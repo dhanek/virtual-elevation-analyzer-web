@@ -394,8 +394,11 @@ impl FitParserWrapper {
     }
 
     fn extract_lap(&self, message: &fitparser::FitDataRecord) -> Option<FitLap> {
-        let mut start_time = None;
-        let mut end_time = None;
+    let mut start_time = None;
+    // Keep lap_timestamp as a fallback if present (some FIT files place a lap timestamp
+    // that isn't the canonical start). We'll prefer start_time + total_elapsed_time
+    // for end_time when possible.
+    let mut lap_timestamp = None;
         let mut total_elapsed_time = None;
         let mut total_distance = None;
         let mut avg_speed = None;
@@ -416,7 +419,9 @@ impl FitParserWrapper {
                     start_time = self.extract_f64_value(field.value());
                 }
                 "timestamp" => {
-                    end_time = self.extract_f64_value(field.value());
+                    // Do not treat the Lap.message timestamp as the canonical lap end.
+                    // Capture it as a fallback value instead.
+                    lap_timestamp = self.extract_f64_value(field.value());
                 }
                 "total_elapsed_time" => {
                     total_elapsed_time = self.extract_f64_value(field.value());
@@ -461,11 +466,51 @@ impl FitParserWrapper {
             }
         }
 
-        // Create lap if we have required fields
-        if let (Some(st), Some(et), Some(elapsed)) = (start_time, end_time, total_elapsed_time) {
+        // Create lap: prefer start_time and derive end_time = start_time + total_elapsed_time.
+        // If start_time is missing but lap_timestamp and total_elapsed_time exist, derive start
+        // from lap_timestamp - total_elapsed_time. This handles a few FIT producers that only
+        // set a timestamp on the lap message.
+        if let (Some(st), Some(elapsed)) = (start_time, total_elapsed_time) {
+            let et = st + elapsed; // derive end from start + elapsed
+
+            // If a lap_timestamp exists and looks more reasonable, we could compare or log,
+            // but generally prefer the derived end_time.
+            if let Some(ts) = lap_timestamp {
+                // If lap_timestamp is significantly different and is greater than derived end,
+                // keep the derived value but prefer ordering normalization below.
+                // No action needed; lap_timestamp retained only as info.
+                let _ = ts;
+            }
+
+            // Ensure ordering start <= end
+            let (start_time_final, end_time_final) = if st <= et { (st, et) } else { (et, st) };
+
             Some(FitLap {
-                start_time: st,
-                end_time: et,
+                start_time: start_time_final,
+                end_time: end_time_final,
+                total_elapsed_time: elapsed,
+                total_distance: total_distance.unwrap_or(0.0),
+                avg_speed: avg_speed.unwrap_or(0.0),
+                max_speed: max_speed.unwrap_or(0.0),
+                avg_power: avg_power.unwrap_or(0.0),
+                max_power: max_power.unwrap_or(0.0),
+                start_position_lat,
+                start_position_long,
+                avg_heart_rate,
+                max_heart_rate,
+                total_calories,
+                avg_cadence,
+                max_cadence,
+            })
+        } else if let (Some(ts), Some(elapsed)) = (lap_timestamp, total_elapsed_time) {
+            // Fallback: derive start from lap timestamp minus elapsed, and use timestamp as end
+            let st = ts - elapsed;
+            let et = ts;
+            let (start_time_final, end_time_final) = if st <= et { (st, et) } else { (et, st) };
+
+            Some(FitLap {
+                start_time: start_time_final,
+                end_time: end_time_final,
                 total_elapsed_time: elapsed,
                 total_distance: total_distance.unwrap_or(0.0),
                 avg_speed: avg_speed.unwrap_or(0.0),

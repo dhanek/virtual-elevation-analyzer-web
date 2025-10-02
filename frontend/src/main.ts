@@ -3,6 +3,7 @@ import { FitFileProcessor } from './components/FitFileProcessor';
 import { MapVisualization } from './components/MapVisualization';
 import { AnalysisParametersComponent, AnalysisParameters } from './components/AnalysisParameters';
 import { ViewportAdapter } from './utils/ViewportAdapter';
+import { ParameterStorage } from './utils/ParameterStorage';
 import init, { create_ve_calculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -71,6 +72,8 @@ let fitProcessor: FitFileProcessor | null = null;
 let mapVisualization: MapVisualization | null = null;
 let parametersComponent: AnalysisParametersComponent | null = null;
 let viewportAdapter: ViewportAdapter;
+let parameterStorage: ParameterStorage;
+let currentFileHash: string | null = null;
 let currentFitData: any = null;
 let currentFitResult: any = null;
 let currentLaps: any[] = [];
@@ -81,7 +84,7 @@ let mapTrimControlsInitialized = false;
 let presetTrimStart: number = 0;
 let presetTrimEnd: number | null = null;
 
-// Initialize FIT processor
+// Initialize FIT processor and parameter storage
 async function initializeFitProcessor() {
     try {
         showLoading('Initializing WebAssembly module...');
@@ -93,13 +96,22 @@ async function initializeFitProcessor() {
         fitProcessor = new FitFileProcessor();
         await fitProcessor.initialize();
         console.log('FIT processor initialized successfully');
+
+        // Initialize parameter storage
+        parameterStorage = new ParameterStorage();
+        await parameterStorage.initialize();
+        console.log('Parameter storage initialized successfully');
+
+        // Clean up old entries on startup
+        await parameterStorage.cleanup();
+
         hideLoading();
         hideError();
     } catch (err) {
-        console.error('Failed to initialize FIT processor:', err);
+        console.error('Failed to initialize:', err);
         hideLoading();
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        showError(`Failed to initialize WASM module: ${errorMessage}. Check browser console for details.`);
+        showError(`Failed to initialize: ${errorMessage}. Check browser console for details.`);
     }
 }
 
@@ -172,6 +184,10 @@ analyzeButton.addEventListener('click', async () => {
     try {
         showLoading('Reading FIT file...');
 
+        // Calculate file hash for parameter persistence
+        currentFileHash = await parameterStorage.calculateFileHash(selectedFile);
+        console.log('File hash calculated:', currentFileHash);
+
         // Additional validation
         const isValidMagicNumber = await DataProtection.validateFitMagicNumber(selectedFile);
         if (!isValidMagicNumber) {
@@ -233,7 +249,7 @@ function activateSection(sectionNumber: number) {
 }
 
 // Display results
-function displayResults(result: any) {
+async function displayResults(result: any) {
     const stats = result.parsing_statistics;
     const laps = result.laps;
 
@@ -299,10 +315,21 @@ function displayResults(result: any) {
     // Initialize analysis parameters component immediately
     initializeAnalysisParameters();
 
-    // Auto-enable velodrome mode if no GPS data (do this AFTER parameters component is initialized)
-    if (!result.parsing_statistics.has_gps_data && parametersComponent) {
-        console.log('No GPS data found - auto-enabling velodrome mode');
-        parametersComponent.setParameters({ velodrome: true });
+    // Try to load saved parameters for this file
+    if (currentFileHash && parametersComponent) {
+        const savedParameters = await parameterStorage.loadParameters(currentFileHash);
+        if (savedParameters) {
+            console.log('Loaded saved parameters for this file');
+            parametersComponent.setParameters(savedParameters);
+        } else {
+            console.log('No saved parameters found, using defaults');
+
+            // Auto-enable velodrome mode if no GPS data (only if no saved params)
+            if (!result.parsing_statistics.has_gps_data) {
+                console.log('No GPS data found - auto-enabling velodrome mode');
+                parametersComponent.setParameters({ velodrome: true });
+            }
+        }
     }
 }
 
@@ -769,6 +796,12 @@ function initializeAnalysisParameters() {
 function handleParametersChange(parameters: AnalysisParameters) {
     currentParameters = parameters;
     console.log('Parameters updated:', parameters);
+
+    // Save parameters to IndexedDB for this file
+    if (currentFileHash && selectedFile) {
+        parameterStorage.saveParameters(currentFileHash, parameters, selectedFile.name)
+            .catch(err => console.error('Failed to save parameters:', err));
+    }
 
     // Update wind indicator on map if wind parameters are set
     if (mapVisualization && currentParameters) {
