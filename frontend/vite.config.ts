@@ -10,7 +10,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('backend/pkg')) {
+          // Put any imports coming from a `pkg` directory (wasm-pack output)
+          // into a separate chunk so the wasm core is isolated.
+          if (id.includes('/pkg/') || id.includes('backend/pkg') || id.includes('frontend/pkg')) {
             return 'wasm-core';
           }
         }
@@ -19,7 +21,10 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@wasm': resolve(__dirname, '../backend/pkg')
+      // The CI workflow writes the wasm build output into frontend/pkg,
+      // so resolve the alias to the frontend `pkg` directory where
+      // `wasm-pack --out-dir ../frontend/pkg` places the JS glue file.
+      '@wasm': resolve(__dirname, 'pkg')
     }
   },
   server: {
