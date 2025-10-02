@@ -1,8 +1,16 @@
 import { AnalysisParameters } from '../components/AnalysisParameters';
 
+interface LapSettings {
+    trimStart: number;
+    trimEnd: number;
+    cda: number | null;
+    crr: number | null;
+}
+
 interface StoredParameters {
     fileHash: string;
     parameters: AnalysisParameters;
+    lapSettings: { [lapKey: string]: LapSettings }; // Key is lap indices joined by '-' (e.g., "0", "1-2-3")
     lastUsed: number; // timestamp
     fileName?: string; // optional, for debugging
 }
@@ -14,8 +22,7 @@ export class ParameterStorage {
 
     async initialize(): Promise<void> {
         return new Promise((resolve, reject) => {
-            console.log('🗄️ Opening IndexedDB:', this.dbName, 'version: 1');
-            const request = indexedDB.open(this.dbName, 1);
+            const request = indexedDB.open(this.dbName, 2);
 
             request.onerror = () => {
                 console.error('❌ IndexedDB failed to open:', request.error);
@@ -24,27 +31,38 @@ export class ParameterStorage {
 
             request.onsuccess = () => {
                 this.db = request.result;
-                console.log('✅ IndexedDB opened successfully');
-                console.log('   Database version:', this.db.version);
-                console.log('   Object stores:', Array.from(this.db.objectStoreNames));
                 resolve();
             };
 
             request.onupgradeneeded = (event) => {
-                console.log('🔧 IndexedDB upgrade needed');
-                console.log('   Old version:', (event as IDBVersionChangeEvent).oldVersion);
-                console.log('   New version:', (event as IDBVersionChangeEvent).newVersion);
+                const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
+                const newVersion = (event as IDBVersionChangeEvent).newVersion;
 
                 const db = (event.target as IDBOpenDBRequest).result;
+                const transaction = (event.target as IDBOpenDBRequest).transaction!;
 
-                // Create object store if it doesn't exist
+                // Create object store if it doesn't exist (version 1)
                 if (!db.objectStoreNames.contains(this.storeName)) {
-                    console.log('📦 Creating object store:', this.storeName);
                     const objectStore = db.createObjectStore(this.storeName, { keyPath: 'fileHash' });
                     objectStore.createIndex('lastUsed', 'lastUsed', { unique: false });
-                    console.log('✅ Object store created');
                 } else {
-                    console.log('ℹ️ Object store already exists:', this.storeName);
+                }
+
+                // Migrate from version 1 to 2: add lapSettings field to existing entries
+                if (oldVersion < 2) {
+                    const objectStore = transaction.objectStore(this.storeName);
+                    const getAllRequest = objectStore.getAll();
+
+                    getAllRequest.onsuccess = () => {
+                        const allRecords = getAllRequest.result as StoredParameters[];
+
+                        allRecords.forEach(record => {
+                            if (!record.lapSettings) {
+                                record.lapSettings = {};
+                                objectStore.put(record);
+                            }
+                        });
+                    };
                 }
             };
         });
@@ -70,7 +88,6 @@ export class ParameterStorage {
         // Add filename (sanitized)
         hash += '_' + file.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
 
-        console.log('🔑 Calculated file hash:', hash, 'for file:', file.name, 'size:', file.size);
         return hash;
     }
 
@@ -83,34 +100,44 @@ export class ParameterStorage {
             return;
         }
 
-        console.log('💾 Saving parameters with hash:', fileHash, 'fileName:', fileName);
 
         return new Promise((resolve, reject) => {
             const transaction = this.db!.transaction([this.storeName], 'readwrite');
             const objectStore = transaction.objectStore(this.storeName);
 
-            const data: StoredParameters = {
-                fileHash,
-                parameters,
-                lastUsed: Date.now(),
-                fileName
-            };
+            // Get existing data to preserve lapSettings
+            const getRequest = objectStore.get(fileHash);
 
-            const request = objectStore.put(data);
+            getRequest.onsuccess = () => {
+                const existingData = getRequest.result as StoredParameters | undefined;
+
+                const data: StoredParameters = {
+                    fileHash,
+                    parameters,
+                    lapSettings: existingData?.lapSettings || {}, // Preserve existing lap settings
+                    lastUsed: Date.now(),
+                    fileName
+                };
+
+                const request = objectStore.put(data);
 
             request.onsuccess = () => {
-                console.log('✅ Parameters saved successfully for:', fileName || fileHash);
                 // Verify the save
                 const verifyRequest = objectStore.get(fileHash);
                 verifyRequest.onsuccess = () => {
-                    console.log('✅ Verification: Data exists in DB for hash:', fileHash, ':', !!verifyRequest.result);
                 };
                 resolve();
             };
 
-            request.onerror = () => {
-                console.error('❌ Failed to save parameters:', request.error);
-                reject(request.error);
+                request.onerror = () => {
+                    console.error('❌ Failed to save parameters:', request.error);
+                    reject(request.error);
+                };
+            };
+
+            getRequest.onerror = () => {
+                console.error('❌ Failed to get existing data:', getRequest.error);
+                reject(getRequest.error);
             };
         });
     }
@@ -124,7 +151,6 @@ export class ParameterStorage {
             return null;
         }
 
-        console.log('📂 Loading parameters for hash:', fileHash);
 
         return new Promise((resolve, reject) => {
             const transaction = this.db!.transaction([this.storeName], 'readonly');
@@ -134,14 +160,10 @@ export class ParameterStorage {
             request.onsuccess = () => {
                 const result = request.result as StoredParameters | undefined;
                 if (result) {
-                    console.log('✅ Parameters found and loaded for:', result.fileName || fileHash);
-                    console.log('📋 Loaded parameters:', result.parameters);
                     resolve(result.parameters);
                 } else {
-                    console.log('⚠️ No saved parameters found for file hash:', fileHash);
                     // Debug: show what hashes we DO have
                     objectStore.getAllKeys().onsuccess = (e: any) => {
-                        console.log('📋 Available hashes in DB:', e.target.result);
                     };
                     resolve(null);
                 }
@@ -206,7 +228,6 @@ export class ParameterStorage {
             }
 
             if (deleteCount > 0) {
-                console.log(`Cleaned up ${deleteCount} old parameter entries`);
             }
         } catch (error) {
             console.error('Cleanup failed:', error);
@@ -225,7 +246,6 @@ export class ParameterStorage {
             const request = objectStore.clear();
 
             request.onsuccess = () => {
-                console.log('All stored parameters cleared');
                 resolve();
             };
 
@@ -235,4 +255,126 @@ export class ParameterStorage {
             };
         });
     }
+
+    /**
+     * Generate lap key from selected lap indices
+     */
+    private getLapKey(selectedLaps: number[]): string {
+        if (selectedLaps.length === 0) {
+            return 'all'; // Full route
+        }
+        return selectedLaps.sort((a, b) => a - b).join('-');
+    }
+
+    /**
+     * Save lap-specific settings (trim indices and CdA/Crr values)
+     */
+    async saveLapSettings(
+        fileHash: string,
+        selectedLaps: number[],
+        settings: LapSettings
+    ): Promise<void> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot save lap settings');
+            return;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+
+            const getRequest = objectStore.get(fileHash);
+
+            getRequest.onsuccess = () => {
+                let existingData = getRequest.result as StoredParameters | undefined;
+
+                if (!existingData) {
+                    console.warn('⚠️ No existing data found for file, creating default entry for lap settings');
+                    // Create a minimal entry with default parameters
+                    existingData = {
+                        fileHash,
+                        parameters: {
+                            system_mass: 75,
+                            rho: 1.225,
+                            eta: 0.97,
+                            cda: null,
+                            crr: null,
+                            cda_min: 0.15,
+                            cda_max: 0.5,
+                            crr_min: 0.002,
+                            crr_max: 0.015,
+                            wind_speed: null,
+                            wind_direction: null,
+                            wind_speed_unit: 'm/s',
+                            velodrome: false,
+                            auto_lap_detection: 'None'
+                        },
+                        lapSettings: {},
+                        lastUsed: Date.now()
+                    };
+                }
+
+                // Ensure lapSettings exists (for backwards compatibility with old data)
+                if (!existingData.lapSettings) {
+                    existingData.lapSettings = {};
+                }
+
+                // Update lap settings
+                existingData.lapSettings[lapKey] = settings;
+                existingData.lastUsed = Date.now();
+
+                const putRequest = objectStore.put(existingData);
+
+                putRequest.onsuccess = () => {
+                    resolve();
+                };
+
+                putRequest.onerror = () => {
+                    console.error('❌ Failed to save lap settings:', putRequest.error);
+                    reject(putRequest.error);
+                };
+            };
+
+            getRequest.onerror = () => {
+                console.error('❌ Failed to get existing data:', getRequest.error);
+                reject(getRequest.error);
+            };
+        });
+    }
+
+    /**
+     * Load lap-specific settings
+     */
+    async loadLapSettings(fileHash: string, selectedLaps: number[]): Promise<LapSettings | null> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot load lap settings');
+            return null;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readonly');
+            const objectStore = transaction.objectStore(this.storeName);
+            const request = objectStore.get(fileHash);
+
+            request.onsuccess = () => {
+                const result = request.result as StoredParameters | undefined;
+                if (result && result.lapSettings && result.lapSettings[lapKey]) {
+                    resolve(result.lapSettings[lapKey]);
+                } else {
+                    resolve(null);
+                }
+            };
+
+            request.onerror = () => {
+                console.error('❌ Failed to load lap settings:', request.error);
+                reject(request.error);
+            };
+        });
+    }
 }
+
+export type { LapSettings };

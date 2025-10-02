@@ -3,7 +3,7 @@ import { FitFileProcessor } from './components/FitFileProcessor';
 import { MapVisualization } from './components/MapVisualization';
 import { AnalysisParametersComponent, AnalysisParameters } from './components/AnalysisParameters';
 import { ViewportAdapter } from './utils/ViewportAdapter';
-import { ParameterStorage } from './utils/ParameterStorage';
+import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
 import init, { create_ve_calculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -14,12 +14,10 @@ function waitForPlotly(): Promise<any> {
     return new Promise((resolve, reject) => {
         // Check if already loaded
         if (typeof (window as any).Plotly !== 'undefined') {
-            console.log('Plotly already loaded');
             resolve((window as any).Plotly);
             return;
         }
 
-        console.log('Loading Plotly dynamically...');
 
         // Load Plotly script dynamically
         const script = document.createElement('script');
@@ -28,11 +26,9 @@ function waitForPlotly(): Promise<any> {
         script.crossOrigin = 'anonymous';
 
         script.onload = () => {
-            console.log('Plotly script loaded successfully');
             // Give it a moment to initialize
             setTimeout(() => {
                 if (typeof (window as any).Plotly !== 'undefined') {
-                    console.log('Plotly is now available');
                     resolve((window as any).Plotly);
                 } else {
                     console.error('Plotly script loaded but Plotly is not on window object');
@@ -47,7 +43,6 @@ function waitForPlotly(): Promise<any> {
             reject(new Error('Failed to load Plotly script from CDN'));
         };
 
-        console.log('Appending Plotly script to document head');
         document.head.appendChild(script);
     });
 }
@@ -81,7 +76,6 @@ let currentLaps: any[] = [];
 let selectedLaps: number[] = [];
 let currentParameters: AnalysisParameters | null = null;
 let filteredVEData: { positionLat: number[], positionLong: number[] } | null = null;
-let mapTrimControlsInitialized = false;
 let presetTrimStart: number = 0;
 let presetTrimEnd: number | null = null;
 let isLoadingParameters: boolean = false;
@@ -93,16 +87,13 @@ async function initializeFitProcessor() {
 
         // Initialize the Virtual Elevation WASM module
         await init();
-        console.log('Virtual Elevation WASM module initialized');
 
         fitProcessor = new FitFileProcessor();
         await fitProcessor.initialize();
-        console.log('FIT processor initialized successfully');
 
         // Initialize parameter storage
         parameterStorage = new ParameterStorage();
         await parameterStorage.initialize();
-        console.log('Parameter storage initialized successfully');
 
         // Clean up old entries on startup
         await parameterStorage.cleanup();
@@ -163,7 +154,6 @@ async function handleFileSelection(file: File) {
     // Calculate file hash immediately for parameter persistence
     if (parameterStorage) {
         currentFileHash = await parameterStorage.calculateFileHash(file);
-        console.log('File selected, hash calculated:', currentFileHash);
     }
 
     analyzeButton.disabled = false;
@@ -318,7 +308,6 @@ async function displayResults(result: any) {
     currentLaps = laps;
 
     // Initialize analysis parameters component immediately
-    console.log('🔒 Setting isLoadingParameters = true (starting initialization)');
     isLoadingParameters = true; // Prevent saving during initialization
     initializeAnalysisParameters();
 
@@ -326,70 +315,19 @@ async function displayResults(result: any) {
     if (currentFileHash && parametersComponent) {
         const savedParameters = await parameterStorage.loadParameters(currentFileHash);
         if (savedParameters) {
-            console.log('Loaded saved parameters for this file');
             parametersComponent.setParameters(savedParameters);
         } else {
-            console.log('No saved parameters found, using defaults');
 
             // Auto-enable velodrome mode if no GPS data (only if no saved params)
             if (!result.parsing_statistics.has_gps_data) {
-                console.log('No GPS data found - auto-enabling velodrome mode');
                 parametersComponent.setParameters({ velodrome: true });
             }
         }
     }
 
-    console.log('🔓 Setting isLoadingParameters = false (initialization complete)');
     isLoadingParameters = false; // Re-enable saving after load complete
 }
 
-// Generate record table rows
-function generateRecordTableRows(fitData: any): string {
-    const timestamps = fitData.timestamps;
-    const lats = fitData.position_lat;
-    const longs = fitData.position_long;
-    const cadences = fitData.cadence;
-    const distances = fitData.distance;
-    const powers = fitData.power;
-    const speeds = fitData.velocity; // Enhanced speed
-    const altitudes = fitData.altitude; // Enhanced altitude
-    const windSpeeds = fitData.wind_speed;
-    const airSpeeds = fitData.air_speed;
-
-    // Show first 10 records
-    const recordCount = Math.min(10, timestamps.length);
-    let rows = '';
-
-    for (let i = 0; i < recordCount; i++) {
-        const time = new Date(timestamps[i] * 1000).toLocaleTimeString();
-        const distance = distances[i] ? distances[i].toFixed(2) : 'N/A';
-        const speed = speeds[i] && speeds[i] > 0 ? (speeds[i] * 3.6).toFixed(1) : 'N/A'; // Convert m/s to km/h
-        const power = powers[i] && powers[i] > 0 ? powers[i].toFixed(0) : 'N/A';
-        const altitude = altitudes[i] && altitudes[i] !== 0 ? altitudes[i].toFixed(1) : 'N/A';
-        const lat = lats[i] && lats[i] !== 0 ? lats[i].toFixed(6) : 'N/A';
-        const long = longs[i] && longs[i] !== 0 ? longs[i].toFixed(6) : 'N/A';
-        const cadence = cadences[i] && cadences[i] > 0 ? cadences[i].toFixed(0) : 'N/A';
-        const airSpeed = airSpeeds[i] && airSpeeds[i] !== 0 ? airSpeeds[i].toFixed(2) : 'N/A';
-        const windSpeed = windSpeeds[i] && windSpeeds[i] !== 0 ? windSpeeds[i].toFixed(2) : 'N/A';
-
-        rows += `
-            <tr>
-                <td>${time}</td>
-                <td>${distance}</td>
-                <td>${speed}</td>
-                <td>${power}</td>
-                <td>${altitude}</td>
-                <td>${lat}</td>
-                <td>${long}</td>
-                <td>${cadence}</td>
-                <td>${airSpeed}</td>
-                <td>${windSpeed}</td>
-            </tr>
-        `;
-    }
-
-    return rows;
-}
 
 // Utility functions
 function formatFileSize(bytes: number): string {
@@ -456,7 +394,6 @@ async function initializeApplication() {
 
     // Setup viewport change listener for map resizing
     viewportAdapter.onViewportChange((viewportInfo) => {
-        console.log('Viewport changed:', viewportInfo);
 
         // Update CSS custom properties for sidebar width
         const sidebarWidth = viewportAdapter.getOptimalSidebarWidth();
@@ -466,18 +403,7 @@ async function initializeApplication() {
         if (mapVisualization && mapVisualization.hasGpsData()) {
             // Map libraries usually need a resize trigger when container dimensions change
             mapVisualization.resizeMap();
-            console.log('Triggered map resize for new viewport');
         }
-    });
-
-    // Log initial viewport info
-    const initialViewport = viewportAdapter.getViewportInfo();
-    console.log('Initial viewport setup:', {
-        category: initialViewport.category,
-        dimensions: `${initialViewport.width}x${initialViewport.height}`,
-        mapHeight: document.documentElement.style.getPropertyValue('--map-height'),
-        contentWidth: document.documentElement.style.getPropertyValue('--content-max-width'),
-        sidebarWidth: document.documentElement.style.getPropertyValue('--sidebar-width')
     });
 
     // Initialize FIT processor
@@ -486,39 +412,6 @@ async function initializeApplication() {
 
 // Initialize the application
 initializeApplication();
-
-// Map visualization and lap selection functions
-async function initializeMapVisualization(result: any) {
-    try {
-        currentFitResult = result;
-        currentFitData = result.fit_data;
-        currentLaps = result.laps;
-        selectedLaps = [];
-
-        // Initialize map visualization
-        mapVisualization = new MapVisualization('mapView');
-        await mapVisualization.initialize();
-
-        // Set data
-        mapVisualization.setData(currentFitData, currentLaps);
-
-        // Setup lap selection event handlers
-        setupLapSelectionHandlers();
-
-        console.log('Map initialized with data:', {
-            records: currentFitData.timestamps.length,
-            laps: currentLaps.length,
-            hasGPS: mapVisualization.hasGpsData()
-        });
-
-    } catch (error) {
-        console.error('Error initializing map:', error);
-        const mapContainer = document.getElementById('mapView');
-        if (mapContainer) {
-            mapContainer.innerHTML = '<div class="no-gps-message">Error loading map visualization</div>';
-        }
-    }
-}
 
 function setupLapSelectionHandlers() {
     const selectAllBtn = document.getElementById('selectAllLaps');
@@ -610,7 +503,6 @@ function initializeMapTrimControls(dataLength: number) {
     mapTrimEndValue.min = '30';
     mapTrimEndValue.max = (dataLength - 1).toString();
 
-    console.log('Map trim controls initialized with lap data length:', dataLength);
 }
 
 function updateSelectedLaps() {
@@ -625,7 +517,6 @@ function updateSelectedLaps() {
         mapVisualization.setSelectedLaps(selectedLaps);
     }
 
-    console.log('Selected laps:', selectedLaps);
 
     // Show/hide trim controls based on lap selection
     const mapTrimControls = document.getElementById('mapTrimControls');
@@ -643,8 +534,11 @@ function updateSelectedLaps() {
     updateAnalyzeButton();
 }
 
-function initializeMapTrimControlsForSelectedLaps() {
-    if (!currentFitResult || !currentLaps || selectedLaps.length === 0) return;
+async function initializeMapTrimControlsForSelectedLaps() {
+
+    if (!currentFitResult || !currentLaps || selectedLaps.length === 0) {
+        return;
+    }
 
     // Get selected lap data
     const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]);
@@ -692,19 +586,34 @@ function initializeMapTrimControlsForSelectedLaps() {
         }
     }
 
-    console.log('Initializing map trim controls for selected laps:', {
-        selectedLaps,
-        dataLength,
-        hasGpsData,
-        filteredGPSPoints: hasGpsData ? filteredLapPositionLat.length : 'N/A'
-    });
-
     // Initialize the controls with correct data length
     initializeMapTrimControls(dataLength);
 
-    // Set preset values to defaults
-    presetTrimStart = 0;
-    presetTrimEnd = dataLength - 1;
+    // Try to load saved lap settings for this file and lap combination
+    let savedSettings: LapSettings | null = null;
+    if (currentFileHash) {
+        try {
+            savedSettings = await parameterStorage.loadLapSettings(currentFileHash, selectedLaps);
+            if (savedSettings) {
+                // Use saved trim values
+                presetTrimStart = savedSettings.trimStart;
+                presetTrimEnd = savedSettings.trimEnd;
+            } else {
+                // Set preset values to defaults
+                presetTrimStart = 0;
+                presetTrimEnd = dataLength - 1;
+            }
+        } catch (err) {
+            console.error('Failed to load lap settings:', err);
+            // Fallback to defaults
+            presetTrimStart = 0;
+            presetTrimEnd = dataLength - 1;
+        }
+    } else {
+        // No file hash, use defaults
+        presetTrimStart = 0;
+        presetTrimEnd = dataLength - 1;
+    }
 
     // Set up event listeners for map trim controls
     const mapTrimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
@@ -724,30 +633,40 @@ function initializeMapTrimControlsForSelectedLaps() {
         mapTrimStartValue.parentNode?.replaceChild(newMapTrimStartValue, mapTrimStartValue);
         mapTrimEndValue.parentNode?.replaceChild(newMapTrimEndValue, mapTrimEndValue);
 
+        // Set slider values to loaded settings (or defaults)
+        newMapTrimStartSlider.value = presetTrimStart.toString();
+        newMapTrimStartValue.value = presetTrimStart.toString();
+        newMapTrimEndSlider.value = presetTrimEnd.toString();
+        newMapTrimEndValue.value = presetTrimEnd.toString();
+
         // Add new listeners
         newMapTrimStartSlider.addEventListener('input', () => {
             const value = parseInt(newMapTrimStartSlider.value);
             newMapTrimStartValue.value = value.toString();
             presetTrimStart = value;
-            console.log('Preset trim start:', presetTrimStart);
 
             // Update map markers immediately (before analyze) - use filtered lap GPS data
             if (mapVisualization) {
                 const trimEnd = presetTrimEnd ?? dataLength - 1;
                 mapVisualization.fitBoundsToTrimRegion(value, trimEnd, filteredLapPositionLat, filteredLapPositionLong);
             }
+
+            // Save map trim settings
+            saveMapTrimSettings();
         });
 
         newMapTrimEndSlider.addEventListener('input', () => {
             const value = parseInt(newMapTrimEndSlider.value);
             newMapTrimEndValue.value = value.toString();
             presetTrimEnd = value;
-            console.log('Preset trim end:', presetTrimEnd);
 
             // Update map markers immediately (before analyze) - use filtered lap GPS data
             if (mapVisualization) {
                 mapVisualization.fitBoundsToTrimRegion(presetTrimStart, value, filteredLapPositionLat, filteredLapPositionLong);
             }
+
+            // Save map trim settings
+            saveMapTrimSettings();
         });
 
         newMapTrimStartValue.addEventListener('change', () => {
@@ -758,12 +677,14 @@ function initializeMapTrimControlsForSelectedLaps() {
                 newMapTrimStartSlider.value = clamped.toString();
                 newMapTrimStartValue.value = clamped.toString();
                 presetTrimStart = clamped;
-                console.log('Preset trim start (text input):', presetTrimStart);
 
                 // Update map markers immediately (before analyze) - use filtered lap GPS data
                 if (mapVisualization) {
                     mapVisualization.fitBoundsToTrimRegion(clamped, trimEnd, filteredLapPositionLat, filteredLapPositionLong);
                 }
+
+                // Save map trim settings
+                saveMapTrimSettings();
             }
         });
 
@@ -774,17 +695,18 @@ function initializeMapTrimControlsForSelectedLaps() {
                 newMapTrimEndSlider.value = clamped.toString();
                 newMapTrimEndValue.value = clamped.toString();
                 presetTrimEnd = clamped;
-                console.log('Preset trim end (text input):', presetTrimEnd);
 
                 // Update map markers immediately (before analyze) - use filtered lap GPS data
                 if (mapVisualization) {
                     mapVisualization.fitBoundsToTrimRegion(presetTrimStart, clamped, filteredLapPositionLat, filteredLapPositionLong);
                 }
+
+                // Save map trim settings
+                saveMapTrimSettings();
             }
         });
     }
 
-    mapTrimControlsInitialized = true;
 }
 
 // Analysis parameters initialization
@@ -794,7 +716,6 @@ function initializeAnalysisParameters() {
 
         // Initialize currentParameters with the default values from the component
         currentParameters = parametersComponent.getParameters();
-        console.log('Analysis parameters component initialized with defaults:', currentParameters);
 
         // Update analyze button with the default parameters
         updateAnalyzeButton();
@@ -805,15 +726,9 @@ function initializeAnalysisParameters() {
 
 function handleParametersChange(parameters: AnalysisParameters) {
     currentParameters = parameters;
-    console.log('🔄 handleParametersChange called');
-    console.log('   Parameters:', parameters);
-    console.log('   isLoadingParameters:', isLoadingParameters);
-    console.log('   currentFileHash:', currentFileHash);
-    console.log('   selectedFile:', selectedFile?.name);
 
     // Don't save if we're currently loading parameters from storage
     if (isLoadingParameters) {
-        console.log('⏸️ Skipping save: currently loading parameters from storage');
         return;
     }
 
@@ -828,10 +743,8 @@ function handleParametersChange(parameters: AnalysisParameters) {
         return;
     }
 
-    console.log('✅ All checks passed, calling saveParameters...');
     parameterStorage.saveParameters(currentFileHash, parameters, selectedFile.name)
         .then(() => {
-            console.log('✅ Parameters save completed successfully');
         })
         .catch(err => {
             console.error('❌ Failed to save parameters:', err);
@@ -854,7 +767,6 @@ function handleParametersChange(parameters: AnalysisParameters) {
     // If VE analysis is already visible, recalculate when parameters change
     const veSection = document.getElementById('veSection');
     if (veSection && !veSection.classList.contains('hidden')) {
-        console.log('VE analysis visible - recalculating with new parameters');
         // Get the current sliders and data for recalculation
         const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
         const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
@@ -1171,7 +1083,7 @@ async function handleAnalyze() {
 }
 
 
-function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[]) {
+async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[]) {
     // Check if air_speed data is available (not all zeros/NaN)
     const hasAirSpeed = airSpeed.some(val => !isNaN(val) && val !== 0);
     const hasConstantWind = currentParameters.wind_speed !== undefined && currentParameters.wind_speed !== 0 &&
@@ -1299,14 +1211,52 @@ function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: nu
         </div>
     `;
 
-    // Initialize the VE analysis interface
-    initializeVEAnalysis(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, analyzedLaps);
+    // Initialize the VE analysis interface (await to ensure lap settings load before rendering)
+    await initializeVEAnalysis(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, analyzedLaps);
 
     // Scroll to the VE analysis section
     veSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function initializeVEAnalysis(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], analyzedLaps: number[]) {
+async function initializeVEAnalysis(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], analyzedLaps: number[]) {
+
+    // Try to load saved lap settings for this file and lap combination
+    let savedSettings: LapSettings | null = null;
+    if (currentFileHash) {
+        try {
+            savedSettings = await parameterStorage.loadLapSettings(currentFileHash, analyzedLaps);
+            if (savedSettings) {
+                // Update preset values that will be used when rendering
+                presetTrimStart = savedSettings.trimStart;
+                presetTrimEnd = savedSettings.trimEnd;
+
+                // Apply saved CdA and Crr values to sliders after they're created
+                const savedCda = savedSettings.cda;
+                const savedCrr = savedSettings.crr;
+                setTimeout(() => {
+                    const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
+                    const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
+                    const cdaValue = document.getElementById('cdaValue') as HTMLInputElement;
+                    const crrValue = document.getElementById('crrValue') as HTMLInputElement;
+
+                    if (cdaSlider && savedCda !== null) {
+                        cdaSlider.value = savedCda.toString();
+                        if (cdaValue) cdaValue.value = savedCda.toFixed(3);
+                    }
+                    if (crrSlider && savedCrr !== null) {
+                        crrSlider.value = savedCrr.toString();
+                        if (crrValue) crrValue.value = savedCrr.toFixed(4);
+                    }
+
+                    // Trigger an update to re-render with saved values
+                    if (cdaSlider) cdaSlider.dispatchEvent(new Event('input'));
+                }, 100);
+            }
+        } catch (err) {
+            console.error('Failed to load lap settings:', err);
+        }
+    }
+
     // Set up tab switching
     const tabButtons = document.querySelectorAll('.ve-tab-button');
     tabButtons.forEach(button => {
@@ -1374,6 +1324,53 @@ function initializeVEAnalysis(timestamps: number[], power: number[], velocity: n
     }, 500);
 }
 
+// Helper function to save current lap settings to IndexedDB
+async function saveCurrentLapSettings() {
+    if (!currentFileHash || !selectedFile) return;
+
+    const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
+    const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
+    const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
+    const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
+
+    if (!trimStartSlider || !trimEndSlider || !cdaSlider || !crrSlider) return;
+
+    const settings: LapSettings = {
+        trimStart: parseInt(trimStartSlider.value),
+        trimEnd: parseInt(trimEndSlider.value),
+        cda: parseFloat(cdaSlider.value) || null,
+        crr: parseFloat(crrSlider.value) || null
+    };
+
+    try {
+        await parameterStorage.saveLapSettings(currentFileHash, selectedLaps, settings);
+    } catch (err) {
+        console.error('Failed to save lap settings:', err);
+    }
+}
+
+// Helper function to save map trim settings (before VE analysis is opened)
+async function saveMapTrimSettings() {
+
+    if (!currentFileHash || !selectedFile) {
+        console.warn('⚠️ Cannot save: missing fileHash or selectedFile');
+        return;
+    }
+
+    const settings: LapSettings = {
+        trimStart: presetTrimStart,
+        trimEnd: presetTrimEnd ?? 0,
+        cda: null, // CdA/Crr not set yet
+        crr: null
+    };
+
+    try {
+        await parameterStorage.saveLapSettings(currentFileHash, selectedLaps, settings);
+    } catch (err) {
+        console.error('❌ Failed to save map trim settings:', err);
+    }
+}
+
 function setupVESliders(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[]) {
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
@@ -1423,6 +1420,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (mapVisualization && filteredVEData) {
             mapVisualization.fitBoundsToTrimRegion(value, trimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
         }
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     const updateTrimEnd = () => {
@@ -1462,6 +1462,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (mapVisualization && filteredVEData) {
             mapVisualization.fitBoundsToTrimRegion(trimStart, value, filteredVEData.positionLat, filteredVEData.positionLong);
         }
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     const updateCdA = () => {
@@ -1471,6 +1474,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
         updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     const updateCrr = () => {
@@ -1480,6 +1486,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
         updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     // Update functions for input fields (when user types)
@@ -1510,6 +1519,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (mapVisualization && filteredVEData) {
             mapVisualization.fitBoundsToTrimRegion(clamped, trimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
         }
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     const updateTrimEndFromInput = () => {
@@ -1539,6 +1551,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (mapVisualization && filteredVEData) {
             mapVisualization.fitBoundsToTrimRegion(trimStart, clamped, filteredVEData.positionLat, filteredVEData.positionLong);
         }
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     const updateCdAFromInput = () => {
@@ -1553,6 +1568,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
         updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     const updateCrrFromInput = () => {
@@ -1567,6 +1585,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
         updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+        // Save lap settings
+        saveCurrentLapSettings();
     };
 
     // Add event listeners for sliders
