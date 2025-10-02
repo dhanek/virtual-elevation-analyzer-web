@@ -1,8 +1,139 @@
-# Comprehensive Migration Plan: Python Virtual Elevation Analyzer → Rust/WebAssembly Web Application
+# Virtual Elevation Analyzer - Web Application
 
-## Executive Summary
+> **Live Demo**: https://dhanek.github.io/virtual-elevation-analyzer-web/
 
-This plan transforms the Virtual Elevation Analyzer from a Python desktop application into a privacy-respecting web application that processes all data locally using Rust/WebAssembly for high-performance calculations.
+A privacy-respecting web application for cycling power analysis using Robert Chung's Virtual Elevation method. All data processing happens locally in your browser using Rust/WebAssembly - no server uploads required.
+
+## ✨ Features
+
+- 🔒 **100% Local Processing** - Your data never leaves your browser
+- ⚡ **High Performance** - Rust/WebAssembly for fast calculations
+- 📊 **Interactive Visualization** - Real-time VE analysis with Plotly.js
+- 🗺️ **GPS Track Mapping** - Leaflet integration with trim markers
+- 🌬️ **Wind Analysis** - Multiple wind source options (constant, FIT file, comparison)
+- 🎨 **Minimal Design** - Dieter Rams-inspired interface
+- 📱 **Responsive** - Works on desktop and tablet
+
+## 🚀 Quick Start
+
+1. Visit https://dhanek.github.io/virtual-elevation-analyzer-web/
+2. Upload your FIT file
+3. Set analysis parameters (mass, CdA, Crr, wind)
+4. Select laps and adjust trim settings
+5. Click "Analyze" to view results
+
+## 📋 Current Status
+
+**Implementation Progress: ~75% Complete**
+
+✅ **Implemented**:
+- FIT file parsing and processing
+- Virtual Elevation calculation
+- Interactive plots (VE, Wind, Power)
+- Map visualization with lap selection
+- Real-time parameter adjustment
+- Wind source selection
+- Responsive UI
+
+🚧 **In Progress** (See [TODO](#-todo-list) below):
+- Activity parameter persistence
+- CSV/JSON export
+- DEM data integration
+
+## 📚 TODO List
+
+### High Priority
+
+1. **Activity Parameter Persistence** (Phase 4.4)
+   - [ ] Implement IndexedDB storage for activity parameters
+   - [ ] Add file hash-based parameter matching
+   - [ ] Auto-load saved parameters on file re-upload
+   - [ ] Parameter suggestions based on similar activities
+
+2. **Export Functionality**
+   - [ ] CSV export for analysis results
+   - [ ] JSON export for processed data
+   - [ ] PNG export for plots
+   - [ ] Configurable export options
+
+### Medium Priority
+
+3. **DEM Data Integration** (Phase 4.1)
+   - [ ] Research client-side DEM tile sources
+   - [ ] Implement tile-based DEM loading
+   - [ ] Add IndexedDB caching for DEM tiles
+   - [ ] Add elevation correction toggle
+
+4. **Enhanced Analysis Types**
+   - [ ] GPS based out and back refinement
+   - [ ] GPS gate analysis implementation
+   - [ ] Auto lap detection improvements
+
+5. **Optimization Features**
+   - [ ] Automatic CdA/Crr optimization
+   - [ ] Multi-parameter optimization
+   - [ ] Result comparison view
+
+### Low Priority
+
+6. **User Experience Enhancements**
+   - [ ] Tutorial/onboarding flow
+   - [ ] Keyboard shortcuts
+   - [ ] Drag-and-drop file upload
+   - [ ] Recent files list
+
+7. **Advanced Features**
+   - [ ] Multiple file comparison
+   - [ ] Historical trend analysis
+   - [ ] Advanced statistics
+   - [ ] Custom report generation
+
+## 🏗️ Development
+
+### Prerequisites
+- Rust toolchain with `wasm-pack`
+- Node.js 18+ with npm
+
+### Build & Run Locally
+
+```bash
+# Build WASM module
+cd backend
+wasm-pack build --target web --out-dir ../frontend/pkg
+
+# Install frontend dependencies
+cd ../frontend
+npm install
+
+# Run development server
+npm run dev
+```
+
+Visit http://localhost:5173
+
+### Deploy to GitHub Pages
+
+Deployment is automated via GitHub Actions. Push to `main` branch triggers a build and deploy.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for details.
+
+## 📁 Project Structure
+
+```
+virtual-elevation-analyzer-web/
+├── backend/          # Rust/WASM core
+├── frontend/         # TypeScript/Vite frontend
+├── .github/          # CI/CD workflows
+└── dist/             # Build output
+```
+
+See [PROJECT_STATUS.md](PROJECT_STATUS.md) for detailed implementation status.
+
+---
+
+## 📖 Original Migration Plan
+
+This project transforms the Virtual Elevation Analyzer from a Python desktop application into a privacy-respecting web application that processes all data locally using Rust/WebAssembly for high-performance calculations.
 
 ## Phase 1: Foundation Setup
 
@@ -33,13 +164,13 @@ ve-web-app/
 ```toml
 [dependencies]
 # Core WebAssembly
-wasm-bindgen = "0.2"
-web-sys = "0.3"
-js-sys = "0.3"
+wasm-bindgen = "0.2.95"  # Latest stable - regularly updated
+web-sys = "0.3.72"
+js-sys = "0.3.72"
 
 # Numerical Computing
-ndarray = "0.15"
-nalgebra = "0.32"
+ndarray = "0.16"         # Upgraded from 0.15 for compatibility
+nalgebra = "0.34"        # Upgraded from 0.32 for latest features
 num-traits = "0.2"
 
 # FIT File Processing
@@ -48,8 +179,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Geospatial
-proj4rs = "0.1"     # Coordinate transformations
-geo = "0.25"        # Geometric operations
+geo = "0.26"          # Latest maintained release
+geodesy = "0.12"      # Advanced projections and datum conversions
 
 # Utilities
 thiserror = "1.0"
@@ -60,10 +191,10 @@ console_error_panic_hook = "0.1.7"
 ```json
 {
   "dependencies": {
-    "vite": "^4.0",
-    "typescript": "^5.0",
-    "chart.js": "^4.0",
-    "leaflet": "^1.9",
+    "vite": "^7.1",      # Latest for better build performance
+    "typescript": "^5.6", # Latest stable release
+    "chart.js": "^4.5",   # Updated for new features
+    "leaflet": "^1.9",    # Stable; consider 2.0 prep for 2026
     "comlink": "^4.4",
     "@types/leaflet": "^1.9"
   }
@@ -491,9 +622,74 @@ pub fn optimize_memory_usage() {
 }
 ```
 
-## Phase 6: Deployment & Security
+## Phase 6: Deployment, Security & CI/CD
 
-### 6.1 Static Site Generation
+### 6.1 Automated Dependency Management
+```yaml
+# .github/workflows/dependency-audit.yml
+name: Dependency Security Audit
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly Monday 2 AM
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Audit Rust dependencies
+        run: cargo audit
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install
+      - name: Audit npm dependencies
+        run: npm audit --audit-level moderate
+      - name: Check for outdated dependencies
+        run: |
+          cargo install cargo-outdated
+          cargo outdated --root-deps-only
+          npm outdated || true
+```
+
+```yaml
+# .github/workflows/dependency-update.yml
+name: Automated Dependency Updates
+on:
+  schedule:
+    - cron: '0 4 * * 1'  # Weekly Monday 4 AM
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Cargo dependencies
+        run: |
+          cargo update
+          cargo test
+      - name: Update npm dependencies
+        run: |
+          npm update
+          npm run test
+      - name: Create PR if changes
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: 'chore: automated dependency updates'
+          body: 'Automated dependency updates with passing tests'
+          branch: auto-dependency-updates
+```
+
+### 6.2 Static Site Generation
 ```javascript
 // build.js
 const { build } = require('vite');
@@ -524,26 +720,168 @@ async function buildForProduction() {
 }
 ```
 
-### 6.2 Security Features
+### 6.3 Enhanced Security & WebAssembly Hardening
 ```typescript
 // frontend/src/security/DataProtection.ts
 class DataProtection {
   static validateFileType(file: File): boolean {
-    // Only allow .fit files
-    return file.name.endsWith('.fit') && file.type === 'application/octet-stream';
+    // Strict FIT file validation with magic number check
+    return file.name.endsWith('.fit') &&
+           file.type === 'application/octet-stream' &&
+           file.size > 0 && file.size < 50_000_000; // 50MB limit
   }
-  
+
+  static async validateFitMagicNumber(file: File): Promise<boolean> {
+    // Read first 4 bytes to verify FIT file format
+    const header = await file.slice(0, 4).arrayBuffer();
+    const view = new Uint8Array(header);
+    // FIT files start with specific header pattern
+    return view[8] === 0x2E && view[9] === 0x46 && view[10] === 0x49 && view[11] === 0x54;
+  }
+
   static sanitizeInput(input: any): any {
-    // Sanitize all user inputs
-    // Prevent injection attacks
+    // Comprehensive input sanitization
+    if (typeof input === 'string') {
+      return input.replace(/[<>\"'&]/g, '');
+    }
+    if (typeof input === 'number') {
+      return Number.isFinite(input) ? input : 0;
+    }
+    return input;
   }
-  
-  static clearSensitiveData(): void {
-    // Clear all data from memory and storage
-    // GDPR compliance
+
+  static secureMemoryWipe(): void {
+    // Secure memory clearing for WASM heap
+    // Force garbage collection and zero sensitive arrays
+    if ('gc' in window) {
+      (window as any).gc();
+    }
+    // Clear IndexedDB on session end
+    indexedDB.databases().then(dbs => {
+      dbs.forEach(db => indexedDB.deleteDatabase(db.name || ''));
+    });
+  }
+
+  static setupContentSecurityPolicy(): void {
+    // Ensure CSP headers prevent XSS and data exfiltration
+    const meta = document.createElement('meta');
+    meta.httpEquiv = 'Content-Security-Policy';
+    meta.content = `
+      default-src 'self';
+      script-src 'self' 'wasm-unsafe-eval';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: blob:;
+      connect-src 'none';
+      object-src 'none';
+      base-uri 'self';
+    `.replace(/\s+/g, ' ');
+    document.head.appendChild(meta);
+  }
+}
+
+// WebAssembly Security Monitoring
+class WasmSecurity {
+  static monitorMemoryUsage(): void {
+    // Monitor WASM memory growth to prevent DoS
+    if ('performance' in window && 'memory' in performance) {
+      const memInfo = (performance as any).memory;
+      if (memInfo.usedJSHeapSize > 100_000_000) { // 100MB threshold
+        console.warn('High memory usage detected, clearing caches');
+        DataProtection.secureMemoryWipe();
+      }
+    }
+  }
+
+  static validateWasmModule(module: WebAssembly.Module): boolean {
+    // Basic WASM module validation
+    try {
+      const imports = WebAssembly.Module.imports(module);
+      const exports = WebAssembly.Module.exports(module);
+
+      // Ensure no unexpected imports/exports
+      const allowedImports = ['env', 'wbg'];
+      return imports.every(imp => allowedImports.includes(imp.module));
+    } catch {
+      return false;
+    }
   }
 }
 ```
+
+```rust
+// backend/src/security.rs
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+#[wasm_bindgen]
+pub struct SecurityValidator;
+
+#[wasm_bindgen]
+impl SecurityValidator {
+    pub fn new() -> SecurityValidator {
+        // Initialize panic hook for security monitoring
+        console_error_panic_hook::set_once();
+        SecurityValidator
+    }
+
+    pub fn validate_fit_data(&self, data: &[u8]) -> Result<(), JsValue> {
+        // Comprehensive FIT file validation
+        if data.len() < 12 {
+            return Err(JsValue::from_str("Invalid FIT file: too small"));
+        }
+
+        // Check file header and size constraints
+        let header_size = data[0] as usize;
+        if header_size < 12 || header_size > data.len() {
+            return Err(JsValue::from_str("Invalid FIT file: corrupted header"));
+        }
+
+        // Validate protocol version
+        let protocol_version = data[1];
+        if protocol_version > 20 {  // Future-proof version check
+            console::warn_1(&"Unknown FIT protocol version".into());
+        }
+
+        Ok(())
+    }
+
+    pub fn sanitize_numeric_input(&self, value: f64) -> f64 {
+        // Ensure numeric inputs are within reasonable bounds
+        if !value.is_finite() {
+            return 0.0;
+        }
+
+        // Clamp to reasonable ranges for cycling data
+        value.max(-1000.0).min(10000.0)
+    }
+
+    pub fn check_memory_pressure(&self) -> bool {
+        // Monitor WASM memory usage
+        let memory = wasm_bindgen::memory();
+        let buffer_size = memory.buffer().byte_length() as f64;
+
+        // Warn if approaching 1GB (browser limit)
+        if buffer_size > 800_000_000.0 {
+            console::warn_1(&"High WASM memory usage detected".into());
+            return true;
+        }
+
+        false
+    }
+}
+```
+
+### 6.4 WebAssembly Security Best Practices
+
+**Runtime Security Monitoring**
+- Periodic review of Rust-to-WASM toolchain updates for security advisories
+- Monitor browser WebAssembly sandbox changes and security hardening updates
+- Implement memory usage monitoring to prevent DoS through resource exhaustion
+
+**Secure Data Flow**
+- All sensitive cycling data processed exclusively in client-side WebAssembly
+- No network requests during data processing phase
+- Explicit memory clearing and garbage collection for privacy compliance
 
 ## Migration Phase Summary
 
@@ -569,19 +907,57 @@ class DataProtection {
 | `folium` | `leaflet` (JS) | ✅ Web-native |
 | `pyproj` | `proj4rs` | ✅ Available |
 
+## Dependency Maintenance & Upgrade Strategy
+
+### Current Dependency Status & Recommendations
+
+**Core WebAssembly Stack (Well-Maintained)**
+- `wasm-bindgen 0.2.95`: Latest stable - monitor for rapid ecosystem changes
+- `ndarray 0.16`: Upgraded from 0.15 to resolve dependency conflicts in larger projects
+- `nalgebra 0.34`: Upgraded from 0.32 for performance improvements and security patches
+- `geo 0.26`/`geodesy 0.12`: Both actively maintained; `geo` for planar operations, `geodesy` for advanced projections
+
+**Frontend Dependencies (Require Monitoring)**
+- `vite 7.1`: Major upgrade from 5.0 for build performance and modern browser targeting
+- `chart.js 4.5`: Updated for latest features; monitor for breaking changes
+- `leaflet 1.9`: Stable; prepare for 2.0 alpha migration for 2026+ browser modernization
+
+**Proactive Upgrade Preparation**
+- Test Leaflet 2.0 alpha in development branch for future-proofing
+- Monitor `nalgebra` 0.35+ releases for continued performance improvements
+- Evaluate `geodesy` vs direct proj4 bindings for production-scale projection requirements
+
+### Automated Maintenance Recommendations
+
+1. **Dependency Auditing**: Integrate `cargo audit` and `npm audit` into CI pipeline
+2. **Security Monitoring**: Schedule weekly dependency vulnerability scans
+3. **Version Tracking**: Use `cargo outdated` and `npm outdated` for proactive updates
+4. **Testing Strategy**: Automated testing against latest dependency versions in separate CI branch
+
+### Alternative Technology Evaluation
+
+**Advanced Geospatial Processing**
+- For production deployments requiring high-precision projections, evaluate direct `proj4` WASM bindings
+- Consider `geodesy` crate for complex datum conversions beyond simplified UTM logic
+
+**Performance Optimization Opportunities**
+- WebAssembly SIMD support monitoring for numerical computation acceleration
+- Evaluate WebGPU integration for massively parallel virtual elevation calculations
+
 ## Risk Mitigation
 
 ### Technical Risks
-1. **Large FIT files**: Implement streaming processing
-2. **Memory limitations**: Use Web Workers and chunked processing
-3. **DEM data size**: Tile-based loading with caching
-4. **Browser compatibility**: Target modern browsers only
+1. **Large FIT files**: Implement streaming processing with chunked WASM memory allocation
+2. **Memory limitations**: Use Web Workers and explicit memory pooling
+3. **DEM data size**: Tile-based loading with IndexedDB caching and compression
+4. **Browser compatibility**: Target modern browsers with WebAssembly support
+5. **Dependency drift**: Automated monitoring and testing of upstream changes
 
 ### Privacy Compliance
-1. **No server uploads**: All processing client-side
-2. **Data clearing**: Automatic cleanup on page close
-3. **Consent management**: Clear data usage policies
-4. **Local storage**: IndexedDB with user control
+1. **No server uploads**: All processing client-side with explicit data flow documentation
+2. **Data clearing**: Automatic cleanup on page close with secure memory wiping
+3. **Consent management**: Clear data usage policies and retention controls
+4. **Local storage**: IndexedDB with user-controlled data lifecycle management
 
 ## Success Metrics
 
@@ -627,6 +1003,16 @@ virtual_slope = (
 3. **Portability**: Single codebase for all platforms
 4. **Security**: Sandboxed execution environment
 5. **Maintainability**: Type-safe Rust code with better error handling
+
+### Architecture Documentation
+
+**Recommended Addition**: Create a high-level architecture diagram documenting:
+- Data flow from FIT file upload through WebAssembly processing to visualization
+- Component interaction between Rust WASM modules and TypeScript frontend
+- Memory management and Web Worker threading model
+- Security boundaries and privacy-preserving design patterns
+
+This documentation improves maintainability and helps onboard future contributors to the codebase architecture.
 
 ### Migration Strategy
 

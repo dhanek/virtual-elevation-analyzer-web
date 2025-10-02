@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Elevation Analyzer</title>
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'wasm-unsafe-eval' https://cdn.plot.ly;
+        style-src 'self' 'unsafe-inline' https://unpkg.com;
+        img-src 'self' data: blob: https://*.tile.openstreetmap.org;
+        connect-src 'self' https://*.tile.openstreetmap.org;
+        object-src 'none';
+        base-uri 'self';
+    ">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #fafafa;
+            min-height: 100vh;
+            margin: 0;
+            color: #1a1a1a;
+            line-height: 1.5;
+            overflow-x: hidden;
+        }
+
+        .container {
+            background: white;
+            min-height: 100vh;
+            padding: 0;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .header {
+            background: white;
+            border-bottom: 1px solid #e5e5e5;
+            padding: 2rem 0;
+            margin-bottom: 0;
+        }
+
+        .header-content {
+            max-width: 100%;
+            margin: 0;
+            padding: 0 1rem;
+        }
+
+        .header h1 {
+            color: #1a1a1a;
+            margin: 0 0 0.5rem 0;
+            font-size: 2rem;
+            font-weight: 300;
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1rem;
+            margin: 0;
+            font-weight: 400;
+        }
+
+        .main-content {
+            max-width: 100%;
+            margin: 0;
+            padding: 1rem;
+            width: 100%;
+        }
+
+        /* Workflow Sections */
+        .workflow-section {
+            background: white;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            width: 100%;
+        }
+
+        .workflow-section.inactive {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .workflow-section h2 {
+            color: #1a1a1a;
+            margin: 0 0 1.5rem 0;
+            font-size: 1.5rem;
+            font-weight: 300;
+            letter-spacing: -0.02em;
+            border-bottom: 2px solid #4363d8;
+            padding-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .section-number {
+            background: #4363d8;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            font-size: 1rem;
+        }
+
+        .section-number.completed {
+            background: #38a169;
+        }
+
+        .file-section {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+
+        .file-input {
+            width: 100%;
+            padding: 2rem;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            background: #fafafa;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .file-input:hover {
+            border-color: #4363d8;
+            background: white;
+        }
+
+        .file-input.dragover {
+            border-color: #4363d8;
+            background: white;
+            box-shadow: 0 0 0 2px rgba(67, 99, 216, 0.1);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .file-info {
+            background: white;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .file-info h3 {
+            color: #1a1a1a;
+            margin: 0 0 0.75rem 0;
+            font-weight: 400;
+            font-size: 1.1rem;
+        }
+
+        .analyze-button {
+            width: 100%;
+            padding: clamp(0.875rem, 2vw, 1.125rem) clamp(1.5rem, 3vw, 2rem);
+            background: #4363d8;
+            color: white;
+            border: none;
+            border-radius: 2px;
+            font-size: clamp(1rem, 1.8vw, 1.125rem);
+            font-weight: 400;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            margin-top: 1.5rem;
+            letter-spacing: -0.01em;
+        }
+
+        .analyze-button:hover:not(:disabled) {
+            background: #2952cc;
+        }
+
+        .analyze-button:disabled {
+            background: #e5e5e5;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4363d8;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            color: #c53030;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .statistics {
+            background: white;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            padding: 1rem;
+            margin: 1rem 0;
+            width: 100%;
+            max-width: none;
+        }
+
+        .statistics h3 {
+            color: #1a1a1a;
+            margin: 0 0 clamp(1.5rem, 3vw, 2rem) 0;
+            font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+            font-weight: 300;
+            letter-spacing: -0.02em;
+            border-bottom: 1px solid #4363d8;
+            padding-bottom: 0.75rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+            gap: clamp(1rem, 2vw, 1.5rem);
+        }
+
+        .stat-item {
+            background: #fafafa;
+            padding: clamp(1rem, 2vw, 1.25rem);
+            border-radius: 2px;
+            border-left: 2px solid #4363d8;
+        }
+
+        .stat-label {
+            font-size: clamp(0.85rem, 1.5vw, 0.95rem);
+            color: #666;
+            margin-bottom: 0.4rem;
+            font-weight: 400;
+        }
+
+        .stat-value {
+            font-size: clamp(1.1rem, 2vw, 1.3rem);
+            font-weight: 400;
+            color: #1a1a1a;
+            letter-spacing: -0.01em;
+        }
+
+        .laps-section {
+            margin-top: 1.5rem;
+        }
+
+        .lap-item {
+            background: white;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid #38a169;
+        }
+
+        .lap-header {
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+
+        .lap-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin-top: 1rem;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .lap-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            font-size: 0.9rem;
+        }
+
+        .lap-table th {
+            background: #4363d8;
+            color: white;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #3651c7;
+        }
+
+        .lap-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #2d3748;
+        }
+
+        .lap-table tbody tr:hover {
+            background: #f7fafc;
+        }
+
+        .lap-table tbody tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .lap-table tbody tr:nth-child(even):hover {
+            background: #e6f0ff;
+        }
+
+        .records-section {
+            margin-top: 2rem;
+        }
+
+        .records-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            font-size: 0.85rem;
+        }
+
+        .records-table th {
+            background: #38a169;
+            color: white;
+            padding: 10px 6px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #2d7a52;
+            font-size: 0.8rem;
+        }
+
+        .records-table td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #2d3748;
+            white-space: nowrap;
+        }
+
+        .records-table tbody tr:hover {
+            background: #f0fff4;
+        }
+
+        .records-table tbody tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .records-table tbody tr:nth-child(even):hover {
+            background: #e6fffa;
+        }
+
+        /* Map and Lap Selection Styles */
+        .map-lap-container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .map-container {
+            height: var(--map-height, 400px);
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            overflow: hidden;
+            background: #fafafa;
+            flex: 1;
+            min-height: 400px;
+            width: 100%;
+        }
+
+        #mapView {
+            height: 100%;
+            width: 100%;
+        }
+
+        .map-trim-controls {
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: #f8f9fa;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            margin-top: 0.5rem;
+        }
+
+        .map-trim-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .map-trim-group label {
+            font-size: 0.8rem;
+            color: #2d3748;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .ve-slider-compact {
+            flex: 1;
+            min-width: 80px;
+        }
+
+        .ve-value-input-compact {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #1a1a1a;
+            background: white;
+            padding: 0.2rem 0.4rem;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            width: 60px;
+            text-align: center;
+        }
+
+        .ve-value-input-compact:focus {
+            outline: none;
+            border-color: #4363d8;
+            box-shadow: 0 0 0 1px #4363d8;
+        }
+
+        .no-gps-message {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+            font-size: 1.1rem;
+        }
+
+        .lap-selection {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 2px;
+            padding: 0.5rem;
+        }
+
+        .lap-selection h4 {
+            color: #2d3748;
+            margin-bottom: 0.35rem;
+            border-bottom: 1px solid #4363d8;
+            padding-bottom: 0.25rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .lap-controls {
+            margin-bottom: 0.35rem;
+        }
+
+        .select-all-btn {
+            width: 100%;
+            padding: 0.3rem;
+            background: #e2e8f0;
+            border: 1px solid #cbd5e0;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            font-size: 0.75rem;
+        }
+
+        .select-all-btn:hover {
+            background: #cbd5e0;
+        }
+
+        .lap-list {
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .lap-checkbox-item {
+            display: flex;
+            align-items: center;
+            padding: 0.3rem 0.35rem;
+            margin-bottom: 0.15rem;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .lap-checkbox-item:hover {
+            background: #f0f4ff;
+        }
+
+        .lap-checkbox-item.selected {
+            background: #e6f0ff;
+            border-color: #4363d8;
+        }
+
+        .lap-checkbox {
+            margin-right: 0.35rem;
+        }
+
+        .lap-info {
+            flex: 1;
+            font-size: 0.75rem;
+        }
+
+        .lap-number {
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .lap-details {
+            color: #666;
+            font-size: 0.7rem;
+        }
+
+        /* Leaflet marker styles */
+        .lap-marker {
+            background: transparent;
+            border: none;
+        }
+
+        .marker-content {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .marker-content.start {
+            background: #38a169;
+        }
+
+        .marker-content.end {
+            background: #e53e3e;
+        }
+
+        @media (max-width: 768px) {
+            .map-lap-container {
+                grid-template-columns: 1fr;
+            }
+
+            .map-container {
+                height: 300px;
+            }
+        }
+
+        /* Analysis Parameters Styles */
+        .analysis-parameters {
+            background: white;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            padding: 1rem;
+            margin: 1rem 0;
+            width: 100%;
+            max-width: none;
+        }
+
+        .analysis-parameters h4 {
+            color: #1a1a1a;
+            margin: 0 0 clamp(1.5rem, 3vw, 2rem) 0;
+            font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+            font-weight: 300;
+            letter-spacing: -0.02em;
+            border-bottom: 1px solid #4363d8;
+            padding-bottom: 0.75rem;
+        }
+
+        .param-section {
+            margin-bottom: clamp(1.5rem, 3vw, 2rem);
+        }
+
+        .param-section h5 {
+            color: #1a1a1a;
+            margin-bottom: clamp(0.75rem, 1.5vw, 1rem);
+            font-size: clamp(0.95rem, 1.8vw, 1.1rem);
+            font-weight: 400;
+            letter-spacing: -0.01em;
+        }
+
+        .param-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+            gap: clamp(1rem, 2vw, 1.5rem);
+        }
+
+        .param-compact-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+            gap: 0.75rem;
+        }
+
+        .param-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .param-item label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #2d3748;
+            margin-bottom: 0.25rem;
+        }
+
+        .param-item input,
+        .param-item select {
+            padding: clamp(0.5rem, 1vw, 0.75rem);
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            font-size: clamp(0.9rem, 1.6vw, 1rem);
+            transition: border-color 0.2s ease;
+            background: white;
+            color: #1a1a1a;
+        }
+
+        .param-item input:focus,
+        .param-item select:focus {
+            outline: none;
+            border-color: #4363d8;
+            box-shadow: 0 0 0 1px #4363d8;
+        }
+
+        .param-item input:disabled {
+            background-color: #fafafa;
+            color: #9ca3af;
+            border-color: #e5e5e5;
+        }
+
+        .param-item input::placeholder {
+            color: #9ca3af;
+            font-style: normal;
+        }
+
+        .checkbox-item {
+            flex-direction: row;
+            align-items: center;
+        }
+
+        .checkbox-item label {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            margin-right: 0.5rem;
+            width: auto;
+        }
+
+        .bounds-section {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .bounds-group {
+            margin-bottom: 0.75rem;
+        }
+
+        .bounds-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .bounds-group label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+
+        .bounds-inputs {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .bounds-inputs input {
+            flex: 1;
+            padding: 0.4rem;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .bounds-inputs span {
+            color: #666;
+            font-size: 0.9rem;
+            padding: 0 0.25rem;
+        }
+
+        .param-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .primary-btn {
+            flex: 1;
+            padding: clamp(0.875rem, 2vw, 1.125rem) clamp(1.5rem, 3vw, 2rem);
+            background: #4363d8;
+            color: white;
+            border: none;
+            border-radius: 2px;
+            font-size: clamp(1rem, 1.8vw, 1.125rem);
+            font-weight: 400;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            letter-spacing: -0.01em;
+        }
+
+        .primary-btn:hover:not(:disabled) {
+            background: #2952cc;
+        }
+
+        .primary-btn:disabled {
+            background: #e5e5e5;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .secondary-btn {
+            padding: clamp(0.875rem, 2vw, 1.125rem) clamp(1.5rem, 3vw, 2rem);
+            background: white;
+            color: #1a1a1a;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            font-size: clamp(1rem, 1.8vw, 1.125rem);
+            font-weight: 400;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: -0.01em;
+        }
+
+        .secondary-btn:hover {
+            background: #fafafa;
+            border-color: #9ca3af;
+        }
+
+        /* Analysis Layout - Section 3 */
+        .analysis-layout {
+            display: flex;
+            gap: 1.5rem;
+            width: 100%;
+            height: clamp(600px, 80vh, 900px);
+        }
+
+        .analysis-sidebar {
+            flex: 0 0 320px;
+            min-width: 280px;
+            max-height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .analysis-main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        @media (max-width: 1024px) {
+            .analysis-sidebar {
+                flex: 0 0 260px;
+                min-width: 260px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .analysis-layout {
+                flex-direction: column;
+            }
+
+            .analysis-sidebar {
+                flex: 1 1 auto;
+                max-height: none;
+                overflow-y: visible;
+            }
+        }
+
+        /* Ensure map uses maximum screen real estate */
+        .viewport-laptop .analysis-layout,
+        .viewport-desktop .analysis-layout,
+        .viewport-ultrawide .analysis-layout {
+            height: var(--map-height, 80vh);
+            max-height: 90vh;
+        }
+
+        .viewport-laptop .map-container,
+        .viewport-desktop .map-container,
+        .viewport-ultrawide .map-container {
+            height: 100%;
+            min-height: var(--map-height, 600px);
+        }
+
+        /* Sidebar scrolling for tall screens */
+        .lap-selection {
+            max-height: 100%;
+            overflow-y: auto;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .lap-list {
+            max-height: calc(100vh - 400px);
+            overflow-y: auto;
+        }
+
+        /* Force map to use most of the screen width */
+        .analysis-layout {
+            grid-template-columns: 1fr 280px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+        }
+
+        @media (max-width: 768px) {
+            .analysis-layout {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        /* Ensure absolutely no hidden margins or constraints */
+        html, body {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Virtual Elevation Results Styles */
+        .ve-results {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 2rem;
+            margin: 1rem 0;
+        }
+
+        .ve-results h3 {
+            color: #2d3748;
+            margin-bottom: 1.5rem;
+            border-bottom: 2px solid #4363d8;
+            padding-bottom: 0.5rem;
+        }
+
+        .ve-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .ve-metric {
+            background: white;
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .ve-metric label {
+            display: block;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .ve-metric span {
+            display: block;
+            font-size: 1.1rem;
+            color: #2d3748;
+            font-weight: 500;
+        }
+
+        .ve-data-info {
+            background: white;
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .ve-data-info p {
+            margin: 0.5rem 0;
+            color: #4a5568;
+        }
+
+
+        .ve-header {
+            background: #f7fafc;
+            border-bottom: 2px solid #4363d8;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .ve-header h2 {
+            margin: 0;
+            color: #2d3748;
+        }
+
+        .ve-header-controls {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .ve-main-layout {
+            display: flex;
+            height: calc(100vh - 80px);
+            overflow: hidden;
+        }
+
+        .ve-left-panel {
+            width: 400px;
+            background: #f7fafc;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .ve-right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .ve-map-container {
+            padding: 1rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .ve-map-container h4 {
+            margin: 0 0 1rem 0;
+            color: #2d3748;
+        }
+
+        .ve-map {
+            height: 300px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+
+        .ve-controls {
+            padding: 1rem;
+            flex: 1;
+        }
+
+        .ve-controls h4 {
+            margin: 0 0 1.5rem 0;
+            color: #2d3748;
+            border-bottom: 2px solid #4363d8;
+            padding-bottom: 0.5rem;
+        }
+
+        .ve-control-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .ve-control-group label {
+            display: block;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .ve-slider {
+            width: 100%;
+            margin-bottom: 0.5rem;
+            accent-color: #4363d8;
+        }
+
+        .ve-control-group span {
+            display: inline-block;
+            background: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            font-family: monospace;
+            font-size: 0.9rem;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .ve-metrics {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #e2e8f0;
+            margin-top: 1rem;
+        }
+
+        .ve-metric-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .ve-metric-item:last-child {
+            border-bottom: none;
+        }
+
+        .ve-metric-item label {
+            font-weight: 600;
+            color: #4a5568;
+            margin: 0;
+        }
+
+        .ve-metric-item span {
+            font-family: monospace;
+            background: #f1f5f9;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+        }
+
+
+        .primary-btn {
+            background: #4363d8;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .primary-btn:hover {
+            background: #3c5aa6;
+        }
+
+        .secondary-btn {
+            background: #e2e8f0;
+            color: #4a5568;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .secondary-btn:hover {
+            background: #cbd5e0;
+        }
+
+        /* Virtual Elevation Analysis Styles */
+        .ve-inline-container {
+            width: 100%;
+            position: static;
+            display: block;
+        }
+
+        .ve-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .ve-header h3 {
+            margin: 0;
+            color: #1a1a1a;
+        }
+
+        .ve-control-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 0; /* Remove gap, use margin on control-group instead */
+            margin-bottom: 1.5rem;
+        }
+
+        .ve-controls {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+
+        .ve-controls h4 {
+            margin: 0 0 1rem 0;
+            color: #1a1a1a;
+            font-size: 1.1rem;
+        }
+
+        .ve-control-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .ve-control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .ve-control-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #2d3748;
+            font-size: 0.9rem;
+        }
+
+        .ve-slider {
+            width: 100%;
+            margin-bottom: 0.25rem;
+        }
+
+        .ve-control-group span {
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #4a5568;
+            background: white;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            display: inline-block;
+        }
+
+        .ve-value-input {
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #1a1a1a;
+            background: white;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            width: 100px;
+            text-align: center;
+        }
+
+        .ve-value-input:focus {
+            outline: none;
+            border-color: #4363d8;
+            box-shadow: 0 0 0 1px #4363d8;
+        }
+
+        .ve-metrics {
+            background: white;
+            padding: 1rem;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+
+        .ve-metric-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .ve-metric-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .ve-metric-item label {
+            font-size: 0.85rem;
+            color: #2d3748;
+            font-weight: 500;
+        }
+
+        .ve-metric-item span {
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #1a1a1a;
+            font-weight: 600;
+        }
+
+        .ve-plots {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .ve-plot-container {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 0.75rem;
+            flex: 1;
+        }
+
+        .ve-plot-container h4 {
+            margin: 0 0 0.5rem 0;
+            color: #1a1a1a;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .ve-plot {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #f0f0f0;
+            border-radius: 2px;
+        }
+
+        .ve-wind-source {
+            background: white;
+            padding: 1rem;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            margin-top: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .ve-wind-source h4 {
+            margin: 0 0 0.75rem 0;
+            color: #1a1a1a;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .ve-radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .ve-radio-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 0.5rem;
+            background: white;
+            border: 1px solid #d4d4d4;
+            border-radius: 2px;
+            transition: all 0.2s ease;
+        }
+
+        .ve-radio-label:hover {
+            background: #f8f9fa;
+            border-color: #4363d8;
+        }
+
+        .ve-radio-label input[type="radio"] {
+            margin-right: 0.5rem;
+            accent-color: #4363d8;
+            cursor: pointer;
+        }
+
+        .ve-radio-label span {
+            font-size: 0.9rem;
+            color: #2d3748;
+        }
+
+        .ve-tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 0.75rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .ve-tab-button {
+            padding: 0.4rem 0.75rem;
+            background: white;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: #666;
+            transition: all 0.15s ease;
+            font-weight: 400;
+        }
+
+        .ve-tab-button:hover {
+            color: #4363d8;
+            background: #f8f9fa;
+        }
+
+        .ve-tab-button.active {
+            color: #4363d8;
+            border-bottom-color: #4363d8;
+            font-weight: 500;
+        }
+
+        .ve-tab-content {
+            display: none;
+        }
+
+        .ve-tab-content.active {
+            display: block;
+        }
+
+        /* Compact metrics and plot header */
+        .ve-plot-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .ve-plot-header h4 {
+            margin: 0;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .ve-metrics-compact {
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: #666;
+            white-space: nowrap;
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+        }
+
+        .ve-metrics-compact span {
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-left: 0.15rem;
+            margin-right: 0.35rem;
+        }
+
+        /* Responsive Side-by-Side Layout */
+        .ve-layout {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .ve-controls-sidebar {
+            flex: 0 0 320px;
+            min-width: 280px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            max-height: 680px;
+        }
+
+        .ve-controls-scrollable {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .ve-sidebar-footer {
+            flex-shrink: 0;
+            padding: 1rem;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .ve-plots-main {
+            flex: 1;
+            min-width: 0; /* Allow flex item to shrink below content size */
+        }
+
+        .ve-plots {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin-top: 0; /* Remove top margin since it's now side-by-side */
+        }
+
+        /* Tablet: Narrower sidebar */
+        @media (max-width: 1024px) {
+            .ve-controls-sidebar {
+                flex: 0 0 260px;
+                min-width: 260px;
+            }
+
+            .ve-control-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Mobile: Stack layout */
+        @media (max-width: 768px) {
+            .ve-layout {
+                flex-direction: column;
+            }
+
+            .ve-controls-sidebar {
+                flex: 1 1 auto;
+                max-height: none;
+                overflow-y: visible;
+            }
+
+            .ve-plots-main {
+                flex: 1 1 auto;
+            }
+
+            .ve-plot {
+                height: 300px; /* Shorter plots on mobile */
+            }
+
+            .ve-plot-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.25rem;
+            }
+
+            .ve-metrics-compact {
+                font-size: 0.7rem;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .ve-main-layout {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+
+            .ve-left-panel {
+                order: 2;
+            }
+
+            .ve-right-panel {
+                order: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <h1>Virtual Elevation Analyzer</h1>
+                <p>Privacy-first FIT file analysis in your browser</p>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <!-- Section 1: File Selection -->
+            <div class="workflow-section" id="fileSection">
+                <h2><span class="section-number" id="section1Number">1</span>File Selection</h2>
+                <div class="file-section">
+                    <div class="file-input-wrapper">
+                        <input type="file" id="fitFileInput" accept=".fit" class="hidden">
+                        <div class="file-input" id="fileDropZone">
+                            <div>
+                                📁 Click to select a FIT file or drag and drop
+                            </div>
+                            <small>Supports .fit files up to 50MB</small>
+                        </div>
+                    </div>
+
+                    <div id="fileInfo" class="file-info hidden">
+                        <h3>Selected File</h3>
+                        <div id="fileDetails"></div>
+                    </div>
+
+                    <button id="analyzeButton" class="analyze-button" disabled>
+                        Analyze FIT File
+                    </button>
+
+                    <div id="loading" class="loading">
+                        <div class="spinner"></div>
+                        <span id="loadingText">Processing FIT file...</span>
+                    </div>
+
+                    <div id="error" class="error hidden"></div>
+                </div>
+            </div>
+
+            <!-- Section 2: Analysis Parameters -->
+            <div class="workflow-section inactive" id="parametersSection">
+                <h2><span class="section-number" id="section2Number">2</span>Analysis Parameters</h2>
+                <div id="analysisParameters"></div>
+            </div>
+
+            <!-- Section 3: Map Analysis -->
+            <div class="workflow-section inactive" id="analysisSection">
+                <h2><span class="section-number" id="section3Number">3</span>Map Analysis & Lap Selection</h2>
+                <div id="results" class="hidden">
+                    <div id="statisticsContent"></div>
+                </div>
+            </div>
+
+            <!-- Section 4: Virtual Elevation Analysis -->
+            <div class="workflow-section inactive hidden" id="veAnalysisSection">
+                <h2><span class="section-number" id="section4Number">4</span>Virtual Elevation Analysis</h2>
+                <div id="veAnalysisContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="src/main.ts"></script>
+</body>
+</html>

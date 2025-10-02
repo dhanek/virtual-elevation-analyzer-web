@@ -1,0 +1,29 @@
+{
+  "name": "virtual-elevation-analyzer-web",
+  "version": "0.1.0",
+  "description": "Privacy-first web application for virtual elevation analysis of cycling FIT files",
+  "scripts": {
+    "build": "./build.sh",
+    "dev": "cd frontend && npm run dev",
+    "preview": "cd frontend && npm run preview",
+    "install:deps": "cd frontend && npm install",
+    "build:wasm": "cd backend && wasm-pack build --target web --out-dir pkg",
+    "build:frontend": "cd frontend && npm run build",
+    "check:rust": "cd backend && cargo check",
+    "check:frontend": "cd frontend && npm run check"
+  },
+  "keywords": [
+    "cycling",
+    "fit-files",
+    "virtual-elevation",
+    "webassembly",
+    "rust",
+    "privacy"
+  ],
+  "author": "Virtual Elevation Analyzer Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/virtual-elevation-analyzer-web.git"
+  }
+}

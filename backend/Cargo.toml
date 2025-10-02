@@ -1,0 +1,48 @@
+[package]
+name = "virtual-elevation-analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Core WebAssembly
+wasm-bindgen = "0.2.95"  # Latest stable - regularly updated
+js-sys = "0.3.72"
+
+# Web APIs
+web-sys = { version = "0.3.72", features = [
+  "console",
+  "File",
+  "FileReader",
+  "Blob",
+] }
+
+# Numerical Computing
+ndarray = "0.16"         # Upgraded from 0.15 for compatibility
+nalgebra = "0.34"        # Upgraded from 0.32 for latest features
+num-traits = "0.2"
+
+# FIT File Processing
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+fitparser = "0.10.0"  # Latest version with better developer field support
+
+# Geospatial
+geo = "0.26"          # Latest maintained release
+geodesy = "0.12"      # Advanced projections and datum conversions
+
+# UUID with WASM support
+uuid = { version = "1.0", features = ["v4", "js"] }
+
+# Utilities
+thiserror = "1.0"
+console_error_panic_hook = "0.1.7"
+byteorder = "1.5"
+
+[profile.release]
+# Optimize for small code size and performance
+opt-level = "s"
+lto = true
