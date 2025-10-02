@@ -10,6 +10,7 @@ export interface AnalysisParameters {
     crr_max: number;
     wind_speed: number | null;
     wind_direction: number | null;
+    wind_speed_unit: 'm/s' | 'km/h';
     velodrome: boolean;
     auto_lap_detection: 'None' | 'GPS based lap splitting' | 'GPS based out and back' | 'GPS gate one way';
 }
@@ -26,6 +27,7 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
     crr_max: 0.015,
     wind_speed: null,      // m/s - null = no wind
     wind_direction: null,  // degrees - null = no wind
+    wind_speed_unit: 'm/s',// unit for wind speed display
     velodrome: false,      // zero altitude for track cycling
     auto_lap_detection: 'None'
 };
@@ -54,6 +56,8 @@ export class AnalysisParametersComponent {
     public setParameters(params: Partial<AnalysisParameters>): void {
         this.parameters = { ...this.parameters, ...params };
         this.updateUI();
+        // Trigger the callback to update currentParameters in main.ts
+        this.onParametersChange(this.parameters);
     }
 
     private render(): void {
@@ -117,15 +121,21 @@ export class AnalysisParametersComponent {
 
                 <div class="param-compact-grid" style="margin-top: 1rem;">
                     <div class="param-item">
-                        <label for="wind_speed">Wind Speed (m/s):</label>
-                        <input type="number" id="wind_speed" min="-30" max="30" step="0.1"
-                               placeholder="Optional" title="Positive = headwind, Negative = tailwind">
+                        <label for="wind_speed">Wind Speed:</label>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <input type="number" id="wind_speed" min="0" max="30" step="0.1"
+                                   placeholder="Optional" title="Wind speed (constant value)" style="flex: 1;">
+                            <select id="wind_speed_unit" style="width: 70px;" title="Wind speed unit">
+                                <option value="m/s" ${this.parameters.wind_speed_unit === 'm/s' ? 'selected' : ''}>m/s</option>
+                                <option value="km/h" ${this.parameters.wind_speed_unit === 'km/h' ? 'selected' : ''}>km/h</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div class="param-item">
                         <label for="wind_direction">Wind Direction (°):</label>
                         <input type="number" id="wind_direction" min="0" max="360" step="1"
-                               placeholder="Optional" title="Wind direction in degrees (0-360)">
+                               placeholder="Optional" title="Direction wind is coming FROM (0°=N, 90°=E, 180°=S, 270°=W)">
                     </div>
 
                     <div class="param-item checkbox-item">
@@ -186,6 +196,15 @@ export class AnalysisParametersComponent {
             return element?.checked || false;
         };
 
+        // Get wind speed and convert to m/s if needed
+        const windSpeedUnit = getValue('wind_speed_unit') as 'm/s' | 'km/h';
+        let windSpeedValue = getNumberValue('wind_speed');
+
+        // Convert km/h to m/s for internal storage
+        if (windSpeedValue !== null && windSpeedUnit === 'km/h') {
+            windSpeedValue = windSpeedValue / 3.6;
+        }
+
         // Update parameters
         this.parameters = {
             system_mass: getNumberValue('system_mass') || DEFAULT_PARAMETERS.system_mass,
@@ -197,8 +216,9 @@ export class AnalysisParametersComponent {
             cda_max: getNumberValue('cda_max') || DEFAULT_PARAMETERS.cda_max,
             crr_min: getNumberValue('crr_min') || DEFAULT_PARAMETERS.crr_min,
             crr_max: getNumberValue('crr_max') || DEFAULT_PARAMETERS.crr_max,
-            wind_speed: getNumberValue('wind_speed'),
+            wind_speed: windSpeedValue,
             wind_direction: getNumberValue('wind_direction'),
+            wind_speed_unit: windSpeedUnit,
             velodrome: getBooleanValue('velodrome'),
             auto_lap_detection: getValue('auto_lap_detection') as AnalysisParameters['auto_lap_detection']
         };
@@ -247,6 +267,12 @@ export class AnalysisParametersComponent {
             }
         };
 
+        // Convert wind speed from m/s to selected unit for display
+        let displayWindSpeed = this.parameters.wind_speed;
+        if (displayWindSpeed !== null && this.parameters.wind_speed_unit === 'km/h') {
+            displayWindSpeed = displayWindSpeed * 3.6;
+        }
+
         setValue('system_mass', this.parameters.system_mass);
         setValue('rho', this.parameters.rho);
         setValue('eta', this.parameters.eta);
@@ -256,8 +282,9 @@ export class AnalysisParametersComponent {
         setValue('cda_max', this.parameters.cda_max);
         setValue('crr_min', this.parameters.crr_min);
         setValue('crr_max', this.parameters.crr_max);
-        setValue('wind_speed', this.parameters.wind_speed);
+        setValue('wind_speed', displayWindSpeed);
         setValue('wind_direction', this.parameters.wind_direction);
+        setValue('wind_speed_unit', this.parameters.wind_speed_unit);
         setValue('velodrome', this.parameters.velodrome);
         setValue('auto_lap_detection', this.parameters.auto_lap_detection);
 

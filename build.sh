@@ -22,7 +22,7 @@ fi
 
 echo "📦 Building Rust/WebAssembly backend..."
 cd backend
-wasm-pack build --target web --out-dir pkg
+wasm-pack build --target web --out-dir ../frontend/pkg
 cd ..
 
 echo "📦 Installing frontend dependencies..."

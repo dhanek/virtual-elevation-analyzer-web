@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
 
-export default defineConfig({
-  base: '/virtual-elevation-analyzer-web/',
+export default defineConfig(() => ({
+  // Use GitHub Pages base path only when VITE_GITHUB_PAGES=true
+  // For local dev/testing: npm run build
+  // For GitHub Pages: VITE_GITHUB_PAGES=true npm run build
+  base: process.env.VITE_GITHUB_PAGES === 'true' ? '/virtual-elevation-analyzer-web/' : '/',
   root: '.',
   build: {
     outDir: '../dist',
@@ -38,4 +41,4 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['virtual-elevation-analyzer']
   }
-})
+}))

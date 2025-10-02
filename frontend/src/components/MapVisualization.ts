@@ -447,7 +447,13 @@ export class MapVisualization {
         }
     }
 
-    public showWindIndicator(windSpeed: number, windDirection: number): void {
+    private degreeToCardinal(degrees: number): string {
+        const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+        const index = Math.round(((degrees % 360) / 22.5)) % 16;
+        return directions[index];
+    }
+
+    public showWindIndicator(windSpeed: number, windDirection: number, windSpeedUnit: 'm/s' | 'km/h' = 'm/s'): void {
         // Remove existing indicator if present
         if (this.windIndicator) {
             this.windIndicator.remove();
@@ -458,21 +464,25 @@ export class MapVisualization {
             return;
         }
 
+        // Convert wind speed to selected unit
+        const displaySpeed = windSpeedUnit === 'km/h' ? windSpeed * 3.6 : windSpeed;
+
         // Create wind indicator overlay
         this.windIndicator = document.createElement('div');
         this.windIndicator.style.position = 'absolute';
         this.windIndicator.style.top = '10px';
         this.windIndicator.style.right = '10px';
-        this.windIndicator.style.backgroundColor = 'rgba(255, 255, 255, 0.75)';
+        this.windIndicator.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
         this.windIndicator.style.padding = '12px';
         this.windIndicator.style.borderRadius = '8px';
-        this.windIndicator.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+        this.windIndicator.style.border = '1px solid #4363d8';
+        this.windIndicator.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
         this.windIndicator.style.zIndex = '1000';
         this.windIndicator.style.display = 'flex';
         this.windIndicator.style.flexDirection = 'column';
         this.windIndicator.style.alignItems = 'center';
-        this.windIndicator.style.gap = '8px';
-        this.windIndicator.style.minWidth = '90px';
+        this.windIndicator.style.gap = '6px';
+        this.windIndicator.style.minWidth = '110px';
 
         // Create title
         const title = document.createElement('div');
@@ -480,41 +490,50 @@ export class MapVisualization {
         title.style.fontSize = '16px';
         title.style.fontWeight = '600';
         title.style.color = '#4363d8';
-        title.style.marginBottom = '4px';
+        title.style.marginBottom = '2px';
 
-        // Create arrow element
+        // Create arrow element - rotated by windDirection + 180 to point where wind is coming FROM
         const arrow = document.createElement('div');
-        arrow.innerHTML = '←';
+        arrow.innerHTML = '↑';
         arrow.style.fontSize = '32px';
-        arrow.style.transform = `rotate(${-windDirection}deg)`;
+        arrow.style.transform = `rotate(${windDirection + 180}deg)`;
         arrow.style.transition = 'transform 0.3s ease';
         arrow.style.color = '#4363d8';
         arrow.style.lineHeight = '1';
 
         // Create speed text
         const speed = document.createElement('div');
-        speed.textContent = `${windSpeed.toFixed(1)} m/s`;
+        speed.textContent = `${displaySpeed.toFixed(1)} ${windSpeedUnit}`;
         speed.style.fontSize = '14px';
         speed.style.fontWeight = '500';
         speed.style.color = '#2d3748';
-        speed.style.marginTop = '4px';
+        speed.style.marginTop = '2px';
 
-        // Create direction text
+        // Create direction text with cardinal direction
         const direction = document.createElement('div');
+        const cardinal = this.degreeToCardinal(windDirection);
         direction.textContent = `${windDirection.toFixed(0)}°`;
         direction.style.fontSize = '13px';
         direction.style.color = '#666';
+
+        // Create "from" text with cardinal direction
+        const fromText = document.createElement('div');
+        fromText.textContent = `from ${cardinal}`;
+        fromText.style.fontSize = '12px';
+        fromText.style.color = '#888';
+        fromText.style.fontStyle = 'italic';
 
         this.windIndicator.appendChild(title);
         this.windIndicator.appendChild(arrow);
         this.windIndicator.appendChild(speed);
         this.windIndicator.appendChild(direction);
+        this.windIndicator.appendChild(fromText);
 
         // Append to map container
         this.container.style.position = 'relative';
         this.container.appendChild(this.windIndicator);
 
-        console.log('Wind indicator shown:', { windSpeed, windDirection });
+        console.log('Wind indicator shown:', { windSpeed, windDirection, cardinal });
     }
 
     public hideWindIndicator(): void {

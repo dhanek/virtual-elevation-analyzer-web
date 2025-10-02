@@ -310,7 +310,7 @@ impl VirtualElevationCalculator {
 
     /// Calculate virtual elevation profile
     #[wasm_bindgen]
-    pub fn calculate_virtual_elevation(&self, cda: f64, crr: f64) -> VEResult {
+    pub fn calculate_virtual_elevation(&self, cda: f64, crr: f64, trim_start: usize, trim_end: usize) -> VEResult {
         let (virtual_slope, effective_wind, apparent_velocity) = self.calculate_virtual_slope(cda, crr);
         let acceleration = self.calculate_acceleration();
 
@@ -333,7 +333,7 @@ impl VirtualElevationCalculator {
 
         // Calculate metrics if actual elevation is available
         let (r2, rmse, ve_elevation_diff, actual_elevation_diff) =
-            self.calculate_metrics(&virtual_elevation);
+            self.calculate_metrics(&virtual_elevation, trim_start, trim_end);
 
         VEResult {
             virtual_elevation,
@@ -348,13 +348,20 @@ impl VirtualElevationCalculator {
         }
     }
 
-    /// Calculate R², RMSE and elevation differences
-    fn calculate_metrics(&self, virtual_elevation: &[f64]) -> (f64, f64, f64, f64) {
+    /// Calculate R², RMSE and elevation differences within trim region
+    fn calculate_metrics(&self, virtual_elevation: &[f64], trim_start: usize, trim_end: usize) -> (f64, f64, f64, f64) {
         // Check if we have actual elevation data
-        if self.data.altitude.is_empty() || self.data.altitude.iter().all(|&x| x.is_nan() || x == 0.0) {
-            // No actual elevation available
-            let ve_diff = if virtual_elevation.len() > 1 {
-                virtual_elevation[virtual_elevation.len() - 1] - virtual_elevation[0]
+        // Only skip if array is empty OR if ALL values are NaN OR if ALL values are zero
+        let all_nan = !self.data.altitude.is_empty() && self.data.altitude.iter().all(|&x| x.is_nan());
+        let all_zero = !self.data.altitude.is_empty() && self.data.altitude.iter().all(|&x| x == 0.0);
+
+        if self.data.altitude.is_empty() || all_nan || all_zero {
+            // No actual elevation available - calculate VE diff using trim indices
+            let safe_trim_end = trim_end.min(virtual_elevation.len().saturating_sub(1));
+            let safe_trim_start = trim_start.min(safe_trim_end);
+
+            let ve_diff = if virtual_elevation.len() > safe_trim_start && virtual_elevation.len() > safe_trim_end {
+                virtual_elevation[safe_trim_end] - virtual_elevation[safe_trim_start]
             } else {
                 0.0
             };
@@ -363,8 +370,21 @@ impl VirtualElevationCalculator {
 
         let mut actual_elevation = self.data.altitude.clone();
 
+        // Debug: check altitude data
+        web_sys::console::log_1(&format!(
+            "Altitude data check: len={}, all_zeros={}, all_nan={}, velodrome_mode={}, sample_values=[{:.2}, {:.2}, {:.2}]",
+            actual_elevation.len(),
+            actual_elevation.iter().all(|&x| x == 0.0),
+            actual_elevation.iter().all(|&x| x.is_nan()),
+            self.params.velodrome,
+            actual_elevation.get(0).unwrap_or(&0.0),
+            actual_elevation.get(actual_elevation.len()/2).unwrap_or(&0.0),
+            actual_elevation.get(actual_elevation.len()-1).unwrap_or(&0.0)
+        ).into());
+
         // Handle velodrome mode
         if self.params.velodrome {
+            web_sys::console::log_1(&"Velodrome mode ACTIVE - setting all altitude to zero".into());
             actual_elevation = vec![0.0; actual_elevation.len()];
         }
 
@@ -374,31 +394,44 @@ impl VirtualElevationCalculator {
             return (0.0, 0.0, 0.0, 0.0);
         }
 
-        let ve_trim = &virtual_elevation[..min_len];
-        let actual_trim = &actual_elevation[..min_len];
+        // Validate trim indices
+        let safe_trim_end = trim_end.min(min_len.saturating_sub(1));
+        let safe_trim_start = trim_start.min(safe_trim_end);
 
-        // Calibrate to match at start point
-        let offset = actual_trim[0] - ve_trim[0];
-        let ve_calibrated: Vec<f64> = ve_trim.iter().map(|x| x + offset).collect();
+        if safe_trim_end <= safe_trim_start || (safe_trim_end - safe_trim_start) < 2 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
 
-        // Calculate R² and RMSE
-        let ve_mean: f64 = ve_calibrated.iter().sum::<f64>() / ve_calibrated.len() as f64;
-        let actual_mean: f64 = actual_trim.iter().sum::<f64>() / actual_trim.len() as f64;
+        let ve_full = &virtual_elevation[..min_len];
+        let actual_full = &actual_elevation[..min_len];
+
+        // Calibrate to match at trim_start (not at 0!)
+        let offset = actual_full[safe_trim_start] - ve_full[safe_trim_start];
+        let ve_calibrated: Vec<f64> = ve_full.iter().map(|x| x + offset).collect();
+
+        // Extract trim region for metrics calculation
+        let ve_trim_region = &ve_calibrated[safe_trim_start..=safe_trim_end];
+        let actual_trim_region = &actual_full[safe_trim_start..=safe_trim_end];
+        let trim_len = ve_trim_region.len();
+
+        // Calculate R² and RMSE ONLY in trim region
+        let ve_mean: f64 = ve_trim_region.iter().sum::<f64>() / trim_len as f64;
+        let actual_mean: f64 = actual_trim_region.iter().sum::<f64>() / trim_len as f64;
 
         let mut numerator = 0.0;
         let mut ve_sq_sum = 0.0;
         let mut actual_sq_sum = 0.0;
         let mut mse = 0.0;
 
-        for i in 0..min_len {
-            let ve_dev = ve_calibrated[i] - ve_mean;
-            let actual_dev = actual_trim[i] - actual_mean;
+        for i in 0..trim_len {
+            let ve_dev = ve_trim_region[i] - ve_mean;
+            let actual_dev = actual_trim_region[i] - actual_mean;
 
             numerator += ve_dev * actual_dev;
             ve_sq_sum += ve_dev * ve_dev;
             actual_sq_sum += actual_dev * actual_dev;
 
-            let diff = ve_calibrated[i] - actual_trim[i];
+            let diff = ve_trim_region[i] - actual_trim_region[i];
             mse += diff * diff;
         }
 
@@ -409,11 +442,20 @@ impl VirtualElevationCalculator {
             0.0
         };
 
-        let rmse = (mse / min_len as f64).sqrt();
+        let rmse = (mse / trim_len as f64).sqrt();
 
-        // Calculate elevation differences
-        let ve_diff = ve_calibrated[min_len - 1] - ve_calibrated[0];
-        let actual_diff = actual_trim[min_len - 1] - actual_trim[0];
+        // Calculate elevation differences from trim_start to trim_end
+        let ve_diff = ve_calibrated[safe_trim_end] - ve_calibrated[safe_trim_start];
+        let actual_diff = actual_full[safe_trim_end] - actual_full[safe_trim_start];
+
+        // Debug logging
+        web_sys::console::log_1(&format!(
+            "Metrics Debug: trim_start={}, trim_end={}, safe_trim_start={}, safe_trim_end={}, \
+            ve[start]={:.2}, ve[end]={:.2}, ve_diff={:.2}, actual[start]={:.2}, actual[end]={:.2}, actual_diff={:.2}",
+            trim_start, trim_end, safe_trim_start, safe_trim_end,
+            ve_calibrated[safe_trim_start], ve_calibrated[safe_trim_end], ve_diff,
+            actual_full[safe_trim_start], actual_full[safe_trim_end], actual_diff
+        ).into());
 
         (r2, rmse, ve_diff, actual_diff)
     }

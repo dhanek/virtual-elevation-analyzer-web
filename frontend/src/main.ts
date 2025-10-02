@@ -187,12 +187,13 @@ analyzeButton.addEventListener('click', async () => {
         hideLoading();
         displayResults(result);
 
-        // Activate section 2 (parameters) and 3 (map) after successful file analysis
+        // Activate section 2 (parameters) and 3 (lap selection) after successful file analysis
         activateSection(2);
 
-        // If we have GPS data, also activate section 3 immediately and initialize map
-        if (result.parsing_statistics.has_gps_data && result.laps.length > 0) {
+        // Activate section 3 if we have laps (GPS data optional)
+        if (result.laps.length > 0) {
             activateSection(3);
+
             // Initialize section 3 after a brief delay to ensure DOM is ready
             setTimeout(() => {
                 initializeSection3();
@@ -297,6 +298,12 @@ function displayResults(result: any) {
 
     // Initialize analysis parameters component immediately
     initializeAnalysisParameters();
+
+    // Auto-enable velodrome mode if no GPS data (do this AFTER parameters component is initialized)
+    if (!result.parsing_statistics.has_gps_data && parametersComponent) {
+        console.log('No GPS data found - auto-enabling velodrome mode');
+        parametersComponent.setParameters({ velodrome: true });
+    }
 }
 
 // Generate record table rows
@@ -606,8 +613,7 @@ function initializeMapTrimControlsForSelectedLaps() {
     const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]);
     const fitData = currentFitResult.fit_data;
     const allTimestamps = fitData.timestamps;
-    const allPositionLat = fitData.position_lat;
-    const allPositionLong = fitData.position_long;
+    const hasGpsData = currentFitResult.parsing_statistics?.has_gps_data ?? false;
 
     // Get time ranges for selected laps
     const selectedLapTimeRanges = selectedLapData.map(lap => ({
@@ -615,27 +621,45 @@ function initializeMapTrimControlsForSelectedLaps() {
         end: lap.end_time
     }));
 
-    // Filter GPS data for selected laps
+    // Filter GPS data for selected laps (if available)
     const filteredLapPositionLat: number[] = [];
     const filteredLapPositionLong: number[] = [];
 
-    for (let i = 0; i < allTimestamps.length; i++) {
-        const timestamp = allTimestamps[i];
-        const isInSelectedLap = selectedLapTimeRanges.some(range =>
-            timestamp >= range.start && timestamp <= range.end
-        );
-        if (isInSelectedLap) {
-            filteredLapPositionLat.push(allPositionLat[i]);
-            filteredLapPositionLong.push(allPositionLong[i]);
+    let dataLength = 0;
+
+    if (hasGpsData) {
+        const allPositionLat = fitData.position_lat;
+        const allPositionLong = fitData.position_long;
+
+        for (let i = 0; i < allTimestamps.length; i++) {
+            const timestamp = allTimestamps[i];
+            const isInSelectedLap = selectedLapTimeRanges.some(range =>
+                timestamp >= range.start && timestamp <= range.end
+            );
+            if (isInSelectedLap) {
+                filteredLapPositionLat.push(allPositionLat[i]);
+                filteredLapPositionLong.push(allPositionLong[i]);
+            }
+        }
+        dataLength = filteredLapPositionLat.length;
+    } else {
+        // Use timestamp count instead of GPS points
+        for (let i = 0; i < allTimestamps.length; i++) {
+            const timestamp = allTimestamps[i];
+            const isInSelectedLap = selectedLapTimeRanges.some(range =>
+                timestamp >= range.start && timestamp <= range.end
+            );
+            if (isInSelectedLap) {
+                dataLength++;
+            }
         }
     }
-
-    const dataLength = filteredLapPositionLat.length;
 
     console.log('Initializing map trim controls for selected laps:', {
         selectedLaps,
         dataLength,
-        filteredGPSPoints: filteredLapPositionLat.length
+        hasGpsData,
+        filteredGPSPoints: hasGpsData ? filteredLapPositionLat.length : 'N/A'
     });
 
     // Initialize the controls with correct data length
@@ -748,14 +772,39 @@ function handleParametersChange(parameters: AnalysisParameters) {
 
     // Update wind indicator on map if wind parameters are set
     if (mapVisualization && currentParameters) {
-        if (currentParameters.wind_speed !== undefined && currentParameters.wind_direction !== undefined) {
-            mapVisualization.showWindIndicator(currentParameters.wind_speed, currentParameters.wind_direction);
+        if (currentParameters.wind_speed !== null && currentParameters.wind_speed !== undefined &&
+            currentParameters.wind_direction !== null && currentParameters.wind_direction !== undefined) {
+            mapVisualization.showWindIndicator(
+                currentParameters.wind_speed,
+                currentParameters.wind_direction,
+                currentParameters.wind_speed_unit
+            );
         } else {
             mapVisualization.hideWindIndicator();
         }
     }
 
-    // Just update analyze button state - section 3 should already be active
+    // If VE analysis is already visible, recalculate when parameters change
+    const veSection = document.getElementById('veSection');
+    if (veSection && !veSection.classList.contains('hidden')) {
+        console.log('VE analysis visible - recalculating with new parameters');
+        // Get the current sliders and data for recalculation
+        const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
+        const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
+        const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
+        const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
+
+        if (cdaSlider && crrSlider && trimStartSlider && trimEndSlider) {
+            const trimStart = parseInt(trimStartSlider.value);
+            const trimEnd = parseInt(trimEndSlider.value);
+
+            // Need to get the data arrays - they should be in scope from the initial analysis
+            // Trigger a recalculation by simulating a slider change
+            trimStartSlider.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }
+
+    // Update analyze button state
     updateAnalyzeButton();
 }
 
@@ -764,7 +813,9 @@ function initializeSection3() {
     const analysisSection = document.getElementById('analysisSection');
     if (!analysisSection || !currentFitData || !currentLaps.length) return;
 
-    // Update the analysis section with map and lap selection
+    const hasGpsData = currentFitResult?.parsing_statistics?.has_gps_data ?? false;
+
+    // Update the analysis section with map and lap selection (map only if GPS available)
     const analysisHtml = `
         <div class="analysis-layout">
             <div class="analysis-sidebar">
@@ -802,11 +853,22 @@ function initializeSection3() {
                     </div>
                 </div>
             </div>
+            ${hasGpsData ? `
             <div class="analysis-main">
                 <div class="map-container">
                     <div id="mapView"></div>
                 </div>
             </div>
+            ` : `
+            <div class="analysis-main">
+                <div style="padding: 2rem; text-align: center; background: #f7fafc; border: 2px dashed #cbd5e0; border-radius: 8px;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📍</div>
+                    <h3 style="margin-bottom: 0.5rem;">No GPS Data Available</h3>
+                    <p style="color: #718096; margin-bottom: 1rem;">This file contains power and speed data but no GPS coordinates.</p>
+                    <p style="color: #718096; margin: 0;">Velodrome mode has been automatically enabled (zero altitude reference).</p>
+                </div>
+            </div>
+            `}
         </div>
         <div class="analysis-actions" style="margin-top: 2rem;">
             <button id="analyzeBtn" class="primary-btn" disabled>Select Laps to Analyze</button>
@@ -819,16 +881,22 @@ function initializeSection3() {
         resultsDiv.classList.remove('hidden');
     }
 
-    // Initialize map visualization
+    // Initialize map visualization only if GPS data is available
     setTimeout(async () => {
         try {
-            mapVisualization = new MapVisualization('mapView');
-            await mapVisualization.initialize();
-            mapVisualization.setData(currentFitData, currentLaps);
+            if (hasGpsData) {
+                mapVisualization = new MapVisualization('mapView');
+                await mapVisualization.initialize();
+                mapVisualization.setData(currentFitData, currentLaps);
+                console.log('Map initialized with GPS data');
+            } else {
+                console.log('No GPS data - skipping map initialization');
+            }
+
             setupLapSelectionHandlers();
             setupAnalyzeButton();
 
-            console.log('Section 3 initialized with map and lap selection');
+            console.log('Section 3 initialized (GPS:', hasGpsData, ')');
         } catch (error) {
             console.error('Error initializing section 3:', error);
         }
@@ -1010,7 +1078,11 @@ async function handleAnalyze() {
         const cda = currentParameters.cda ?? 0.3; // Use middle of range if optimizing
         const crr = currentParameters.crr ?? 0.008; // Use middle of range if optimizing
 
-        const result = calculator.calculate_virtual_elevation(cda, crr);
+        // Initial trim values - full dataset
+        const trimStart = 0;
+        const trimEnd = filteredTimestamps.length - 1;
+
+        const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
         hideLoading();
 
@@ -1631,14 +1703,19 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 currentParameters.velodrome
             );
 
-            const result1 = calculator1.calculate_virtual_elevation(cda, crr);
-            const result2 = calculator2.calculate_virtual_elevation(cda, crr);
+            const result1 = calculator1.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
+            const result2 = calculator2.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
             // Update metrics to show both
             updateVEMetricsComparison(result1, result2);
 
+            // Use zero altitude for plotting if velodrome mode is enabled
+            const plotAltitude = currentParameters.velodrome
+                ? new Array(altitude.length).fill(0)
+                : altitude;
+
             // Create comparison plots
-            createVirtualElevationPlotsComparison(trimStart, trimEnd, result1.virtual_elevation, result2.virtual_elevation, altitude);
+            createVirtualElevationPlotsComparison(trimStart, trimEnd, result1.virtual_elevation, result2.virtual_elevation, plotAltitude);
 
         } else {
             // Single method
@@ -1660,6 +1737,18 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 console.log('Sample air_speed values:', useAirSpeed.slice(0, 5));
                 console.log('Non-zero air_speed count:', airSpeed.filter(v => !isNaN(v) && v !== 0).length);
             }
+
+            // Debug altitude data AND velodrome parameter before passing to calculator
+            console.log('Altitude data being passed to calculator:', {
+                length: altitude.length,
+                allZeros: altitude.every(v => v === 0),
+                allNaN: altitude.every(v => isNaN(v)),
+                samples: [altitude[0], altitude[Math.floor(altitude.length/2)], altitude[altitude.length-1]],
+                trimStartValue: altitude[trimStart],
+                trimEndValue: altitude[trimEnd],
+                expectedDiff: altitude[trimEnd] - altitude[trimStart]
+            });
+            console.log('VELODROME PARAMETER:', currentParameters.velodrome, 'Type:', typeof currentParameters.velodrome);
 
             const calculator = create_ve_calculator(
                 timestamps,
@@ -1685,7 +1774,7 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 currentParameters.velodrome
             );
 
-            const result = calculator.calculate_virtual_elevation(cda, crr);
+            const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
             console.log('VE calculation result:', {
                 r2: result.r2,
@@ -1698,8 +1787,13 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
             // Update metrics
             updateVEMetrics(result);
 
+            // Use zero altitude for plotting if velodrome mode is enabled
+            const plotAltitude = currentParameters.velodrome
+                ? new Array(altitude.length).fill(0)
+                : altitude;
+
             // Create plots with Plotly.js
-            createVirtualElevationPlots(trimStart, trimEnd, result.virtual_elevation, altitude);
+            createVirtualElevationPlots(trimStart, trimEnd, result.virtual_elevation, plotAltitude);
         }
 
     } catch (error) {
@@ -1834,6 +1928,12 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
     const xMin = extendedStart;
     const xMax = extendedEnd - 1;
 
+    // Get current CdA and Crr values for annotation
+    const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
+    const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
+    const cdaValue = cdaSlider ? parseFloat(cdaSlider.value).toFixed(3) : '0.300';
+    const crrValue = crrSlider ? parseFloat(crrSlider.value).toFixed(4) : '0.0050';
+
     const elevationPlotLayout = {
         title: {
             text: 'Virtual vs Actual Elevation Profile',
@@ -1856,6 +1956,25 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
             y: 0.98,
             bgcolor: 'rgba(255,255,255,0.8)'
         },
+        annotations: [{
+            text: `CdA: ${cdaValue}<br>Crr: ${crrValue}`,
+            xref: 'paper',
+            yref: 'paper',
+            x: 0.98,
+            y: 0.98,
+            xanchor: 'right',
+            yanchor: 'top',
+            showarrow: false,
+            bgcolor: 'rgba(255,255,255,0.9)',
+            bordercolor: '#4363d8',
+            borderwidth: 1,
+            borderpad: 6,
+            font: {
+                size: 12,
+                family: 'monospace',
+                color: '#2d3748'
+            }
+        }],
         margin: { l: 60, r: 20, t: 40, b: 5 },  // Reduced bottom margin
         height: 350,  // Fixed height for alignment
         plot_bgcolor: '#fafafa',

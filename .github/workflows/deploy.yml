@@ -53,6 +53,7 @@ jobs:
           npm run build
         env:
           NODE_ENV: production
+          VITE_GITHUB_PAGES: true
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
