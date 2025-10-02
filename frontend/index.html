@@ -1537,6 +1537,25 @@
                 <div id="veAnalysisContent"></div>
             </div>
         </div>
+
+        <!-- Footer -->
+        <footer style="padding: 2rem 1rem; text-align: center; color: #999; font-size: 0.875rem; border-top: 1px solid #e5e5e5; margin-top: 2rem;">
+            <p style="margin: 0 0 0.5rem 0;">All data is processed locally in your browser. No files are uploaded to any server.</p>
+            <button id="clearStorageButton" style="
+                background: transparent;
+                border: 1px solid #ddd;
+                color: #666;
+                padding: 0.5rem 1rem;
+                font-size: 0.75rem;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.2s;
+                margin-top: 0.5rem;
+            " onmouseover="this.style.borderColor='#999'; this.style.color='#333'"
+               onmouseout="this.style.borderColor='#ddd'; this.style.color='#666'">
+                Clear Saved Parameters
+            </button>
+        </footer>
     </div>
 
     <script type="module" src="src/main.ts"></script>

@@ -269,21 +269,16 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         return Err(JsValue::from_str("File too small to be a valid FIT file"));
     }
 
-    // Parse FIT header
-    let header_size = file_data[0] as usize;
-    let protocol_version = file_data[1];
-    let profile_version = LittleEndian::read_u16(&file_data[2..4]);
-    let data_size = LittleEndian::read_u32(&file_data[4..8]) as usize;
+    // Parse FIT header (variables prefixed with _ as they're read but not currently used)
+    let _header_size = file_data[0] as usize;
+    let _protocol_version = file_data[1];
+    let _profile_version = LittleEndian::read_u16(&file_data[2..4]);
+    let _data_size = LittleEndian::read_u32(&file_data[4..8]) as usize;
 
     // Check for FIT file signature ".FIT"
     if &file_data[8..12] != b".FIT" {
         return Err(JsValue::from_str("Invalid FIT file signature"));
     }
-
-    web_sys::console::log_1(&format!(
-        "FIT file header: size={}, protocol={}, profile={}, data_size={}",
-        header_size, protocol_version, profile_version, data_size
-    ).into());
 
     // Parse the actual FIT data using the fitparser crate
     let parser = FitParserWrapper::new(file_data.to_vec())
@@ -291,11 +286,6 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
 
     let (fit_records, fit_laps) = parser.parse()
         .map_err(|e| JsValue::from_str(&format!("Failed to parse FIT data: {}", e)))?;
-
-    web_sys::console::log_1(&format!(
-        "Parsed FIT file: {} records, {} laps",
-        fit_records.len(), fit_laps.len()
-    ).into());
 
     // Convert FIT records to our data structure
     let mut timestamps = Vec::new();

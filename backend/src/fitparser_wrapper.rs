@@ -77,171 +77,21 @@ impl FitParserWrapper {
         let mut records = Vec::new();
         let mut laps = Vec::new();
 
-        web_sys::console::log_1(&format!(
-            "FitParser: Successfully parsed {} messages",
-            fit_data.len()
-        ).into());
-
-        for (i, data_record) in fit_data.iter().enumerate() {
-            // Enhanced logging for first few messages
-            if i < 10 {
-                web_sys::console::log_1(&format!(
-                    "Message {}: kind={:?}, fields={}, has_developer_fields={}",
-                    i, data_record.kind(), data_record.fields().len(),
-                    // Try to detect if there are developer fields by checking if the record has more methods
-                    "unknown"
-                ).into());
-
-                // Log ALL field names for any message to find developer data
-                if data_record.kind() == fitparser::profile::MesgNum::DeveloperDataId {
-                    web_sys::console::log_1(&"=== DEVELOPER DATA ID MESSAGE ===".into());
-                    for field in data_record.fields() {
-                        web_sys::console::log_1(&format!(
-                            "  DevDataId Field: '{}' = {:?} (units: {:?})",
-                            field.name(), field.value(), field.units()
-                        ).into());
-                    }
-                    web_sys::console::log_1(&"=== END DEVELOPER DATA ID ===".into());
-                }
-
-                // Log all field names for first record message (skip non-record messages)
-                if data_record.kind() == fitparser::profile::MesgNum::Record {
-                    static mut RECORD_DEBUG_COUNT: u32 = 0;
-                    unsafe {
-                        if RECORD_DEBUG_COUNT < 3 {
-                            web_sys::console::log_1(&format!("=== RECORD {} DETAILED ANALYSIS ===", RECORD_DEBUG_COUNT + 1).into());
-
-                            // Log ALL fields with their types and values
-                            for field in data_record.fields() {
-                                web_sys::console::log_1(&format!(
-                                    "  Field: '{}' = {:?} (units: {:?})",
-                                    field.name(), field.value(), field.units()
-                                ).into());
-                            }
-
-                            // Try to access any potential developer field methods
-                            web_sys::console::log_1(&format!(
-                                "Record has {} total fields", data_record.fields().len()
-                            ).into());
-
-                            // Try to check if there are developer fields by using different methods
-                            // Note: This is experimental - we'll try different possible methods
-                            // that the fitparser crate might provide for developer fields
-
-                            // In fitparser 0.10.0, developer fields might be accessible differently
-                            // Let's check if the newer version exposes them through regular fields
-                            // or if there are additional methods
-
-                            // Check for any fields with numeric patterns that might be developer fields
-                            let field_names: Vec<String> = data_record.fields()
-                                .into_iter()
-                                .map(|f| f.name().to_string())
-                                .collect();
-
-                            let numeric_fields: Vec<String> = field_names.iter()
-                                .filter(|name| name.chars().any(|c| c.is_digit(10)))
-                                .cloned()
-                                .collect();
-
-                            if !numeric_fields.is_empty() {
-                                web_sys::console::log_1(&format!(
-                                    "Numeric fields found: {:?}", numeric_fields
-                                ).into());
-                            }
-
-                            web_sys::console::log_1(&format!("=== END RECORD {} ===", RECORD_DEBUG_COUNT + 1).into());
-                        }
-                        RECORD_DEBUG_COUNT += 1;
-                    }
-                }
-            }
-
+        for (_i, data_record) in fit_data.iter().enumerate() {
             match data_record.kind() {
                 fitparser::profile::MesgNum::Record => {
-                    // Log field details for first few records to find developer fields
-                    static mut RECORD_DEBUG_COUNT: u32 = 0;
-                    unsafe {
-                        if RECORD_DEBUG_COUNT < 10 {
-                            let field_names: Vec<String> = data_record.fields()
-                                .into_iter()
-                                .map(|f| f.name().to_string())
-                                .collect();
-
-                            // Check for wind_speed and air_speed fields specifically
-                            let has_wind_speed = field_names.iter().any(|name| name == "0_6_wind_speed" || name.contains("wind_speed"));
-                            let has_air_speed = field_names.iter().any(|name| name == "0_11_air_speed" || name.contains("air_speed"));
-                            let has_developer_fields = field_names.iter()
-                                .any(|name| name.contains("_") && name.chars().any(|c| c.is_digit(10)));
-
-                            let special_note = if has_wind_speed || has_air_speed {
-                                format!(" (HAS {}{})",
-                                    if has_wind_speed { "WIND_SPEED " } else { "" },
-                                    if has_air_speed { "AIR_SPEED " } else { "" })
-                            } else if has_developer_fields {
-                                " (HAS DEVELOPER FIELDS)".to_string()
-                            } else {
-                                "".to_string()
-                            };
-
-                            web_sys::console::log_1(&format!(
-                                "Record {}: {} fields{}",
-                                RECORD_DEBUG_COUNT + 1,
-                                field_names.len(),
-                                special_note
-                            ).into());
-
-                            // Show detailed fields for record 2 since it has 13 fields
-                            if RECORD_DEBUG_COUNT == 1 {
-                                web_sys::console::log_1(&"=== RECORD 2 FIELD DETAILS (13 fields) ===".into());
-                                for field in data_record.fields() {
-                                    web_sys::console::log_1(&format!(
-                                        "Field: '{}' = {:?} (units: {:?})",
-                                        field.name(), field.value(), field.units()
-                                    ).into());
-                                }
-                                web_sys::console::log_1(&"=== END RECORD 2 DETAILS ===".into());
-                            }
-
-                            if has_wind_speed || has_air_speed || has_developer_fields {
-                                web_sys::console::log_1(&"=== SPECIAL FIELDS FOUND ===".into());
-                                for field in data_record.fields() {
-                                    web_sys::console::log_1(&format!(
-                                        "Field: '{}' = {:?}", field.name(), field.value()
-                                    ).into());
-                                }
-                                web_sys::console::log_1(&"=== END SPECIAL FIELDS ===".into());
-                            }
-                        }
-                        RECORD_DEBUG_COUNT += 1;
-                    }
-
                     if let Some(record) = self.extract_record(data_record) {
                         records.push(record);
-                        if records.len() <= 5 {
-                            web_sys::console::log_1(&format!(
-                                "Parsed record {}: power={:?}, speed={:?}",
-                                records.len(), records.last().unwrap().power, records.last().unwrap().speed
-                            ).into());
-                        }
                     }
                 }
                 fitparser::profile::MesgNum::Lap => {
                     if let Some(lap) = self.extract_lap(data_record) {
-                        web_sys::console::log_1(&format!(
-                            "Parsed lap {}: duration={:.1}s, distance={:.1}m",
-                            laps.len() + 1, lap.total_elapsed_time, lap.total_distance
-                        ).into());
                         laps.push(lap);
                     }
                 }
                 _ => {} // Skip other message types
             }
         }
-
-        web_sys::console::log_1(&format!(
-            "FitParser: Extracted {} records and {} laps",
-            records.len(), laps.len()
-        ).into());
 
         Ok((records, laps))
     }
@@ -318,20 +168,12 @@ impl FitParserWrapper {
                     if let Some(value) = self.extract_f64_value(field.value()) {
                         // Scale by 1000 as indicated in the expected values
                         air_speed = Some(value / 1000.0);
-                        web_sys::console::log_1(&format!(
-                            "Found air_speed_0_11 developer field: {} = {:?} -> scaled: {}",
-                            field.name(), field.value(), value / 1000.0
-                        ).into());
                     }
                 }
                 "wind_speed_0_6" => {
                     if let Some(value) = self.extract_f64_value(field.value()) {
                         // Scale by 1000 as indicated in the expected values
                         wind_speed = Some(value / 1000.0);
-                        web_sys::console::log_1(&format!(
-                            "Found wind_speed_0_6 developer field: {} = {:?} -> scaled: {}",
-                            field.name(), field.value(), value / 1000.0
-                        ).into());
                     }
                 }
                 // Also check for the plain field names in case they appear without the prefix
@@ -340,10 +182,6 @@ impl FitParserWrapper {
                     if air_speed.is_none() {
                         if let Some(value) = self.extract_f64_value(field.value()) {
                             air_speed = Some(value / 1000.0);
-                            web_sys::console::log_1(&format!(
-                                "Found fallback air_speed field: {} = {:?} -> scaled: {}",
-                                field.name(), field.value(), value / 1000.0
-                            ).into());
                         }
                     }
                 }
@@ -352,20 +190,11 @@ impl FitParserWrapper {
                     if wind_speed.is_none() {
                         if let Some(value) = self.extract_f64_value(field.value()) {
                             wind_speed = Some(value / 1000.0);
-                            web_sys::console::log_1(&format!(
-                                "Found fallback wind_speed field: {} = {:?} -> scaled: {}",
-                                field.name(), field.value(), value / 1000.0
-                            ).into());
                         }
                     }
                 }
                 _ => {
-                    // Log unhandled fields that might be developer fields
-                    if field.name().contains("_") && field.name().len() > 10 {
-                        web_sys::console::log_1(&format!(
-                            "Unhandled field (possible developer): {} = {:?}", field.name(), field.value()
-                        ).into());
-                    }
+                    // Silently ignore unhandled fields
                 }
             }
         }
@@ -472,15 +301,6 @@ impl FitParserWrapper {
         // set a timestamp on the lap message.
         if let (Some(st), Some(elapsed)) = (start_time, total_elapsed_time) {
             let et = st + elapsed; // derive end from start + elapsed
-
-            // If a lap_timestamp exists and looks more reasonable, we could compare or log,
-            // but generally prefer the derived end_time.
-            if let Some(ts) = lap_timestamp {
-                // If lap_timestamp is significantly different and is greater than derived end,
-                // keep the derived value but prefer ordering normalization below.
-                // No action needed; lap_timestamp retained only as info.
-                let _ = ts;
-            }
 
             // Ensure ordering start <= end
             let (start_time_final, end_time_final) = if st <= et { (st, et) } else { (et, st) };

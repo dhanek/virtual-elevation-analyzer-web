@@ -66,6 +66,7 @@ const loadingText = document.getElementById('loadingText') as HTMLSpanElement;
 const error = document.getElementById('error') as HTMLDivElement;
 const results = document.getElementById('results') as HTMLDivElement;
 const statisticsContent = document.getElementById('statisticsContent') as HTMLDivElement;
+const clearStorageButton = document.getElementById('clearStorageButton') as HTMLButtonElement;
 
 let selectedFile: File | null = null;
 let fitProcessor: FitFileProcessor | null = null;
@@ -83,6 +84,7 @@ let filteredVEData: { positionLat: number[], positionLong: number[] } | null = n
 let mapTrimControlsInitialized = false;
 let presetTrimStart: number = 0;
 let presetTrimEnd: number | null = null;
+let isLoadingParameters: boolean = false;
 
 // Initialize FIT processor and parameter storage
 async function initializeFitProcessor() {
@@ -148,7 +150,7 @@ fileDropZone.addEventListener('drop', (event) => {
 });
 
 // File validation and display
-function handleFileSelection(file: File) {
+async function handleFileSelection(file: File) {
     // Validate file type and size
     if (!DataProtection.validateFileType(file)) {
         showError('Please select a valid FIT file (.fit extension, under 50MB)');
@@ -157,6 +159,13 @@ function handleFileSelection(file: File) {
 
     selectedFile = file;
     displayFileInfo(file);
+
+    // Calculate file hash immediately for parameter persistence
+    if (parameterStorage) {
+        currentFileHash = await parameterStorage.calculateFileHash(file);
+        console.log('File selected, hash calculated:', currentFileHash);
+    }
+
     analyzeButton.disabled = false;
     hideError();
 }
@@ -183,10 +192,6 @@ analyzeButton.addEventListener('click', async () => {
 
     try {
         showLoading('Reading FIT file...');
-
-        // Calculate file hash for parameter persistence
-        currentFileHash = await parameterStorage.calculateFileHash(selectedFile);
-        console.log('File hash calculated:', currentFileHash);
 
         // Additional validation
         const isValidMagicNumber = await DataProtection.validateFitMagicNumber(selectedFile);
@@ -313,6 +318,8 @@ async function displayResults(result: any) {
     currentLaps = laps;
 
     // Initialize analysis parameters component immediately
+    console.log('🔒 Setting isLoadingParameters = true (starting initialization)');
+    isLoadingParameters = true; // Prevent saving during initialization
     initializeAnalysisParameters();
 
     // Try to load saved parameters for this file
@@ -331,6 +338,9 @@ async function displayResults(result: any) {
             }
         }
     }
+
+    console.log('🔓 Setting isLoadingParameters = false (initialization complete)');
+    isLoadingParameters = false; // Re-enable saving after load complete
 }
 
 // Generate record table rows
@@ -795,13 +805,37 @@ function initializeAnalysisParameters() {
 
 function handleParametersChange(parameters: AnalysisParameters) {
     currentParameters = parameters;
-    console.log('Parameters updated:', parameters);
+    console.log('🔄 handleParametersChange called');
+    console.log('   Parameters:', parameters);
+    console.log('   isLoadingParameters:', isLoadingParameters);
+    console.log('   currentFileHash:', currentFileHash);
+    console.log('   selectedFile:', selectedFile?.name);
+
+    // Don't save if we're currently loading parameters from storage
+    if (isLoadingParameters) {
+        console.log('⏸️ Skipping save: currently loading parameters from storage');
+        return;
+    }
 
     // Save parameters to IndexedDB for this file
-    if (currentFileHash && selectedFile) {
-        parameterStorage.saveParameters(currentFileHash, parameters, selectedFile.name)
-            .catch(err => console.error('Failed to save parameters:', err));
+    if (!currentFileHash) {
+        console.error('❌ Cannot save: currentFileHash is null/undefined');
+        return;
     }
+
+    if (!selectedFile) {
+        console.error('❌ Cannot save: selectedFile is null/undefined');
+        return;
+    }
+
+    console.log('✅ All checks passed, calling saveParameters...');
+    parameterStorage.saveParameters(currentFileHash, parameters, selectedFile.name)
+        .then(() => {
+            console.log('✅ Parameters save completed successfully');
+        })
+        .catch(err => {
+            console.error('❌ Failed to save parameters:', err);
+        });
 
     // Update wind indicator on map if wind parameters are set
     if (mapVisualization && currentParameters) {
@@ -2683,6 +2717,19 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
 
     Plotly.newPlot('speedPowerPlot', traces, layout, {responsive: true});
 }
+
+// Clear saved parameters button
+clearStorageButton.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to clear all saved parameters? This cannot be undone.')) {
+        try {
+            await parameterStorage.clearAll();
+            alert('All saved parameters have been cleared.');
+        } catch (err) {
+            console.error('Failed to clear storage:', err);
+            alert('Failed to clear saved parameters. Please try again.');
+        }
+    }
+});
 
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {

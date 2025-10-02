@@ -370,21 +370,8 @@ impl VirtualElevationCalculator {
 
         let mut actual_elevation = self.data.altitude.clone();
 
-        // Debug: check altitude data
-        web_sys::console::log_1(&format!(
-            "Altitude data check: len={}, all_zeros={}, all_nan={}, velodrome_mode={}, sample_values=[{:.2}, {:.2}, {:.2}]",
-            actual_elevation.len(),
-            actual_elevation.iter().all(|&x| x == 0.0),
-            actual_elevation.iter().all(|&x| x.is_nan()),
-            self.params.velodrome,
-            actual_elevation.get(0).unwrap_or(&0.0),
-            actual_elevation.get(actual_elevation.len()/2).unwrap_or(&0.0),
-            actual_elevation.get(actual_elevation.len()-1).unwrap_or(&0.0)
-        ).into());
-
         // Handle velodrome mode
         if self.params.velodrome {
-            web_sys::console::log_1(&"Velodrome mode ACTIVE - setting all altitude to zero".into());
             actual_elevation = vec![0.0; actual_elevation.len()];
         }
 
@@ -447,15 +434,6 @@ impl VirtualElevationCalculator {
         // Calculate elevation differences from trim_start to trim_end
         let ve_diff = ve_calibrated[safe_trim_end] - ve_calibrated[safe_trim_start];
         let actual_diff = actual_full[safe_trim_end] - actual_full[safe_trim_start];
-
-        // Debug logging
-        web_sys::console::log_1(&format!(
-            "Metrics Debug: trim_start={}, trim_end={}, safe_trim_start={}, safe_trim_end={}, \
-            ve[start]={:.2}, ve[end]={:.2}, ve_diff={:.2}, actual[start]={:.2}, actual[end]={:.2}, actual_diff={:.2}",
-            trim_start, trim_end, safe_trim_start, safe_trim_end,
-            ve_calibrated[safe_trim_start], ve_calibrated[safe_trim_end], ve_diff,
-            actual_full[safe_trim_start], actual_full[safe_trim_end], actual_diff
-        ).into());
 
         (r2, rmse, ve_diff, actual_diff)
     }

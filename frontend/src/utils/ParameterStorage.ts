@@ -14,27 +14,37 @@ export class ParameterStorage {
 
     async initialize(): Promise<void> {
         return new Promise((resolve, reject) => {
+            console.log('🗄️ Opening IndexedDB:', this.dbName, 'version: 1');
             const request = indexedDB.open(this.dbName, 1);
 
             request.onerror = () => {
-                console.error('IndexedDB failed to open:', request.error);
+                console.error('❌ IndexedDB failed to open:', request.error);
                 reject(request.error);
             };
 
             request.onsuccess = () => {
                 this.db = request.result;
-                console.log('IndexedDB initialized successfully');
+                console.log('✅ IndexedDB opened successfully');
+                console.log('   Database version:', this.db.version);
+                console.log('   Object stores:', Array.from(this.db.objectStoreNames));
                 resolve();
             };
 
             request.onupgradeneeded = (event) => {
+                console.log('🔧 IndexedDB upgrade needed');
+                console.log('   Old version:', (event as IDBVersionChangeEvent).oldVersion);
+                console.log('   New version:', (event as IDBVersionChangeEvent).newVersion);
+
                 const db = (event.target as IDBOpenDBRequest).result;
 
                 // Create object store if it doesn't exist
                 if (!db.objectStoreNames.contains(this.storeName)) {
+                    console.log('📦 Creating object store:', this.storeName);
                     const objectStore = db.createObjectStore(this.storeName, { keyPath: 'fileHash' });
                     objectStore.createIndex('lastUsed', 'lastUsed', { unique: false });
-                    console.log('IndexedDB object store created');
+                    console.log('✅ Object store created');
+                } else {
+                    console.log('ℹ️ Object store already exists:', this.storeName);
                 }
             };
         });
@@ -60,6 +70,7 @@ export class ParameterStorage {
         // Add filename (sanitized)
         hash += '_' + file.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
 
+        console.log('🔑 Calculated file hash:', hash, 'for file:', file.name, 'size:', file.size);
         return hash;
     }
 
@@ -71,6 +82,8 @@ export class ParameterStorage {
             console.warn('IndexedDB not initialized, cannot save parameters');
             return;
         }
+
+        console.log('💾 Saving parameters with hash:', fileHash, 'fileName:', fileName);
 
         return new Promise((resolve, reject) => {
             const transaction = this.db!.transaction([this.storeName], 'readwrite');
@@ -86,12 +99,17 @@ export class ParameterStorage {
             const request = objectStore.put(data);
 
             request.onsuccess = () => {
-                console.log('Parameters saved for file:', fileName || fileHash);
+                console.log('✅ Parameters saved successfully for:', fileName || fileHash);
+                // Verify the save
+                const verifyRequest = objectStore.get(fileHash);
+                verifyRequest.onsuccess = () => {
+                    console.log('✅ Verification: Data exists in DB for hash:', fileHash, ':', !!verifyRequest.result);
+                };
                 resolve();
             };
 
             request.onerror = () => {
-                console.error('Failed to save parameters:', request.error);
+                console.error('❌ Failed to save parameters:', request.error);
                 reject(request.error);
             };
         });
@@ -106,6 +124,8 @@ export class ParameterStorage {
             return null;
         }
 
+        console.log('📂 Loading parameters for hash:', fileHash);
+
         return new Promise((resolve, reject) => {
             const transaction = this.db!.transaction([this.storeName], 'readonly');
             const objectStore = transaction.objectStore(this.storeName);
@@ -114,16 +134,21 @@ export class ParameterStorage {
             request.onsuccess = () => {
                 const result = request.result as StoredParameters | undefined;
                 if (result) {
-                    console.log('Parameters loaded for file:', result.fileName || fileHash);
+                    console.log('✅ Parameters found and loaded for:', result.fileName || fileHash);
+                    console.log('📋 Loaded parameters:', result.parameters);
                     resolve(result.parameters);
                 } else {
-                    console.log('No saved parameters found for file hash:', fileHash);
+                    console.log('⚠️ No saved parameters found for file hash:', fileHash);
+                    // Debug: show what hashes we DO have
+                    objectStore.getAllKeys().onsuccess = (e: any) => {
+                        console.log('📋 Available hashes in DB:', e.target.result);
+                    };
                     resolve(null);
                 }
             };
 
             request.onerror = () => {
-                console.error('Failed to load parameters:', request.error);
+                console.error('❌ Failed to load parameters:', request.error);
                 reject(request.error);
             };
         });

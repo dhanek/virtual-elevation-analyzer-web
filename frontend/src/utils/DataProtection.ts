@@ -36,18 +36,9 @@ export class DataProtection {
       (window as any).gc();
     }
 
-    // Clear IndexedDB on session end
-    if ('indexedDB' in window) {
-      indexedDB.databases?.().then(dbs => {
-        dbs.forEach(db => {
-          if (db.name) {
-            indexedDB.deleteDatabase(db.name);
-          }
-        });
-      }).catch(() => {
-        // Silently handle errors
-      });
-    }
+    // NOTE: We do NOT delete IndexedDB here because it contains user preferences
+    // (parameter settings) that should persist across sessions.
+    // FIT file data is never stored in IndexedDB - only analysis parameters.
   }
 
   static setupContentSecurityPolicy(): void {
