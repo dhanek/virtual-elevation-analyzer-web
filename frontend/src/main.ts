@@ -4,6 +4,7 @@ import { MapVisualization } from './components/MapVisualization';
 import { AnalysisParametersComponent, AnalysisParameters } from './components/AnalysisParameters';
 import { ViewportAdapter } from './utils/ViewportAdapter';
 import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
+import { ResultsStorage, type VEAnalysisResult } from './utils/ResultsStorage';
 import init, { create_ve_calculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -79,6 +80,10 @@ let filteredVEData: { positionLat: number[], positionLong: number[] } | null = n
 let presetTrimStart: number = 0;
 let presetTrimEnd: number | null = null;
 let isLoadingParameters: boolean = false;
+let currentVEResult: VEAnalysisResult | null = null;
+let currentWindSource: 'constant' | 'fit' | 'compare' | 'none' = 'none';
+let currentAnalyzedLaps: number[] = [];
+let resultsStorage: ResultsStorage = new ResultsStorage();
 
 // Initialize FIT processor and parameter storage
 async function initializeFitProcessor() {
@@ -94,6 +99,9 @@ async function initializeFitProcessor() {
         // Initialize parameter storage
         parameterStorage = new ParameterStorage();
         await parameterStorage.initialize();
+
+        // Initialize results storage
+        await resultsStorage.initialize();
 
         // Clean up old entries on startup
         await parameterStorage.cleanup();
@@ -411,7 +419,11 @@ async function initializeApplication() {
 }
 
 // Initialize the application
-initializeApplication();
+initializeApplication().catch(err => {
+    console.error('Failed to initialize application:', err);
+    hideLoading();
+    showError(`Failed to initialize application: ${err.message}`);
+});
 
 function setupLapSelectionHandlers() {
     const selectAllBtn = document.getElementById('selectAllLaps');
@@ -1084,6 +1096,9 @@ async function handleAnalyze() {
 
 
 async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[]) {
+    // Store analyzed laps globally for save functionality
+    currentAnalyzedLaps = analyzedLaps;
+
     // Check if air_speed data is available (not all zeros/NaN)
     const hasAirSpeed = airSpeed.some(val => !isNaN(val) && val !== 0);
     const hasConstantWind = currentParameters.wind_speed !== undefined && currentParameters.wind_speed !== 0 &&
@@ -1170,7 +1185,9 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     </div>
 
                     <div class="ve-sidebar-footer">
-                        <button id="saveVeResults" class="primary-btn" style="width: 100%;">Save Results</button>
+                        <button id="saveScreenshot" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Save Screenshot</button>
+                        <button id="storeResult" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Store Result</button>
+                        <button id="exportAllResults" class="secondary-btn" style="width: 100%; font-size: 0.9rem;">Export All Results to CSV</button>
                     </div>
                 </div>
 
@@ -1322,6 +1339,148 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
             mapVisualization.fitBoundsToTrimRegion(initialTrimStart, initialTrimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
         }
     }, 500);
+
+    // Set up Save Screenshot button
+    const saveScreenshotBtn = document.getElementById('saveScreenshot') as HTMLButtonElement;
+    if (saveScreenshotBtn) {
+        saveScreenshotBtn.addEventListener('click', async () => {
+            await handleSaveScreenshot();
+        });
+    }
+
+    // Set up Store Result button
+    const storeResultBtn = document.getElementById('storeResult') as HTMLButtonElement;
+    if (storeResultBtn) {
+        storeResultBtn.addEventListener('click', async () => {
+            await handleStoreResult();
+        });
+    }
+
+    // Set up Export All Results button
+    const exportAllBtn = document.getElementById('exportAllResults') as HTMLButtonElement;
+    if (exportAllBtn) {
+        exportAllBtn.addEventListener('click', async () => {
+            await handleExportAllResults();
+        });
+    }
+}
+
+// Handle Save Screenshot button click
+async function handleSaveScreenshot() {
+    if (!selectedFile) {
+        console.error('Cannot save: missing file');
+        alert('Cannot save screenshot: missing file data.');
+        return;
+    }
+
+    const lapCombo = currentAnalyzedLaps.length === 0 ? 'all' : currentAnalyzedLaps.join('-');
+    const saveBtn = document.getElementById('saveScreenshot') as HTMLButtonElement;
+    if (!saveBtn) return;
+
+    const originalText = saveBtn.textContent;
+
+    try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+
+        await resultsStorage.saveScreenshot(selectedFile.name, lapCombo);
+
+        saveBtn.textContent = '✓ Saved';
+        setTimeout(() => {
+            saveBtn.disabled = false;
+            saveBtn.textContent = originalText || 'Save Screenshot';
+        }, 2000);
+    } catch (error) {
+        console.error('❌ Failed to save screenshot:', error);
+        alert('Failed to save screenshot. See console for details.');
+
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalText || 'Save Screenshot';
+    }
+}
+
+// Handle Store Result button click
+async function handleStoreResult() {
+    if (!selectedFile || !currentParameters || !currentVEResult) {
+        console.error('Cannot store: missing required data');
+        alert('Cannot store result: missing analysis data. Please run analysis first.');
+        return;
+    }
+
+    const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
+    const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
+    const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
+    const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
+
+    if (!trimStartSlider || !trimEndSlider || !cdaSlider || !crrSlider) {
+        console.error('Cannot store: UI elements not found');
+        return;
+    }
+
+    const storeBtn = document.getElementById('storeResult') as HTMLButtonElement;
+    if (!storeBtn) return;
+
+    const originalText = storeBtn.textContent;
+
+    try {
+        // Prepare save data
+        const saveData = {
+            fileName: selectedFile.name,
+            laps: currentAnalyzedLaps,
+            trimStart: parseInt(trimStartSlider.value),
+            trimEnd: parseInt(trimEndSlider.value),
+            cda: parseFloat(cdaSlider.value),
+            crr: parseFloat(crrSlider.value),
+            windSource: currentWindSource,
+            parameters: currentParameters,
+            result: currentVEResult,
+            timestamp: new Date()
+        };
+
+        storeBtn.disabled = true;
+        storeBtn.textContent = 'Storing...';
+
+        await resultsStorage.saveResult(saveData);
+
+        storeBtn.textContent = '✓ Stored';
+        setTimeout(() => {
+            storeBtn.disabled = false;
+            storeBtn.textContent = originalText || 'Store Result';
+        }, 2000);
+    } catch (error) {
+        console.error('❌ Failed to store result:', error);
+        alert('Failed to store result. See console for details.');
+
+        storeBtn.disabled = false;
+        storeBtn.textContent = originalText || 'Store Result';
+    }
+}
+
+// Handle Export All Results button click
+async function handleExportAllResults() {
+    const exportBtn = document.getElementById('exportAllResults') as HTMLButtonElement;
+    if (!exportBtn) return;
+
+    const originalText = exportBtn.textContent;
+
+    try {
+        exportBtn.disabled = true;
+        exportBtn.textContent = 'Exporting...';
+
+        await resultsStorage.exportAllResultsToCSV();
+
+        exportBtn.textContent = '✓ Exported';
+        setTimeout(() => {
+            exportBtn.disabled = false;
+            exportBtn.textContent = originalText || 'Export all results to CSV';
+        }, 2000);
+    } catch (error) {
+        console.error('❌ Failed to export results:', error);
+        alert('Failed to export results. See console for details.');
+
+        exportBtn.disabled = false;
+        exportBtn.textContent = originalText || 'Export all results to CSV';
+    }
 }
 
 // Helper function to save current lap settings to IndexedDB
@@ -1794,6 +1953,10 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
             const result1 = calculator1.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
             const result2 = calculator2.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
+            // Store first result globally for save functionality (use constant wind result)
+            currentVEResult = result1;
+            currentWindSource = 'compare';
+
             // Update metrics to show both
             updateVEMetricsComparison(result1, result2);
 
@@ -1871,6 +2034,10 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 actualGain: result.actual_elevation_diff,
                 windSource: windSource
             });
+
+            // Store result globally for save functionality
+            currentVEResult = result;
+            currentWindSource = windSource as 'constant' | 'fit' | 'compare' | 'none';
 
             // Update metrics
             updateVEMetrics(result);
@@ -2739,15 +2906,16 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
     Plotly.newPlot('speedPowerPlot', traces, layout, {responsive: true});
 }
 
-// Clear saved parameters button
+// Clear saved parameters and results button
 clearStorageButton.addEventListener('click', async () => {
-    if (confirm('Are you sure you want to clear all saved parameters? This cannot be undone.')) {
+    if (confirm('Are you sure you want to clear all saved parameters AND results? This cannot be undone.')) {
         try {
             await parameterStorage.clearAll();
-            alert('All saved parameters have been cleared.');
+            await resultsStorage.clearAllResults();
+            alert('All saved parameters and results have been cleared.');
         } catch (err) {
             console.error('Failed to clear storage:', err);
-            alert('Failed to clear saved parameters. Please try again.');
+            alert('Failed to clear storage. Please try again.');
         }
     }
 });
