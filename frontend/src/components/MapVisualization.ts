@@ -26,6 +26,7 @@ interface FitData {
     wind_speed: number[];
     heart_rate: number[];
     cadence: number[];
+    temperature: number[];
 }
 
 export class MapVisualization {

@@ -24,6 +24,11 @@ export interface SaveResultData {
     parameters: AnalysisParameters;
     result: VEAnalysisResult;
     timestamp: Date;
+    recordingDate: string; // yyyy-mm-dd format from FIT file
+    avgPower: number;
+    avgSpeed: number;
+    avgTemperature: number;
+    notes: string;
 }
 
 interface StoredVEResult {
@@ -43,9 +48,12 @@ interface StoredVEResult {
     rmse: number;
     veGain: number;
     actualGain: number;
-    cdaError: number;
-    crrError: number;
-    timestamp: string;
+    avgPower: number;
+    avgSpeed: number;
+    avgTemperature: number;
+    notes: string;
+    recordingDate: string; // yyyy-mm-dd
+    timestamp: string; // ISO timestamp when entry was added to DB
 }
 
 export class ResultsStorage {
@@ -53,9 +61,190 @@ export class ResultsStorage {
     private storeName = 'veResults';
     private db: IDBDatabase | null = null;
 
+    /**
+     * Delete the database completely (for testing/debugging)
+     */
+    async deleteDatabase(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.deleteDatabase(this.dbName);
+
+            request.onsuccess = () => {
+                resolve();
+            };
+
+            request.onerror = () => {
+                console.error('❌ Failed to delete database:', request.error);
+                reject(request.error);
+            };
+
+            request.onblocked = () => {
+                console.warn('⚠️ Database deletion blocked - close all tabs using this database');
+            };
+        });
+    }
+
     async initialize(): Promise<void> {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, 1); // First version of results DB
+            // First check current version
+            const checkRequest = indexedDB.open(this.dbName);
+
+            checkRequest.onsuccess = async () => {
+                const db = checkRequest.result;
+                const currentVersion = db.version;
+
+                // Check if the keyPath is correct
+                let keyPathCorrect = false;
+                let needsMigration = false;
+
+                if (db.objectStoreNames.contains(this.storeName)) {
+                    const transaction = db.transaction([this.storeName], 'readonly');
+                    const objectStore = transaction.objectStore(this.storeName);
+                    const keyPath = objectStore.keyPath;
+
+                    // Check if it's the correct composite key with notes
+                    keyPathCorrect = Array.isArray(keyPath) &&
+                                    keyPath.length === 3 &&
+                                    keyPath[0] === 'fileName' &&
+                                    keyPath[1] === 'lapKey' &&
+                                    keyPath[2] === 'notes';
+
+                    needsMigration = currentVersion < 5 || !keyPathCorrect;
+                }
+
+                // If migration needed, backup existing data first
+                if (needsMigration) {
+                    try {
+                        // Read all existing data before migration
+                        const existingData = await this.readAllExistingData(db);
+                        db.close();
+
+                        // Delete old database
+                        await this.deleteDatabase();
+
+                        // Create new database
+                        await this.createDatabase();
+
+                        // Migrate old data to new schema
+                        if (existingData.length > 0) {
+                            await this.migrateData(existingData);
+                        }
+
+                        resolve();
+                    } catch (error) {
+                        console.error('❌ Migration failed:', error);
+                        reject(error);
+                    }
+                } else {
+                    db.close();
+                    // Version is correct, just open it
+                    this.createDatabase().then(resolve).catch(reject);
+                }
+            };
+
+            checkRequest.onerror = () => {
+                // Database doesn't exist yet, create it
+                this.createDatabase().then(resolve).catch(reject);
+            };
+        });
+    }
+
+    /**
+     * Read all existing data from the database before migration
+     */
+    private async readAllExistingData(db: IDBDatabase): Promise<any[]> {
+        return new Promise((resolve, reject) => {
+            if (!db.objectStoreNames.contains(this.storeName)) {
+                resolve([]);
+                return;
+            }
+
+            const transaction = db.transaction([this.storeName], 'readonly');
+            const objectStore = transaction.objectStore(this.storeName);
+            const request = objectStore.getAll();
+
+            request.onsuccess = () => {
+                const data = request.result || [];
+                resolve(data);
+            };
+
+            request.onerror = () => {
+                console.error('❌ Failed to read existing data:', request.error);
+                reject(request.error);
+            };
+        });
+    }
+
+    /**
+     * Migrate old data to new schema
+     */
+    private async migrateData(oldData: any[]): Promise<void> {
+        if (!this.db) {
+            throw new Error('Database not initialized');
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+
+            let migratedCount = 0;
+            let errorCount = 0;
+
+            for (const oldRecord of oldData) {
+                try {
+                    // Transform old record to new schema
+                    const migratedRecord: StoredVEResult = {
+                        fileName: oldRecord.fileName || 'unknown.fit',
+                        lapKey: oldRecord.lapKey || 'all',
+                        trimStart: oldRecord.trimStart ?? 0,
+                        trimEnd: oldRecord.trimEnd ?? 0,
+                        cda: oldRecord.cda ?? 0,
+                        crr: oldRecord.crr ?? 0,
+                        windSource: oldRecord.windSource || 'none',
+                        windSpeed: oldRecord.windSpeed ?? '',
+                        windDirection: oldRecord.windDirection ?? '',
+                        systemMass: oldRecord.systemMass ?? 80,
+                        rho: oldRecord.rho ?? 1.225,
+                        eta: oldRecord.eta ?? 0.97,
+                        r2: oldRecord.r2 ?? 0,
+                        rmse: oldRecord.rmse ?? 0,
+                        veGain: oldRecord.veGain ?? 0,
+                        actualGain: oldRecord.actualGain ?? 0,
+                        avgPower: oldRecord.avgPower ?? 0,
+                        avgSpeed: oldRecord.avgSpeed ?? 0,
+                        avgTemperature: oldRecord.avgTemperature ?? 0,
+                        notes: oldRecord.notes || '',
+                        recordingDate: oldRecord.recordingDate || '', // V5: New field
+                        timestamp: oldRecord.timestamp || new Date().toISOString()
+                    };
+
+                    const request = objectStore.add(migratedRecord);
+
+                    request.onsuccess = () => {
+                        migratedCount++;
+                    };
+
+                    request.onerror = () => {
+                        errorCount++;
+                    };
+                } catch (error) {
+                    errorCount++;
+                }
+            }
+
+            transaction.oncomplete = () => {
+                resolve();
+            };
+
+            transaction.onerror = () => {
+                console.error('❌ Migration transaction failed:', transaction.error);
+                reject(transaction.error);
+            };
+        });
+    }
+
+    private async createDatabase(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, 5); // Version 5: Removed error columns, added recordingDate
 
             request.onerror = () => {
                 console.error('❌ IndexedDB failed to open:', request.error);
@@ -64,22 +253,22 @@ export class ResultsStorage {
 
             request.onsuccess = () => {
                 this.db = request.result;
-                console.log('✅ ResultsStorage IndexedDB initialized');
                 resolve();
             };
 
             request.onupgradeneeded = (event) => {
                 const db = (event.target as IDBOpenDBRequest).result;
 
-                // Create VE results store if it doesn't exist
-                if (!db.objectStoreNames.contains(this.storeName)) {
-                    const objectStore = db.createObjectStore(this.storeName, {
-                        keyPath: ['fileName', 'lapKey'] // Composite key
-                    });
-                    objectStore.createIndex('fileName', 'fileName', { unique: false });
-                    objectStore.createIndex('timestamp', 'timestamp', { unique: false });
-                    console.log('✅ Created veResults object store');
+                // Always recreate the store to ensure correct schema
+                if (db.objectStoreNames.contains(this.storeName)) {
+                    db.deleteObjectStore(this.storeName);
                 }
+
+                const objectStore = db.createObjectStore(this.storeName, {
+                    keyPath: ['fileName', 'lapKey', 'notes'] // Composite key with notes
+                });
+                objectStore.createIndex('fileName', 'fileName', { unique: false });
+                objectStore.createIndex('timestamp', 'timestamp', { unique: false });
             };
         });
     }
@@ -164,8 +353,11 @@ export class ResultsStorage {
             rmse: data.result.rmse,
             veGain: data.result.ve_elevation_diff,
             actualGain: data.result.actual_elevation_diff,
-            cdaError: this.calculateCdAError(data.result, data.cda),
-            crrError: this.calculateCrrError(data.result, data.crr),
+            avgPower: data.avgPower,
+            avgSpeed: data.avgSpeed,
+            avgTemperature: data.avgTemperature,
+            notes: data.notes,
+            recordingDate: data.recordingDate,
             timestamp: data.timestamp.toISOString()
         };
 
@@ -175,7 +367,6 @@ export class ResultsStorage {
             const request = objectStore.put(storedResult);
 
             request.onsuccess = () => {
-                console.log(`✅ Saved VE result for ${data.fileName}, laps: ${lapKey}`);
                 resolve();
             };
 
@@ -245,15 +436,19 @@ export class ResultsStorage {
     private generateCSVFromResults(results: StoredVEResult[]): string {
         // Headers
         const headers = [
-            'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
+            'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
             'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
-            'R2', 'RMSE', 'VEGain', 'ActualGain', 'CdAError', 'CrrError', 'Timestamp'
+            'R2', 'RMSE', 'VEGain', 'ActualGain',
+            'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
         ];
 
         let csv = headers.join(',') + '\n';
 
-        // Sort by fileName, then by lapKey
+        // Sort by recording date (descending), then fileName, then by lapKey
         results.sort((a, b) => {
+            if (a.recordingDate !== b.recordingDate) {
+                return b.recordingDate.localeCompare(a.recordingDate); // Descending
+            }
             if (a.fileName !== b.fileName) {
                 return a.fileName.localeCompare(b.fileName);
             }
@@ -263,6 +458,7 @@ export class ResultsStorage {
         // Rows
         for (const result of results) {
             const values = [
+                result.recordingDate,
                 result.fileName,
                 result.lapKey,
                 result.trimStart,
@@ -279,8 +475,10 @@ export class ResultsStorage {
                 result.rmse.toFixed(2),
                 result.veGain.toFixed(2),
                 result.actualGain.toFixed(2),
-                result.cdaError.toFixed(3),
-                result.crrError.toFixed(4),
+                result.avgPower.toFixed(1),
+                result.avgSpeed.toFixed(2),
+                result.avgTemperature.toFixed(1),
+                `"${result.notes.replace(/"/g, '""')}"`, // Escape quotes in notes
                 result.timestamp
             ];
             csv += values.join(',') + '\n';
@@ -303,7 +501,8 @@ export class ResultsStorage {
             const request = objectStore.getAll();
 
             request.onsuccess = () => {
-                resolve(request.result as StoredVEResult[]);
+                const results = request.result as StoredVEResult[];
+                resolve(results);
             };
 
             request.onerror = () => {
@@ -325,7 +524,6 @@ export class ResultsStorage {
             const request = objectStore.clear();
 
             request.onsuccess = () => {
-                console.log('✅ Cleared all VE results');
                 resolve();
             };
 
@@ -334,24 +532,6 @@ export class ResultsStorage {
                 reject(request.error);
             };
         });
-    }
-
-    /**
-     * Calculate CdA error (simplified - using RMSE as proxy)
-     */
-    private calculateCdAError(result: VEAnalysisResult, cda: number): number {
-        // Simple heuristic: error proportional to RMSE and CdA
-        // In a real implementation, this would come from optimization bounds
-        return result.rmse * 0.001 * cda;
-    }
-
-    /**
-     * Calculate Crr error (simplified - using RMSE as proxy)
-     */
-    private calculateCrrError(result: VEAnalysisResult, crr: number): number {
-        // Simple heuristic: error proportional to RMSE and Crr
-        // In a real implementation, this would come from optimization bounds
-        return result.rmse * 0.0001 * crr;
     }
 
     /**

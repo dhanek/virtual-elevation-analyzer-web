@@ -83,6 +83,7 @@ let isLoadingParameters: boolean = false;
 let currentVEResult: VEAnalysisResult | null = null;
 let currentWindSource: 'constant' | 'fit' | 'compare' | 'none' = 'none';
 let currentAnalyzedLaps: number[] = [];
+let currentFilteredData: { power: number[], velocity: number[], temperature: number[], timestamps: number[] } | null = null;
 let resultsStorage: ResultsStorage = new ResultsStorage();
 
 // Initialize FIT processor and parameter storage
@@ -960,6 +961,7 @@ async function handleAnalyze() {
         const allDistance = fitData.distance;
         const allAirSpeed = fitData.air_speed;
         const allWindSpeed = fitData.wind_speed;
+        const allTemperature = fitData.temperature || [];
 
         console.log('Data arrays accessed successfully:', {
             timestamps: allTimestamps.length,
@@ -996,6 +998,7 @@ async function handleAnalyze() {
         let filteredDistance: number[] = [];
         let filteredAirSpeed: number[] = [];
         let filteredWindSpeed: number[] = [];
+        let filteredTemperature: number[] = [];
 
         for (let i = 0; i < allTimestamps.length; i++) {
             const timestamp = allTimestamps[i];
@@ -1015,6 +1018,7 @@ async function handleAnalyze() {
                 filteredDistance.push(allDistance[i]);
                 filteredAirSpeed.push(allAirSpeed[i]);
                 filteredWindSpeed.push(allWindSpeed[i]);
+                filteredTemperature.push(allTemperature[i] || 0);
             }
         }
 
@@ -1084,7 +1088,7 @@ async function handleAnalyze() {
         };
 
         // Show the Virtual Elevation analysis interface inline
-        showVirtualElevationAnalysisInline(result, selectedLaps, filteredTimestamps, filteredPower, filteredVelocity, filteredPositionLat, filteredPositionLong, filteredAltitude, filteredDistance, filteredAirSpeed, filteredWindSpeed);
+        showVirtualElevationAnalysisInline(result, selectedLaps, filteredTimestamps, filteredPower, filteredVelocity, filteredPositionLat, filteredPositionLong, filteredAltitude, filteredDistance, filteredAirSpeed, filteredWindSpeed, filteredTemperature);
 
     } catch (err) {
         console.error('Virtual Elevation analysis failed:', err);
@@ -1095,9 +1099,11 @@ async function handleAnalyze() {
 }
 
 
-async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[]) {
+async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], temperature: number[] = []) {
     // Store analyzed laps globally for save functionality
     currentAnalyzedLaps = analyzedLaps;
+    // Store filtered data globally for save functionality
+    currentFilteredData = { power, velocity, temperature, timestamps };
 
     // Check if air_speed data is available (not all zeros/NaN)
     const hasAirSpeed = airSpeed.some(val => !isNaN(val) && val !== 0);
@@ -1399,6 +1405,75 @@ async function handleSaveScreenshot() {
     }
 }
 
+// Calculate average of array values (excluding NaN and 0 values for temperature)
+function calculateAverage(values: number[], excludeZero: boolean = false): number {
+    const validValues = values.filter(v => !isNaN(v) && (excludeZero ? v !== 0 : true));
+    if (validValues.length === 0) return 0;
+    const sum = validValues.reduce((acc, val) => acc + val, 0);
+    return sum / validValues.length;
+}
+
+// Show notes dialog and return the entered notes
+function showNotesDialog(): Promise<string> {
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 10000;
+            min-width: 300px;
+        `;
+
+        dialog.innerHTML = `
+            <h3 style="margin-top: 0;">Add Notes</h3>
+            <input type="text" id="notesInput" placeholder="e.g., test_config_A" style="width: 100%; padding: 8px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px;">
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px;">
+                <button id="notesCancelBtn" style="padding: 8px 16px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>
+                <button id="notesOkBtn" style="padding: 8px 16px; border: none; background: #007bff; color: white; border-radius: 4px; cursor: pointer;">OK</button>
+            </div>
+        `;
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+        `;
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(dialog);
+
+        const input = document.getElementById('notesInput') as HTMLInputElement;
+        const okBtn = document.getElementById('notesOkBtn') as HTMLButtonElement;
+        const cancelBtn = document.getElementById('notesCancelBtn') as HTMLButtonElement;
+
+        input.focus();
+
+        const cleanup = (notes: string) => {
+            document.body.removeChild(overlay);
+            document.body.removeChild(dialog);
+            resolve(notes);
+        };
+
+        okBtn.addEventListener('click', () => cleanup(input.value.trim()));
+        cancelBtn.addEventListener('click', () => cleanup(''));
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') cleanup(input.value.trim());
+            if (e.key === 'Escape') cleanup('');
+        });
+    });
+}
+
 // Handle Store Result button click
 async function handleStoreResult() {
     if (!selectedFile || !currentParameters || !currentVEResult) {
@@ -1423,18 +1498,54 @@ async function handleStoreResult() {
     const originalText = storeBtn.textContent;
 
     try {
+        // Show notes dialog first
+        const notes = await showNotesDialog();
+
+        const trimStart = parseInt(trimStartSlider.value);
+        const trimEnd = parseInt(trimEndSlider.value);
+
+        // Get filtered data arrays (already filtered by selected laps)
+        if (!currentFilteredData) {
+            alert('Cannot store result: filtered data not available. Please run analysis first.');
+            return;
+        }
+
+        const filteredPower = currentFilteredData.power;
+        const filteredVelocity = currentFilteredData.velocity;
+        const filteredTemperature = currentFilteredData.temperature;
+        const filteredTimestamps = currentFilteredData.timestamps;
+
+        // Calculate averages from trimmed data (trimStart and trimEnd are indices into the filtered arrays)
+        const trimmedPower = filteredPower.slice(trimStart, trimEnd + 1);
+        const trimmedVelocity = filteredVelocity.slice(trimStart, trimEnd + 1);
+        const trimmedTemperature = filteredTemperature.slice(trimStart, trimEnd + 1);
+
+        const avgPower = calculateAverage(trimmedPower, false);
+        const avgSpeed = calculateAverage(trimmedVelocity, false) * 3.6; // Convert m/s to km/h
+        const avgTemperature = calculateAverage(trimmedTemperature, true); // Exclude zeros for temperature
+
+        // Extract recording date from the first timestamp in the trimmed range
+        // Timestamps are Unix seconds since epoch
+        const firstTimestamp = filteredTimestamps[trimStart];
+        const recordingDate = new Date(firstTimestamp * 1000).toISOString().split('T')[0]; // yyyy-mm-dd
+
         // Prepare save data
         const saveData = {
             fileName: selectedFile.name,
             laps: currentAnalyzedLaps,
-            trimStart: parseInt(trimStartSlider.value),
-            trimEnd: parseInt(trimEndSlider.value),
+            trimStart: trimStart,
+            trimEnd: trimEnd,
             cda: parseFloat(cdaSlider.value),
             crr: parseFloat(crrSlider.value),
             windSource: currentWindSource,
             parameters: currentParameters,
             result: currentVEResult,
-            timestamp: new Date()
+            timestamp: new Date(),
+            recordingDate: recordingDate,
+            avgPower: avgPower,
+            avgSpeed: avgSpeed,
+            avgTemperature: avgTemperature,
+            notes: notes
         };
 
         storeBtn.disabled = true;
