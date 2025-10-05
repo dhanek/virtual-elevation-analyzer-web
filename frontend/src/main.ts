@@ -5,6 +5,7 @@ import { AnalysisParametersComponent, AnalysisParameters } from './components/An
 import { ViewportAdapter } from './utils/ViewportAdapter';
 import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
 import { ResultsStorage, type VEAnalysisResult } from './utils/ResultsStorage';
+import { DEMManager, ElevationProfileCache } from './utils/DEMManager';
 import init, { create_ve_calculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -64,6 +65,15 @@ const results = document.getElementById('results') as HTMLDivElement;
 const statisticsContent = document.getElementById('statisticsContent') as HTMLDivElement;
 const clearStorageButton = document.getElementById('clearStorageButton') as HTMLButtonElement;
 
+// DEM-related DOM elements
+const demFileInput = document.getElementById('demFileInput') as HTMLInputElement;
+const demFileDropZone = document.getElementById('demFileDropZone') as HTMLDivElement;
+const demFileInfo = document.getElementById('demFileInfo') as HTMLDivElement;
+const demFileName = document.getElementById('demFileName') as HTMLSpanElement;
+const demFileMetadata = document.getElementById('demFileMetadata') as HTMLDivElement;
+const clearDemButton = document.getElementById('clearDemButton') as HTMLButtonElement;
+const correctElevationCheckbox = document.getElementById('correctElevationCheckbox') as HTMLInputElement;
+
 let selectedFile: File | null = null;
 let fitProcessor: FitFileProcessor | null = null;
 let mapVisualization: MapVisualization | null = null;
@@ -85,6 +95,13 @@ let currentWindSource: 'constant' | 'fit' | 'compare' | 'none' = 'none';
 let currentAnalyzedLaps: number[] = [];
 let currentFilteredData: { power: number[], velocity: number[], temperature: number[], timestamps: number[] } | null = null;
 let resultsStorage: ResultsStorage = new ResultsStorage();
+
+// DEM-related state
+let demManager: DEMManager = new DEMManager();
+let elevationCache: ElevationProfileCache = new ElevationProfileCache();
+let selectedDEMFile: File | null = null;
+let elevationCorrectionEnabled: boolean = false;
+let elevationErrorRate: number = 0;
 
 // Initialize FIT processor and parameter storage
 async function initializeFitProcessor() {
@@ -149,6 +166,91 @@ fileDropZone.addEventListener('drop', (event) => {
     }
 });
 
+// DEM file selection handlers
+demFileDropZone.addEventListener('click', () => {
+    demFileInput.click();
+});
+
+demFileInput.addEventListener('change', async (event) => {
+    const target = event.target as HTMLInputElement;
+    if (target.files && target.files.length > 0) {
+        await handleDEMFileSelection(target.files[0]);
+    }
+});
+
+demFileDropZone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    demFileDropZone.classList.add('dragover');
+});
+
+demFileDropZone.addEventListener('dragleave', () => {
+    demFileDropZone.classList.remove('dragover');
+});
+
+demFileDropZone.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    demFileDropZone.classList.remove('dragover');
+
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+        await handleDEMFileSelection(files[0]);
+    }
+});
+
+clearDemButton.addEventListener('click', () => {
+    clearDEMFile();
+});
+
+correctElevationCheckbox.addEventListener('change', (event) => {
+    elevationCorrectionEnabled = (event.target as HTMLInputElement).checked;
+});
+
+// DEM file handling functions
+async function handleDEMFileSelection(file: File): Promise<void> {
+    try {
+        showLoading('Loading DEM file...');
+
+        // Load DEM file
+        await demManager.loadDEMFile(file);
+        selectedDEMFile = file;
+
+        // Update UI
+        demFileInfo.classList.remove('hidden');
+        demFileName.textContent = file.name;
+
+        // Show metadata
+        const metadata = JSON.parse(demManager.getDEMMetadata()!);
+        const bounds = demManager.getDEMBounds();
+        demFileMetadata.innerHTML = `
+            <p>Size: ${metadata.width} × ${metadata.height} pixels</p>
+            <p>Bounds: [${bounds![0].toFixed(2)}, ${bounds![1].toFixed(2)}, ${bounds![2].toFixed(2)}, ${bounds![3].toFixed(2)}]</p>
+        `;
+
+        // Enable correction checkbox
+        correctElevationCheckbox.disabled = false;
+        correctElevationCheckbox.checked = true;
+        elevationCorrectionEnabled = true;
+
+        hideLoading();
+        console.log('DEM file loaded successfully:', file.name);
+    } catch (err) {
+        hideLoading();
+        showError(`Failed to load DEM file: ${err}`);
+        clearDEMFile();
+    }
+}
+
+function clearDEMFile(): void {
+    demManager.clearDEM();
+    selectedDEMFile = null;
+    demFileInfo.classList.add('hidden');
+    correctElevationCheckbox.disabled = true;
+    correctElevationCheckbox.checked = false;
+    elevationCorrectionEnabled = false;
+    demFileInput.value = '';
+    elevationErrorRate = 0;
+}
+
 // File validation and display
 async function handleFileSelection(file: File) {
     // Validate file type and size
@@ -203,6 +305,64 @@ analyzeButton.addEventListener('click', async () => {
         showLoading('Parsing FIT data...');
 
         const result = await fitProcessor.processFitFile(selectedFile);
+
+        // Apply DEM elevation correction if enabled
+        if (elevationCorrectionEnabled && demManager.isDEMLoaded() && result.fit_data) {
+            showLoading('Correcting elevation using DEM...');
+
+            try {
+                const fitData = result.fit_data;
+                const lats = fitData.position_lat;
+                const lons = fitData.position_long;
+                const originalAltitudes = fitData.altitude;
+
+                if (lats && lons && originalAltitudes) {
+                    // Debug: Log first few coordinates
+                    console.log('Sample GPS coordinates:', {
+                        lat: lats.slice(0, 5),
+                        lon: lons.slice(0, 5),
+                        originalAlt: originalAltitudes.slice(0, 5)
+                    });
+
+                    const correctionResult = await demManager.correctElevation(lats, lons, originalAltitudes);
+
+                    console.log('Sample corrected elevations:', correctionResult.elevations.slice(0, 5));
+
+                    // Replace altitudes with corrected values using setter
+                    result.fit_data.set_altitude(correctionResult.elevations);
+                    elevationErrorRate = correctionResult.errorRate;
+
+                    console.log(`Elevation corrected. Error rate: ${(elevationErrorRate * 100).toFixed(1)}%`);
+
+                    if (elevationErrorRate > 0.5) {
+                        console.warn('High error rate! DEM may not cover route area. DEM bounds:', demManager.getDEMBounds());
+                    }
+
+                    // Cache the corrected elevation profile
+                    if (currentFileHash && elevationCache) {
+                        const bounds = {
+                            minLat: Math.min(...lats),
+                            maxLat: Math.max(...lats),
+                            minLon: Math.min(...lons),
+                            maxLon: Math.max(...lons)
+                        };
+
+                        await elevationCache.cacheProfile(
+                            currentFileHash,
+                            selectedFile.name,
+                            correctionResult.elevations,
+                            bounds
+                        );
+                    }
+                } else {
+                    console.warn('Missing GPS or altitude data, skipping DEM correction');
+                }
+            } catch (demError) {
+                console.warn('DEM elevation correction failed, using GPS altitude:', demError);
+                showError(`Warning: DEM correction failed: ${demError}. Using GPS altitude.`);
+                // Continue with original GPS altitude
+            }
+        }
 
         hideLoading();
         displayResults(result);
@@ -305,6 +465,21 @@ async function displayResults(result: any) {
         <div style="margin-top: 1.5rem; padding: 1rem; background: #f0fff4; border: 1px solid #38a169; border-radius: 4px; color: #2d7a52;">
             File analyzed successfully! Found ${laps.length} lap${laps.length > 1 ? 's' : ''} with ${stats.has_gps_data ? 'GPS data' : 'no GPS data'}.
             ${stats.has_gps_data ? 'Map and lap selection are now available below.' : ''}
+        </div>
+        ` : ''}
+
+        ${elevationCorrectionEnabled && selectedDEMFile ? `
+        <div style="margin-top: 1.5rem; padding: 1rem; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #2d7a52;">📊 Elevation Correction Applied</h4>
+            <p style="margin: 0 0 0.5rem 0; color: #2d7a52;"><strong>DEM file:</strong> ${selectedDEMFile.name}</p>
+            <p style="margin: 0 0 0.5rem 0; color: #2d7a52;">
+                <strong>Successfully corrected:</strong> ${(100 - elevationErrorRate * 100).toFixed(1)}%
+            </p>
+            ${elevationErrorRate > 0.01 ? `
+            <p style="margin: 0; color: #f57c00; font-weight: 500;">
+                ⚠️ ${(elevationErrorRate * 100).toFixed(1)}% of points used GPS fallback (DEM lookup failed)
+            </p>
+            ` : ''}
         </div>
         ` : ''}
     `;

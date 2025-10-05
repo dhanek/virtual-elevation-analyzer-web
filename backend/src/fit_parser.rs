@@ -53,6 +53,12 @@ impl FitData {
         self.altitude.clone()
     }
 
+    /// Set altitude values (for DEM correction)
+    #[wasm_bindgen]
+    pub fn set_altitude(&mut self, altitude: Vec<f64>) {
+        self.altitude = altitude;
+    }
+
     #[wasm_bindgen(getter)]
     pub fn distance(&self) -> Vec<f64> {
         self.distance.clone()

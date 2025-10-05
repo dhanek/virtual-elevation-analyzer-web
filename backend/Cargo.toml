@@ -33,6 +33,10 @@ fitparser = "0.10.0"  # Latest version with better developer field support
 # Geospatial
 geo = "0.26"          # Latest maintained release
 geodesy = "0.12"      # Advanced projections and datum conversions
+proj4rs = "0.1"       # PROJ coordinate transformation (WASM compatible by default)
+
+# DEM/GeoTIFF Processing
+tiff = "0.9"          # TIFF decoder in pure Rust
 
 # UUID with WASM support
 uuid = { version = "1.0", features = ["v4", "js"] }
