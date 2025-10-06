@@ -20,6 +20,7 @@ export interface SaveResultData {
     trimEnd: number;
     cda: number;
     crr: number;
+    airSpeedCalibration?: number; // Air speed calibration percentage
     windSource: 'constant' | 'fit' | 'compare' | 'none';
     parameters: AnalysisParameters;
     result: VEAnalysisResult;
@@ -38,6 +39,7 @@ interface StoredVEResult {
     trimEnd: number;
     cda: number;
     crr: number;
+    airSpeedCalibration?: number; // Air speed calibration percentage
     windSource: string;
     windSpeed: number | string;
     windDirection: number | string;
@@ -199,6 +201,7 @@ export class ResultsStorage {
                         trimEnd: oldRecord.trimEnd ?? 0,
                         cda: oldRecord.cda ?? 0,
                         crr: oldRecord.crr ?? 0,
+                        airSpeedCalibration: oldRecord.airSpeedCalibration,
                         windSource: oldRecord.windSource || 'none',
                         windSpeed: oldRecord.windSpeed ?? '',
                         windDirection: oldRecord.windDirection ?? '',
@@ -343,6 +346,7 @@ export class ResultsStorage {
             trimEnd: data.trimEnd,
             cda: data.cda,
             crr: data.crr,
+            airSpeedCalibration: data.airSpeedCalibration,
             windSource: data.windSource,
             windSpeed: data.parameters.wind_speed ?? '',
             windDirection: data.parameters.wind_direction ?? '',
@@ -436,7 +440,7 @@ export class ResultsStorage {
     private generateCSVFromResults(results: StoredVEResult[]): string {
         // Headers
         const headers = [
-            'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
+            'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr', 'AirSpeedCal',
             'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
             'R2', 'RMSE', 'VEGain', 'ActualGain',
             'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
@@ -465,6 +469,7 @@ export class ResultsStorage {
                 result.trimEnd,
                 result.cda.toFixed(3),
                 result.crr.toFixed(4),
+                result.airSpeedCalibration !== undefined ? result.airSpeedCalibration.toFixed(1) : '',
                 result.windSource,
                 result.windSpeed,
                 result.windDirection,

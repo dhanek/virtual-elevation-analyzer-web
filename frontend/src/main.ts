@@ -94,6 +94,8 @@ let currentVEResult: VEAnalysisResult | null = null;
 let currentWindSource: 'constant' | 'fit' | 'compare' | 'none' = 'none';
 let currentAnalyzedLaps: number[] = [];
 let currentFilteredData: { power: number[], velocity: number[], temperature: number[], timestamps: number[] } | null = null;
+let veCalculator: any = null; // VE calculator instance for air speed calibration
+let airSpeedCalibrationPercent: number = 0; // Air speed calibration percentage (-20 to +20)
 let resultsStorage: ResultsStorage = new ResultsStorage();
 
 // DEM-related state
@@ -827,6 +829,16 @@ async function initializeMapTrimControlsForSelectedLaps() {
         newMapTrimEndSlider.value = presetTrimEnd.toString();
         newMapTrimEndValue.value = presetTrimEnd.toString();
 
+        // Set map markers with loaded/default trim values
+        if (mapVisualization && savedSettings) {
+            console.log('Setting map trim markers to loaded settings:', { trimStart: presetTrimStart, trimEnd: presetTrimEnd });
+            setTimeout(() => {
+                if (mapVisualization) {
+                    mapVisualization.fitBoundsToTrimRegion(presetTrimStart, presetTrimEnd, filteredLapPositionLat, filteredLapPositionLong);
+                }
+            }, 100);
+        }
+
         // Add new listeners
         newMapTrimStartSlider.addEventListener('input', () => {
             const value = parseInt(newMapTrimStartSlider.value);
@@ -1362,6 +1374,19 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     </div>
                 </div>
                 ` : ''}
+
+                ${hasAirSpeed ? `
+                <div class="ve-parameter">
+                    <div class="ve-param-header">
+                        <label for="airSpeedCalibration">Air Speed Calibration</label>
+                        <input type="number" id="airSpeedCalibrationValue" value="0.0" step="0.1" min="-20.0" max="20.0"
+                               style="width: 60px; text-align: right;" />
+                        <span>%</span>
+                    </div>
+                    <input type="range" id="airSpeedCalibrationSlider" min="-20.0" max="20.0" step="0.1" value="0.0" />
+                    <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
+                </div>
+                ` : ''}
                         </div>
                     </div>
 
@@ -1381,14 +1406,17 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     <button class="ve-tab-button" data-tab="wind">Wind</button>
                     ` : ''}
                     <button class="ve-tab-button" data-tab="power">Power</button>
+                    ${hasAirSpeed ? `
+                    <button class="ve-tab-button" data-tab="vd">VD</button>
+                    ` : ''}
                 </div>
 
                 <div class="ve-tab-content active" id="ve-tab">
                     <div class="ve-metrics-compact">
                         R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
                         RMSE:<span id="rmseValue">${initialResult.rmse.toFixed(2)}m</span> |
-                        VE:<span id="veGainValue">${initialResult.ve_elevation_diff.toFixed(1)}m</span> |
-                        Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(1)}m</span>
+                        VE:<span id="veGainValue">${initialResult.ve_elevation_diff.toFixed(2)}m</span> |
+                        Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span>
                     </div>
                     <div id="vePlot" class="ve-plot" style="margin-bottom: 0; height: 380px;"></div>
                     <div id="veResidualsPlot" class="ve-plot" style="margin-top: 0; height: 220px;"></div>
@@ -1403,6 +1431,17 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 <div class="ve-tab-content" id="power-tab">
                     <div id="speedPowerPlot" class="ve-plot" style="height: 600px;"></div>
                 </div>
+
+                ${hasAirSpeed ? `
+                <div class="ve-tab-content" id="vd-tab">
+                    <div class="ve-metrics-compact" style="margin-bottom: 1rem;">
+                        VD (Air):<span id="vdAirValue">${(initialResult.virtual_distance_air / 1000).toFixed(3)} km</span> |
+                        VD (Ground):<span id="vdGroundValue">${(initialResult.virtual_distance_ground / 1000).toFixed(3)} km</span> |
+                        Difference:<span id="vdDiffValue" style="${initialResult.vd_difference_percent >= 0 ? 'color: #4caf50;' : 'color: #f44336;'}">${initialResult.vd_difference_percent >= 0 ? '+' : ''}${initialResult.vd_difference_percent.toFixed(2)}%</span>
+                    </div>
+                    <div id="vdPlot" class="ve-plot" style="height: 600px;"></div>
+                </div>
+                ` : ''}
                     </div>
                 </div>
             </div>
@@ -1428,14 +1467,17 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
                 presetTrimStart = savedSettings.trimStart;
                 presetTrimEnd = savedSettings.trimEnd;
 
-                // Apply saved CdA and Crr values to sliders after they're created
+                // Apply saved CdA, Crr, and airSpeedCalibration values to sliders after they're created
                 const savedCda = savedSettings.cda;
                 const savedCrr = savedSettings.crr;
+                const savedAirSpeedCalibration = savedSettings.airSpeedCalibration;
                 setTimeout(() => {
                     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
                     const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
                     const cdaValue = document.getElementById('cdaValue') as HTMLInputElement;
                     const crrValue = document.getElementById('crrValue') as HTMLInputElement;
+                    const airSpeedCalibrationSlider = document.getElementById('airSpeedCalibrationSlider') as HTMLInputElement;
+                    const airSpeedCalibrationValue = document.getElementById('airSpeedCalibrationValue') as HTMLInputElement;
 
                     if (cdaSlider && savedCda !== null) {
                         cdaSlider.value = savedCda.toString();
@@ -1444,6 +1486,12 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
                     if (crrSlider && savedCrr !== null) {
                         crrSlider.value = savedCrr.toString();
                         if (crrValue) crrValue.value = savedCrr.toFixed(4);
+                    }
+                    if (airSpeedCalibrationSlider && savedAirSpeedCalibration !== undefined) {
+                        airSpeedCalibrationSlider.value = savedAirSpeedCalibration.toString();
+                        if (airSpeedCalibrationValue) airSpeedCalibrationValue.value = savedAirSpeedCalibration.toFixed(1);
+                        // Update global variable
+                        airSpeedCalibrationPercent = savedAirSpeedCalibration;
                     }
 
                     // Trigger an update to re-render with saved values
@@ -1484,6 +1532,11 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
                 // Create speed & power plot
                 setTimeout(() => {
                     createSpeedPowerPlot(timestamps, velocity, power, trimStart, trimEnd);
+                }, 100);
+            } else if (tabName === 'vd') {
+                // Create virtual distance plot
+                setTimeout(() => {
+                    createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
                 }, 100);
             } else if (tabName === 've') {
                 // Resize VE plots when switching back
@@ -1784,7 +1837,8 @@ async function saveCurrentLapSettings() {
         trimStart: parseInt(trimStartSlider.value),
         trimEnd: parseInt(trimEndSlider.value),
         cda: parseFloat(cdaSlider.value) || null,
-        crr: parseFloat(crrSlider.value) || null
+        crr: parseFloat(crrSlider.value) || null,
+        airSpeedCalibration: airSpeedCalibrationPercent !== 0 ? airSpeedCalibrationPercent : undefined
     };
 
     try {
@@ -1860,6 +1914,10 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (powerTab && powerTab.classList.contains('active')) {
             createSpeedPowerPlot(timestamps, velocity, power, value, trimEnd);
         }
+        const vdTab = document.getElementById('vd-tab');
+        if (vdTab && vdTab.classList.contains('active')) {
+            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, value, trimEnd);
+        }
 
         // Auto-zoom map to trim region
         if (mapVisualization && filteredVEData) {
@@ -1901,6 +1959,10 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
             createSpeedPowerPlot(timestamps, velocity, power, trimStart, value);
+        }
+        const vdTab = document.getElementById('vd-tab');
+        if (vdTab && vdTab.classList.contains('active')) {
+            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, value);
         }
 
         // Auto-zoom map to trim region
@@ -1961,6 +2023,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             createSpeedPowerPlot(timestamps, velocity, power, clamped, trimEnd);
         }
 
+        // Update VD plot if it's visible
+        const vdTab = document.getElementById('vd-tab');
+        if (vdTab && vdTab.classList.contains('active')) {
+            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, clamped, trimEnd);
+        }
+
         if (mapVisualization && filteredVEData) {
             mapVisualization.fitBoundsToTrimRegion(clamped, trimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
         }
@@ -1991,6 +2059,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
             createSpeedPowerPlot(timestamps, velocity, power, trimStart, clamped);
+        }
+
+        // Update VD plot if it's visible
+        const vdTab = document.getElementById('vd-tab');
+        if (vdTab && vdTab.classList.contains('active')) {
+            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, clamped);
         }
 
         if (mapVisualization && filteredVEData) {
@@ -2062,6 +2136,124 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd, windSource);
         });
     });
+
+    // Add air speed calibration slider listeners (if available)
+    const airSpeedCalibrationSlider = document.getElementById('airSpeedCalibrationSlider') as HTMLInputElement;
+    const airSpeedCalibrationValue = document.getElementById('airSpeedCalibrationValue') as HTMLInputElement;
+
+    if (airSpeedCalibrationSlider && airSpeedCalibrationValue) {
+        const updateAirSpeedCalibration = () => {
+            const value = parseFloat(airSpeedCalibrationSlider.value);
+            airSpeedCalibrationValue.value = value.toFixed(1);
+
+            // Store calibration percentage globally
+            airSpeedCalibrationPercent = value;
+
+            const trimStart = parseInt(trimStartSlider.value);
+            const trimEnd = parseInt(trimEndSlider.value);
+
+            // Trigger full recalculation (which will apply calibration when creating calculator)
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+            // Update VD tab if visible
+            const vdTab = document.getElementById('vd-tab');
+            if (vdTab && vdTab.classList.contains('active')) {
+                createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+            }
+
+            // Save lap settings with new calibration value
+            saveCurrentLapSettings();
+        };
+
+        const updateAirSpeedCalibrationFromInput = () => {
+            const value = parseFloat(airSpeedCalibrationValue.value);
+            if (isNaN(value)) return;
+
+            const clamped = Math.max(-20.0, Math.min(value, 20.0));
+
+            airSpeedCalibrationSlider.value = clamped.toString();
+            airSpeedCalibrationValue.value = clamped.toFixed(1);
+
+            // Store calibration percentage globally
+            airSpeedCalibrationPercent = clamped;
+
+            const trimStart = parseInt(trimStartSlider.value);
+            const trimEnd = parseInt(trimEndSlider.value);
+
+            // Trigger full recalculation
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+            // Update VD tab if visible
+            const vdTab = document.getElementById('vd-tab');
+            if (vdTab && vdTab.classList.contains('active')) {
+                createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+            }
+
+            // Save lap settings with new calibration value
+            saveCurrentLapSettings();
+        };
+
+        airSpeedCalibrationSlider.addEventListener('input', updateAirSpeedCalibration);
+        airSpeedCalibrationValue.addEventListener('change', updateAirSpeedCalibrationFromInput);
+
+        // Add auto-adjust button listener
+        const autoAdjustButton = document.getElementById('autoAdjustCalibration') as HTMLButtonElement;
+        if (autoAdjustButton) {
+            autoAdjustButton.addEventListener('click', () => {
+                const trimStart = parseInt(trimStartSlider.value);
+                const trimEnd = parseInt(trimEndSlider.value);
+
+                // Calculate uncalibrated VD distances
+                let vdAirUncalibrated = 0;
+                let vdGround = 0;
+
+                for (let i = trimStart + 1; i <= trimEnd; i++) {
+                    const dt = timestamps[i] - timestamps[i - 1];
+                    if (dt > 0 && dt < 10) {
+                        // Air speed (no calibration)
+                        const airSpeedVal = (!isNaN(airSpeed[i]) && airSpeed[i] > 0) ? airSpeed[i] : 0;
+                        vdAirUncalibrated += airSpeedVal * dt;
+
+                        // Ground speed
+                        const groundSpeedVal = (!isNaN(velocity[i]) && velocity[i] > 0) ? velocity[i] : 0;
+                        vdGround += groundSpeedVal * dt;
+                    }
+                }
+
+                // Calculate calibration factor: we want VD_air * calibration = VD_ground
+                // So: calibration = VD_ground / VD_air
+                if (vdAirUncalibrated > 0) {
+                    const calibrationMultiplier = vdGround / vdAirUncalibrated;
+                    // Convert from multiplier to percentage: (1.05 -> +5%, 0.95 -> -5%)
+                    const calibrationPercent = (calibrationMultiplier - 1.0) * 100.0;
+
+                    // Clamp to ±20%
+                    const clampedPercent = Math.max(-20.0, Math.min(calibrationPercent, 20.0));
+
+                    // Update sliders
+                    airSpeedCalibrationSlider.value = clampedPercent.toFixed(1);
+                    airSpeedCalibrationValue.value = clampedPercent.toFixed(1);
+                    airSpeedCalibrationPercent = clampedPercent;
+
+                    // Trigger recalculation
+                    updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+                    // Update VD tab if visible
+                    const vdTab = document.getElementById('vd-tab');
+                    if (vdTab && vdTab.classList.contains('active')) {
+                        createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                    }
+
+                    // Save settings
+                    saveCurrentLapSettings();
+
+                    console.log(`Auto-adjusted air speed calibration to ${clampedPercent.toFixed(1)}%`);
+                } else {
+                    console.warn('Cannot auto-adjust: no air speed data available');
+                }
+            });
+        }
+    }
 
     // Initialize map trim controls (synchronized with main trim controls)
     const mapTrimControls = document.getElementById('mapTrimControls');
@@ -2212,6 +2404,11 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
             );
 
             // Calculator 2: Use FIT file air speed
+            // Apply air speed calibration if set
+            const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
+                ? airSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+                : airSpeed;
+
             const calculator2 = create_ve_calculator(
                 timestamps,
                 power,
@@ -2220,7 +2417,7 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 positionLong,
                 altitude,
                 distance,
-                airSpeed,
+                calibratedAirSpeed,
                 windSpeed,
                 currentParameters.system_mass,
                 currentParameters.rho,
@@ -2235,6 +2432,9 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 currentParameters.wind_direction,
                 currentParameters.velodrome
             );
+
+            // Store calculator2 globally for air speed calibration (it has the air_speed data)
+            veCalculator = calculator2;
 
             const result1 = calculator1.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
             const result2 = calculator2.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
@@ -2287,6 +2487,11 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
             });
             console.log('VELODROME PARAMETER:', currentParameters.velodrome, 'Type:', typeof currentParameters.velodrome);
 
+            // Apply air speed calibration if set
+            const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
+                ? useAirSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+                : useAirSpeed;
+
             const calculator = create_ve_calculator(
                 timestamps,
                 power,
@@ -2295,7 +2500,7 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 positionLong,
                 altitude,
                 distance,
-                useAirSpeed,
+                calibratedAirSpeed,
                 useWindSpeed,
                 currentParameters.system_mass,
                 currentParameters.rho,
@@ -2310,6 +2515,9 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 currentParameters.wind_direction,
                 currentParameters.velodrome
             );
+
+            // Store calculator globally for air speed calibration
+            veCalculator = calculator;
 
             const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
@@ -2697,8 +2905,25 @@ function updateVEMetrics(result: any) {
 
     if (r2Value) r2Value.textContent = result.r2.toFixed(4);
     if (rmseValue) rmseValue.textContent = result.rmse.toFixed(2) + ' m';
-    if (veGainValue) veGainValue.textContent = result.ve_elevation_diff.toFixed(1) + ' m';
-    if (actualGainValue) actualGainValue.textContent = result.actual_elevation_diff.toFixed(1) + ' m';
+    if (veGainValue) veGainValue.textContent = result.ve_elevation_diff.toFixed(2) + ' m';
+    if (actualGainValue) actualGainValue.textContent = result.actual_elevation_diff.toFixed(2) + ' m';
+
+    // Update VD metrics if available
+    const vdAirValue = document.getElementById('vdAirValue') as HTMLSpanElement;
+    const vdGroundValue = document.getElementById('vdGroundValue') as HTMLSpanElement;
+    const vdDiffValue = document.getElementById('vdDiffValue') as HTMLSpanElement;
+
+    if (vdAirValue && result.virtual_distance_air !== undefined) {
+        vdAirValue.textContent = (result.virtual_distance_air / 1000).toFixed(3) + ' km';
+    }
+    if (vdGroundValue && result.virtual_distance_ground !== undefined) {
+        vdGroundValue.textContent = (result.virtual_distance_ground / 1000).toFixed(3) + ' km';
+    }
+    if (vdDiffValue && result.vd_difference_percent !== undefined) {
+        const diffPercent = result.vd_difference_percent;
+        vdDiffValue.textContent = (diffPercent >= 0 ? '+' : '') + diffPercent.toFixed(2) + '%';
+        vdDiffValue.style.color = diffPercent >= 0 ? '#4caf50' : '#f44336';
+    }
 }
 
 function updateVEMetricsComparison(result1: any, result2: any) {
@@ -3190,6 +3415,166 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
     };
 
     Plotly.newPlot('speedPowerPlot', traces, layout, {responsive: true});
+}
+
+async function createVirtualDistancePlot(timestamps: number[], velocity: number[], airSpeed: number[], distance: number[], trimStart: number, trimEnd: number) {
+    // Wait for Plotly to load
+    let Plotly;
+    try {
+        Plotly = await waitForPlotly();
+    } catch (error) {
+        console.error('Failed to load Plotly:', error);
+        const plotDiv = document.getElementById('vdPlot');
+        if (plotDiv) plotDiv.innerHTML = '<p style="text-align: center; padding: 50px; color: #e74c3c;">Plotly failed to load. Please check your internet connection.</p>';
+        return;
+    }
+
+    // Calculate context range (+/- 5s, but limited by actual trim)
+    const contextBefore = Math.min(trimStart, 5);
+    const contextAfter = Math.min(velocity.length - 1 - trimEnd, 5);
+
+    // Extended range including context
+    const extendedStart = trimStart - contextBefore;
+    const extendedEnd = trimEnd + 1 + contextAfter;
+
+    // Apply air speed calibration
+    const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
+        ? airSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        : airSpeed;
+
+    // Calculate cumulative virtual distances starting from trimStart (both start at 0)
+    const vdAir: number[] = new Array(timestamps.length).fill(0);
+    const vdGround: number[] = new Array(timestamps.length).fill(0);
+
+    // Calculate from trim start onwards
+    for (let i = trimStart + 1; i < timestamps.length; i++) {
+        const dt = timestamps[i] - timestamps[i - 1];
+
+        // Air speed VD (cumulative with calibration)
+        const airSpeedVal = (!isNaN(calibratedAirSpeed[i]) && calibratedAirSpeed[i] > 0) ? calibratedAirSpeed[i] : 0;
+        const airDist = airSpeedVal * dt;
+        vdAir[i] = vdAir[i - 1] + airDist;
+
+        // Ground speed VD (cumulative)
+        const groundSpeedVal = (!isNaN(velocity[i]) && velocity[i] > 0) ? velocity[i] : 0;
+        const groundDist = groundSpeedVal * dt;
+        vdGround[i] = vdGround[i - 1] + groundDist;
+    }
+
+    // Convert to kilometers
+    const vdAirKm = vdAir.map(d => d / 1000);
+    const vdGroundKm = vdGround.map(d => d / 1000);
+
+    // Use time (seconds) for x-axis
+    const timeSeconds = timestamps.map((t, i) => i);
+    const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
+    const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
+    const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
+
+    // Prepare traces with context (low opacity before/after)
+    const traces: any[] = [];
+
+    // Add context before trim (low opacity)
+    if (contextBefore > 0) {
+        // VD Air context
+        traces.push({
+            x: timePointsBefore,
+            y: vdAirKm.slice(extendedStart, trimStart + 1),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'VD Air (trimmed)',
+            line: { color: '#4363d8', width: 2 },
+            opacity: 0.2,
+            showlegend: false
+        });
+
+        // VD Ground context
+        traces.push({
+            x: timePointsBefore,
+            y: vdGroundKm.slice(extendedStart, trimStart + 1),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'VD Ground (trimmed)',
+            line: { color: '#000000', width: 2 },
+            opacity: 0.2,
+            showlegend: false
+        });
+    }
+
+    // Main trimmed data (full opacity)
+    // VD from Air Speed (blue)
+    traces.push({
+        x: timePointsMain,
+        y: vdAirKm.slice(trimStart, trimEnd + 1),
+        type: 'scatter',
+        mode: 'lines',
+        name: 'VD from Air Speed',
+        line: { color: '#4363d8', width: 2 }
+    });
+
+    // VD from Ground Speed (black)
+    traces.push({
+        x: timePointsMain,
+        y: vdGroundKm.slice(trimStart, trimEnd + 1),
+        type: 'scatter',
+        mode: 'lines',
+        name: 'VD from Ground Speed',
+        line: { color: '#000000', width: 2 }
+    });
+
+    // Add context after trim (low opacity)
+    if (contextAfter > 0) {
+        // VD Air context
+        traces.push({
+            x: timePointsAfter,
+            y: vdAirKm.slice(trimEnd, extendedEnd),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'VD Air (trimmed)',
+            line: { color: '#4363d8', width: 2 },
+            opacity: 0.2,
+            showlegend: false
+        });
+
+        // VD Ground context
+        traces.push({
+            x: timePointsAfter,
+            y: vdGroundKm.slice(trimEnd, extendedEnd),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'VD Ground (trimmed)',
+            line: { color: '#000000', width: 2 },
+            opacity: 0.2,
+            showlegend: false
+        });
+    }
+
+    const layout = {
+        title: {
+            text: 'Virtual Distance: Air Speed vs Ground Speed',
+            font: { size: 14 }
+        },
+        xaxis: {
+            title: 'Time (seconds)',
+            showgrid: true,
+            gridcolor: '#e0e0e0'
+        },
+        yaxis: {
+            title: 'Cumulative Distance (km)',
+            showgrid: true,
+            gridcolor: '#e0e0e0'
+        },
+        legend: {
+            x: 0.02,
+            y: 0.98,
+            bgcolor: 'rgba(255,255,255,0.8)'
+        },
+        margin: { l: 60, r: 60, t: 40, b: 60 },
+        plot_bgcolor: '#fafafa',
+        paper_bgcolor: 'white'
+    };
+
+    Plotly.newPlot('vdPlot', traces, layout, {responsive: true});
 }
 
 // Clear saved parameters and results button

@@ -5,6 +5,7 @@ interface LapSettings {
     trimEnd: number;
     cda: number | null;
     crr: number | null;
+    airSpeedCalibration?: number; // Air speed calibration percentage (-20 to +20)
 }
 
 interface StoredParameters {
@@ -22,7 +23,7 @@ export class ParameterStorage {
 
     async initialize(): Promise<void> {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, 2);
+            const request = indexedDB.open(this.dbName, 3);
 
             request.onerror = () => {
                 console.error('❌ IndexedDB failed to open:', request.error);
@@ -63,6 +64,12 @@ export class ParameterStorage {
                             }
                         });
                     };
+                }
+
+                // Migrate from version 2 to 3: airSpeedCalibration field added to LapSettings
+                // No migration needed - the field is optional and will be undefined for old records
+                if (oldVersion < 3) {
+                    console.log('✅ Migrated to version 3: airSpeedCalibration support added');
                 }
             };
         });

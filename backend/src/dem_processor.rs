@@ -1,6 +1,6 @@
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
-use tiff::decoder::{Decoder, DecodingResult};
+use tiff::decoder::{Decoder, DecodingResult, Limits};
 use proj4rs::Proj;
 
 #[wasm_bindgen]
@@ -59,9 +59,16 @@ impl DEMProcessor {
     /// Create a new DEMProcessor from GeoTIFF file bytes
     #[wasm_bindgen(constructor)]
     pub fn new(file_data: &[u8], filename: Option<String>) -> Result<DEMProcessor, JsValue> {
+        // Create custom limits for large DEM files (328MB file)
+        let mut limits = Limits::default();
+        limits.decoding_buffer_size = 2_000_000_000; // 2GB
+        limits.ifd_value_size = 500_000_000; // 500MB for large arrays
+        limits.intermediate_buffer_size = 500_000_000; // 500MB
+
         let cursor = Cursor::new(file_data);
         let mut decoder = Decoder::new(cursor)
-            .map_err(|e| JsValue::from_str(&format!("Failed to create TIFF decoder: {}", e)))?;
+            .map_err(|e| JsValue::from_str(&format!("Failed to create TIFF decoder: {}", e)))?
+            .with_limits(limits);
 
         // Get image dimensions
         let (width, height) = decoder.dimensions()

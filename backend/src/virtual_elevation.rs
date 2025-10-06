@@ -93,6 +93,9 @@ pub struct VEResult {
     rmse: f64,
     ve_elevation_diff: f64,
     actual_elevation_diff: f64,
+    virtual_distance_air: f64,
+    virtual_distance_ground: f64,
+    vd_difference_percent: f64,
 }
 
 #[wasm_bindgen]
@@ -123,6 +126,15 @@ impl VEResult {
 
     #[wasm_bindgen(getter)]
     pub fn actual_elevation_diff(&self) -> f64 { self.actual_elevation_diff }
+
+    #[wasm_bindgen(getter)]
+    pub fn virtual_distance_air(&self) -> f64 { self.virtual_distance_air }
+
+    #[wasm_bindgen(getter)]
+    pub fn virtual_distance_ground(&self) -> f64 { self.virtual_distance_ground }
+
+    #[wasm_bindgen(getter)]
+    pub fn vd_difference_percent(&self) -> f64 { self.vd_difference_percent }
 }
 
 #[wasm_bindgen]
@@ -130,6 +142,7 @@ pub struct VirtualElevationCalculator {
     data: VEData,
     params: VEParameters,
     dt: f64, // time step in seconds
+    air_speed_calibration: f64, // air_speed multiplier (1.0 = no adjustment, 1.1 = +10%, 0.9 = -10%)
 }
 
 #[wasm_bindgen]
@@ -140,7 +153,14 @@ impl VirtualElevationCalculator {
             data,
             params,
             dt: 1.0, // assume 1 second intervals
+            air_speed_calibration: 1.0, // default: no calibration
         }
+    }
+
+    /// Set air speed calibration factor (1.0 = no adjustment, 1.1 = +10%, 0.9 = -10%)
+    #[wasm_bindgen]
+    pub fn set_air_speed_calibration(&mut self, calibration: f64) {
+        self.air_speed_calibration = calibration;
     }
 
     /// Calculate acceleration using method from R code: a = diff(v^2)/(2*v[-1]*dt)
@@ -262,11 +282,14 @@ impl VirtualElevationCalculator {
         effective_wind
     }
 
-    /// Get apparent velocity (ground + wind)
+    /// Get apparent velocity (ground + wind) with optional air_speed calibration
     fn get_apparent_velocity(&self, effective_wind: &[f64]) -> Vec<f64> {
         // Prioritize air_speed data if available
         if !self.data.air_speed.is_empty() && self.data.air_speed.iter().any(|&x| !x.is_nan() && x != 0.0) {
-            return self.data.air_speed.clone();
+            // Apply calibration to air_speed
+            return self.data.air_speed.iter()
+                .map(|&speed| speed * self.air_speed_calibration)
+                .collect();
         }
 
         // Use wind_speed data if available
@@ -280,6 +303,55 @@ impl VirtualElevationCalculator {
         self.data.velocity.iter().zip(effective_wind)
             .map(|(v, w)| v + w)
             .collect()
+    }
+
+    /// Calculate virtual distances from air speed and ground speed within trim region
+    fn calculate_virtual_distances(&self, trim_start: usize, trim_end: usize) -> (f64, f64, f64) {
+        let mut vd_air = 0.0;
+        let mut vd_ground = 0.0;
+
+        // Check if air_speed data is available
+        let has_air_speed = !self.data.air_speed.is_empty()
+            && self.data.air_speed.iter().any(|&x| !x.is_nan() && x != 0.0);
+
+        if !has_air_speed {
+            return (0.0, 0.0, 0.0);
+        }
+
+        // Validate trim indices
+        let start_idx = trim_start.min(self.data.timestamps.len().saturating_sub(1));
+        let end_idx = trim_end.min(self.data.timestamps.len().saturating_sub(1));
+
+        if start_idx >= end_idx {
+            return (0.0, 0.0, 0.0);
+        }
+
+        // Calculate VD from trim_start to trim_end (both VD start at 0 at trim_start)
+        for i in (start_idx + 1)..=end_idx {
+            let dt = self.data.timestamps[i] - self.data.timestamps[i - 1];
+            if dt > 0.0 && dt < 10.0 { // Sanity check for time step
+                // Air speed distance (calibrated)
+                let air_speed = self.data.air_speed[i] * self.air_speed_calibration;
+                if !air_speed.is_nan() && air_speed > 0.0 {
+                    vd_air += air_speed * dt;
+                }
+
+                // Ground speed distance
+                let ground_speed = self.data.velocity[i];
+                if !ground_speed.is_nan() && ground_speed > 0.0 {
+                    vd_ground += ground_speed * dt;
+                }
+            }
+        }
+
+        // Calculate percentage difference: ((VD_air - VD_ground) / VD_ground) * 100
+        let vd_diff_percent = if vd_ground > 0.0 {
+            ((vd_air - vd_ground) / vd_ground) * 100.0
+        } else {
+            0.0
+        };
+
+        (vd_air, vd_ground, vd_diff_percent)
     }
 
     /// Calculate virtual slope
@@ -335,6 +407,10 @@ impl VirtualElevationCalculator {
         let (r2, rmse, ve_elevation_diff, actual_elevation_diff) =
             self.calculate_metrics(&virtual_elevation, trim_start, trim_end);
 
+        // Calculate virtual distances within trim region
+        let (virtual_distance_air, virtual_distance_ground, vd_difference_percent) =
+            self.calculate_virtual_distances(trim_start, trim_end);
+
         VEResult {
             virtual_elevation,
             virtual_slope,
@@ -345,6 +421,9 @@ impl VirtualElevationCalculator {
             rmse,
             ve_elevation_diff,
             actual_elevation_diff,
+            virtual_distance_air,
+            virtual_distance_ground,
+            vd_difference_percent,
         }
     }
 
