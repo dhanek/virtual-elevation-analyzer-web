@@ -1765,6 +1765,7 @@ async function handleStoreResult() {
             trimEnd: trimEnd,
             cda: parseFloat(cdaSlider.value),
             crr: parseFloat(crrSlider.value),
+            airSpeedCalibration: airSpeedCalibrationPercent !== 0 ? airSpeedCalibrationPercent : undefined,
             windSource: currentWindSource,
             parameters: currentParameters,
             result: currentVEResult,
