@@ -2684,6 +2684,64 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
     const cdaValue = cdaSlider ? parseFloat(cdaSlider.value).toFixed(3) : '0.300';
     const crrValue = crrSlider ? parseFloat(crrSlider.value).toFixed(4) : '0.0050';
 
+    // Find optimal annotation position to avoid blocking plot content and legend
+    const findOptimalAnnotationPosition = (elevationData: number[], timeData: number[]): { x: number, y: number, xanchor: string, yanchor: string } => {
+        if (elevationData.length === 0) {
+            return { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' };
+        }
+
+        const minElev = Math.min(...elevationData);
+        const maxElev = Math.max(...elevationData);
+        const elevRange = maxElev - minElev;
+        const minTime = Math.min(...timeData);
+        const maxTime = Math.max(...timeData);
+        const timeRange = maxTime - minTime;
+
+        // Define 3 corner regions (excluding top-left where legend is)
+        // Each corner is 30% of the range from edges
+        const corners = [
+            { name: 'top-right', x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top',
+              timeMin: minTime + 0.7 * timeRange, timeMax: maxTime,
+              elevMin: minElev + 0.7 * elevRange, elevMax: maxElev },
+            { name: 'bottom-right', x: 0.98, y: 0.02, xanchor: 'right', yanchor: 'bottom',
+              timeMin: minTime + 0.7 * timeRange, timeMax: maxTime,
+              elevMin: minElev, elevMax: minElev + 0.3 * elevRange },
+            { name: 'bottom-left', x: 0.02, y: 0.02, xanchor: 'left', yanchor: 'bottom',
+              timeMin: minTime, timeMax: minTime + 0.3 * timeRange,
+              elevMin: minElev, elevMax: minElev + 0.3 * elevRange }
+            // Top-left excluded because legend is there
+        ];
+
+        // Count data points in each corner region
+        const cornerScores = corners.map(corner => {
+            let pointsInCorner = 0;
+            for (let i = 0; i < elevationData.length; i++) {
+                if (timeData[i] >= corner.timeMin && timeData[i] <= corner.timeMax &&
+                    elevationData[i] >= corner.elevMin && elevationData[i] <= corner.elevMax) {
+                    pointsInCorner++;
+                }
+            }
+            return { ...corner, score: pointsInCorner };
+        });
+
+        // Find corner with fewest data points
+        const bestCorner = cornerScores.reduce((best, current) =>
+            current.score < best.score ? current : best
+        );
+
+        return {
+            x: bestCorner.x,
+            y: bestCorner.y,
+            xanchor: bestCorner.xanchor,
+            yanchor: bestCorner.yanchor
+        };
+    };
+
+    // Combine all elevation data for analysis (prioritize main data over context)
+    const allElevationData = [...offsetVirtualElevation, ...trimmedActualElevation];
+    const allTimeData = [...timePoints, ...timePoints];
+    const annotationPos = findOptimalAnnotationPosition(allElevationData, allTimeData);
+
     const elevationPlotLayout = {
         title: {
             text: 'Virtual vs Actual Elevation Profile',
@@ -2706,14 +2764,44 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
             y: 0.98,
             bgcolor: 'rgba(255,255,255,0.8)'
         },
+        shapes: [
+            // Trim start vertical line
+            {
+                type: 'line',
+                x0: trimStart,
+                x1: trimStart,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            },
+            // Trim end vertical line
+            {
+                type: 'line',
+                x0: trimEnd,
+                x1: trimEnd,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            }
+        ],
         annotations: [{
             text: `CdA: ${cdaValue}<br>Crr: ${crrValue}`,
             xref: 'paper',
             yref: 'paper',
-            x: 0.98,
-            y: 0.98,
-            xanchor: 'right',
-            yanchor: 'top',
+            x: annotationPos.x,
+            y: annotationPos.y,
+            xanchor: annotationPos.xanchor as 'left' | 'right',
+            yanchor: annotationPos.yanchor as 'top' | 'bottom',
             showarrow: false,
             bgcolor: 'rgba(255,255,255,0.9)',
             bordercolor: '#4363d8',
@@ -2814,6 +2902,36 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
             y: 0.98,
             bgcolor: 'rgba(255,255,255,0.8)'
         },
+        shapes: [
+            // Trim start vertical line
+            {
+                type: 'line',
+                x0: trimStart,
+                x1: trimStart,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            },
+            // Trim end vertical line
+            {
+                type: 'line',
+                x0: trimEnd,
+                x1: trimEnd,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            }
+        ],
         margin: { l: 60, r: 20, t: 30, b: 60 },  // Adjusted margins
         height: 200,  // Fixed height for alignment
         plot_bgcolor: '#fafafa',
@@ -3246,8 +3364,8 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
         xaxis: {
             title: 'Time (seconds)',
             showgrid: true,
-            gridcolor: '#e0e0e0'
-            // No explicit range - let Plotly auto-scale to show all data (context included)
+            gridcolor: '#e0e0e0',
+            range: [xMin, xMax]
         },
         yaxis: {
             title: 'Speed (km/h)',
@@ -3259,6 +3377,36 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
             y: 0.98,
             bgcolor: 'rgba(255,255,255,0.8)'
         },
+        shapes: [
+            // Trim start vertical line
+            {
+                type: 'line',
+                x0: trimStart,
+                x1: trimStart,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            },
+            // Trim end vertical line
+            {
+                type: 'line',
+                x0: trimEnd,
+                x1: trimEnd,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            }
+        ],
         margin: { l: 60, r: 20, t: 40, b: 60 },
         plot_bgcolor: '#fafafa',
         paper_bgcolor: 'white'
@@ -3388,7 +3536,8 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
         xaxis: {
             title: 'Time (seconds)',
             showgrid: true,
-            gridcolor: '#e0e0e0'
+            gridcolor: '#e0e0e0',
+            range: [extendedStart, extendedEnd - 1]
         },
         yaxis: {
             title: 'Speed (km/h)',
@@ -3410,6 +3559,36 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
             y: 0.98,
             bgcolor: 'rgba(255,255,255,0.8)'
         },
+        shapes: [
+            // Trim start vertical line
+            {
+                type: 'line',
+                x0: trimStart,
+                x1: trimStart,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            },
+            // Trim end vertical line
+            {
+                type: 'line',
+                x0: trimEnd,
+                x1: trimEnd,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            }
+        ],
         margin: { l: 60, r: 60, t: 40, b: 60 },
         plot_bgcolor: '#fafafa',
         paper_bgcolor: 'white'
@@ -3558,7 +3737,8 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
         xaxis: {
             title: 'Time (seconds)',
             showgrid: true,
-            gridcolor: '#e0e0e0'
+            gridcolor: '#e0e0e0',
+            range: [extendedStart, extendedEnd - 1]
         },
         yaxis: {
             title: 'Cumulative Distance (km)',
@@ -3570,6 +3750,36 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
             y: 0.98,
             bgcolor: 'rgba(255,255,255,0.8)'
         },
+        shapes: [
+            // Trim start vertical line
+            {
+                type: 'line',
+                x0: trimStart,
+                x1: trimStart,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            },
+            // Trim end vertical line
+            {
+                type: 'line',
+                x0: trimEnd,
+                x1: trimEnd,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: 'rgba(100, 100, 100, 0.3)',
+                    width: 1.5,
+                    dash: 'dash'
+                }
+            }
+        ],
         margin: { l: 60, r: 60, t: 40, b: 60 },
         plot_bgcolor: '#fafafa',
         paper_bgcolor: 'white'
