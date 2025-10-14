@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+mod air_density;
 mod dem_processor;
 mod fit_parser;
 mod fitparser_wrapper;
@@ -7,6 +8,7 @@ mod security;
 mod utils;
 mod virtual_elevation;
 
+pub use air_density::*;
 pub use dem_processor::*;
 pub use fit_parser::*;
 pub use fitparser_wrapper::*;

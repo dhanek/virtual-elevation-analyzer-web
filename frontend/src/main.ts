@@ -6,7 +6,10 @@ import { ViewportAdapter } from './utils/ViewportAdapter';
 import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
 import { ResultsStorage, type VEAnalysisResult } from './utils/ResultsStorage';
 import { DEMManager, ElevationProfileCache } from './utils/DEMManager';
-import init, { create_ve_calculator } from '../pkg/virtual_elevation_analyzer.js';
+import { calculateTrimRegionMetadata, formatCoordinates } from './utils/GeoCalculations';
+import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
+import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
+import init, { create_ve_calculator, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -84,6 +87,13 @@ let currentFileHash: string | null = null;
 let currentFitData: any = null;
 let currentFitResult: any = null;
 let currentLaps: any[] = [];
+let filteredLapData: {
+    position_lat: number[];
+    position_long: number[];
+    timestamps: number[];
+} | null = null;
+let isCalculatingAutoRho = false; // Flag to prevent infinite loops
+let lastWeatherQueryKey: string | null = null; // Cache last query to avoid redundant API calls
 let selectedLaps: number[] = [];
 let currentParameters: AnalysisParameters | null = null;
 let filteredVEData: { positionLat: number[], positionLong: number[] } | null = null;
@@ -372,6 +382,14 @@ analyzeButton.addEventListener('click', async () => {
         // Activate section 2 (parameters) and 3 (lap selection) after successful file analysis
         activateSection(2);
 
+        // Trigger auto-rho calculation if enabled and we have GPS data
+        if (parametersComponent?.getParameters().auto_calculate_rho && result.parsing_statistics.has_gps_data) {
+            // Delay slightly to ensure trim sliders are initialized
+            setTimeout(async () => {
+                await calculateAutoRho();
+            }, 500);
+        }
+
         // Activate section 3 if we have laps (GPS data optional)
         if (result.laps.length > 0) {
             activateSection(3);
@@ -501,12 +519,19 @@ async function displayResults(result: any) {
     if (currentFileHash && parametersComponent) {
         const savedParameters = await parameterStorage.loadParameters(currentFileHash);
         if (savedParameters) {
+            // Load saved parameters (preserves user's preference for auto-rho)
             parametersComponent.setParameters(savedParameters);
         } else {
+            // First time loading this file - apply smart defaults
 
-            // Auto-enable velodrome mode if no GPS data (only if no saved params)
+            // Auto-enable velodrome mode if no GPS data
             if (!result.parsing_statistics.has_gps_data) {
                 parametersComponent.setParameters({ velodrome: true });
+            }
+            // Auto-enable auto-rho if HAS GPS data
+            else if (result.parsing_statistics.has_gps_data) {
+                parametersComponent.setParameters({ auto_calculate_rho: true });
+                console.log('📍 GPS data detected - auto-rho enabled by default');
             }
         }
     }
@@ -550,6 +575,304 @@ function formatSpeed(ms: number): string {
 
 function formatPower(watts: number): string {
     return `${watts.toFixed(0)} W`;
+}
+
+/**
+ * Calculate air density automatically from weather data
+ * Uses GPS coordinates and timestamp from trim region
+ * Caches weather data permanently in IndexedDB
+ */
+async function calculateAutoRho(): Promise<number | null> {
+    // Prevent infinite loops
+    if (isCalculatingAutoRho) {
+        console.log('⏭️  Auto-rho calculation already in progress, skipping\n');
+        return null;
+    }
+
+    isCalculatingAutoRho = true;
+
+    console.log('\n╔═══════════════════════════════════════════════════════════════╗');
+    console.log('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
+    console.log('╚═══════════════════════════════════════════════════════════════╝\n');
+
+    if (!currentFitData || !parametersComponent) {
+        console.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
+        console.log('  - currentFitData:', !!currentFitData);
+        console.log('  - parametersComponent:', !!parametersComponent);
+        isCalculatingAutoRho = false;
+        return null;
+    }
+
+    const params = parametersComponent.getParameters();
+
+    // Check if auto-calculate is enabled
+    if (!params.auto_calculate_rho) {
+        console.log('⏭️  Auto-calculate disabled, skipping\n');
+        isCalculatingAutoRho = false;
+        return null;
+    }
+
+    console.log('✅ Auto-calculate enabled, proceeding...\n');
+
+    try {
+        // Get current trim region values - check both section 3 sliders and map sliders
+        let trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
+        let trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
+
+        // If section 3 sliders don't exist, use map trim sliders
+        if (!trimStartSlider || !trimEndSlider) {
+            trimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
+            trimEndSlider = document.getElementById('mapTrimEndSlider') as HTMLInputElement;
+            console.log('🔍 Section 3 trim sliders not found, using map trim sliders...');
+        } else {
+            console.log('🔍 Using section 3 trim sliders...');
+        }
+
+        console.log('  - trimStartSlider exists:', !!trimStartSlider);
+        console.log('  - trimEndSlider exists:', !!trimEndSlider);
+
+        if (!trimStartSlider || !trimEndSlider) {
+            console.warn('❌ No trim sliders found - cannot calculate auto rho');
+            console.log('  This usually means the UI is not ready yet.');
+            console.log('  Will retry when sliders are available.\n');
+            isCalculatingAutoRho = false;
+            return null;
+        }
+
+        const trimStart = parseInt(trimStartSlider.value);
+        const trimEnd = parseInt(trimEndSlider.value);
+
+        console.log('📊 Trim region values:', {
+            start: trimStart,
+            end: trimEnd,
+            dataPointsInRange: trimEnd - trimStart + 1
+        });
+        console.log('');
+
+        // Show loading state
+        showLoading('Fetching weather data...');
+
+        try {
+            // Calculate GPS metadata from trim region
+            // Use filtered lap data (only selected laps), not the full FIT data
+            if (!filteredLapData) {
+                console.warn('❌ No filtered lap data available - cannot calculate auto rho');
+                console.log('  This usually means laps have not been selected yet.\n');
+                hideLoading();
+                isCalculatingAutoRho = false;
+                return null;
+            }
+
+            console.log('🗺️  Calculating GPS metadata from trim region...');
+            console.log('  Using filtered lap data with', filteredLapData.timestamps.length, 'data points');
+
+            const metadata = calculateTrimRegionMetadata(
+                filteredLapData,
+                trimStart,
+                trimEnd
+            );
+
+            console.log('═══════════════════════════════════════════════════════');
+            console.log('📍 TRIM REGION METADATA');
+            console.log('═══════════════════════════════════════════════════════');
+            console.log('  Location:', formatCoordinates(metadata.avgLat, metadata.avgLon));
+            console.log('  Coordinates:', `${metadata.avgLat}, ${metadata.avgLon}`);
+            console.log('  Date/Time:', metadata.middleDate.toISOString());
+            console.log('  Valid GPS Points:', metadata.dataPointCount);
+            console.log('  Trim Range:', `${trimStart} to ${trimEnd}`);
+            console.log('═══════════════════════════════════════════════════════\n');
+
+            // Generate query key (rounded to hour precision to match API granularity)
+            const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${metadata.middleDate.toISOString().substring(0, 13)}`;
+
+            // Check if query has actually changed
+            if (lastWeatherQueryKey === queryKey) {
+                console.log('⏭️  Query unchanged from last calculation, using cached rho');
+                console.log('  Query key:', queryKey);
+                hideLoading();
+                isCalculatingAutoRho = false;
+                return params.rho; // Return current rho value
+            }
+
+            console.log('🔄 Query changed, fetching new weather data');
+            console.log('  Previous:', lastWeatherQueryKey || 'none');
+            console.log('  Current:', queryKey);
+            console.log('');
+
+            // Update last query key
+            lastWeatherQueryKey = queryKey;
+
+            // Initialize weather services
+            const weatherCache = new WeatherCache();
+            const weatherAPI = new WeatherAPI();
+
+            // Get weather data (from cache or API)
+            console.log('🔄 Fetching weather data (checking cache first)...\n');
+            let weatherEntry: WeatherCacheEntry = await weatherCache.getWeatherData(metadata, weatherAPI);
+
+            // Check if cached entry has wind data - if not, re-fetch from API
+            if (weatherEntry.source === 'cache' &&
+                (weatherEntry.data.windSpeed === undefined || weatherEntry.data.windDirection === undefined)) {
+                console.log('⚠️  Cached entry missing wind data, re-fetching from API...');
+                // Fetch directly from API to get complete data
+                const freshData = await weatherAPI.fetchWeatherData(metadata);
+                weatherEntry = {
+                    key: weatherEntry.key,
+                    data: freshData,
+                    cachedAt: Date.now(),
+                    source: 'api'
+                };
+                // Update cache with complete data
+                await weatherCache.updateCachedEntry(metadata, freshData);
+            }
+
+            // Calculate air density using WASM
+            console.log('═══════════════════════════════════════════════════════');
+            console.log('🧮 CALCULATING AIR DENSITY');
+            console.log('═══════════════════════════════════════════════════════');
+            console.log('  Input:');
+            console.log('    - Temperature:', weatherEntry.data.temperature, '°C');
+            console.log('    - Pressure:', weatherEntry.data.pressure, 'hPa');
+            console.log('    - Dew Point:', weatherEntry.data.dewPoint, '°C');
+
+            const rhoRaw = AirDensityCalculator.calculate_air_density(
+                weatherEntry.data.temperature,
+                weatherEntry.data.pressure,
+                weatherEntry.data.dewPoint
+            );
+
+            // Round to 4 decimal places for practical use
+            const rho = parseFloat(rhoRaw.toFixed(4));
+
+            console.log('  Output:');
+            console.log('    - Air Density (ρ):', rho, 'kg/m³');
+            console.log('    - Wind Speed:', weatherEntry.data.windSpeed, 'm/s');
+            console.log('    - Wind Direction:', weatherEntry.data.windDirection, '°');
+            console.log('    - Source:', weatherEntry.source === 'cache' ? '💾 Cache' : '⬇️ API');
+            console.log('═══════════════════════════════════════════════════════\n');
+
+            // Update parameters with calculated rho, wind data, and weather metadata
+            const updateParams: Partial<AnalysisParameters> = {
+                rho,
+                rho_source: weatherEntry.source === 'cache' ? 'weather_cache' : 'weather_api',
+                weather_metadata: {
+                    temperature: weatherEntry.data.temperature,
+                    dewPoint: weatherEntry.data.dewPoint,
+                    pressure: weatherEntry.data.pressure,
+                    windSpeed: weatherEntry.data.windSpeed ?? 0,
+                    windDirection: weatherEntry.data.windDirection ?? 0,
+                    location: { lat: metadata.avgLat, lon: metadata.avgLon },
+                    timestamp: metadata.middleDate.toISOString(),
+                    source: weatherEntry.source
+                }
+            };
+
+            // Only set wind parameters if they are valid numbers
+            // Weather API always returns m/s, and we store wind_speed internally in m/s
+            // (The UI converts to display unit automatically based on wind_speed_unit)
+            if (weatherEntry.data.windSpeed !== undefined && weatherEntry.data.windSpeed !== null) {
+                updateParams.wind_speed = weatherEntry.data.windSpeed;  // Always store in m/s
+            }
+            if (weatherEntry.data.windDirection !== undefined && weatherEntry.data.windDirection !== null) {
+                updateParams.wind_direction = weatherEntry.data.windDirection;
+            }
+
+            parametersComponent.setParameters(updateParams);
+
+            // Show success notification
+            const sourceText = weatherEntry.source === 'cache' ? 'cached data' : 'weather API';
+            showNotification(`Air density calculated: ${rho.toFixed(3)} kg/m³ (from ${sourceText})`, 'success');
+
+            console.log('╔═══════════════════════════════════════════════════════════════╗');
+            console.log('║  ✅ AUTO RHO CALCULATION COMPLETED SUCCESSFULLY              ║');
+            console.log('║  Final ρ: ' + rho.toFixed(3) + ' kg/m³                                     ║');
+            console.log('╚═══════════════════════════════════════════════════════════════╝\n');
+
+            hideLoading();
+            isCalculatingAutoRho = false;
+            return rho;
+
+        } catch (error) {
+            hideLoading();
+
+            if (error instanceof WeatherAPIError) {
+                console.error('Weather API error:', error.message, error.code);
+
+                // Show user-friendly error message
+                let userMessage = 'Could not fetch weather data: ';
+                if (error.code === 'DATA_TOO_OLD') {
+                    userMessage += 'Activity is too old (>92 days). Using manual rho value.';
+                } else if (error.code === 'API_ERROR') {
+                    userMessage += 'Weather service unavailable. Using manual rho value.';
+                } else if (error.code === 'FETCH_ERROR') {
+                    userMessage += 'Network error. Check your internet connection.';
+                } else {
+                    userMessage += error.message;
+                }
+
+                showNotification(userMessage, 'warning');
+            } else {
+                console.error('Failed to calculate auto rho:', error);
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                showNotification(`Auto-rho calculation failed: ${errorMsg}`, 'error');
+            }
+
+            isCalculatingAutoRho = false;
+            return null;
+        }
+
+    } catch (error) {
+        hideLoading();
+        console.error('Unexpected error in calculateAutoRho:', error);
+        showNotification('Failed to calculate air density. Using manual value.', 'error');
+        isCalculatingAutoRho = false;
+        return null;
+    }
+}
+
+/**
+ * Show notification to user
+ */
+function showNotification(message: string, type: 'success' | 'warning' | 'error' = 'success'): void {
+    // Create notification element if it doesn't exist
+    let notification = document.getElementById('notification');
+
+    if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'notification';
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 10000;
+            max-width: 400px;
+            font-size: 0.9em;
+            display: none;
+        `;
+        document.body.appendChild(notification);
+    }
+
+    // Set colors based on type
+    const colors = {
+        success: { bg: '#4CAF50', text: '#fff' },
+        warning: { bg: '#FF9800', text: '#fff' },
+        error: { bg: '#f44336', text: '#fff' }
+    };
+
+    notification.style.backgroundColor = colors[type].bg;
+    notification.style.color = colors[type].text;
+    notification.textContent = message;
+    notification.style.display = 'block';
+
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+        if (notification) {
+            notification.style.display = 'none';
+        }
+    }, 5000);
 }
 
 // UI state management
@@ -715,6 +1038,15 @@ function updateSelectedLaps() {
             mapTrimControls.style.display = 'flex';
             // Calculate total duration of selected laps
             initializeMapTrimControlsForSelectedLaps();
+
+            // Trigger auto-rho calculation when laps are selected (trim sliders now available)
+            if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+                setTimeout(() => {
+                    calculateAutoRho().catch(err => {
+                        console.error('Auto-rho calculation error on lap selection:', err);
+                    });
+                }, 500); // Small delay to ensure sliders are initialized
+            }
         } else {
             mapTrimControls.style.display = 'none';
         }
@@ -745,6 +1077,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
     // Filter GPS data for selected laps (if available)
     const filteredLapPositionLat: number[] = [];
     const filteredLapPositionLong: number[] = [];
+    const filteredLapTimestamps: number[] = [];
 
     let dataLength = 0;
 
@@ -760,6 +1093,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
             if (isInSelectedLap) {
                 filteredLapPositionLat.push(allPositionLat[i]);
                 filteredLapPositionLong.push(allPositionLong[i]);
+                filteredLapTimestamps.push(timestamp);
             }
         }
         dataLength = filteredLapPositionLat.length;
@@ -771,10 +1105,18 @@ async function initializeMapTrimControlsForSelectedLaps() {
                 timestamp >= range.start && timestamp <= range.end
             );
             if (isInSelectedLap) {
+                filteredLapTimestamps.push(timestamp);
                 dataLength++;
             }
         }
     }
+
+    // Store filtered lap data globally for auto-rho calculation
+    filteredLapData = {
+        position_lat: filteredLapPositionLat,
+        position_long: filteredLapPositionLong,
+        timestamps: filteredLapTimestamps
+    };
 
     // Initialize the controls with correct data length
     initializeMapTrimControls(dataLength);
@@ -905,6 +1247,26 @@ async function initializeMapTrimControlsForSelectedLaps() {
                 saveMapTrimSettings();
             }
         });
+
+        // Add auto-rho trigger on map trim slider changes (debounced)
+        let mapAutoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+        const triggerAutoRhoOnMapTrimChange = () => {
+            if (mapAutoRhoDebounceTimer) {
+                clearTimeout(mapAutoRhoDebounceTimer);
+            }
+            mapAutoRhoDebounceTimer = setTimeout(() => {
+                if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+                    calculateAutoRho().catch(err => {
+                        console.error('Auto-rho calculation error on map trim change:', err);
+                    });
+                }
+            }, 500); // Wait 500ms after last slider change
+        };
+
+        newMapTrimStartSlider.addEventListener('input', triggerAutoRhoOnMapTrimChange);
+        newMapTrimEndSlider.addEventListener('input', triggerAutoRhoOnMapTrimChange);
+        newMapTrimStartValue.addEventListener('change', triggerAutoRhoOnMapTrimChange);
+        newMapTrimEndValue.addEventListener('change', triggerAutoRhoOnMapTrimChange);
     }
 
 }
@@ -962,6 +1324,18 @@ function handleParametersChange(parameters: AnalysisParameters) {
         } else {
             mapVisualization.hideWindIndicator();
         }
+    }
+
+    // Trigger auto-rho calculation if checkbox was just enabled
+    // or if auto-calculate is already enabled (parameters changed)
+    // BUT skip if we're already calculating (prevents infinite loop)
+    if (parameters.auto_calculate_rho && currentFitData && !isCalculatingAutoRho) {
+        // Small delay to ensure UI is updated
+        setTimeout(() => {
+            calculateAutoRho().catch(err => {
+                console.error('Auto-rho calculation error:', err);
+            });
+        }, 100);
     }
 
     // If VE analysis is already visible, recalculate when parameters change
@@ -1118,6 +1492,9 @@ async function handleAnalyze() {
         alert('No FIT data available for analysis.');
         return;
     }
+
+    // Note: Auto-rho will be triggered AFTER VE analysis when trim sliders are created
+    // (trim sliders don't exist yet at this point)
 
     try {
         showLoading('Preparing data for Virtual Elevation analysis...');
@@ -2115,6 +2492,33 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     trimEndSlider.addEventListener('input', updateTrimEnd);
     cdaSlider.addEventListener('input', updateCdA);
     crrSlider.addEventListener('input', updateCrr);
+
+    // Add auto-rho trigger on trim slider changes (debounced)
+    let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const triggerAutoRhoOnTrimChange = () => {
+        if (autoRhoDebounceTimer) {
+            clearTimeout(autoRhoDebounceTimer);
+        }
+        autoRhoDebounceTimer = setTimeout(() => {
+            if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+                calculateAutoRho().catch(err => {
+                    console.error('Auto-rho calculation error on trim change:', err);
+                });
+            }
+        }, 500); // Wait 500ms after last slider change
+    };
+
+    trimStartSlider.addEventListener('input', triggerAutoRhoOnTrimChange);
+    trimEndSlider.addEventListener('input', triggerAutoRhoOnTrimChange);
+
+    // Also trigger auto-rho immediately after VE analysis completes (if enabled)
+    if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+        setTimeout(() => {
+            calculateAutoRho().catch(err => {
+                console.error('Auto-rho initial calculation error:', err);
+            });
+        }, 1000); // Wait 1s for UI to fully render
+    }
 
     // Add event listeners for input fields
     trimStartValue.addEventListener('change', updateTrimStartFromInput);
@@ -3202,18 +3606,51 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
         const windSpeedMs = currentParameters.wind_speed || 0;
         const windDirection = currentParameters.wind_direction || 0;
 
+        // Get rider bearings from filtered VE data (matches the Rust calculation)
+        let riderBearings: number[] = [];
+        if (filteredVEData && filteredVEData.positionLat.length > 0) {
+            // Calculate bearing for each point based on GPS movement
+            riderBearings = new Array(filteredVEData.positionLat.length).fill(0);
+
+            for (let i = 1; i < filteredVEData.positionLat.length; i++) {
+                const lat1 = filteredVEData.positionLat[i - 1] * Math.PI / 180;
+                const lat2 = filteredVEData.positionLat[i] * Math.PI / 180;
+                const lon1 = filteredVEData.positionLong[i - 1] * Math.PI / 180;
+                const lon2 = filteredVEData.positionLong[i] * Math.PI / 180;
+
+                const dLon = lon2 - lon1;
+                const y = Math.sin(dLon) * Math.cos(lat2);
+                const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+                let bearing = Math.atan2(y, x) * 180 / Math.PI;
+                bearing = (bearing + 360) % 360; // Normalize to 0-360
+
+                riderBearings[i] = bearing;
+            }
+            // Fill first point with second point's bearing
+            if (riderBearings.length > 1) {
+                riderBearings[0] = riderBearings[1];
+            }
+        }
+
         constantWindApparent = velocity.map((v, i) => {
-            // Calculate bearing from GPS points
-            let bearing = 0;
-            if (i > 0 && i < velocity.length) {
-                // Simple bearing calculation would go here
-                // For now, using simplified approach
-                bearing = 0;
+            // Use calculated bearing if available, otherwise default to 0
+            const bearing = riderBearings.length > i ? riderBearings[i] : 0;
+
+            // Calculate angle difference between wind and rider direction
+            // Wind direction: direction wind is COMING FROM (meteorological convention)
+            // Rider bearing: direction rider is MOVING TOWARDS
+            let angleDiff = Math.abs(windDirection - bearing);
+
+            // Normalize to 0-180 degrees (shortest angle)
+            if (angleDiff > 180) {
+                angleDiff = 360 - angleDiff;
             }
 
-            // Calculate effective headwind/tailwind component
-            const windAngle = (windDirection - bearing) * Math.PI / 180;
-            const effectiveWind = windSpeedMs * Math.cos(windAngle);
+            // Calculate effective wind component
+            // angle_diff = 0°   -> headwind (full resistance) -> cos(0) = +1
+            // angle_diff = 90°  -> crosswind (no effect) -> cos(90) = 0
+            // angle_diff = 180° -> tailwind (full assistance) -> cos(180) = -1
+            const effectiveWind = windSpeedMs * Math.cos(angleDiff * Math.PI / 180);
 
             return (v + effectiveWind) * 3.6; // Convert to km/h
         });
@@ -3790,11 +4227,17 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
 
 // Clear saved parameters and results button
 clearStorageButton.addEventListener('click', async () => {
-    if (confirm('Are you sure you want to clear all saved parameters AND results? This cannot be undone.')) {
+    if (confirm('Are you sure you want to clear all saved parameters, results, AND weather cache? This cannot be undone.')) {
         try {
             await parameterStorage.clearAll();
             await resultsStorage.clearAllResults();
-            alert('All saved parameters and results have been cleared.');
+
+            // Also clear weather cache
+            const { WeatherCache } = await import('./utils/WeatherCache');
+            const weatherCache = new WeatherCache();
+            await weatherCache.clearCache();
+
+            alert('All saved parameters, results, and weather cache have been cleared.');
         } catch (err) {
             console.error('Failed to clear storage:', err);
             alert('Failed to clear storage. Please try again.');

@@ -13,6 +13,18 @@ export interface AnalysisParameters {
     wind_speed_unit: 'm/s' | 'km/h';
     velodrome: boolean;
     auto_lap_detection: 'None' | 'GPS based lap splitting' | 'GPS based out and back' | 'GPS gate one way';
+    auto_calculate_rho: boolean;
+    rho_source?: 'manual' | 'weather_api' | 'weather_cache';
+    weather_metadata?: {
+        temperature: number;
+        dewPoint: number;
+        pressure: number;
+        windSpeed?: number;  // Optional for backward compatibility with old cache entries
+        windDirection?: number;  // Optional for backward compatibility with old cache entries
+        location: { lat: number; lon: number };
+        timestamp: string;
+        source: 'api' | 'cache';
+    };
 }
 
 export const DEFAULT_PARAMETERS: AnalysisParameters = {
@@ -29,7 +41,9 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
     wind_direction: null,  // degrees - null = no wind
     wind_speed_unit: 'm/s',// unit for wind speed display
     velodrome: false,      // zero altitude for track cycling
-    auto_lap_detection: 'None'
+    auto_lap_detection: 'None',
+    auto_calculate_rho: false,  // auto-calculate rho from weather data
+    rho_source: 'manual'
 };
 
 export class AnalysisParametersComponent {
@@ -74,6 +88,13 @@ export class AnalysisParametersComponent {
                         <label for="rho">Air Density (kg/m³):</label>
                         <input type="number" id="rho" min="0.5" max="2.0" step="0.001"
                                value="${this.parameters.rho}" title="Air density (1.225 at sea level, 15°C)">
+                    </div>
+
+                    <div class="param-item checkbox-item">
+                        <label for="auto_calculate_rho">
+                            <input type="checkbox" id="auto_calculate_rho" ${this.parameters.auto_calculate_rho ? 'checked' : ''}>
+                            Auto-calculate from weather
+                        </label>
                     </div>
 
                     <div class="param-item">
@@ -156,6 +177,25 @@ export class AnalysisParametersComponent {
                     </div>
                 </div>
 
+                <div id="weather_info_container" style="display: none; margin-top: 1rem; padding: 0.75rem; background: #f5f5f5; border-radius: 4px; border-left: 3px solid #4CAF50;">
+                    <div style="font-size: 0.9em; color: #666;">
+                        <strong>Weather Data:</strong>
+                        <span id="weather_temp" style="margin-left: 0.5rem;">--</span>°C,
+                        <span id="weather_pressure" style="margin-left: 0.25rem;">--</span> hPa,
+                        Dew Point: <span id="weather_dewpoint">--</span>°C
+                        <span id="weather_source" style="margin-left: 0.5rem; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; background: #e0e0e0;">--</span>
+                    </div>
+                    <div style="font-size: 0.85em; color: #666; margin-top: 0.25rem;">
+                        <strong>Wind:</strong>
+                        <span id="weather_windspeed" style="margin-left: 0.5rem;">--</span> m/s,
+                        Direction: <span id="weather_winddirection">--</span>°
+                    </div>
+                    <div style="font-size: 0.85em; color: #888; margin-top: 0.25rem;">
+                        Location: <span id="weather_location">--</span> |
+                        Time: <span id="weather_timestamp">--</span>
+                    </div>
+                </div>
+
                 <div class="param-actions">
                     <button id="resetParams" class="secondary-btn">Reset to Defaults</button>
                 </div>
@@ -220,7 +260,10 @@ export class AnalysisParametersComponent {
             wind_direction: getNumberValue('wind_direction'),
             wind_speed_unit: windSpeedUnit,
             velodrome: getBooleanValue('velodrome'),
-            auto_lap_detection: getValue('auto_lap_detection') as AnalysisParameters['auto_lap_detection']
+            auto_lap_detection: getValue('auto_lap_detection') as AnalysisParameters['auto_lap_detection'],
+            auto_calculate_rho: getBooleanValue('auto_calculate_rho'),
+            rho_source: this.parameters.rho_source || 'manual',
+            weather_metadata: this.parameters.weather_metadata
         };
 
         // Validate and notify
@@ -287,8 +330,63 @@ export class AnalysisParametersComponent {
         setValue('wind_speed_unit', this.parameters.wind_speed_unit);
         setValue('velodrome', this.parameters.velodrome);
         setValue('auto_lap_detection', this.parameters.auto_lap_detection);
+        setValue('auto_calculate_rho', this.parameters.auto_calculate_rho);
+
+        // Update weather info display if available
+        this.updateWeatherInfoDisplay();
 
         this.validateParameters();
+    }
+
+    /**
+     * Update weather information display panel
+     */
+    private updateWeatherInfoDisplay(): void {
+        const weatherInfoContainer = this.container.querySelector('#weather_info_container') as HTMLElement;
+
+        if (!weatherInfoContainer) return;
+
+        if (this.parameters.weather_metadata) {
+            const metadata = this.parameters.weather_metadata;
+
+            // Show the weather info container
+            weatherInfoContainer.style.display = 'block';
+
+            // Update values
+            const tempSpan = this.container.querySelector('#weather_temp');
+            const pressureSpan = this.container.querySelector('#weather_pressure');
+            const dewpointSpan = this.container.querySelector('#weather_dewpoint');
+            const windSpeedSpan = this.container.querySelector('#weather_windspeed');
+            const windDirectionSpan = this.container.querySelector('#weather_winddirection');
+            const sourceSpan = this.container.querySelector('#weather_source');
+            const locationSpan = this.container.querySelector('#weather_location');
+            const timestampSpan = this.container.querySelector('#weather_timestamp');
+
+            if (tempSpan) tempSpan.textContent = metadata.temperature.toFixed(1);
+            if (pressureSpan) pressureSpan.textContent = metadata.pressure.toFixed(1);
+            if (dewpointSpan) dewpointSpan.textContent = metadata.dewPoint.toFixed(1);
+            if (windSpeedSpan) windSpeedSpan.textContent = metadata.windSpeed !== undefined ? metadata.windSpeed.toFixed(1) : '--';
+            if (windDirectionSpan) windDirectionSpan.textContent = metadata.windDirection !== undefined ? metadata.windDirection.toFixed(0) : '--';
+
+            if (sourceSpan) {
+                const isCached = metadata.source === 'cache';
+                sourceSpan.textContent = isCached ? '💾 Cached' : '⬇️ API';
+                sourceSpan.style.background = isCached ? '#e3f2fd' : '#fff3e0';
+                sourceSpan.style.color = isCached ? '#1976d2' : '#e65100';
+            }
+
+            if (locationSpan) {
+                locationSpan.textContent = `${metadata.location.lat.toFixed(4)}, ${metadata.location.lon.toFixed(4)}`;
+            }
+
+            if (timestampSpan) {
+                const date = new Date(metadata.timestamp);
+                timestampSpan.textContent = date.toLocaleString();
+            }
+        } else {
+            // Hide the weather info container
+            weatherInfoContainer.style.display = 'none';
+        }
     }
 
     private resetParameters(): void {

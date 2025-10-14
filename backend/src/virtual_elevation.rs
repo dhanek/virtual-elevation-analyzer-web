@@ -246,13 +246,21 @@ impl VirtualElevationCalculator {
     /// Calculate effective wind velocity considering wind direction and rider movement
     fn calculate_effective_wind(&self) -> Vec<f64> {
         let wind_speed = self.params.wind_speed.unwrap_or(0.0);
+
+        // If no wind speed, return zero wind
+        if wind_speed == 0.0 {
+            return vec![0.0; self.data.velocity.len()];
+        }
+
         let wind_direction = match self.params.wind_direction {
             Some(dir) => dir,
+            // If no direction specified, assume pure headwind (resistance)
             None => return vec![wind_speed; self.data.velocity.len()],
         };
 
         // Check if we have GPS data
         if self.data.position_lat.is_empty() || self.data.position_long.is_empty() {
+            // No GPS data - assume pure headwind
             return vec![wind_speed; self.data.velocity.len()];
         }
 
@@ -260,21 +268,25 @@ impl VirtualElevationCalculator {
         let mut effective_wind = Vec::new();
 
         for &rider_dir in &rider_directions {
-            // Calculate angle difference between wind and rider direction
+            // Wind direction: direction wind is COMING FROM (meteorological convention)
+            // Rider direction: direction rider is MOVING TOWARDS (geographic bearing)
+            //
+            // For headwind: wind_direction ≈ rider_direction (wind coming from ahead)
+            // For tailwind: wind_direction ≈ rider_direction + 180° (wind coming from behind)
+            //
+            // Angle between wind source and rider heading:
             let mut angle_diff = (wind_direction - rider_dir).abs();
 
-            // Ensure angle is <= 180 degrees
+            // Normalize to [-180, 180]
             if angle_diff > 180.0 {
                 angle_diff = 360.0 - angle_diff;
             }
 
-            // Calculate effective wind component (projection)
-            let mut eff_wind = wind_speed * angle_diff.to_radians().cos();
-
-            // Correct sign: tailwind should be negative
-            if angle_diff > 90.0 {
-                eff_wind = -eff_wind.abs();
-            }
+            // Calculate wind component along rider direction
+            // angle_diff = 0°   -> headwind (full resistance) -> cos(0) = +1
+            // angle_diff = 90°  -> crosswind (no effect) -> cos(90) = 0
+            // angle_diff = 180° -> tailwind (full assistance) -> cos(180) = -1
+            let eff_wind = wind_speed * angle_diff.to_radians().cos();
 
             effective_wind.push(eff_wind);
         }
