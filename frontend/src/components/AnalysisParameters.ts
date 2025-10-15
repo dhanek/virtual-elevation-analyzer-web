@@ -11,6 +11,7 @@ export interface AnalysisParameters {
     wind_speed: number | null;
     wind_direction: number | null;
     wind_speed_unit: 'm/s' | 'km/h';
+    air_speed_offset: number;  // seconds - time offset for air speed data synchronization
     velodrome: boolean;
     auto_lap_detection: 'None' | 'GPS based lap splitting' | 'GPS based out and back' | 'GPS gate one way';
     auto_calculate_rho: boolean;
@@ -40,6 +41,7 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
     wind_speed: null,      // m/s - null = no wind
     wind_direction: null,  // degrees - null = no wind
     wind_speed_unit: 'm/s',// unit for wind speed display
+    air_speed_offset: 2,   // seconds - default: shift air speed 2s later for better sync
     velodrome: false,      // zero altitude for track cycling
     auto_lap_detection: 'None',
     auto_calculate_rho: false,  // auto-calculate rho from weather data
@@ -259,6 +261,7 @@ export class AnalysisParametersComponent {
             wind_speed: windSpeedValue,
             wind_direction: getNumberValue('wind_direction'),
             wind_speed_unit: windSpeedUnit,
+            air_speed_offset: getNumberValue('air_speed_offset') || DEFAULT_PARAMETERS.air_speed_offset,
             velodrome: getBooleanValue('velodrome'),
             auto_lap_detection: getValue('auto_lap_detection') as AnalysisParameters['auto_lap_detection'],
             auto_calculate_rho: getBooleanValue('auto_calculate_rho'),
@@ -328,6 +331,7 @@ export class AnalysisParametersComponent {
         setValue('wind_speed', displayWindSpeed);
         setValue('wind_direction', this.parameters.wind_direction);
         setValue('wind_speed_unit', this.parameters.wind_speed_unit);
+        setValue('air_speed_offset', this.parameters.air_speed_offset);
         setValue('velodrome', this.parameters.velodrome);
         setValue('auto_lap_detection', this.parameters.auto_lap_detection);
         setValue('auto_calculate_rho', this.parameters.auto_calculate_rho);

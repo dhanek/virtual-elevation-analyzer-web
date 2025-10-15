@@ -615,17 +615,19 @@ async function calculateAutoRho(): Promise<number | null> {
     console.log('✅ Auto-calculate enabled, proceeding...\n');
 
     try {
-        // Get current trim region values - check both section 3 sliders and map sliders
-        let trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
-        let trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
+        // IMPORTANT: For auto-rho calculation, always use map trim sliders
+        // Map trim sliders are relative to filtered lap data, which is what we need
+        // Section 3 trim sliders are relative to full FIT data
+        let trimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
+        let trimEndSlider = document.getElementById('mapTrimEndSlider') as HTMLInputElement;
 
-        // If section 3 sliders don't exist, use map trim sliders
+        // Fallback to section 3 sliders only if map sliders don't exist
         if (!trimStartSlider || !trimEndSlider) {
-            trimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
-            trimEndSlider = document.getElementById('mapTrimEndSlider') as HTMLInputElement;
-            console.log('🔍 Section 3 trim sliders not found, using map trim sliders...');
+            trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
+            trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
+            console.log('🔍 Map trim sliders not found, using section 3 sliders...');
         } else {
-            console.log('🔍 Using section 3 trim sliders...');
+            console.log('🔍 Using map trim sliders (relative to filtered lap data)...');
         }
 
         console.log('  - trimStartSlider exists:', !!trimStartSlider);
@@ -1802,6 +1804,29 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 ${(hasAirSpeed || hasConstantWind) ? `
                 <div class="ve-tab-content" id="wind-tab">
                     <div id="windSpeedPlot" class="ve-plot" style="height: 600px;"></div>
+
+                    ${hasAirSpeed ? `
+                    <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
+                        <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
+                        <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                            <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${currentParameters?.air_speed_offset ?? 2}"
+                                   style="width: 100%;" />
+                            <input type="number" id="airSpeedOffsetValue" value="${currentParameters?.air_speed_offset ?? 2}" step="1" min="-10" max="10"
+                                   style="width: 60px; text-align: right;" />
+                            <span style="font-weight: 500;">seconds</span>
+                        </div>
+                        <div style="font-size: 0.9em; color: #666; margin-top: 0.75rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span>Sync Error:</span>
+                                <span id="airSpeedOffsetErrorMetric" style="font-weight: bold; color: #e65100; font-size: 1.1em;">--</span>
+                            </div>
+                            <p style="margin: 0.5rem 0 0 0; font-size: 0.85em; line-height: 1.4;">
+                                Adjust to minimize sync error between ground speed and air speed.
+                                Positive = shift later, Negative = shift earlier.
+                            </p>
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
                 ` : ''}
 
@@ -2660,6 +2685,91 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         }
     }
 
+    // Add air speed offset control listeners
+    const airSpeedOffsetSlider = document.getElementById('airSpeedOffsetSlider') as HTMLInputElement;
+    const airSpeedOffsetValue = document.getElementById('airSpeedOffsetValue') as HTMLInputElement;
+    const airSpeedOffsetErrorMetric = document.getElementById('airSpeedOffsetErrorMetric') as HTMLSpanElement;
+
+    if (airSpeedOffsetSlider && airSpeedOffsetValue) {
+        const updateAirSpeedOffset = () => {
+            const value = parseInt(airSpeedOffsetSlider.value);
+            airSpeedOffsetValue.value = value.toString();
+
+            // Update parameters
+            if (parametersComponent && currentParameters) {
+                parametersComponent.setParameters({ air_speed_offset: value });
+            }
+
+            const trimStart = parseInt(trimStartSlider.value);
+            const trimEnd = parseInt(trimEndSlider.value);
+
+            // Calculate error metric (sum of absolute differences)
+            const errorMetric = calculateAirSpeedSyncError(velocity, airSpeed, value, trimStart, trimEnd);
+            if (airSpeedOffsetErrorMetric && !isNaN(errorMetric)) {
+                airSpeedOffsetErrorMetric.textContent = errorMetric.toFixed(2);
+            }
+
+            // Trigger full recalculation with new offset
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+            // Update wind plot if visible
+            const windTab = document.getElementById('wind-tab');
+            if (windTab && windTab.classList.contains('active')) {
+                createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+            }
+
+            // Save lap settings with new offset value
+            saveCurrentLapSettings();
+        };
+
+        const updateAirSpeedOffsetFromInput = () => {
+            const value = parseInt(airSpeedOffsetValue.value);
+            if (isNaN(value)) return;
+
+            const clamped = Math.max(-10, Math.min(value, 10));
+            airSpeedOffsetSlider.value = clamped.toString();
+            airSpeedOffsetValue.value = clamped.toString();
+
+            // Update parameters
+            if (parametersComponent && currentParameters) {
+                parametersComponent.setParameters({ air_speed_offset: clamped });
+            }
+
+            const trimStart = parseInt(trimStartSlider.value);
+            const trimEnd = parseInt(trimEndSlider.value);
+
+            // Calculate error metric
+            const errorMetric = calculateAirSpeedSyncError(velocity, airSpeed, clamped, trimStart, trimEnd);
+            if (airSpeedOffsetErrorMetric && !isNaN(errorMetric)) {
+                airSpeedOffsetErrorMetric.textContent = errorMetric.toFixed(2);
+            }
+
+            // Trigger full recalculation
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+
+            // Update wind plot if visible
+            const windTab = document.getElementById('wind-tab');
+            if (windTab && windTab.classList.contains('active')) {
+                createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+            }
+
+            // Save settings
+            saveCurrentLapSettings();
+        };
+
+        airSpeedOffsetSlider.addEventListener('input', updateAirSpeedOffset);
+        airSpeedOffsetValue.addEventListener('change', updateAirSpeedOffsetFromInput);
+
+        // Calculate initial error metric
+        const trimStart = parseInt(trimStartSlider.value);
+        const trimEnd = parseInt(trimEndSlider.value);
+        const initialOffset = currentParameters?.air_speed_offset ?? 2;
+        const initialError = calculateAirSpeedSyncError(velocity, airSpeed, initialOffset, trimStart, trimEnd);
+        if (airSpeedOffsetErrorMetric && !isNaN(initialError)) {
+            airSpeedOffsetErrorMetric.textContent = initialError.toFixed(2);
+        }
+    }
+
     // Initialize map trim controls (synchronized with main trim controls)
     const mapTrimControls = document.getElementById('mapTrimControls');
     const mapTrimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
@@ -2759,6 +2869,63 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     }
 }
 
+/**
+ * Apply time offset to air speed data
+ * Negative offset shifts air speed earlier (e.g., -2 means use air speed from 2 seconds earlier)
+ * Positive offset shifts air speed later (e.g., +2 means use air speed from 2 seconds later)
+ */
+function applyAirSpeedOffset(airSpeed: number[], offsetSeconds: number): number[] {
+    if (offsetSeconds === 0 || airSpeed.length === 0) {
+        return airSpeed;
+    }
+
+    const offsetIndices = Math.round(offsetSeconds); // Assuming 1Hz sampling rate
+    const result = new Array(airSpeed.length);
+
+    for (let i = 0; i < airSpeed.length; i++) {
+        const sourceIndex = i + offsetIndices;
+        if (sourceIndex >= 0 && sourceIndex < airSpeed.length) {
+            result[i] = airSpeed[sourceIndex];
+        } else {
+            result[i] = NaN; // Out of bounds
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Calculate synchronization error metric between ground speed and air speed
+ * Returns sum of absolute differences (lower is better)
+ */
+function calculateAirSpeedSyncError(
+    groundSpeed: number[],
+    airSpeed: number[],
+    offsetSeconds: number,
+    trimStart: number,
+    trimEnd: number
+): number {
+    // Apply offset to air speed
+    const offsetAirSpeed = applyAirSpeedOffset(airSpeed, offsetSeconds);
+
+    let sumAbsDiff = 0;
+    let validCount = 0;
+
+    for (let i = trimStart; i <= trimEnd && i < groundSpeed.length; i++) {
+        const ground = groundSpeed[i];
+        const air = offsetAirSpeed[i];
+
+        // Only include valid data points where both speeds are available
+        if (!isNaN(ground) && !isNaN(air) && ground > 0 && air > 0) {
+            sumAbsDiff += Math.abs(air - ground);
+            validCount++;
+        }
+    }
+
+    // Return average absolute difference (normalized by count)
+    return validCount > 0 ? sumAbsDiff / validCount : NaN;
+}
+
 function updateVEPlots(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], trimStart: number, trimEnd: number) {
     // Check which wind source is currently selected
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -2809,10 +2976,14 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
             );
 
             // Calculator 2: Use FIT file air speed
-            // Apply air speed calibration if set
+            // Apply air speed time offset first (to sync with ground speed)
+            const airSpeedOffset = currentParameters?.air_speed_offset ?? 2;
+            const offsetAirSpeed = applyAirSpeedOffset(airSpeed, airSpeedOffset);
+
+            // Then apply air speed calibration if set
             const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
-                ? airSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
-                : airSpeed;
+                ? offsetAirSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+                : offsetAirSpeed;
 
             const calculator2 = create_ve_calculator(
                 timestamps,
@@ -2873,11 +3044,13 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 console.log('Wind speed param:', currentParameters.wind_speed ?? 0, 'Wind direction:', currentParameters.wind_direction ?? 0);
             } else {
                 // Use FIT file air speed
-                useAirSpeed = airSpeed;
+                // Apply time offset first
+                const airSpeedOffset = currentParameters?.air_speed_offset ?? 2;
+                useAirSpeed = applyAirSpeedOffset(airSpeed, airSpeedOffset);
                 useWindSpeed = windSpeed;
-                console.log('Using FIT air speed - length:', useAirSpeed.length);
-                console.log('Sample air_speed values:', useAirSpeed.slice(0, 5));
-                console.log('Non-zero air_speed count:', airSpeed.filter(v => !isNaN(v) && v !== 0).length);
+                console.log('Using FIT air speed with offset:', airSpeedOffset, 'seconds');
+                console.log('Sample offset air_speed values:', useAirSpeed.slice(0, 5));
+                console.log('Non-zero air_speed count:', useAirSpeed.filter(v => !isNaN(v) && v !== 0).length);
             }
 
             // Debug altitude data AND velodrome parameter before passing to calculator
@@ -2892,7 +3065,7 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
             });
             console.log('VELODROME PARAMETER:', currentParameters.velodrome, 'Type:', typeof currentParameters.velodrome);
 
-            // Apply air speed calibration if set
+            // Apply air speed calibration if set (after offset)
             const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
                 ? useAirSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
                 : useAirSpeed;
@@ -3656,8 +3829,10 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
         });
     }
 
-    // Calculate FIT air speed in km/h
-    const airSpeedKmh = hasAirSpeed ? airSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
+    // Calculate FIT air speed in km/h (with offset applied)
+    const airSpeedOffset = currentParameters?.air_speed_offset ?? 2;
+    const offsetAirSpeed = hasAirSpeed ? applyAirSpeedOffset(airSpeed, airSpeedOffset) : airSpeed;
+    const airSpeedKmh = hasAirSpeed ? offsetAirSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
 
     // Use time (seconds) instead of distance for x-axis
     const timeSeconds = timestamps.map((t, i) => i);
@@ -4233,9 +4408,8 @@ clearStorageButton.addEventListener('click', async () => {
             await resultsStorage.clearAllResults();
 
             // Also clear weather cache
-            const { WeatherCache } = await import('./utils/WeatherCache');
-            const weatherCache = new WeatherCache();
-            await weatherCache.clearCache();
+            const weatherCacheInstance = new WeatherCache();
+            await weatherCacheInstance.clearCache();
 
             alert('All saved parameters, results, and weather cache have been cleared.');
         } catch (err) {
