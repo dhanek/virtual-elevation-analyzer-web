@@ -25,6 +25,63 @@ impl AirDensityCalculator {
         6.1078 * (17.27 * temp_c / (temp_c + 237.3)).exp()
     }
 
+    /// Calculate dew point temperature from temperature and relative humidity
+    /// Uses Magnus-Tetens approximation
+    ///
+    /// # Arguments
+    /// * `temp_c` - Air temperature in Celsius
+    /// * `humidity_percent` - Relative humidity in percent (0-100)
+    ///
+    /// # Returns
+    /// Dew point temperature in Celsius
+    ///
+    /// # Errors
+    /// Returns error if inputs are invalid
+    #[wasm_bindgen]
+    pub fn calculate_dew_point(temp_c: f64, humidity_percent: f64) -> Result<f64, JsValue> {
+        // Validate inputs
+        if !temp_c.is_finite() || !humidity_percent.is_finite() {
+            return Err(JsValue::from_str("Invalid input: non-finite values"));
+        }
+
+        if humidity_percent < 0.0 || humidity_percent > 100.0 {
+            return Err(JsValue::from_str(
+                &format!("Invalid humidity: {}% (must be 0-100%)", humidity_percent)
+            ));
+        }
+
+        if temp_c < -100.0 || temp_c > 60.0 {
+            return Err(JsValue::from_str(
+                &format!("Invalid temperature: {}°C (must be -100 to 60°C)", temp_c)
+            ));
+        }
+
+        // Magnus-Tetens constants
+        const A: f64 = 17.27;
+        const B: f64 = 237.3;
+
+        // Calculate gamma = ln(RH/100) + (a*T)/(b+T)
+        let rh_fraction = humidity_percent / 100.0;
+        let gamma = rh_fraction.ln() + (A * temp_c) / (B + temp_c);
+
+        // Calculate dew point: Td = (b * gamma) / (a - gamma)
+        let dew_point = (B * gamma) / (A - gamma);
+
+        // Sanity check
+        if !dew_point.is_finite() {
+            return Err(JsValue::from_str("Dew point calculation resulted in invalid value"));
+        }
+
+        // Dew point must be <= temperature
+        if dew_point > temp_c + 0.1 {
+            return Err(JsValue::from_str(
+                &format!("Calculated dew point ({}°C) exceeds temperature ({}°C)", dew_point, temp_c)
+            ));
+        }
+
+        Ok(dew_point)
+    }
+
     /// Calculate air density using meteorological data
     ///
     /// Implementation follows the formula from gribble.org:
@@ -103,6 +160,32 @@ impl AirDensityCalculator {
 
         Ok(rho)
     }
+
+    /// Calculate air density from temperature, humidity, and pressure
+    /// This is a convenience function that combines dew point calculation with air density calculation
+    ///
+    /// # Arguments
+    /// * `temp_c` - Air temperature in Celsius
+    /// * `pressure_hpa` - Air pressure in hPa (hectopascals)
+    /// * `humidity_percent` - Relative humidity in percent (0-100)
+    ///
+    /// # Returns
+    /// Air density in kg/m³
+    ///
+    /// # Errors
+    /// Returns error if inputs are invalid
+    #[wasm_bindgen]
+    pub fn calculate_air_density_from_humidity(
+        temp_c: f64,
+        pressure_hpa: f64,
+        humidity_percent: f64
+    ) -> Result<f64, JsValue> {
+        // First calculate dew point from temperature and humidity
+        let dew_point = Self::calculate_dew_point(temp_c, humidity_percent)?;
+
+        // Then calculate air density using dew point
+        Self::calculate_air_density(temp_c, pressure_hpa, dew_point)
+    }
 }
 
 #[cfg(test)]
@@ -180,5 +263,52 @@ mod tests {
         // High altitude: lower pressure (~700 hPa at 3000m)
         let rho = AirDensityCalculator::calculate_air_density(10.0, 700.0, 0.0).unwrap();
         assert!(rho > 0.8 && rho < 0.9); // Much less dense at altitude
+    }
+
+    #[test]
+    fn test_dew_point_calculation() {
+        // At 20°C and 50% RH, dew point should be around 9.3°C
+        let dp = AirDensityCalculator::calculate_dew_point(20.0, 50.0).unwrap();
+        assert!((dp - 9.3).abs() < 0.5, "Dew point at 20°C, 50% RH should be ~9.3°C, got {}", dp);
+
+        // At 25°C and 60% RH, dew point should be around 16.7°C
+        let dp = AirDensityCalculator::calculate_dew_point(25.0, 60.0).unwrap();
+        assert!((dp - 16.7).abs() < 0.5, "Dew point at 25°C, 60% RH should be ~16.7°C, got {}", dp);
+
+        // At 100% RH, dew point should equal temperature
+        let dp = AirDensityCalculator::calculate_dew_point(15.0, 100.0).unwrap();
+        assert!((dp - 15.0).abs() < 0.1, "Dew point at 100% RH should equal temperature");
+    }
+
+    #[test]
+    fn test_dew_point_edge_cases() {
+        // Very dry air (low humidity)
+        let dp = AirDensityCalculator::calculate_dew_point(20.0, 10.0).unwrap();
+        assert!(dp < 0.0, "Dew point at 20°C, 10% RH should be below 0°C");
+
+        // Invalid humidity
+        let result = AirDensityCalculator::calculate_dew_point(20.0, 150.0);
+        assert!(result.is_err());
+
+        let result = AirDensityCalculator::calculate_dew_point(20.0, -10.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_air_density_from_humidity() {
+        // Test the convenience function that combines dew point and air density calculations
+        // At 15°C, 1013.25 hPa, 50% RH
+        let rho = AirDensityCalculator::calculate_air_density_from_humidity(15.0, 1013.25, 50.0).unwrap();
+
+        // Should be close to standard air density
+        assert!((rho - 1.225).abs() < 0.01, "Air density at standard conditions should be ~1.225 kg/m³");
+
+        // Hot and humid: 30°C, 1013 hPa, 80% RH
+        let rho = AirDensityCalculator::calculate_air_density_from_humidity(30.0, 1013.0, 80.0).unwrap();
+        assert!(rho > 1.10 && rho < 1.18, "Hot humid air should be less dense");
+
+        // Cold and dry: 0°C, 1013 hPa, 30% RH
+        let rho = AirDensityCalculator::calculate_air_density_from_humidity(0.0, 1013.0, 30.0).unwrap();
+        assert!(rho > 1.25 && rho < 1.30, "Cold dry air should be more dense");
     }
 }

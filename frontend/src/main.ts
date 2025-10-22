@@ -9,7 +9,9 @@ import { DEMManager, ElevationProfileCache } from './utils/DEMManager';
 import { calculateTrimRegionMetadata, formatCoordinates } from './utils/GeoCalculations';
 import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
 import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
-import init, { create_ve_calculator, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
+import { GibliCsvParser, type GibliCsvData, CsvParseError } from './utils/CsvParser';
+import { interpolateAllData, analyzeTimeIntervals } from './utils/DataInterpolation';
+import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -84,9 +86,11 @@ let parametersComponent: AnalysisParametersComponent | null = null;
 let viewportAdapter: ViewportAdapter;
 let parameterStorage: ParameterStorage;
 let currentFileHash: string | null = null;
-let currentFitData: any = null;
+let currentFitData: any = null; // Unified data structure for both FIT and CSV
 let currentFitResult: any = null;
 let currentLaps: any[] = [];
+let currentCdaReference: number[] | null = null; // Filtered CdA reference for current analysis
+let currentRhoArray: number[] | null = null; // Per-datapoint rho array for VE calculation
 let filteredLapData: {
     position_lat: number[];
     position_long: number[];
@@ -267,7 +271,7 @@ function clearDEMFile(): void {
 async function handleFileSelection(file: File) {
     // Validate file type and size
     if (!DataProtection.validateFileType(file)) {
-        showError('Please select a valid FIT file (.fit extension, under 50MB)');
+        showError('Please select a valid FIT or CSV file (.fit or .csv extension, under 50MB)');
         return;
     }
 
@@ -304,10 +308,33 @@ analyzeButton.addEventListener('click', async () => {
     }
 
     try {
+        // Detect file type
+        const fileType = DataProtection.getFileType(selectedFile);
+
+        if (fileType === 'fit') {
+            await processFitFile(selectedFile);
+        } else if (fileType === 'csv') {
+            await processCsvFile(selectedFile);
+        } else {
+            showError('Unknown file type. Please select a .fit or .csv file.');
+            hideLoading();
+            return;
+        }
+
+    } catch (err) {
+        console.error('Error processing file:', err);
+        showError(`Failed to process file: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        hideLoading();
+    }
+});
+
+// Process FIT file
+async function processFitFile(file: File) {
+    try {
         showLoading('Reading FIT file...');
 
         // Additional validation
-        const isValidMagicNumber = await DataProtection.validateFitMagicNumber(selectedFile);
+        const isValidMagicNumber = await DataProtection.validateFitMagicNumber(file);
         if (!isValidMagicNumber) {
             showError('Invalid FIT file format. Please select a valid FIT file.');
             hideLoading();
@@ -316,7 +343,7 @@ analyzeButton.addEventListener('click', async () => {
 
         showLoading('Parsing FIT data...');
 
-        const result = await fitProcessor.processFitFile(selectedFile);
+        const result = await fitProcessor.processFitFile(file);
 
         // Apply DEM elevation correction if enabled
         if (elevationCorrectionEnabled && demManager.isDEMLoaded() && result.fit_data) {
@@ -405,7 +432,355 @@ analyzeButton.addEventListener('click', async () => {
         console.error('Error processing FIT file:', err);
         showError(`Error processing FIT file: ${err}`);
     }
-});
+}
+
+// Helper function to calculate cumulative distance from GPS coordinates
+function calculateDistanceArray(lats: number[], lons: number[]): number[] {
+    const distances: number[] = [0];
+    let cumulative = 0;
+
+    for (let i = 1; i < lats.length; i++) {
+        const lat1 = lats[i - 1];
+        const lon1 = lons[i - 1];
+        const lat2 = lats[i];
+        const lon2 = lons[i];
+
+        // Haversine formula
+        const R = 6371000; // Earth's radius in meters
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const d = R * c;
+
+        cumulative += d;
+        distances.push(cumulative);
+    }
+
+    return distances;
+}
+
+// Generate laps from CSV lap number column
+function generateLapsFromCsv(csvData: GibliCsvData): any[] {
+    if (!csvData.hasLapData || !csvData.lapNumber) {
+        return [];
+    }
+
+    const laps: any[] = [];
+    const uniqueLapNumbers = Array.from(new Set(csvData.lapNumber.filter(n => !isNaN(n)))).sort((a, b) => a - b);
+
+    for (const lapNum of uniqueLapNumbers) {
+        const indices = csvData.lapNumber
+            .map((n, i) => n === lapNum ? i : -1)
+            .filter(i => i !== -1);
+
+        if (indices.length > 0) {
+            const startIdx = indices[0];
+            const endIdx = indices[indices.length - 1];
+
+            laps.push({
+                lap_number: lapNum,
+                start_time: csvData.timestamps[startIdx],
+                end_time: csvData.timestamps[endIdx],
+                total_elapsed_time: csvData.timestamps[endIdx] - csvData.timestamps[startIdx],
+                start_index: startIdx,
+                end_index: endIdx,
+                total_distance: 0, // Will calculate if needed
+            });
+        }
+    }
+
+    return laps;
+}
+
+// Display CSV results (similar to displayResults but for CSV)
+async function displayCsvResults(csvData: GibliCsvData, result: any) {
+    const stats = result.parsing_statistics;
+
+    fileDetails.innerHTML = `
+        <div><strong>File Type:</strong> CSV (Gibli Aerosensor)</div>
+        <div><strong>Data Points:</strong> ${stats.data_points}</div>
+        <div><strong>Duration:</strong> ${(csvData.timeRangeSeconds / 60).toFixed(1)} minutes</div>
+        <div><strong>Power Data:</strong> ${stats.has_power_data ? '✅ Yes' : '❌ No'}</div>
+        <div><strong>GPS Data:</strong> ${stats.has_gps_data ? '✅ Yes' : '❌ No'}</div>
+        <div><strong>Altitude Data:</strong> ${stats.has_altitude_data ? '✅ Yes' : '❌ No'}</div>
+        <div><strong>Air Speed Data:</strong> ${stats.has_air_speed_data ? '✅ Yes' : '❌ No'}</div>
+        <div><strong>Environmental Data:</strong> ${csvData.hasEnvironmentalData ? '✅ Yes (Temp, Humidity, Pressure)' : '❌ No'}</div>
+        <div><strong>CdA Reference:</strong> ${csvData.hasCdaReference ? `✅ Yes (avg: ${calculateAvgCda(csvData).toFixed(3)})` : '❌ No'}</div>
+        <div><strong>Laps:</strong> ${result.laps.length > 0 ? `✅ ${result.laps.length} lap(s)` : '❌ No lap data'}</div>
+    `;
+
+    fileInfo.classList.remove('hidden');
+
+    // Initialize analysis parameters component (same as FIT files)
+    isLoadingParameters = true; // Prevent saving during initialization
+    initializeAnalysisParameters();
+
+    // Try to load saved parameters for this file
+    if (currentFileHash && parametersComponent) {
+        const savedParameters = await parameterStorage.loadParameters(currentFileHash);
+        if (savedParameters) {
+            // Load saved parameters
+            parametersComponent.setParameters(savedParameters);
+        } else {
+            // First time loading - apply smart defaults
+            if (csvData.hasEnvironmentalData) {
+                // CSV has environmental data - disable weather API
+                parametersComponent.setParameters({
+                    auto_calculate_rho: false
+                });
+                console.log('📊 CSV has environmental data - weather API disabled');
+            } else if (stats.has_gps_data) {
+                // No environmental data but has GPS - enable weather API
+                parametersComponent.setParameters({
+                    auto_calculate_rho: true
+                });
+                console.log('📍 GPS data detected - auto-rho enabled');
+            }
+        }
+    }
+
+    isLoadingParameters = false;
+}
+
+// Calculate average CdA from CSV reference data
+function calculateAvgCda(csvData: GibliCsvData): number {
+    if (!csvData.cdaReference) return 0;
+    const validCda = csvData.cdaReference.filter(v => !isNaN(v));
+    if (validCda.length === 0) return 0;
+    return validCda.reduce((sum, v) => sum + v, 0) / validCda.length;
+}
+
+// Calculate per-datapoint air density from environmental data (works for both FIT and CSV)
+function calculateRhoArrayFromFitData(fitData: any): number[] | null {
+    // Check if data has all required environmental data
+    if (!fitData.temperature || !fitData.humidity || !fitData.pressure) {
+        console.log('📊 No environmental data available, using single rho parameter');
+        return null;
+    }
+
+    const rhoArray: number[] = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (let i = 0; i < fitData.timestamps.length; i++) {
+        const temp = fitData.temperature[i];
+        const humidity = fitData.humidity[i];
+        const pressure = fitData.pressure[i];
+
+        // Skip invalid data points
+        if (isNaN(temp) || isNaN(humidity) || isNaN(pressure)) {
+            rhoArray.push(1.225); // Use standard air density as fallback
+            failureCount++;
+            continue;
+        }
+
+        try {
+            // Calculate air density from temperature, humidity, and pressure
+            const rho = AirDensityCalculator.calculate_air_density_from_humidity(temp, pressure, humidity);
+            rhoArray.push(rho);
+            successCount++;
+        } catch (err) {
+            console.warn(`Failed to calculate rho at index ${i}:`, err);
+            rhoArray.push(1.225); // Use standard air density as fallback
+            failureCount++;
+        }
+    }
+
+    console.log('📊 Per-datapoint rho calculation:', {
+        totalPoints: fitData.timestamps.length,
+        successCount,
+        failureCount,
+        sampleRho: rhoArray.slice(0, 5),
+        avgRho: (rhoArray.reduce((sum, r) => sum + r, 0) / rhoArray.length).toFixed(4),
+        minRho: Math.min(...rhoArray).toFixed(4),
+        maxRho: Math.max(...rhoArray).toFixed(4)
+    });
+
+    return rhoArray;
+}
+
+// Initialize section 3 for CSV data
+function initializeSection3Csv(csvData: GibliCsvData, result: any) {
+    // Calculate distance from GPS coordinates
+    const distance = calculateDistanceArray(csvData.positionLat, csvData.positionLong);
+
+    // Calculate wind speed in the direction of the rider from Wind Magnitude and Wind Angle
+    // Formula: ws_rider = cos(angle_radians) * magnitude
+    const windSpeed = csvData.windAngle.map((angleDeg, i) => {
+        const magnitude = csvData.airSpeed[i]; // airSpeed is already converted to m/s
+        if (isNaN(angleDeg) || isNaN(magnitude)) {
+            return 0;
+        }
+        const angleRad = (angleDeg * Math.PI) / 180;
+        return Math.cos(angleRad) * magnitude;
+    });
+
+    console.log('📊 Calculated wind speed from CSV:', {
+        sampleAngles: csvData.windAngle.slice(0, 5),
+        sampleMagnitudes: csvData.airSpeed.slice(0, 5),
+        sampleWindSpeeds: windSpeed.slice(0, 5),
+        nonZeroCount: windSpeed.filter(ws => Math.abs(ws) > 0.1).length
+    });
+
+    // Create a FitData-compatible structure
+    // This structure matches FitData from WASM, allowing all downstream code to work identically
+    currentFitData = {
+        // Required fields (same as FitData)
+        timestamps: csvData.timestamps,
+        position_lat: csvData.positionLat,
+        position_long: csvData.positionLong,
+        altitude: csvData.altitude,
+        velocity: csvData.velocity,
+        power: csvData.power,
+        air_speed: csvData.airSpeed,
+        distance: distance,
+        wind_speed: windSpeed,
+        temperature: csvData.temperature || new Array(csvData.timestamps.length).fill(0),
+        battery_soc: new Array(csvData.timestamps.length).fill(0),
+        heart_rate: new Array(csvData.timestamps.length).fill(0),
+        cadence: new Array(csvData.timestamps.length).fill(0),
+        record_count: csvData.timestamps.length,
+
+        // Extended fields (not in standard FitData, but available from CSV)
+        // These will be checked by feature detection, not file type
+        humidity: csvData.humidity,  // Optional: only present if CSV has it
+        pressure: csvData.pressure,  // Optional: only present if CSV has it
+        cda_reference: csvData.cdaReference,  // Optional: only present if CSV has it
+    };
+
+    // Call regular initializeSection3
+    initializeSection3();
+}
+
+// Process CSV file
+async function processCsvFile(file: File) {
+    try {
+        showLoading('Reading CSV file...');
+
+        // Read file content
+        const text = await file.text();
+
+        showLoading('Parsing CSV data...');
+
+        // Parse CSV
+        let csvData: GibliCsvData;
+        try {
+            csvData = GibliCsvParser.parse(text);
+        } catch (parseError) {
+            if (parseError instanceof CsvParseError) {
+                showError(`CSV parsing error:\n${parseError.message}`);
+            } else {
+                showError(`Failed to parse CSV file: ${parseError}`);
+            }
+            hideLoading();
+            return;
+        }
+
+        // Show summary
+        console.log('CSV Data Summary:');
+        console.log(GibliCsvParser.getSummary(csvData));
+
+        // Analyze time intervals
+        const intervals = analyzeTimeIntervals(csvData.timestamps);
+        console.log('Time interval statistics:', intervals);
+
+        // Interpolate to 1Hz if needed
+        if (intervals.std > 0.1) {
+            showLoading('Interpolating data to 1Hz...');
+            console.log('Non-uniform time series detected, interpolating to 1Hz');
+
+            const dataToInterpolate: Record<string, number[]> = {
+                velocity: csvData.velocity,
+                power: csvData.power,
+                airSpeed: csvData.airSpeed,
+                windAngle: csvData.windAngle,
+                altitude: csvData.altitude,
+                positionLat: csvData.positionLat,
+                positionLong: csvData.positionLong,
+            };
+
+            // Add optional arrays if they exist
+            if (csvData.temperature) dataToInterpolate.temperature = csvData.temperature;
+            if (csvData.humidity) dataToInterpolate.humidity = csvData.humidity;
+            if (csvData.pressure) dataToInterpolate.pressure = csvData.pressure;
+            if (csvData.cdaReference) dataToInterpolate.cdaReference = csvData.cdaReference;
+            if (csvData.lapNumber) dataToInterpolate.lapNumber = csvData.lapNumber;
+
+            const interpolated = interpolateAllData(csvData.timestamps, dataToInterpolate);
+
+            // Replace with interpolated data
+            csvData.timestamps = interpolated.timestamps;
+            csvData.velocity = interpolated.velocity;
+            csvData.power = interpolated.power;
+            csvData.airSpeed = interpolated.airSpeed;
+            csvData.windAngle = interpolated.windAngle;
+            csvData.altitude = interpolated.altitude;
+            csvData.positionLat = interpolated.positionLat;
+            csvData.positionLong = interpolated.positionLong;
+            if (interpolated.temperature) csvData.temperature = interpolated.temperature;
+            if (interpolated.humidity) csvData.humidity = interpolated.humidity;
+            if (interpolated.pressure) csvData.pressure = interpolated.pressure;
+            if (interpolated.cdaReference) csvData.cdaReference = interpolated.cdaReference;
+            if (interpolated.lapNumber) csvData.lapNumber = interpolated.lapNumber;
+
+            console.log(`Interpolated to ${csvData.timestamps.length} data points at 1Hz`);
+        }
+
+        // Create a unified result structure similar to FIT file processing
+        showLoading('Creating data structure...');
+
+        // Calculate distance from GPS coordinates
+        const distance = calculateDistanceArray(csvData.positionLat, csvData.positionLong);
+
+        // Create wind speed array from air speed (wind magnitude is already air speed)
+        // Wind speed in this context is the environmental wind, which we'll calculate later
+        const windSpeed = new Array(csvData.timestamps.length).fill(0);
+
+        // Create a mock result structure that mirrors FIT file result
+        const result = {
+            fit_data: null, // No FIT data for CSV files
+            parsing_statistics: {
+                has_power_data: csvData.power.some(p => !isNaN(p) && p > 0),
+                has_gps_data: csvData.positionLat.some(lat => !isNaN(lat)),
+                has_altitude_data: csvData.altitude.some(alt => !isNaN(alt)),
+                has_air_speed_data: csvData.airSpeed.some(as => !isNaN(as) && as > 0),
+                data_points: csvData.timestamps.length,
+            },
+            laps: csvData.hasLapData ? generateLapsFromCsv(csvData) : [],
+        };
+
+        currentFitResult = result;
+        currentLaps = result.laps;
+
+        hideLoading();
+        await displayCsvResults(csvData, result);
+
+        // Activate section 2 (parameters) and section 3 (map/laps)
+        // CSV files work just like FIT files - both sections are active after loading
+        activateSection(2);
+
+        // Initialize and activate section 3 if we have laps
+        if (result.laps.length > 0) {
+            console.log('📍 Activating section 3 for CSV lap analysis...');
+            activateSection(3);
+            setTimeout(() => {
+                initializeSection3Csv(csvData, result);
+                console.log('✅ Section 3 initialized for CSV');
+            }, 100);
+        }
+
+    } catch (err) {
+        hideLoading();
+        console.error('Error processing CSV file:', err);
+        showError(`Error processing CSV file: ${err}`);
+    }
+}
 
 // Workflow management
 function activateSection(sectionNumber: number) {
@@ -1066,8 +1441,18 @@ async function initializeMapTrimControlsForSelectedLaps() {
 
     // Get selected lap data
     const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]);
-    const fitData = currentFitResult.fit_data;
+
+    // Get data from unified structure (works for both FIT and CSV)
+    const fitData = currentFitData || currentFitResult.fit_data;
+    if (!fitData) {
+        console.error('No fit data available for map trim controls');
+        return;
+    }
+
     const allTimestamps = fitData.timestamps;
+    const allPositionLat = fitData.position_lat;
+    const allPositionLong = fitData.position_long;
+
     const hasGpsData = currentFitResult.parsing_statistics?.has_gps_data ?? false;
 
     // Get time ranges for selected laps
@@ -1083,10 +1468,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
 
     let dataLength = 0;
 
-    if (hasGpsData) {
-        const allPositionLat = fitData.position_lat;
-        const allPositionLong = fitData.position_long;
-
+    if (hasGpsData && allPositionLat && allPositionLong) {
         for (let i = 0; i < allTimestamps.length; i++) {
             const timestamp = allTimestamps[i];
             const isInSelectedLap = selectedLapTimeRanges.some(range =>
@@ -1510,12 +1892,18 @@ async function handleAnalyze() {
         console.log('currentFitResult structure:', currentFitResult);
         console.log('currentFitResult keys:', currentFitResult ? Object.keys(currentFitResult) : 'null');
 
-        // Use the fit_data WASM object which contains all the data arrays
-        if (!currentFitResult || !currentFitResult.fit_data) {
-            throw new Error('No FIT data available');
+        // Get unified data structure (works for both FIT and CSV)
+        if (!currentFitResult) {
+            throw new Error('No data available for analysis');
         }
 
-        const fitData = currentFitResult.fit_data;
+        // Use currentFitData which is either:
+        // - WASM FitData object (from FIT file)
+        // - JavaScript object with same structure (from CSV file)
+        const fitData = currentFitData || currentFitResult.fit_data;
+        if (!fitData) {
+            throw new Error('No analysis data available');
+        }
 
         // Access data directly as properties (Float64Arrays), not as functions
         const allTimestamps = fitData.timestamps;
@@ -1609,31 +1997,86 @@ async function handleAnalyze() {
 
         showLoading('Running Virtual Elevation calculation...');
 
+        // Check if data has environmental data for per-datapoint rho (works for both FIT and CSV)
+        currentRhoArray = null; // Reset global rho array
+        const hasEnvironmentalData = fitData.temperature && fitData.humidity && fitData.pressure;
+        if (hasEnvironmentalData) {
+            console.log('📊 Data has environmental data - calculating per-datapoint rho');
+            const fullRhoArray = calculateRhoArrayFromFitData(fitData);
+
+            if (fullRhoArray) {
+                // Filter rho array to match selected laps (same filtering as other data)
+                currentRhoArray = [];
+                for (let i = 0; i < allTimestamps.length; i++) {
+                    const timestamp = allTimestamps[i];
+                    const isInSelectedLap = selectedLapTimeRanges.some(range =>
+                        timestamp >= range.start && timestamp <= range.end
+                    );
+                    if (isInSelectedLap) {
+                        currentRhoArray.push(fullRhoArray[i]);
+                    }
+                }
+
+                console.log('📊 Filtered rho array for VE calculation:', {
+                    fullLength: fullRhoArray.length,
+                    filteredLength: currentRhoArray.length,
+                    sampleValues: currentRhoArray.slice(0, 5)
+                });
+            }
+        }
+
         // Create Virtual Elevation calculator with filtered data
-        const calculator = create_ve_calculator(
-            filteredTimestamps,
-            filteredPower,
-            filteredVelocity,
-            filteredPositionLat,
-            filteredPositionLong,
-            filteredAltitude,
-            filteredDistance,
-            filteredAirSpeed,
-            filteredWindSpeed,
-            // Parameters
-            currentParameters.system_mass,
-            currentParameters.rho,
-            currentParameters.eta,
-            currentParameters.cda,
-            currentParameters.crr,
-            currentParameters.cda_min,
-            currentParameters.cda_max,
-            currentParameters.crr_min,
-            currentParameters.crr_max,
-            currentParameters.wind_speed,
-            currentParameters.wind_direction,
-            currentParameters.velodrome
-        );
+        // Use the rho array version if we have per-datapoint rho from CSV
+        const calculator = currentRhoArray
+            ? create_ve_calculator_with_rho_array(
+                filteredTimestamps,
+                filteredPower,
+                filteredVelocity,
+                filteredPositionLat,
+                filteredPositionLong,
+                filteredAltitude,
+                filteredDistance,
+                filteredAirSpeed,
+                filteredWindSpeed,
+                new Float64Array(currentRhoArray),
+                // Parameters
+                currentParameters.system_mass,
+                currentParameters.rho,
+                currentParameters.eta,
+                currentParameters.cda,
+                currentParameters.crr,
+                currentParameters.cda_min,
+                currentParameters.cda_max,
+                currentParameters.crr_min,
+                currentParameters.crr_max,
+                currentParameters.wind_speed,
+                currentParameters.wind_direction,
+                currentParameters.velodrome
+            )
+            : create_ve_calculator(
+                filteredTimestamps,
+                filteredPower,
+                filteredVelocity,
+                filteredPositionLat,
+                filteredPositionLong,
+                filteredAltitude,
+                filteredDistance,
+                filteredAirSpeed,
+                filteredWindSpeed,
+                // Parameters
+                currentParameters.system_mass,
+                currentParameters.rho,
+                currentParameters.eta,
+                currentParameters.cda,
+                currentParameters.crr,
+                currentParameters.cda_min,
+                currentParameters.cda_max,
+                currentParameters.crr_min,
+                currentParameters.crr_max,
+                currentParameters.wind_speed,
+                currentParameters.wind_direction,
+                currentParameters.velodrome
+            );
 
         // Use provided CdA and Crr values, or defaults for optimization
         const cda = currentParameters.cda ?? 0.3; // Use middle of range if optimizing
@@ -1645,6 +2088,26 @@ async function handleAnalyze() {
 
         const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
+        // If data has CdA reference data, filter it for the selected laps
+        // (validation will be calculated dynamically when plots update)
+        let filteredCdaReference: number[] | null = null;
+        if (fitData.cda_reference) {
+            console.log('📊 Data has CdA reference - will enable validation tab');
+
+            // Filter CdA reference to match selected laps
+            const fullCdaReference = fitData.cda_reference;
+            filteredCdaReference = [];
+            for (let i = 0; i < allTimestamps.length; i++) {
+                const timestamp = allTimestamps[i];
+                const isInSelectedLap = selectedLapTimeRanges.some(range =>
+                    timestamp >= range.start && timestamp <= range.end
+                );
+                if (isInSelectedLap) {
+                    filteredCdaReference.push(fullCdaReference[i]);
+                }
+            }
+        }
+
         hideLoading();
 
         // Store filtered position data for map trimming
@@ -1654,7 +2117,21 @@ async function handleAnalyze() {
         };
 
         // Show the Virtual Elevation analysis interface inline
-        showVirtualElevationAnalysisInline(result, selectedLaps, filteredTimestamps, filteredPower, filteredVelocity, filteredPositionLat, filteredPositionLong, filteredAltitude, filteredDistance, filteredAirSpeed, filteredWindSpeed, filteredTemperature);
+        showVirtualElevationAnalysisInline(
+            result,
+            selectedLaps,
+            filteredTimestamps,
+            filteredPower,
+            filteredVelocity,
+            filteredPositionLat,
+            filteredPositionLong,
+            filteredAltitude,
+            filteredDistance,
+            filteredAirSpeed,
+            filteredWindSpeed,
+            filteredTemperature,
+            filteredCdaReference
+        );
 
     } catch (err) {
         console.error('Virtual Elevation analysis failed:', err);
@@ -1665,11 +2142,13 @@ async function handleAnalyze() {
 }
 
 
-async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], temperature: number[] = []) {
+async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], temperature: number[] = [], cdaReference: number[] | null = null) {
     // Store analyzed laps globally for save functionality
     currentAnalyzedLaps = analyzedLaps;
     // Store filtered data globally for save functionality
     currentFilteredData = { power, velocity, temperature, timestamps };
+    // Store CdA reference data globally (will be used for dynamic validation)
+    currentCdaReference = cdaReference;
 
     // Check if air_speed data is available (not all zeros/NaN)
     const hasAirSpeed = airSpeed.some(val => !isNaN(val) && val !== 0);
@@ -1781,6 +2260,9 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     <div class="ve-plots">
                 <div class="ve-tabs">
                     <button class="ve-tab-button active" data-tab="ve">VE</button>
+                    ${cdaReference ? `
+                    <button class="ve-tab-button" data-tab="cda-validation">CdA Validation</button>
+                    ` : ''}
                     ${(hasAirSpeed || hasConstantWind) ? `
                     <button class="ve-tab-button" data-tab="wind">Wind</button>
                     ` : ''}
@@ -1800,6 +2282,35 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     <div id="vePlot" class="ve-plot" style="margin-bottom: 0; height: 380px;"></div>
                     <div id="veResidualsPlot" class="ve-plot" style="margin-top: 0; height: 220px;"></div>
                 </div>
+
+                ${cdaReference ? `
+                <div class="ve-tab-content" id="cda-validation-tab">
+                    <div style="background: #f5f5f5; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+                        <h4 style="margin: 0 0 0.75rem 0; font-size: 1.1rem;">CdA Comparison</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div>
+                                <div style="font-weight: 600; color: #1976d2;">VE Calculated</div>
+                                <div id="cdaOptimizedMetrics" style="font-size: 0.9em; color: #666; margin-top: 0.25rem;">
+                                    <!-- Updated dynamically -->
+                                </div>
+                            </div>
+                            <div>
+                                <div style="font-weight: 600; color: #000;">Reference CdA</div>
+                                <div id="cdaReferenceMetrics" style="font-size: 0.9em; color: #666; margin-top: 0.25rem;">
+                                    <!-- Updated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #ddd;">
+                            <div id="cdaDifferenceMetrics" style="font-size: 0.9em; color: #666;">
+                                <!-- Updated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                    <div id="cdaValidationPlot" class="ve-plot" style="margin-bottom: 0; height: 380px;"></div>
+                    <div id="cdaValidationResidualsPlot" class="ve-plot" style="margin-top: 0; height: 220px;"></div>
+                </div>
+                ` : ''}
 
                 ${(hasAirSpeed || hasConstantWind) ? `
                 <div class="ve-tab-content" id="wind-tab">
@@ -1968,6 +2479,8 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
     });
     setTimeout(() => {
         updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, initialTrimStart, initialTrimEnd);
+
+        // CdA validation plots will be rendered dynamically by updateVEPlots if CdA reference exists
 
         // Update map markers with preset trim values after analyze
         if (mapVisualization && filteredVEData) {
@@ -2937,7 +3450,7 @@ function updateVEPlots(timestamps: number[], power: number[], velocity: number[]
     updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd, windSource);
 }
 
-function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
+async function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
     const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
 
@@ -3070,29 +3583,55 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
                 ? useAirSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
                 : useAirSpeed;
 
-            const calculator = create_ve_calculator(
-                timestamps,
-                power,
-                velocity,
-                positionLat,
-                positionLong,
-                altitude,
-                distance,
-                calibratedAirSpeed,
-                useWindSpeed,
-                currentParameters.system_mass,
-                currentParameters.rho,
-                currentParameters.eta,
-                cda,
-                crr,
-                currentParameters.cda_min,
-                currentParameters.cda_max,
-                currentParameters.crr_min,
-                currentParameters.crr_max,
-                currentParameters.wind_speed,
-                currentParameters.wind_direction,
-                currentParameters.velodrome
-            );
+            // Use rho array version if we have per-datapoint rho
+            const calculator = currentRhoArray
+                ? create_ve_calculator_with_rho_array(
+                    new Float64Array(timestamps),
+                    new Float64Array(power),
+                    new Float64Array(velocity),
+                    new Float64Array(positionLat),
+                    new Float64Array(positionLong),
+                    new Float64Array(altitude),
+                    new Float64Array(distance),
+                    new Float64Array(calibratedAirSpeed),
+                    new Float64Array(useWindSpeed),
+                    new Float64Array(currentRhoArray),
+                    currentParameters!.system_mass,
+                    currentParameters!.rho,
+                    currentParameters!.eta,
+                    cda,
+                    crr,
+                    currentParameters!.cda_min,
+                    currentParameters!.cda_max,
+                    currentParameters!.crr_min,
+                    currentParameters!.crr_max,
+                    currentParameters!.wind_speed,
+                    currentParameters!.wind_direction,
+                    currentParameters!.velodrome
+                )
+                : create_ve_calculator(
+                    new Float64Array(timestamps),
+                    new Float64Array(power),
+                    new Float64Array(velocity),
+                    new Float64Array(positionLat),
+                    new Float64Array(positionLong),
+                    new Float64Array(altitude),
+                    new Float64Array(distance),
+                    new Float64Array(calibratedAirSpeed),
+                    new Float64Array(useWindSpeed),
+                    currentParameters!.system_mass,
+                    currentParameters!.rho,
+                    currentParameters!.eta,
+                    cda,
+                    crr,
+                    currentParameters!.cda_min,
+                    currentParameters!.cda_max,
+                    currentParameters!.crr_min,
+                    currentParameters!.crr_max,
+                    currentParameters!.wind_speed,
+                    currentParameters!.wind_direction,
+                    currentParameters!.velodrome
+                );
 
             // Store calculator globally for air speed calibration
             veCalculator = calculator;
@@ -3121,6 +3660,15 @@ function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velo
 
             // Create plots with Plotly.js
             createVirtualElevationPlots(trimStart, trimEnd, result.virtual_elevation, plotAltitude);
+
+            // Update CdA validation plots if CdA reference data is available
+            if (currentCdaReference) {
+                await updateCdaValidationPlots(
+                    timestamps, power, velocity, positionLat, positionLong, altitude, distance,
+                    calibratedAirSpeed, useWindSpeed,
+                    cda, crr, trimStart, trimEnd, result
+                );
+            }
         }
 
     } catch (error) {
@@ -3591,6 +4139,227 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
     } catch (error) {
         console.error('Error creating plots:', error);
     }
+}
+
+// Update CdA validation plots and metrics dynamically
+async function updateCdaValidationPlots(
+    timestamps: number[],
+    power: number[],
+    velocity: number[],
+    positionLat: number[],
+    positionLong: number[],
+    altitude: number[],
+    distance: number[],
+    airSpeed: number[],
+    windSpeed: number[],
+    cdaOptimized: number,
+    crrOptimized: number,
+    trimStart: number,
+    trimEnd: number,
+    veOptimizedResult: any
+) {
+    if (!currentCdaReference || !currentParameters) return;
+
+    // Calculate average CdA from reference data for the TRIMMED region (for metrics display)
+    const trimmedCdaRef = currentCdaReference.slice(trimStart, trimEnd + 1);
+    const validCda = trimmedCdaRef.filter(c => !isNaN(c));
+    if (validCda.length === 0) return;
+
+    const avgCdaRef = validCda.reduce((sum, c) => sum + c, 0) / validCda.length;
+
+    // Create calculator for reference CdA calculation
+    // Uses SAME air speed/wind data as the slider CdA calculation
+    const refCalculator = currentRhoArray
+        ? create_ve_calculator_with_rho_array(
+            timestamps, power, velocity, positionLat, positionLong, altitude, distance,
+            airSpeed, windSpeed,
+            new Float64Array(currentRhoArray),
+            currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
+            currentParameters.cda, crrOptimized,
+            currentParameters.cda_min, currentParameters.cda_max,
+            currentParameters.crr_min, currentParameters.crr_max,
+            currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
+        )
+        : create_ve_calculator(
+            timestamps, power, velocity, positionLat, positionLong, altitude, distance,
+            airSpeed, windSpeed,
+            currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
+            currentParameters.cda, crrOptimized,
+            currentParameters.cda_min, currentParameters.cda_max,
+            currentParameters.crr_min, currentParameters.crr_max,
+            currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
+        );
+
+    // Calculate VE with per-datapoint CdA reference array
+    // Pre-process: Replace any NaN values with the average to avoid using default 0.3
+    const cleanedCdaRef = currentCdaReference.map(cda => isNaN(cda) ? avgCdaRef : cda);
+    const cdaRefArray = new Float64Array(cleanedCdaRef);
+
+    // Debug: Verify we're using per-datapoint CdA, not average
+    const nanCount = currentCdaReference.filter(c => isNaN(c)).length;
+    console.log('CdA Array Debug:', {
+        arrayLength: cdaRefArray.length,
+        trimmedLength: trimmedCdaRef.length,
+        nanCount: nanCount,
+        nanReplaced: nanCount > 0 ? `${nanCount} NaN values replaced with average (${avgCdaRef.toFixed(4)})` : 'No NaN values',
+        sampleValues: Array.from(cdaRefArray.slice(trimStart, trimStart + 10)),
+        average: avgCdaRef,
+        min: Math.min(...Array.from(cdaRefArray.slice(trimStart, trimEnd + 1))),
+        max: Math.max(...Array.from(cdaRefArray.slice(trimStart, trimEnd + 1))),
+        stdDev: (() => {
+            const trimmedArray = Array.from(cdaRefArray.slice(trimStart, trimEnd + 1));
+            const mean = avgCdaRef;
+            const variance = trimmedArray.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / trimmedArray.length;
+            return Math.sqrt(variance);
+        })(),
+        usingPerDatapoint: true
+    });
+
+    let refResult;
+    try {
+        refResult = refCalculator.calculate_virtual_elevation_with_cda_array(cdaRefArray, crrOptimized, trimStart, trimEnd);
+    } catch (error) {
+        console.error('Error calculating VE with CdA array - WASM method may not exist yet:', error);
+        console.error('Please rebuild WASM with: ./build.sh or wasm-pack build backend --target web --out-dir ../frontend/wasm');
+        return;
+    }
+
+    // Update metrics
+    const cdaOptimizedMetrics = document.getElementById('cdaOptimizedMetrics');
+    const cdaReferenceMetrics = document.getElementById('cdaReferenceMetrics');
+    const cdaDifferenceMetrics = document.getElementById('cdaDifferenceMetrics');
+
+    if (cdaOptimizedMetrics) {
+        cdaOptimizedMetrics.innerHTML = `
+            CdA: <span style="font-weight: 600;">${cdaOptimized.toFixed(4)}</span><br>
+            VE Gain: <span style="font-weight: 600;">${veOptimizedResult.ve_elevation_diff.toFixed(2)}m</span>
+        `;
+    }
+
+    if (cdaReferenceMetrics) {
+        cdaReferenceMetrics.innerHTML = `
+            CdA: <span style="font-weight: 600;">${avgCdaRef.toFixed(4)}</span><br>
+            VE Gain: <span style="font-weight: 600;">${refResult.ve_elevation_diff.toFixed(2)}m</span>
+        `;
+    }
+
+    if (cdaDifferenceMetrics) {
+        const cdaDiff = cdaOptimized - avgCdaRef;
+        const veGainDiff = veOptimizedResult.ve_elevation_diff - refResult.ve_elevation_diff;
+
+        cdaDifferenceMetrics.innerHTML = `
+            <strong>Difference:</strong>
+            CdA: <span style="font-weight: 600;">${cdaDiff >= 0 ? '+' : ''}${cdaDiff.toFixed(4)}</span> |
+            VE Gain: <span style="font-weight: 600;">${veGainDiff >= 0 ? '+' : ''}${veGainDiff.toFixed(2)}m</span>
+        `;
+    }
+
+    // Render plots
+    const Plotly = await waitForPlotly();
+    const vePlotDiv = document.getElementById('cdaValidationPlot');
+    const residualsPlotDiv = document.getElementById('cdaValidationResidualsPlot');
+
+    if (!vePlotDiv || !residualsPlotDiv) return;
+
+    // Extract data (trim end is inclusive, so we slice to trimEnd + 1)
+    const veRefCdaArray = Array.from(refResult.virtual_elevation).slice(trimStart, trimEnd + 1) as number[];
+    const veSliderCdaArray = Array.from(veOptimizedResult.virtual_elevation).slice(trimStart, trimEnd + 1) as number[];
+    const actualElevation = altitude.slice(trimStart, trimEnd + 1);
+    const timeSlice = timestamps.slice(trimStart, trimEnd + 1);
+
+    // Calculate elevation offset (start at actual elevation, not 0)
+    const elevationOffset = actualElevation[0];
+
+    console.log('Before offset:', {
+        veRefCdaFirst: veRefCdaArray[0],
+        veSliderCdaFirst: veSliderCdaArray[0],
+        difference: veRefCdaArray[0] - veSliderCdaArray[0],
+        actualElevFirst: actualElevation[0]
+    });
+
+    const offsetVeRefCda = veRefCdaArray.map(ve => ve - veRefCdaArray[0] + elevationOffset);
+    const offsetVeSliderCda = veSliderCdaArray.map(ve => ve - veSliderCdaArray[0] + elevationOffset);
+
+    // Residuals: VE (slider CdA) - VE (ref CdA)
+    const residuals = offsetVeSliderCda.map((ve, i) => ve - offsetVeRefCda[i]);
+
+    // Debug: Check if VE profiles are actually different
+    console.log('VE Profile Comparison:', {
+        sliderCdA: cdaOptimized,
+        avgRefCdA: avgCdaRef,
+        cdaDiffPercent: ((cdaOptimized - avgCdaRef) / avgCdaRef * 100).toFixed(2) + '%',
+        veRefSample: offsetVeRefCda.slice(0, 5),
+        veSliderSample: offsetVeSliderCda.slice(0, 5),
+        veRefFinal: offsetVeRefCda[offsetVeRefCda.length - 1],
+        veSliderFinal: offsetVeSliderCda[offsetVeSliderCda.length - 1],
+        totalVEDiff: offsetVeSliderCda[offsetVeSliderCda.length - 1] - offsetVeRefCda[offsetVeRefCda.length - 1],
+        residualsSample: residuals.slice(0, 5),
+        maxResidual: Math.max(...residuals.map(Math.abs)),
+        avgResidual: residuals.reduce((sum, r) => sum + Math.abs(r), 0) / residuals.length,
+        expectedDiff: 'With 5% CdA difference, expecting significant VE difference'
+    });
+
+    // VE plot comparing slider CdA vs reference CdA
+    const vePlotData = [
+        {
+            x: timeSlice,
+            y: offsetVeSliderCda,
+            mode: 'lines',
+            name: `VE (Slider CdA: ${cdaOptimized.toFixed(4)})`,
+            line: { color: '#1976d2', width: 2 } // Blue for slider CdA
+        },
+        {
+            x: timeSlice,
+            y: offsetVeRefCda,
+            mode: 'lines',
+            name: `VE (Ref CdA: ${avgCdaRef.toFixed(4)})`,
+            line: { color: '#000', width: 2 } // Black for reference CdA
+        }
+    ];
+
+    const vePlotLayout = {
+        title: `CdA Validation - VE Comparison`,
+        xaxis: { title: 'Time (seconds)' },
+        yaxis: { title: 'Virtual Elevation (m)' },
+        showlegend: true,
+        margin: { l: 60, r: 20, t: 40, b: 5 },
+        height: 380
+    };
+
+    // Residuals plot: difference between the two VE calculations
+    const residualsData = [{
+        x: timeSlice,
+        y: residuals,
+        mode: 'markers',
+        name: 'VE Difference',
+        marker: { color: '#1976d2', size: 3 }
+    }, {
+        x: timeSlice,
+        y: new Array(residuals.length).fill(0),
+        mode: 'lines',
+        name: 'Zero',
+        line: { color: 'black', width: 1, dash: 'dash' },
+        showlegend: false
+    }];
+
+    const residualsLayout = {
+        title: 'Residuals (VE Slider - VE Ref)',
+        xaxis: { title: 'Time (seconds)' },
+        yaxis: { title: 'VE Difference (m)' },
+        showlegend: false,
+        margin: { l: 60, r: 20, t: 30, b: 60 },
+        height: 220
+    };
+
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+        displaylogo: false
+    };
+
+    Plotly.newPlot(vePlotDiv, vePlotData, vePlotLayout, config);
+    Plotly.newPlot(residualsPlotDiv, residualsData, residualsLayout, config);
 }
 
 function updateVEMetrics(result: any) {

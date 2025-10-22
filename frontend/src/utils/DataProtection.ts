@@ -1,8 +1,16 @@
 export class DataProtection {
   static validateFileType(file: File): boolean {
-    // Relaxed FIT file validation - many systems don't set MIME type correctly for .fit files
-    return file.name.toLowerCase().endsWith('.fit') &&
-           file.size > 0 && file.size < 50_000_000; // 50MB limit
+    // Accept both FIT and CSV files
+    const fileName = file.name.toLowerCase();
+    const isValidExtension = fileName.endsWith('.fit') || fileName.endsWith('.csv');
+    return isValidExtension && file.size > 0 && file.size < 50_000_000; // 50MB limit
+  }
+
+  static getFileType(file: File): 'fit' | 'csv' | 'unknown' {
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.fit')) return 'fit';
+    if (fileName.endsWith('.csv')) return 'csv';
+    return 'unknown';
   }
 
   static async validateFitMagicNumber(file: File): Promise<boolean> {
