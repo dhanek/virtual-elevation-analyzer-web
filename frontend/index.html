@@ -1579,13 +1579,42 @@
                         <h3 style="margin: 0 0 1rem 0; font-size: 1.25rem; font-weight: 400; color: #1a1a1a;">📊 Elevation Correction (Optional)</h3>
                         <p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: #666;">Upload a DEM file to correct GPS altitude data using high-precision terrain data.</p>
 
+                        <details style="margin-bottom: 1rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.875rem;">
+                            <summary style="cursor: pointer; font-weight: 500; color: #4363d8;">ℹ️ Supported DEM Formats & Help</summary>
+                            <div style="margin-top: 0.75rem; color: #666; line-height: 1.6;">
+                                <p style="margin: 0 0 0.5rem 0;"><strong>✅ Supported Formats:</strong></p>
+                                <ul style="margin: 0 0 1rem 1.5rem; padding: 0;">
+                                    <li>GeoTIFF (.tif, .tiff) - uncompressed, LZW, or Deflate compression</li>
+                                    <li>World files (.tfw, .tifw) for coordinate information</li>
+                                    <li>Projection files (.prj) for coordinate system</li>
+                                    <li>Data types: 8-bit, 16-bit, 32-bit integer or float</li>
+                                </ul>
+
+                                <p style="margin: 0 0 0.5rem 0;"><strong>❌ Not Supported (requires conversion):</strong></p>
+                                <ul style="margin: 0 0 1rem 1.5rem; padding: 0;">
+                                    <li>LERC, JPEG2000, or WebP compression</li>
+                                    <li>HFA (.img), ASCII Grid (.asc), HGT (SRTM) formats</li>
+                                </ul>
+
+                                <p style="margin: 0 0 0.5rem 0;"><strong>🔧 Need to convert a file?</strong></p>
+                                <p style="margin: 0 0 0.5rem 1rem;">Use GDAL command-line or QGIS (free GUI tool)</p>
+                                <p style="margin: 0 0 0.5rem 1rem;"><code style="background: #e5e5e5; padding: 0.125rem 0.25rem; border-radius: 2px;">gdal_translate -co COMPRESS=NONE input.tif output.tif</code></p>
+
+                                <p style="margin: 1rem 0 0 0;"><strong>📚 Resources:</strong></p>
+                                <ul style="margin: 0.25rem 0 0 1.5rem; padding: 0;">
+                                    <li><a href="https://qgis.org/download/" target="_blank" style="color: #4363d8;">Download QGIS (free)</a></li>
+                                    <li><a href="https://gdal.org/download.html" target="_blank" style="color: #4363d8;">Install GDAL</a></li>
+                                </ul>
+                            </div>
+                        </details>
+
                         <div class="file-input-wrapper">
-                            <input type="file" id="demFileInput" accept=".tif,.tiff,.vrt" class="hidden">
+                            <input type="file" id="demFileInput" accept=".tif,.tiff,.vrt,.tfw,.tifw,.prj" class="hidden" multiple>
                             <div class="file-input dem-file-input" id="demFileDropZone" style="padding: 1.5rem;">
                                 <div>
-                                    🗻 Click to select DEM file or drag and drop
+                                    🗻 Click to select DEM file(s) or drag and drop
                                 </div>
-                                <small>Supports GeoTIFF (.tif, .tiff) and VRT (.vrt)</small>
+                                <small>Select .tif + optional .tfw (world) + .prj (projection) files</small>
                             </div>
                         </div>
 

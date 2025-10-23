@@ -190,7 +190,7 @@ demFileDropZone.addEventListener('click', () => {
 demFileInput.addEventListener('change', async (event) => {
     const target = event.target as HTMLInputElement;
     if (target.files && target.files.length > 0) {
-        await handleDEMFileSelection(target.files[0]);
+        await handleDEMFileSelection(target.files);
     }
 });
 
@@ -209,7 +209,7 @@ demFileDropZone.addEventListener('drop', async (event) => {
 
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
-        await handleDEMFileSelection(files[0]);
+        await handleDEMFileSelection(files);
     }
 });
 
@@ -222,17 +222,43 @@ correctElevationCheckbox.addEventListener('change', (event) => {
 });
 
 // DEM file handling functions
-async function handleDEMFileSelection(file: File): Promise<void> {
+async function handleDEMFileSelection(files: FileList): Promise<void> {
     try {
         showLoading('Loading DEM file...');
 
-        // Load DEM file
-        await demManager.loadDEMFile(file);
-        selectedDEMFile = file;
+        // Separate TIF, world, and projection files
+        let tifFile: File | null = null;
+        let worldFile: File | null = null;
+        let projFile: File | null = null;
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const fileName = file.name.toLowerCase();
+
+            if (fileName.endsWith('.tif') || fileName.endsWith('.tiff') || fileName.endsWith('.vrt')) {
+                tifFile = file;
+            } else if (fileName.endsWith('.tfw') || fileName.endsWith('.tifw')) {
+                worldFile = file;
+            } else if (fileName.endsWith('.prj')) {
+                projFile = file;
+            }
+        }
+
+        if (!tifFile) {
+            throw new Error('No .tif or .tiff file selected');
+        }
+
+        // Load DEM file with optional world and projection files
+        await demManager.loadDEMFile(tifFile, worldFile ?? undefined, projFile ?? undefined);
+        selectedDEMFile = tifFile;
 
         // Update UI
         demFileInfo.classList.remove('hidden');
-        demFileName.textContent = file.name;
+        const fileNames = [tifFile.name];
+        if (worldFile) fileNames.push(worldFile.name);
+        if (projFile) fileNames.push(projFile.name);
+        const displayName = fileNames.join(' + ');
+        demFileName.textContent = displayName;
 
         // Show metadata
         const metadata = JSON.parse(demManager.getDEMMetadata()!);
@@ -248,7 +274,7 @@ async function handleDEMFileSelection(file: File): Promise<void> {
         elevationCorrectionEnabled = true;
 
         hideLoading();
-        console.log('DEM file loaded successfully:', file.name);
+        console.log('DEM file loaded successfully:', displayName);
     } catch (err) {
         hideLoading();
         showError(`Failed to load DEM file: ${err}`);

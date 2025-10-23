@@ -12,8 +12,10 @@ export class DEMManager {
     /**
      * Load a DEM file into memory for processing
      * @param file The DEM file (GeoTIFF, TIF, etc.)
+     * @param worldFile Optional world file (.tfw, .tifw) for geospatial coordinates
+     * @param projFile Optional projection file (.prj) for coordinate system definition
      */
-    async loadDEMFile(file: File): Promise<void> {
+    async loadDEMFile(file: File, worldFile?: File, projFile?: File): Promise<void> {
         if (!this.isValidDEMFile(file)) {
             throw new Error('Invalid DEM file format. Supported formats: .tif, .tiff, .vrt');
         }
@@ -23,8 +25,26 @@ export class DEMManager {
             const arrayBuffer = await file.arrayBuffer();
             const uint8Array = new Uint8Array(arrayBuffer);
 
-            // Create DEM processor from file data (pass filename for SRTM parsing)
-            this.demProcessor = new DEMProcessor(uint8Array, file.name);
+            // Read world file if provided
+            let worldFileContent: string | undefined = undefined;
+            if (worldFile) {
+                worldFileContent = await worldFile.text();
+                console.log('World file loaded:', worldFile.name);
+            }
+
+            // Read projection file if provided
+            let projFileContent: string | undefined = undefined;
+            if (projFile) {
+                projFileContent = await projFile.text();
+                console.log('Projection file loaded:', projFile.name);
+            }
+
+            // Create DEM processor from file data
+            // If world file or proj file is provided, use new_with_world_file method
+            this.demProcessor = (worldFileContent || projFileContent)
+                ? DEMProcessor.new_with_world_file(uint8Array, file.name, worldFileContent, projFileContent)
+                : new DEMProcessor(uint8Array, file.name);
+
             this.demFile = file;
             this.demFileLoaded = true;
 
