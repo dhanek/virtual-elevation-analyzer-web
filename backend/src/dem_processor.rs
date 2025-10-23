@@ -82,16 +82,16 @@ impl DEMProcessor {
             .map_err(|e| {
                 let error_msg = format!("{}", e);
                 JsValue::from_str(&format!(
-                    "⚠️ Failed to Read DEM File\n\n\
+                    "Failed to Read DEM File\n\n\
                     The file does not appear to be a valid TIFF/GeoTIFF format.\n\n\
                     Supported formats:\n\
-                    • GeoTIFF (.tif, .tiff)\n\
-                    • Uncompressed or LZW/Deflate compression\n\
-                    • With optional .tfw (world file) and .prj (projection file)\n\n\
+                    - GeoTIFF (.tif, .tiff)\n\
+                    - Uncompressed or LZW/Deflate compression\n\
+                    - With optional .tfw (world file) and .prj (projection file)\n\n\
                     If you have a different format:\n\
-                    • HFA (.img) files: Convert with GDAL\n\
-                    • ASCII Grid (.asc): Convert with GDAL\n\
-                    • HGT (SRTM): Convert with GDAL\n\n\
+                    - HFA (.img) files: Convert with GDAL\n\
+                    - ASCII Grid (.asc): Convert with GDAL\n\
+                    - HGT (SRTM): Convert with GDAL\n\n\
                     Conversion command:\n\
                     gdal_translate -of GTiff input.img output.tif\n\n\
                     Technical error: {}",
@@ -125,19 +125,20 @@ impl DEMProcessor {
                     } else { "" };
 
                     JsValue::from_str(&format!(
-                        "⚠️ Unsupported TIFF Compression Format{}\n\n\
+                        "Unsupported TIFF Compression Format{}\n\n\
                         This DEM file uses a compression method not supported by the web browser.\n\n\
-                        📋 SOLUTION OPTIONS:\n\n\
-                        1️⃣ Convert using GDAL (Recommended):\n\
+                        SOLUTION OPTIONS:\n\n\
+                        1. Convert using GDAL (Recommended):\n\
                            gdal_translate -co COMPRESS=NONE input.tif output.tif\n\n\
-                        2️⃣ Convert using QGIS (GUI option):\n\
-                           • Install QGIS (free): https://qgis.org/download/\n\
-                           • Right-click layer → Export → Save As → Set 'Compression: None'\n\n\
-                        3️⃣ Install GDAL command-line:\n\
-                           • macOS: brew install gdal\n\
-                           • Windows: https://gdal.org/download.html#windows\n\
-                           • Linux: sudo apt install gdal-bin\n\n\
-                        📚 Need help? See GDAL documentation: https://gdal.org/programs/gdal_translate.html\n\n\
+                        2. Convert using QGIS (GUI option):\n\
+                           - Install QGIS (free): https://qgis.org/download/\n\
+                           - Right-click layer → Export → Save As → Set 'Compression: None'\n\n\
+                        3. Install GDAL command-line:\n\
+                           - macOS: brew install gdal\n\
+                           - Windows: https://gdal.org/download.html#windows\n\
+                           - Linux: sudo apt install gdal-bin\n\n\
+                        Need help? See GDAL documentation:\n\
+                        https://gdal.org/programs/gdal_translate.html\n\n\
                         Technical details: {}",
                         compression_info,
                         error_msg
@@ -201,7 +202,7 @@ impl DEMProcessor {
         if transform.origin_x.abs() < 10.0 && transform.origin_y.abs() < 10.0 &&
            max_x.abs() < 10.0 && max_y.abs() < 10.0 {
             web_sys::console::warn_1(&format!(
-                "⚠️ Warning: DEM bounds look incorrect [{:.1}, {:.1}, {:.1}, {:.1}]\n\
+                "Warning: DEM bounds look incorrect [{:.1}, {:.1}, {:.1}, {:.1}]\n\
                 This usually means the GeoTIFF file is missing geospatial tags.\n\n\
                 To fix this:\n\
                 1. Look for companion files (.tfw world file, .prj projection file)\n\
@@ -507,7 +508,7 @@ impl DEMProcessor {
         let lines: Vec<&str> = world_file_content.lines().collect();
         if lines.len() < 6 {
             return Err(JsValue::from_str(&format!(
-                "⚠️ Invalid World File Format\n\n\
+                "Invalid World File Format\n\n\
                 World files (.tfw, .tifw, .jgw, etc.) must contain exactly 6 lines.\n\
                 Found {} lines in the provided world file.\n\n\
                 Expected format:\n\
@@ -517,7 +518,7 @@ impl DEMProcessor {
                 Line 4: Pixel height (Y scale, typically negative)\n\
                 Line 5: X coordinate of upper-left corner\n\
                 Line 6: Y coordinate of upper-left corner\n\n\
-                📚 Learn more: https://en.wikipedia.org/wiki/World_file",
+                Learn more: https://en.wikipedia.org/wiki/World_file",
                 lines.len()
             )));
         }
