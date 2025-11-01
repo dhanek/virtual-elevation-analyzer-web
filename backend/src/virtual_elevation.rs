@@ -49,10 +49,9 @@ pub struct VEData {
     position_long: Vec<f64>,
     altitude: Vec<f64>,
     distance: Vec<f64>,
-    air_speed: Vec<f64>, // apparent wind velocity in m/s (if available)
-    wind_speed: Vec<f64>, // wind speed relative to rider (if available)
+    wind_speed: Vec<f64>, // apparent velocity at 0° (air_speed directly, or wind_speed triangulated with wind_yaw)
     #[wasm_bindgen(skip)]
-    rho_array: Option<Vec<f64>>, // per-datapoint air density (if available from environmental data)
+    rho_array: Option<Vec<f64>>, // per-datapoint air density (if available from environmental data or FIT file)
 }
 
 #[wasm_bindgen]
@@ -66,7 +65,6 @@ impl VEData {
         position_long: Vec<f64>,
         altitude: Vec<f64>,
         distance: Vec<f64>,
-        air_speed: Vec<f64>,
         wind_speed: Vec<f64>,
     ) -> VEData {
         VEData {
@@ -77,7 +75,6 @@ impl VEData {
             position_long,
             altitude,
             distance,
-            air_speed,
             wind_speed,
             rho_array: None,
         }
@@ -305,37 +302,30 @@ impl VirtualElevationCalculator {
 
     /// Get apparent velocity (ground + wind) with optional air_speed calibration
     fn get_apparent_velocity(&self, effective_wind: &[f64]) -> Vec<f64> {
-        // Prioritize air_speed data if available
-        if !self.data.air_speed.is_empty() && self.data.air_speed.iter().any(|&x| !x.is_nan() && x != 0.0) {
-            // Apply calibration to air_speed
-            return self.data.air_speed.iter()
+        // PRIORITY 1: Use wind_speed data if available (already apparent velocity from air_speed or wind_speed columns)
+        if !self.data.wind_speed.is_empty() && self.data.wind_speed.iter().any(|&x| !x.is_nan() && x != 0.0) {
+            // Data is already apparent velocity - just apply calibration
+            return self.data.wind_speed.iter()
                 .map(|&speed| speed * self.air_speed_calibration)
                 .collect();
         }
 
-        // Use wind_speed data if available
-        if !self.data.wind_speed.is_empty() && self.data.wind_speed.iter().any(|&x| !x.is_nan() && x != 0.0) {
-            return self.data.velocity.iter().zip(&self.data.wind_speed)
-                .map(|(v, w)| v + if w.is_nan() { 0.0 } else { *w })
-                .collect();
-        }
-
-        // Fall back to calculated effective wind
+        // PRIORITY 2: Fall back to calculated effective wind (from wind parameters)
         self.data.velocity.iter().zip(effective_wind)
             .map(|(v, w)| v + w)
             .collect()
     }
 
-    /// Calculate virtual distances from air speed and ground speed within trim region
+    /// Calculate virtual distances from wind data and ground speed within trim region
     fn calculate_virtual_distances(&self, trim_start: usize, trim_end: usize) -> (f64, f64, f64) {
-        let mut vd_air = 0.0;
+        let mut vd_wind = 0.0;
         let mut vd_ground = 0.0;
 
-        // Check if air_speed data is available
-        let has_air_speed = !self.data.air_speed.is_empty()
-            && self.data.air_speed.iter().any(|&x| !x.is_nan() && x != 0.0);
+        // Check if wind_speed data is available
+        let has_wind_speed = !self.data.wind_speed.is_empty()
+            && self.data.wind_speed.iter().any(|&x| !x.is_nan() && x != 0.0);
 
-        if !has_air_speed {
+        if !has_wind_speed {
             return (0.0, 0.0, 0.0);
         }
 
@@ -351,10 +341,10 @@ impl VirtualElevationCalculator {
         for i in (start_idx + 1)..=end_idx {
             let dt = self.data.timestamps[i] - self.data.timestamps[i - 1];
             if dt > 0.0 && dt < 10.0 { // Sanity check for time step
-                // Air speed distance (calibrated)
-                let air_speed = self.data.air_speed[i] * self.air_speed_calibration;
-                if !air_speed.is_nan() && air_speed > 0.0 {
-                    vd_air += air_speed * dt;
+                // Apparent velocity distance (already includes wind, just apply calibration)
+                let apparent_speed = self.data.wind_speed[i] * self.air_speed_calibration;
+                if !apparent_speed.is_nan() && apparent_speed > 0.0 {
+                    vd_wind += apparent_speed * dt;
                 }
 
                 // Ground speed distance
@@ -365,14 +355,14 @@ impl VirtualElevationCalculator {
             }
         }
 
-        // Calculate percentage difference: ((VD_air - VD_ground) / VD_ground) * 100
+        // Calculate percentage difference: ((VD_wind - VD_ground) / VD_ground) * 100
         let vd_diff_percent = if vd_ground > 0.0 {
-            ((vd_air - vd_ground) / vd_ground) * 100.0
+            ((vd_wind - vd_ground) / vd_ground) * 100.0
         } else {
             0.0
         };
 
-        (vd_air, vd_ground, vd_diff_percent)
+        (vd_wind, vd_ground, vd_diff_percent)
     }
 
     /// Calculate virtual slope
@@ -639,7 +629,6 @@ pub fn create_ve_calculator(
     position_long: Vec<f64>,
     altitude: Vec<f64>,
     distance: Vec<f64>,
-    air_speed: Vec<f64>,
     wind_speed: Vec<f64>,
     // Parameters
     system_mass: f64,
@@ -663,7 +652,6 @@ pub fn create_ve_calculator(
         position_long,
         altitude,
         distance,
-        air_speed,
         wind_speed,
     );
 
@@ -695,7 +683,6 @@ pub fn create_ve_calculator_with_rho_array(
     position_long: Vec<f64>,
     altitude: Vec<f64>,
     distance: Vec<f64>,
-    air_speed: Vec<f64>,
     wind_speed: Vec<f64>,
     // Optional rho array (if None, uses the single rho parameter)
     rho_array: Option<Vec<f64>>,
@@ -721,7 +708,6 @@ pub fn create_ve_calculator_with_rho_array(
         position_long,
         altitude,
         distance,
-        air_speed,
         wind_speed,
     );
 

@@ -667,6 +667,9 @@ function initializeSection3Csv(csvData: GibliCsvData, result: any) {
         air_speed: csvData.airSpeed,
         distance: distance,
         wind_speed: windSpeed,
+        wind_yaw: csvData.windAngle || new Array(csvData.timestamps.length).fill(0),
+        air_density_data: new Array(csvData.timestamps.length).fill(0), // Will be calculated from environmental data if available
+        road_speed: new Array(csvData.timestamps.length).fill(0), // Not available in CSV
         temperature: csvData.temperature || new Array(csvData.timestamps.length).fill(0),
         battery_soc: new Array(csvData.timestamps.length).fill(0),
         heart_rate: new Array(csvData.timestamps.length).fill(0),
@@ -925,15 +928,27 @@ async function displayResults(result: any) {
         } else {
             // First time loading this file - apply smart defaults
 
+            // Determine correct air_speed_offset default based on wind data source
+            const fitData = result.fit_data;
+            const hasAirSpeed = fitData.air_speed && Array.from(fitData.air_speed).some((v: number) => !isNaN(v) && v !== 0);
+            const defaultAirSpeedOffset = hasAirSpeed ? 2 : 0;
+
+            const smartDefaults: any = {
+                air_speed_offset: defaultAirSpeedOffset
+            };
+
             // Auto-enable velodrome mode if no GPS data
             if (!result.parsing_statistics.has_gps_data) {
-                parametersComponent.setParameters({ velodrome: true });
+                smartDefaults.velodrome = true;
             }
             // Auto-enable auto-rho if HAS GPS data
             else if (result.parsing_statistics.has_gps_data) {
-                parametersComponent.setParameters({ auto_calculate_rho: true });
+                smartDefaults.auto_calculate_rho = true;
                 console.log('📍 GPS data detected - auto-rho enabled by default');
             }
+
+            parametersComponent.setParameters(smartDefaults);
+            console.log(`📊 Set air_speed_offset default to ${defaultAirSpeedOffset}s (hasAirSpeed: ${hasAirSpeed})`);
         }
     }
 
@@ -1939,34 +1954,56 @@ async function handleAnalyze() {
         const allPositionLong = fitData.position_long;
         const allAltitude = fitData.altitude;
         const allDistance = fitData.distance;
-        const allAirSpeed = fitData.air_speed;
-        const allWindSpeed = fitData.wind_speed;
+        // Process wind data: consolidate air_speed and wind_speed into single apparent velocity field
+        const hasAirSpeed = fitData.air_speed && Array.from(fitData.air_speed).some((v: number) => !isNaN(v) && v !== 0);
+        const hasWindSpeed = fitData.wind_speed && Array.from(fitData.wind_speed).some((v: number) => !isNaN(v) && v !== 0);
+        const hasWindYaw = fitData.wind_yaw && Array.from(fitData.wind_yaw).some((yaw: number) => !isNaN(yaw) && yaw !== 0);
+
+        let allWindSpeed: any;
+        let defaultAirSpeedOffset: number;
+
+        // Simplify: Always triangulate using yaw (forcing yaw=0 if not present gives same result as no triangulation)
+        if (hasAirSpeed) {
+            console.log('🌬️ Found air speed data, using it as apparent wind speed');
+            const rawYaw = fitData.wind_yaw || new Array(fitData.air_speed.length).fill(0);
+            allWindSpeed = Array.from(fitData.air_speed).map((magnitude: number, i: number) => {
+                const yaw = rawYaw[i] || 0;
+                return Math.cos(yaw * Math.PI / 180) * magnitude;
+            });
+            defaultAirSpeedOffset = 2; // air_speed columns default to 2s offset
+        } else if (hasWindSpeed) {
+            if (hasWindYaw) {
+                console.log('🌬️ Found wind speed with yaw, triangulating for apparent wind speed');
+            } else {
+                console.log('🌬️ Found wind speed without yaw, using it as apparent wind speed');
+            }
+            const rawYaw = fitData.wind_yaw || new Array(fitData.wind_speed.length).fill(0);
+            allWindSpeed = Array.from(fitData.wind_speed).map((magnitude: number, i: number) => {
+                const yaw = rawYaw[i] || 0;
+                return Math.cos(yaw * Math.PI / 180) * magnitude;
+            });
+            defaultAirSpeedOffset = 0; // wind_speed columns default to 0s offset
+        } else {
+            console.log('🌬️ No air/wind speed data found, using constant wind as source');
+            allWindSpeed = new Array(fitData.timestamps.length).fill(0);
+            defaultAirSpeedOffset = 0;
+        }
+
+        const allAirDensity = fitData.air_density_data || [];
         const allTemperature = fitData.temperature || [];
 
-        console.log('Data arrays accessed successfully:', {
-            timestamps: allTimestamps.length,
-            power: allPower.length,
-            velocity: allVelocity.length,
-            position_lat: allPositionLat.length
-        });
-
-        console.log('Total FIT records available:', allTimestamps.length);
+        // Check speed source
+        const hasRoadSpeed = fitData.road_speed && Array.from(fitData.road_speed).some((v: number) => !isNaN(v) && v !== 0);
+        const hasEnhancedSpeed = Array.from(allVelocity).some((v: number) => !isNaN(v) && v !== 0);
+        if (hasRoadSpeed && hasEnhancedSpeed) {
+            console.log('🚴 Found enhanced speed and road speed, prefer road speed');
+        }
 
         // Filter data points to only include those within selected lap time ranges
-        // WASM lap objects - access properties directly, not as functions
         const selectedLapTimeRanges = selectedLapData.map(lap => ({
-            start: lap.start_time,    // Direct property access
-            end: lap.end_time         // Direct property access
+            start: lap.start_time,
+            end: lap.end_time
         }));
-        console.log('Selected lap time ranges:', selectedLapTimeRanges);
-
-        // Debug: Check the timestamp filtering
-        console.log('All timestamps range:', {
-            first: allTimestamps[0],
-            last: allTimestamps[allTimestamps.length - 1],
-            total: allTimestamps.length
-        });
-        console.log('Selected lap time ranges:', selectedLapTimeRanges);
 
         // Filter data points by selected lap time ranges
         let filteredTimestamps: number[] = [];
@@ -1976,8 +2013,8 @@ async function handleAnalyze() {
         let filteredPositionLong: number[] = [];
         let filteredAltitude: number[] = [];
         let filteredDistance: number[] = [];
-        let filteredAirSpeed: number[] = [];
         let filteredWindSpeed: number[] = [];
+        let filteredAirDensity: number[] = [];
         let filteredTemperature: number[] = [];
 
         for (let i = 0; i < allTimestamps.length; i++) {
@@ -1996,20 +2033,11 @@ async function handleAnalyze() {
                 filteredPositionLong.push(allPositionLong[i]);
                 filteredAltitude.push(allAltitude[i]);
                 filteredDistance.push(allDistance[i]);
-                filteredAirSpeed.push(allAirSpeed[i]);
                 filteredWindSpeed.push(allWindSpeed[i]);
+                filteredAirDensity.push(allAirDensity[i] || 0);
                 filteredTemperature.push(allTemperature[i] || 0);
             }
         }
-
-
-        console.log('Lap selection filtering complete:', {
-            selectedLaps: selectedLaps,
-            totalDataPoints: filteredTimestamps.length,
-            firstTimestamp: filteredTimestamps[0],
-            lastTimestamp: filteredTimestamps[filteredTimestamps.length - 1],
-            lapTimeRanges: selectedLapTimeRanges
-        });
 
         if (filteredTimestamps.length === 0) {
             throw new Error('No valid data points found in selected laps');
@@ -2023,31 +2051,39 @@ async function handleAnalyze() {
 
         showLoading('Running Virtual Elevation calculation...');
 
-        // Check if data has environmental data for per-datapoint rho (works for both FIT and CSV)
+        // Check for per-datapoint air density (priority: FIT file column > environmental calculation > Weather API)
         currentRhoArray = null; // Reset global rho array
-        const hasEnvironmentalData = fitData.temperature && fitData.humidity && fitData.pressure;
-        if (hasEnvironmentalData) {
-            console.log('📊 Data has environmental data - calculating per-datapoint rho');
-            const fullRhoArray = calculateRhoArrayFromFitData(fitData);
 
-            if (fullRhoArray) {
-                // Filter rho array to match selected laps (same filtering as other data)
-                currentRhoArray = [];
-                for (let i = 0; i < allTimestamps.length; i++) {
-                    const timestamp = allTimestamps[i];
-                    const isInSelectedLap = selectedLapTimeRanges.some(range =>
-                        timestamp >= range.start && timestamp <= range.end
-                    );
-                    if (isInSelectedLap) {
-                        currentRhoArray.push(fullRhoArray[i]);
+        // PRIORITY 1: Use air_density from FIT file if available
+        const hasAirDensityData = filteredAirDensity.length > 0 &&
+            filteredAirDensity.some(rho => !isNaN(rho) && rho > 0);
+
+        if (hasAirDensityData) {
+            console.log('💨 Found air density data, using it for calculations');
+            currentRhoArray = filteredAirDensity;
+        }
+        // PRIORITY 2: Calculate from environmental data if available
+        else {
+            const hasEnvironmentalData = fitData.temperature && fitData.humidity && fitData.pressure;
+            if (hasEnvironmentalData) {
+                const fullRhoArray = calculateRhoArrayFromFitData(fitData);
+
+                if (fullRhoArray) {
+                    // Filter rho array to match selected laps
+                    currentRhoArray = [];
+                    for (let i = 0; i < allTimestamps.length; i++) {
+                        const timestamp = allTimestamps[i];
+                        const isInSelectedLap = selectedLapTimeRanges.some(range =>
+                            timestamp >= range.start && timestamp <= range.end
+                        );
+                        if (isInSelectedLap) {
+                            currentRhoArray.push(fullRhoArray[i]);
+                        }
                     }
+                    console.log('💨 Calculated air density from environmental data');
                 }
-
-                console.log('📊 Filtered rho array for VE calculation:', {
-                    fullLength: fullRhoArray.length,
-                    filteredLength: currentRhoArray.length,
-                    sampleValues: currentRhoArray.slice(0, 5)
-                });
+            } else {
+                console.log('💨 No air density found, using constant value from weather API');
             }
         }
 
@@ -2062,7 +2098,6 @@ async function handleAnalyze() {
                 filteredPositionLong,
                 filteredAltitude,
                 filteredDistance,
-                filteredAirSpeed,
                 filteredWindSpeed,
                 new Float64Array(currentRhoArray),
                 // Parameters
@@ -2087,7 +2122,6 @@ async function handleAnalyze() {
                 filteredPositionLong,
                 filteredAltitude,
                 filteredDistance,
-                filteredAirSpeed,
                 filteredWindSpeed,
                 // Parameters
                 currentParameters.system_mass,
@@ -2153,10 +2187,10 @@ async function handleAnalyze() {
             filteredPositionLong,
             filteredAltitude,
             filteredDistance,
-            filteredAirSpeed,
             filteredWindSpeed,
             filteredTemperature,
-            filteredCdaReference
+            filteredCdaReference,
+            defaultAirSpeedOffset
         );
 
     } catch (err) {
@@ -2168,7 +2202,7 @@ async function handleAnalyze() {
 }
 
 
-async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], temperature: number[] = [], cdaReference: number[] | null = null) {
+async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], temperature: number[] = [], cdaReference: number[] | null = null, defaultAirSpeedOffset: number = 0) {
     // Store analyzed laps globally for save functionality
     currentAnalyzedLaps = analyzedLaps;
     // Store filtered data globally for save functionality
@@ -2176,12 +2210,23 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
     // Store CdA reference data globally (will be used for dynamic validation)
     currentCdaReference = cdaReference;
 
-    // Check if air_speed data is available (not all zeros/NaN)
-    const hasAirSpeed = airSpeed.some(val => !isNaN(val) && val !== 0);
+    // Check if wind_speed data is available (not all zeros/NaN)
+    const hasWindSpeed = windSpeed.some(val => !isNaN(val) && val !== 0);
     const hasConstantWind = currentParameters.wind_speed !== undefined && currentParameters.wind_speed !== 0 &&
                             currentParameters.wind_direction !== undefined;
 
-    console.log('Wind data availability:', { hasAirSpeed, hasConstantWind });
+    console.log('Wind data availability:', {
+        hasWindSpeed,
+        hasConstantWind,
+        windSpeedLength: windSpeed.length,
+        sampleFilteredWindSpeed: windSpeed.slice(0, 10),
+        nonZeroCount: windSpeed.filter(val => !isNaN(val) && val !== 0).length,
+        windSpeedStats: {
+            min: Math.min(...windSpeed.filter(v => !isNaN(v))),
+            max: Math.max(...windSpeed.filter(v => !isNaN(v))),
+            allZero: windSpeed.every(v => v === 0 || isNaN(v))
+        }
+    });
 
     // Show the VE analysis section
     const veSection = document.getElementById('veAnalysisSection') as HTMLElement;
@@ -2237,18 +2282,18 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     </div>
                 </div>
 
-                ${(hasAirSpeed || hasConstantWind) ? `
+                ${(hasWindSpeed || hasConstantWind) ? `
                 <div class="ve-wind-source">
                     <h4>Wind Source</h4>
                     <div class="ve-radio-group">
                         <label class="ve-radio-label">
-                            <input type="radio" name="windSource" value="constant" ${!hasAirSpeed ? 'checked' : ''}>
+                            <input type="radio" name="windSource" value="constant" ${!hasWindSpeed ? 'checked' : ''}>
                             <span>Use constant wind settings</span>
                         </label>
-                        ${hasAirSpeed ? `
+                        ${hasWindSpeed ? `
                         <label class="ve-radio-label">
-                            <input type="radio" name="windSource" value="fit" ${hasAirSpeed ? 'checked' : ''}>
-                            <span>Use FIT file air speed</span>
+                            <input type="radio" name="windSource" value="fit" ${hasWindSpeed ? 'checked' : ''}>
+                            <span>Use FIT file wind data</span>
                         </label>
                         <label class="ve-radio-label">
                             <input type="radio" name="windSource" value="compare">
@@ -2259,7 +2304,7 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 </div>
                 ` : ''}
 
-                ${hasAirSpeed ? `
+                ${hasWindSpeed ? `
                 <div class="ve-parameter">
                     <div class="ve-param-header">
                         <label for="airSpeedCalibration">Air Speed Calibration</label>
@@ -2289,11 +2334,11 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     ${cdaReference ? `
                     <button class="ve-tab-button" data-tab="cda-validation">CdA Validation</button>
                     ` : ''}
-                    ${(hasAirSpeed || hasConstantWind) ? `
+                    ${(hasWindSpeed || hasConstantWind) ? `
                     <button class="ve-tab-button" data-tab="wind">Wind</button>
                     ` : ''}
                     <button class="ve-tab-button" data-tab="power">Power</button>
-                    ${hasAirSpeed ? `
+                    ${hasWindSpeed ? `
                     <button class="ve-tab-button" data-tab="vd">VD</button>
                     ` : ''}
                 </div>
@@ -2338,17 +2383,17 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 </div>
                 ` : ''}
 
-                ${(hasAirSpeed || hasConstantWind) ? `
+                ${(hasWindSpeed || hasConstantWind) ? `
                 <div class="ve-tab-content" id="wind-tab">
                     <div id="windSpeedPlot" class="ve-plot" style="height: 600px;"></div>
 
-                    ${hasAirSpeed ? `
+                    ${hasWindSpeed ? `
                     <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
                         <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
                         <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
-                            <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${currentParameters?.air_speed_offset ?? 2}"
+                            <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${currentParameters?.air_speed_offset ?? defaultAirSpeedOffset}"
                                    style="width: 100%;" />
-                            <input type="number" id="airSpeedOffsetValue" value="${currentParameters?.air_speed_offset ?? 2}" step="1" min="-10" max="10"
+                            <input type="number" id="airSpeedOffsetValue" value="${currentParameters?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
                                    style="width: 60px; text-align: right;" />
                             <span style="font-weight: 500;">seconds</span>
                         </div>
@@ -2371,7 +2416,7 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     <div id="speedPowerPlot" class="ve-plot" style="height: 600px;"></div>
                 </div>
 
-                ${hasAirSpeed ? `
+                ${hasWindSpeed ? `
                 <div class="ve-tab-content" id="vd-tab">
                     <div class="ve-metrics-compact" style="margin-bottom: 1rem;">
                         VD (Air):<span id="vdAirValue">${(initialResult.virtual_distance_air / 1000).toFixed(3)} km</span> |
@@ -2388,13 +2433,13 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
     `;
 
     // Initialize the VE analysis interface (await to ensure lap settings load before rendering)
-    await initializeVEAnalysis(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, analyzedLaps);
+    await initializeVEAnalysis(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, analyzedLaps, defaultAirSpeedOffset);
 
     // Scroll to the VE analysis section
     veSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-async function initializeVEAnalysis(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], analyzedLaps: number[]) {
+async function initializeVEAnalysis(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], analyzedLaps: number[], defaultAirSpeedOffset: number) {
 
     // Try to load saved lap settings for this file and lap combination
     let savedSettings: LapSettings | null = null;
@@ -2465,7 +2510,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
             // If switching to wind tab, create the wind plot
             if (tabName === 'wind') {
                 setTimeout(() => {
-                    createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                    createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd, defaultAirSpeedOffset);
                 }, 100);
             } else if (tabName === 'power') {
                 // Create speed & power plot
@@ -2475,7 +2520,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
             } else if (tabName === 'vd') {
                 // Create virtual distance plot
                 setTimeout(() => {
-                    createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                    createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
                 }, 100);
             } else if (tabName === 've') {
                 // Resize VE plots when switching back
@@ -2493,7 +2538,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
     });
 
     // Set up sliders with real-time updates
-    setupVESliders(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed);
+    setupVESliders(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, defaultAirSpeedOffset);
 
     // Initial plot rendering (with delay to ensure Plotly is loaded)
     // Use preset trim values if they were set before clicking analyze
@@ -2504,7 +2549,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
         trimEnd: initialTrimEnd
     });
     setTimeout(() => {
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, initialTrimStart, initialTrimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,initialTrimStart, initialTrimEnd);
 
         // CdA validation plots will be rendered dynamically by updateVEPlots if CdA reference exists
 
@@ -2812,7 +2857,7 @@ async function saveMapTrimSettings() {
     }
 }
 
-function setupVESliders(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[]) {
+function setupVESliders(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], defaultAirSpeedOffset: number) {
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
@@ -2845,12 +2890,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             return;
         }
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, value, trimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,value, trimEnd);
 
         // Update other plots if they're visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, airSpeed, distance, value, trimEnd);
+            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,value, trimEnd, defaultAirSpeedOffset);
         }
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
@@ -2858,7 +2903,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         }
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, value, trimEnd);
+            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,value, trimEnd);
         }
 
         // Auto-zoom map to trim region
@@ -2891,12 +2936,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             return;
         }
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, value);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, value);
 
         // Update other plots if they're visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, value);
+            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, value, defaultAirSpeedOffset);
         }
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
@@ -2904,7 +2949,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         }
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, value);
+            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, value);
         }
 
         // Auto-zoom map to trim region
@@ -2922,7 +2967,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -2934,7 +2979,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -2951,12 +2996,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         trimStartSlider.value = clamped.toString();
         trimStartValue.value = clamped.toString();
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, clamped, trimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,clamped, trimEnd);
 
         // Update wind speed plot if it's visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, airSpeed, distance, clamped, trimEnd);
+            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,clamped, trimEnd, defaultAirSpeedOffset);
         }
 
         // Update power plot if it's visible
@@ -2968,7 +3013,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         // Update VD plot if it's visible
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, clamped, trimEnd);
+            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,clamped, trimEnd);
         }
 
         if (mapVisualization && filteredVEData) {
@@ -2989,12 +3034,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         trimEndSlider.value = clamped.toString();
         trimEndValue.value = clamped.toString();
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, clamped);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, clamped);
 
         // Update wind speed plot if it's visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, clamped);
+            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, clamped, defaultAirSpeedOffset);
         }
 
         // Update power plot if it's visible
@@ -3006,7 +3051,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         // Update VD plot if it's visible
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, clamped);
+            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, clamped);
         }
 
         if (mapVisualization && filteredVEData) {
@@ -3028,7 +3073,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -3045,7 +3090,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -3102,7 +3147,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Update VE calculation with new wind source
-            updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd, windSource);
+            updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, trimStart, trimEnd, windSource);
         });
     });
 
@@ -3122,12 +3167,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Trigger full recalculation (which will apply calibration when creating calculator)
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
             // Update VD tab if visible
             const vdTab = document.getElementById('vd-tab');
             if (vdTab && vdTab.classList.contains('active')) {
-                createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
             }
 
             // Save lap settings with new calibration value
@@ -3150,12 +3195,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Trigger full recalculation
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
             // Update VD tab if visible
             const vdTab = document.getElementById('vd-tab');
             if (vdTab && vdTab.classList.contains('active')) {
-                createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
             }
 
             // Save lap settings with new calibration value
@@ -3179,9 +3224,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                 for (let i = trimStart + 1; i <= trimEnd; i++) {
                     const dt = timestamps[i] - timestamps[i - 1];
                     if (dt > 0 && dt < 10) {
-                        // Air speed (no calibration)
-                        const airSpeedVal = (!isNaN(airSpeed[i]) && airSpeed[i] > 0) ? airSpeed[i] : 0;
-                        vdAirUncalibrated += airSpeedVal * dt;
+                        // Wind speed is already apparent velocity (no calibration)
+                        const apparentSpeed = (!isNaN(windSpeed[i])) ? windSpeed[i] : 0;
+                        vdAirUncalibrated += (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
 
                         // Ground speed
                         const groundSpeedVal = (!isNaN(velocity[i]) && velocity[i] > 0) ? velocity[i] : 0;
@@ -3205,12 +3250,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                     airSpeedCalibrationPercent = clampedPercent;
 
                     // Trigger recalculation
-                    updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+                    updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
                     // Update VD tab if visible
                     const vdTab = document.getElementById('vd-tab');
                     if (vdTab && vdTab.classList.contains('active')) {
-                        createVirtualDistancePlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                        createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
                     }
 
                     // Save settings
@@ -3243,18 +3288,18 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Calculate error metric (sum of absolute differences)
-            const errorMetric = calculateAirSpeedSyncError(velocity, airSpeed, value, trimStart, trimEnd);
+            const errorMetric = calculateAirSpeedSyncError(velocity, windSpeed, value, trimStart, trimEnd);
             if (airSpeedOffsetErrorMetric && !isNaN(errorMetric)) {
                 airSpeedOffsetErrorMetric.textContent = errorMetric.toFixed(2);
             }
 
             // Trigger full recalculation with new offset
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
             // Update wind plot if visible
             const windTab = document.getElementById('wind-tab');
             if (windTab && windTab.classList.contains('active')) {
-                createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd, defaultAirSpeedOffset);
             }
 
             // Save lap settings with new offset value
@@ -3278,18 +3323,18 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Calculate error metric
-            const errorMetric = calculateAirSpeedSyncError(velocity, airSpeed, clamped, trimStart, trimEnd);
+            const errorMetric = calculateAirSpeedSyncError(velocity, windSpeed, clamped, trimStart, trimEnd);
             if (airSpeedOffsetErrorMetric && !isNaN(errorMetric)) {
                 airSpeedOffsetErrorMetric.textContent = errorMetric.toFixed(2);
             }
 
             // Trigger full recalculation
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd);
+            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
 
             // Update wind plot if visible
             const windTab = document.getElementById('wind-tab');
             if (windTab && windTab.classList.contains('active')) {
-                createWindSpeedPlot(timestamps, velocity, airSpeed, distance, trimStart, trimEnd);
+                createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd, defaultAirSpeedOffset);
             }
 
             // Save settings
@@ -3302,8 +3347,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         // Calculate initial error metric
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        const initialOffset = currentParameters?.air_speed_offset ?? 2;
-        const initialError = calculateAirSpeedSyncError(velocity, airSpeed, initialOffset, trimStart, trimEnd);
+        const initialOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+        const initialError = calculateAirSpeedSyncError(velocity, windSpeed, initialOffset, trimStart, trimEnd);
         if (airSpeedOffsetErrorMetric && !isNaN(initialError)) {
             airSpeedOffsetErrorMetric.textContent = initialError.toFixed(2);
         }
@@ -3465,7 +3510,7 @@ function calculateAirSpeedSyncError(
     return validCount > 0 ? sumAbsDiff / validCount : NaN;
 }
 
-function updateVEPlots(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], trimStart: number, trimEnd: number) {
+function updateVEPlots(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number) {
     // Check which wind source is currently selected
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
     const windSource = windSourceRadio ? windSourceRadio.value : 'fit';
@@ -3473,10 +3518,10 @@ function updateVEPlots(timestamps: number[], power: number[], velocity: number[]
     console.log('updateVEPlots: Using wind source:', windSource);
 
     // Use the wind source specific function
-    updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, airSpeed, windSpeed, trimStart, trimEnd, windSource);
+    updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, trimStart, trimEnd, windSource);
 }
 
-async function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], airSpeed: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
+async function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
     const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
 
@@ -3488,7 +3533,6 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             // Compare both methods - create two calculators
 
             // Calculator 1: Use constant wind
-            const constantWindAirSpeed = new Array(airSpeed.length).fill(NaN);
             const constantWindSpeed = new Array(windSpeed.length).fill(NaN);
             const calculator1 = create_ve_calculator(
                 timestamps,
@@ -3498,7 +3542,6 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 positionLong,
                 altitude,
                 distance,
-                constantWindAirSpeed,
                 constantWindSpeed,
                 currentParameters.system_mass,
                 currentParameters.rho,
@@ -3514,15 +3557,15 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 currentParameters.velodrome
             );
 
-            // Calculator 2: Use FIT file air speed
-            // Apply air speed time offset first (to sync with ground speed)
-            const airSpeedOffset = currentParameters?.air_speed_offset ?? 2;
-            const offsetAirSpeed = applyAirSpeedOffset(airSpeed, airSpeedOffset);
+            // Calculator 2: Use FIT file wind data
+            // Apply time offset first (to sync with ground speed)
+            const windSpeedOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+            const offsetWindSpeed = applyAirSpeedOffset(windSpeed, windSpeedOffset);
 
-            // Then apply air speed calibration if set
-            const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
-                ? offsetAirSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
-                : offsetAirSpeed;
+            // Then apply calibration if set
+            const calibratedWindSpeed = airSpeedCalibrationPercent !== 0
+                ? offsetWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+                : offsetWindSpeed;
 
             const calculator2 = create_ve_calculator(
                 timestamps,
@@ -3532,8 +3575,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 positionLong,
                 altitude,
                 distance,
-                calibratedAirSpeed,
-                windSpeed,
+                calibratedWindSpeed,
                 currentParameters.system_mass,
                 currentParameters.rho,
                 currentParameters.eta,
@@ -3571,25 +3613,22 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
 
         } else {
             // Single method
-            let useAirSpeed: number[];
             let useWindSpeed: number[];
 
             if (windSource === 'constant') {
-                // Use constant wind - set air_speed to NaN to force fallback to constant wind
+                // Use constant wind - set wind_speed to NaN to force fallback to constant wind
                 // If no constant wind is configured, it will use 0
-                useAirSpeed = new Array(airSpeed.length).fill(NaN);
                 useWindSpeed = new Array(windSpeed.length).fill(NaN);
-                console.log('Using constant wind - air_speed and wind_speed arrays filled with NaN');
+                console.log('Using constant wind - wind_speed array filled with NaN');
                 console.log('Wind speed param:', currentParameters.wind_speed ?? 0, 'Wind direction:', currentParameters.wind_direction ?? 0);
             } else {
-                // Use FIT file air speed
-                // Apply time offset first
-                const airSpeedOffset = currentParameters?.air_speed_offset ?? 2;
-                useAirSpeed = applyAirSpeedOffset(airSpeed, airSpeedOffset);
-                useWindSpeed = windSpeed;
-                console.log('Using FIT air speed with offset:', airSpeedOffset, 'seconds');
-                console.log('Sample offset air_speed values:', useAirSpeed.slice(0, 5));
-                console.log('Non-zero air_speed count:', useAirSpeed.filter(v => !isNaN(v) && v !== 0).length);
+                // Use FIT file wind data
+                // Apply time offset first (to sync with ground speed)
+                const windSpeedOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+                useWindSpeed = applyAirSpeedOffset(windSpeed, windSpeedOffset);
+                console.log('Using FIT wind data with offset:', windSpeedOffset, 'seconds');
+                console.log('Sample offset wind_speed values:', useWindSpeed.slice(0, 5));
+                console.log('Non-zero wind_speed count:', useWindSpeed.filter(v => !isNaN(v) && v !== 0).length);
             }
 
             // Debug altitude data AND velodrome parameter before passing to calculator
@@ -3604,10 +3643,10 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             });
             console.log('VELODROME PARAMETER:', currentParameters.velodrome, 'Type:', typeof currentParameters.velodrome);
 
-            // Apply air speed calibration if set (after offset)
-            const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
-                ? useAirSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
-                : useAirSpeed;
+            // Apply wind speed calibration if set (after offset)
+            const calibratedWindSpeed = airSpeedCalibrationPercent !== 0
+                ? useWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+                : useWindSpeed;
 
             // Use rho array version if we have per-datapoint rho
             const calculator = currentRhoArray
@@ -3619,8 +3658,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                     new Float64Array(positionLong),
                     new Float64Array(altitude),
                     new Float64Array(distance),
-                    new Float64Array(calibratedAirSpeed),
-                    new Float64Array(useWindSpeed),
+                    new Float64Array(calibratedWindSpeed),
                     new Float64Array(currentRhoArray),
                     currentParameters!.system_mass,
                     currentParameters!.rho,
@@ -3643,8 +3681,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                     new Float64Array(positionLong),
                     new Float64Array(altitude),
                     new Float64Array(distance),
-                    new Float64Array(calibratedAirSpeed),
-                    new Float64Array(useWindSpeed),
+                    new Float64Array(calibratedWindSpeed),
                     currentParameters!.system_mass,
                     currentParameters!.rho,
                     currentParameters!.eta,
@@ -3691,7 +3728,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             if (currentCdaReference) {
                 await updateCdaValidationPlots(
                     timestamps, power, velocity, positionLat, positionLong, altitude, distance,
-                    calibratedAirSpeed, useWindSpeed,
+                    calibratedWindSpeed,
                     cda, crr, trimStart, trimEnd, result
                 );
             }
@@ -4176,7 +4213,6 @@ async function updateCdaValidationPlots(
     positionLong: number[],
     altitude: number[],
     distance: number[],
-    airSpeed: number[],
     windSpeed: number[],
     cdaOptimized: number,
     crrOptimized: number,
@@ -4198,7 +4234,7 @@ async function updateCdaValidationPlots(
     const refCalculator = currentRhoArray
         ? create_ve_calculator_with_rho_array(
             timestamps, power, velocity, positionLat, positionLong, altitude, distance,
-            airSpeed, windSpeed,
+            windSpeed,
             new Float64Array(currentRhoArray),
             currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
             currentParameters.cda, crrOptimized,
@@ -4208,7 +4244,7 @@ async function updateCdaValidationPlots(
         )
         : create_ve_calculator(
             timestamps, power, velocity, positionLat, positionLong, altitude, distance,
-            airSpeed, windSpeed,
+            windSpeed,
             currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
             currentParameters.cda, crrOptimized,
             currentParameters.cda_min, currentParameters.cda_max,
@@ -4540,7 +4576,7 @@ async function createVirtualElevationPlotsComparison(trimStart: number, trimEnd:
     Plotly.newPlot('veResidualsPlot', [residualsTrace2, residualsTrace1, zeroLine], residualsLayout, {responsive: true});
 }
 
-async function createWindSpeedPlot(timestamps: number[], velocity: number[], airSpeed: number[], distance: number[], trimStart: number, trimEnd: number) {
+async function createWindSpeedPlot(timestamps: number[], velocity: number[], windSpeed: number[], distance: number[], trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
     // Wait for Plotly to load
     let Plotly;
     try {
@@ -4553,7 +4589,7 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
     }
 
     // Calculate effective wind from constant wind parameters
-    const hasAirSpeed = airSpeed.some(val => !isNaN(val) && val !== 0);
+    const hasWindSpeed = windSpeed.some(val => !isNaN(val) && val !== 0);
     const hasConstantWind = currentParameters.wind_speed !== undefined && currentParameters.wind_speed !== 0 &&
                             currentParameters.wind_direction !== undefined;
 
@@ -4624,10 +4660,10 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
         });
     }
 
-    // Calculate FIT air speed in km/h (with offset applied)
-    const airSpeedOffset = currentParameters?.air_speed_offset ?? 2;
-    const offsetAirSpeed = hasAirSpeed ? applyAirSpeedOffset(airSpeed, airSpeedOffset) : airSpeed;
-    const airSpeedKmh = hasAirSpeed ? offsetAirSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
+    // Calculate FIT wind speed in km/h (with offset applied)
+    const windSpeedOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+    const offsetWindSpeed = hasWindSpeed ? applyAirSpeedOffset(windSpeed, windSpeedOffset) : windSpeed;
+    const windSpeedKmh = hasWindSpeed ? offsetWindSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
 
     // Use time (seconds) instead of distance for x-axis
     const timeSeconds = timestamps.map((t, i) => i);
@@ -4652,11 +4688,11 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
             showlegend: false
         });
 
-        // FIT air speed context
-        if (hasAirSpeed) {
+        // FIT wind speed context
+        if (hasWindSpeed) {
             traces.push({
                 x: timePointsBefore,
-                y: airSpeedKmh.slice(extendedStart, trimStart + 1),
+                y: windSpeedKmh.slice(extendedStart, trimStart + 1),
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Apparent (FIT Air) (trimmed)',
@@ -4692,11 +4728,11 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
         line: { color: '#000000', width: 2 }
     });
 
-    // FIT air speed
-    if (hasAirSpeed) {
+    // FIT wind speed
+    if (hasWindSpeed) {
         traces.push({
             x: timePointsMain,
-            y: airSpeedKmh.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
+            y: windSpeedKmh.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
             type: 'scatter',
             mode: 'lines',
             name: 'Apparent (FIT Air)',
@@ -4730,11 +4766,11 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], air
             showlegend: false
         });
 
-        // FIT air speed context
-        if (hasAirSpeed) {
+        // FIT wind speed context
+        if (hasWindSpeed) {
             traces.push({
                 x: timePointsAfter,
-                y: airSpeedKmh.slice(trimEnd, extendedEnd),
+                y: windSpeedKmh.slice(trimEnd, extendedEnd),
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Apparent (FIT Air) (trimmed)',
@@ -5004,7 +5040,7 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
     Plotly.newPlot('speedPowerPlot', traces, layout, {responsive: true});
 }
 
-async function createVirtualDistancePlot(timestamps: number[], velocity: number[], airSpeed: number[], distance: number[], trimStart: number, trimEnd: number) {
+async function createVirtualDistancePlot(timestamps: number[], velocity: number[], windSpeed: number[], distance: number[], trimStart: number, trimEnd: number) {
     // Wait for Plotly to load
     let Plotly;
     try {
@@ -5024,10 +5060,10 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
     const extendedStart = trimStart - contextBefore;
     const extendedEnd = trimEnd + 1 + contextAfter;
 
-    // Apply air speed calibration
-    const calibratedAirSpeed = airSpeedCalibrationPercent !== 0
-        ? airSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
-        : airSpeed;
+    // Apply wind speed calibration
+    const calibratedWindSpeed = airSpeedCalibrationPercent !== 0
+        ? windSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        : windSpeed;
 
     // Calculate cumulative virtual distances starting from trimStart (both start at 0)
     const vdAir: number[] = new Array(timestamps.length).fill(0);
@@ -5037,10 +5073,10 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
     for (let i = trimStart + 1; i < timestamps.length; i++) {
         const dt = timestamps[i] - timestamps[i - 1];
 
-        // Air speed VD (cumulative with calibration)
-        const airSpeedVal = (!isNaN(calibratedAirSpeed[i]) && calibratedAirSpeed[i] > 0) ? calibratedAirSpeed[i] : 0;
-        const airDist = airSpeedVal * dt;
-        vdAir[i] = vdAir[i - 1] + airDist;
+        // Wind speed is already apparent velocity - just apply calibration
+        const apparentSpeed = (!isNaN(calibratedWindSpeed[i])) ? calibratedWindSpeed[i] : 0;
+        const windDist = (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
+        vdAir[i] = vdAir[i - 1] + windDist;
 
         // Ground speed VD (cumulative)
         const groundSpeedVal = (!isNaN(velocity[i]) && velocity[i] > 0) ? velocity[i] : 0;

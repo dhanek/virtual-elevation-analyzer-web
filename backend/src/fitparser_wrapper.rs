@@ -21,6 +21,9 @@ pub struct FitRecord {
     pub air_speed: Option<f64>,
     pub wind_speed: Option<f64>,
     pub battery_soc: Option<f64>,
+    pub wind_yaw: Option<f64>,
+    pub air_density: Option<f64>,
+    pub road_speed: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,12 +116,14 @@ impl FitParserWrapper {
         let mut air_speed = None;
         let mut wind_speed = None;
         let mut battery_soc = None;
+        let mut wind_yaw = None;
+        let mut air_density = None;
+        let mut road_speed = None;
 
         // Check for developer fields - they might be included in the regular fields() iterator
         // with special names or we need to access them differently
 
         for field in message.fields() {
-
             match field.name() {
                 "timestamp" => {
                     timestamp = self.extract_f64_value(field.value());
@@ -136,7 +141,10 @@ impl FitParserWrapper {
                     altitude = self.extract_f64_value(field.value());
                 }
                 "speed" | "enhanced_speed" => {
-                    speed = self.extract_f64_value(field.value());
+                    // Only use if road_speed is not present
+                    if road_speed.is_none() {
+                        speed = self.extract_f64_value(field.value());
+                    }
                 }
                 "power" => {
                     power = self.extract_f64_value(field.value());
@@ -170,12 +178,6 @@ impl FitParserWrapper {
                         air_speed = Some(value / 1000.0);
                     }
                 }
-                "wind_speed_0_6" => {
-                    if let Some(value) = self.extract_f64_value(field.value()) {
-                        // Scale by 1000 as indicated in the expected values
-                        wind_speed = Some(value / 1000.0);
-                    }
-                }
                 // Also check for the plain field names in case they appear without the prefix
                 "air_speed" => {
                     // Only use if we haven't found the specific _0_11 field
@@ -185,12 +187,34 @@ impl FitParserWrapper {
                         }
                     }
                 }
-                "wind_speed" => {
-                    // Only use if we haven't found the specific _0_6 field
-                    if wind_speed.is_none() {
-                        if let Some(value) = self.extract_f64_value(field.value()) {
-                            wind_speed = Some(value / 1000.0);
-                        }
+                // Accept both prefixed and unprefixed - last one wins
+                "wind_speed" | "0_1_wind_speed" => {
+                    let val = self.extract_f64_value(field.value());
+                    // Only accept non-zero values, or if we don't have a value yet
+                    if val.is_some() && (val.unwrap() != 0.0 || wind_speed.is_none()) {
+                        wind_speed = val;
+                    }
+                }
+                "wind_yaw" | "0_0_wind_yaw" => {
+                    let val = self.extract_f64_value(field.value());
+                    // Accept any value including zero (yaw can be zero)
+                    if val.is_some() {
+                        wind_yaw = val;
+                    }
+                }
+                "air_density" | "0_3_air_density" => {
+                    let val = self.extract_f64_value(field.value());
+                    // Only accept non-zero values, or if we don't have a value yet
+                    if val.is_some() && (val.unwrap() != 0.0 || air_density.is_none()) {
+                        air_density = val;
+                    }
+                }
+                "road_speed" | "0_13_road_speed" => {
+                    let val = self.extract_f64_value(field.value());
+                    // Only accept non-zero values, or if we don't have a value yet
+                    if val.is_some() && (val.unwrap() != 0.0 || road_speed.is_none()) {
+                        road_speed = val;
+                        speed = val; // Also set as speed for compatibility
                     }
                 }
                 _ => {
@@ -218,6 +242,9 @@ impl FitParserWrapper {
                 air_speed,
                 wind_speed,
                 battery_soc,
+                wind_yaw,
+                air_density,
+                road_speed,
             }
         })
     }

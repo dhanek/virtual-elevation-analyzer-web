@@ -19,6 +19,9 @@ pub struct FitData {
     heart_rate: Vec<f64>,
     cadence: Vec<f64>,
     temperature: Vec<f64>,
+    wind_yaw: Vec<f64>,
+    air_density_data: Vec<f64>, // renamed to avoid confusion with rho parameter
+    road_speed: Vec<f64>,
 }
 
 #[wasm_bindgen]
@@ -92,6 +95,21 @@ impl FitData {
     #[wasm_bindgen(getter)]
     pub fn temperature(&self) -> Vec<f64> {
         self.temperature.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn wind_yaw(&self) -> Vec<f64> {
+        self.wind_yaw.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn air_density_data(&self) -> Vec<f64> {
+        self.air_density_data.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn road_speed(&self) -> Vec<f64> {
+        self.road_speed.clone()
     }
 
     #[wasm_bindgen(getter)]
@@ -307,6 +325,9 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
     let mut heart_rate = Vec::new();
     let mut cadence = Vec::new();
     let mut temperature = Vec::new();
+    let mut wind_yaw = Vec::new();
+    let mut air_density_data = Vec::new();
+    let mut road_speed = Vec::new();
 
     for record in &fit_records {
         timestamps.push(record.timestamp);
@@ -322,7 +343,11 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         heart_rate.push(record.heart_rate.unwrap_or(0.0));
         cadence.push(record.cadence.unwrap_or(0.0));
         temperature.push(record.temperature.unwrap_or(0.0));
+        wind_yaw.push(record.wind_yaw.unwrap_or(0.0));
+        air_density_data.push(record.air_density.unwrap_or(0.0));
+        road_speed.push(record.road_speed.unwrap_or(0.0));
     }
+
 
     let fit_data = FitData {
         timestamps,
@@ -338,6 +363,9 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         heart_rate: heart_rate.clone(),
         cadence: cadence.clone(),
         temperature,
+        wind_yaw,
+        air_density_data,
+        road_speed,
     };
 
     // Convert FIT laps to our data structure
