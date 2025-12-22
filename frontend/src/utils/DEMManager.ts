@@ -96,6 +96,28 @@ export class DEMManager {
                 }
             }
 
+            // Fix zero/invalid values at the start (common GPS initialization issue)
+            // Find the first valid (non-zero, non-NaN) elevation and use it to fill invalid starts
+            let firstValidIdx = -1;
+            let firstValidValue = 0;
+            for (let i = 0; i < correctedElevations.length; i++) {
+                const val = correctedElevations[i];
+                if (!isNaN(val) && val !== 0 && val !== null) {
+                    firstValidIdx = i;
+                    firstValidValue = val;
+                    break;
+                }
+            }
+
+            // Fill any leading zeros/NaNs with the first valid value
+            if (firstValidIdx > 0) {
+                for (let i = 0; i < firstValidIdx; i++) {
+                    if (correctedElevations[i] === 0 || isNaN(correctedElevations[i])) {
+                        correctedElevations[i] = firstValidValue;
+                    }
+                }
+            }
+
             const errorRate = errorCount / demElevations.length;
 
             return {

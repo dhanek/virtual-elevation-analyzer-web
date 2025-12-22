@@ -35,11 +35,13 @@ export class WeatherAPIError extends Error {
 export class WeatherAPI {
     private readonly forecastBaseUrl = 'https://api.open-meteo.com/v1/forecast';
     private readonly archiveBaseUrl = 'https://archive-api.open-meteo.com/v1/archive';
-    private readonly forecastMaxDays = 92; // Forecast API: last 92 days
+    // Forecast API supports start_date/end_date for up to ~82 days in the past
+    // Archive API for anything older (supports data from 1940)
+    private readonly forecastMaxDays = 82;
 
     /**
      * Fetch weather data for a specific location and time
-     * Automatically selects Forecast API (last 3 months) or Archive API (older data)
+     * Automatically selects Forecast API (recent days) or Archive API (older data)
      *
      * @param metadata - Trim region metadata containing GPS coordinates and timestamp
      * @returns Weather data (temperature, dew point, pressure)
@@ -55,7 +57,7 @@ export class WeatherAPI {
         const baseUrl = useForecastAPI ? this.forecastBaseUrl : this.archiveBaseUrl;
 
         // Build API URL with precise parameters
-        const url = this.buildApiUrl(baseUrl, query, useForecastAPI);
+        const url = this.buildApiUrl(baseUrl, query);
 
         console.log('═══════════════════════════════════════════════════════');
         console.log(`🌐 OPEN-METEO ${apiType.toUpperCase()} API REQUEST`);
@@ -166,34 +168,21 @@ export class WeatherAPI {
 
     /**
      * Build complete API URL with query parameters
-     * Supports both Forecast API (last 92 days) and Archive API (older data)
+     * Both APIs use start_date/end_date for efficient single-day queries
      */
-    private buildApiUrl(baseUrl: string, query: WeatherQuery, useForecastAPI: boolean): string {
-        if (useForecastAPI) {
-            // Forecast API: uses past_days and forecast_days
-            const params = new URLSearchParams({
-                latitude: query.latitude.toString(),
-                longitude: query.longitude.toString(),
-                hourly: 'temperature_2m,dew_point_2m,surface_pressure,wind_speed_10m,wind_direction_10m',
-                timezone: 'UTC',
-                wind_speed_unit: 'ms',  // Request wind speed in m/s (default is km/h)
-                start_date: query.date,
-                end_date: query.date
-            });
-            return `${baseUrl}?${params}`;
-        } else {
-            // Archive API: uses start_date and end_date
-            const params = new URLSearchParams({
-                latitude: query.latitude.toString(),
-                longitude: query.longitude.toString(),
-                start_date: query.date,
-                end_date: query.date,
-                hourly: 'temperature_2m,dew_point_2m,surface_pressure,wind_speed_10m,wind_direction_10m',
-                timezone: 'UTC',
-                wind_speed_unit: 'ms'  // Request wind speed in m/s (default is km/h)
-            });
-            return `${baseUrl}?${params}`;
-        }
+    private buildApiUrl(baseUrl: string, query: WeatherQuery): string {
+        // Both Forecast and Archive APIs support start_date/end_date
+        // This fetches only 24 hourly data points for the specific day
+        const params = new URLSearchParams({
+            latitude: query.latitude.toString(),
+            longitude: query.longitude.toString(),
+            start_date: query.date,
+            end_date: query.date,
+            hourly: 'temperature_2m,dew_point_2m,surface_pressure,wind_speed_10m,wind_direction_10m',
+            timezone: 'UTC',
+            wind_speed_unit: 'ms'  // Request wind speed in m/s (default is km/h)
+        });
+        return `${baseUrl}?${params}`;
     }
 
     /**
@@ -223,6 +212,15 @@ export class WeatherAPI {
         const windSpeed = data.hourly.wind_speed_10m?.[hourIndex];
         const windDirection = data.hourly.wind_direction_10m?.[hourIndex];
 
+        console.log('🔍 Extracted weather values at index', hourIndex, ':', {
+            temperature,
+            dewPoint,
+            pressure,
+            windSpeed,
+            windDirection,
+            timestamp: data.hourly.time?.[hourIndex]
+        });
+
         // Validate all required fields are present
         if (
             temperature === undefined ||
@@ -236,6 +234,13 @@ export class WeatherAPI {
             windDirection === undefined ||
             windDirection === null
         ) {
+            console.error('❌ Missing weather fields:', {
+                hasTemp: temperature !== undefined && temperature !== null,
+                hasDewPoint: dewPoint !== undefined && dewPoint !== null,
+                hasPressure: pressure !== undefined && pressure !== null,
+                hasWindSpeed: windSpeed !== undefined && windSpeed !== null,
+                hasWindDirection: windDirection !== undefined && windDirection !== null
+            });
             throw new WeatherAPIError(
                 'Incomplete weather data in API response',
                 'INCOMPLETE_DATA',
@@ -316,7 +321,7 @@ export class WeatherAPI {
     async testConnection(): Promise<boolean> {
         try {
             // Test with a simple forecast request (current location, minimal data)
-            const testUrl = `${this.baseUrl}?latitude=0&longitude=0&hourly=temperature_2m&forecast_days=1`;
+            const testUrl = `${this.forecastBaseUrl}?latitude=0&longitude=0&hourly=temperature_2m&forecast_days=1`;
             const response = await fetch(testUrl);
             return response.ok;
         } catch {

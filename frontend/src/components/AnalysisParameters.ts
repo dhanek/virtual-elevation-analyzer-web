@@ -276,12 +276,13 @@ export class AnalysisParametersComponent {
 
     private validateParameters(): void {
         // Basic validation - just check parameter validity, no button control
-        const isValid =
+        const _isValid =
             this.parameters.system_mass > 0 &&
             this.parameters.rho > 0 &&
             this.parameters.eta > 0 &&
             this.parameters.cda_min < this.parameters.cda_max &&
             this.parameters.crr_min < this.parameters.crr_max;
+        void _isValid; // validation result used for future UI feedback
 
         // Update wind direction visibility based on wind speed
         const windDirection = this.container.querySelector('#wind_direction') as HTMLInputElement;
@@ -375,8 +376,8 @@ export class AnalysisParametersComponent {
             if (sourceSpan) {
                 const isCached = metadata.source === 'cache';
                 sourceSpan.textContent = isCached ? '💾 Cached' : '⬇️ API';
-                sourceSpan.style.background = isCached ? '#e3f2fd' : '#fff3e0';
-                sourceSpan.style.color = isCached ? '#1976d2' : '#e65100';
+                (sourceSpan as HTMLElement).style.background = isCached ? '#e3f2fd' : '#fff3e0';
+                (sourceSpan as HTMLElement).style.color = isCached ? '#1976d2' : '#e65100';
             }
 
             if (locationSpan) {

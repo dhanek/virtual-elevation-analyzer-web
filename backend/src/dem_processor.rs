@@ -374,6 +374,15 @@ impl DEMProcessor {
                 ).into());
                 return Ok(transform);
             }
+
+            // Try to parse USGS 1-meter DEM filename (e.g., USGS_one_meter_x51y371_AL_JeffersonCo_2013.tif)
+            if let Some(transform) = Self::parse_usgs_one_meter_filename(fname, width, height) {
+                web_sys::console::log_1(&format!(
+                    "Parsed USGS 1-meter filename: origin=({}, {}), pixel_size=({}, {})",
+                    transform.origin_x, transform.origin_y, transform.pixel_width, transform.pixel_height
+                ).into());
+                return Ok(transform);
+            }
         }
 
         // Fallback: use 1-degree grid based on dimensions
@@ -409,23 +418,72 @@ impl DEMProcessor {
             web_sys::console::log_1(&format!("Found GDAL_METADATA: {}", metadata).into());
         }
 
+        // Check for GeoKeyDirectoryTag (34735) - contains projection info
+        match decoder.get_tag_u16_vec(Tag::Unknown(34735)) {
+            Ok(geokeys) => {
+                web_sys::console::log_1(&format!("Found GeoKeyDirectoryTag (34735): {} entries", geokeys.len() / 4).into());
+                // Parse key directory: each entry is [KeyID, TIFFTagLocation, Count, Value_Offset]
+                for i in (0..geokeys.len()).step_by(4) {
+                    if i + 3 < geokeys.len() {
+                        let key_id = geokeys[i];
+                        let value = geokeys[i + 3];
+                        // Log important keys
+                        match key_id {
+                            1024 => web_sys::console::log_1(&format!("  GTModelTypeGeoKey: {}", value).into()),
+                            1025 => web_sys::console::log_1(&format!("  GTRasterTypeGeoKey: {}", value).into()),
+                            2048 => web_sys::console::log_1(&format!("  GeographicTypeGeoKey: {}", value).into()),
+                            3072 => web_sys::console::log_1(&format!("  ProjectedCSTypeGeoKey: {}", value).into()),
+                            3076 => web_sys::console::log_1(&format!("  ProjLinearUnitsGeoKey: {}", value).into()),
+                            _ => {}
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                web_sys::console::log_1(&format!("No GeoKeyDirectoryTag (34735): {:?}", e).into());
+            }
+        }
+
+        // Check for GeoDoubleParamsTag (34736) - contains double precision params
+        match decoder.get_tag_f64_vec(Tag::Unknown(34736)) {
+            Ok(params) => {
+                web_sys::console::log_1(&format!("Found GeoDoubleParamsTag (34736): {:?}", params).into());
+            },
+            Err(_) => {}
+        }
+
+        // Check for GeoAsciiParamsTag (34737) - contains ASCII params (like CRS name)
+        match decoder.get_tag_ascii_string(Tag::Unknown(34737)) {
+            Ok(params) => {
+                web_sys::console::log_1(&format!("Found GeoAsciiParamsTag (34737): {}", params).into());
+            },
+            Err(_) => {}
+        }
+
         // Try ModelTransformationTag (34264) first - this is a direct affine matrix
-        if let Ok(transform_matrix) = decoder.get_tag_f64_vec(Tag::Unknown(34264)) {
-            if transform_matrix.len() == 16 {
-                web_sys::console::log_1(&format!("Found ModelTransformationTag (34264): {:?}", transform_matrix).into());
-                // Transform matrix is in column-major order:
-                // [0,4,8,12] = first column (X transformation)
-                // [1,5,9,13] = second column (Y transformation)
-                // [2,6,10,14] = third column (Z transformation)
-                // [3,7,11,15] = fourth column (translation)
-                return Some(GeoTransform {
-                    origin_x: transform_matrix[3],      // Translation X
-                    origin_y: transform_matrix[7],      // Translation Y
-                    pixel_width: transform_matrix[0],   // Scale X
-                    pixel_height: transform_matrix[5],  // Scale Y (already negative in most cases)
-                    rotation_x: transform_matrix[4],    // Rotation X
-                    rotation_y: transform_matrix[1],    // Rotation Y
-                });
+        match decoder.get_tag_f64_vec(Tag::Unknown(34264)) {
+            Ok(transform_matrix) => {
+                if transform_matrix.len() == 16 {
+                    web_sys::console::log_1(&format!("Found ModelTransformationTag (34264): {:?}", transform_matrix).into());
+                    // Transform matrix is in column-major order:
+                    // [0,4,8,12] = first column (X transformation)
+                    // [1,5,9,13] = second column (Y transformation)
+                    // [2,6,10,14] = third column (Z transformation)
+                    // [3,7,11,15] = fourth column (translation)
+                    return Some(GeoTransform {
+                        origin_x: transform_matrix[3],      // Translation X
+                        origin_y: transform_matrix[7],      // Translation Y
+                        pixel_width: transform_matrix[0],   // Scale X
+                        pixel_height: transform_matrix[5],  // Scale Y (already negative in most cases)
+                        rotation_x: transform_matrix[4],    // Rotation X
+                        rotation_y: transform_matrix[1],    // Rotation Y
+                    });
+                } else {
+                    web_sys::console::log_1(&format!("ModelTransformationTag (34264) has wrong length: {} (expected 16)", transform_matrix.len()).into());
+                }
+            },
+            Err(e) => {
+                web_sys::console::log_1(&format!("No ModelTransformationTag (34264): {:?}", e).into());
             }
         }
 
@@ -635,6 +693,94 @@ impl DEMProcessor {
         };
 
         Some(value)
+    }
+
+    /// Parse USGS 1-meter DEM filenames like "USGS_one_meter_x51y371_AL_JeffersonCo_2013.tif"
+    /// These tiles use a 10km grid in UTM coordinates.
+    /// The x and y values are tile indices: x * 10000 = UTM easting, y * 10000 = UTM northing
+    fn parse_usgs_one_meter_filename(filename: &str, width: u32, height: u32) -> Option<GeoTransform> {
+        let upper = filename.to_uppercase();
+
+        // Check if it's a USGS one meter DEM
+        if !upper.contains("USGS") || !upper.contains("ONE_METER") {
+            return None;
+        }
+
+        // Extract x and y tile indices from pattern like "X51Y371"
+        // Use regex-like manual parsing
+        let mut x_value: Option<i32> = None;
+        let mut y_value: Option<i32> = None;
+
+        // Find 'X' followed by digits, then 'Y' followed by digits
+        let chars: Vec<char> = upper.chars().collect();
+        for i in 0..chars.len() {
+            if chars[i] == 'X' && x_value.is_none() {
+                // Extract digits after X
+                let mut num_str = String::new();
+                for j in (i + 1)..chars.len() {
+                    if chars[j].is_ascii_digit() {
+                        num_str.push(chars[j]);
+                    } else {
+                        break;
+                    }
+                }
+                if !num_str.is_empty() {
+                    x_value = num_str.parse().ok();
+                }
+            } else if chars[i] == 'Y' && y_value.is_none() {
+                // Extract digits after Y
+                let mut num_str = String::new();
+                for j in (i + 1)..chars.len() {
+                    if chars[j].is_ascii_digit() {
+                        num_str.push(chars[j]);
+                    } else {
+                        break;
+                    }
+                }
+                if !num_str.is_empty() {
+                    y_value = num_str.parse().ok();
+                }
+            }
+        }
+
+        let x_tile = x_value?;
+        let y_tile = y_value?;
+
+        web_sys::console::log_1(&format!(
+            "USGS 1-meter DEM tile indices: x={}, y={}", x_tile, y_tile
+        ).into());
+
+        // USGS 1-meter tiles are 10km x 10km in UTM coordinates
+        // The tile index multiplied by 10000 gives the UTM coordinate of the SW corner
+        // But the tile might have overlap/buffer pixels, so we need to account for that
+
+        // Standard USGS 1-meter tile is 10012x10012 pixels (10000 data + 12 overlap)
+        // Or 10000x10000 without overlap
+        let tile_size_m = 10000.0; // 10km in meters
+
+        // Calculate pixel size based on actual dimensions
+        // For a 10012x10012 tile covering 10km, pixel size ≈ 0.9988m
+        // For a 10000x10000 tile, pixel size = 1.0m exactly
+        let pixel_size = tile_size_m / width as f64;
+
+        // UTM coordinates: x_tile * 10000 = easting, y_tile * 10000 = northing (SW corner)
+        // The tile origin (upper-left) is at (easting, northing + tile_height_m)
+        let origin_x = (x_tile as f64) * tile_size_m;
+        let origin_y = (y_tile as f64) * tile_size_m + (height as f64) * pixel_size;
+
+        web_sys::console::log_1(&format!(
+            "USGS 1-meter: UTM origin=({}, {}), pixel_size={}m, tile {}x{} pixels",
+            origin_x, origin_y, pixel_size, width, height
+        ).into());
+
+        Some(GeoTransform {
+            origin_x,
+            origin_y,
+            pixel_width: pixel_size,
+            pixel_height: -pixel_size, // Negative because Y increases downward in raster
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+        })
     }
 
     fn parse_nodata(_decoder: &mut Decoder<Cursor<&[u8]>>) -> Option<f64> {

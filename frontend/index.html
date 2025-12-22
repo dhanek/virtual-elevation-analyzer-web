@@ -626,6 +626,44 @@
             background: #e53e3e;
         }
 
+        /* GPS Lap Detection Panel */
+        .gps-lap-detection-panel {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 2px;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .gps-lap-detection-panel h4 {
+            color: #2d3748;
+            margin-bottom: 0.35rem;
+            border-bottom: 1px solid #ff6b00;
+            padding-bottom: 0.25rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .gps-marker-controls button {
+            font-size: 0.75rem;
+            padding: 0.4rem 0.5rem;
+        }
+
+        .gps-marker-controls button.active {
+            background: #ff6b00;
+            color: white;
+            border-color: #e65c00;
+        }
+
+        #gpsDetectedLapsInfo {
+            font-size: 0.8rem;
+        }
+
+        #gpsLapList {
+            border: 1px solid #e2e8f0;
+            border-radius: 2px;
+        }
+
         @media (max-width: 768px) {
             .map-lap-container {
                 grid-template-columns: 1fr;
@@ -1545,6 +1583,31 @@
             .ve-right-panel {
                 order: 1;
             }
+        }
+
+        /* GPS Gate Marker Labels */
+        .gate-marker-label {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            font-weight: bold;
+            font-size: 12px;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .gate-marker-label::before {
+            border: none !important;
+        }
+
+        .gate-marker-label-a {
+            background: #00aa00 !important;
+            color: white !important;
+        }
+
+        .gate-marker-label-b {
+            background: #0066cc !important;
+            color: white !important;
         }
     </style>
 </head>

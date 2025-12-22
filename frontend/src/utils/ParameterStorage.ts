@@ -8,10 +8,38 @@ interface LapSettings {
     airSpeedCalibration?: number; // Air speed calibration percentage (-20 to +20)
 }
 
+// GPS marker settings for lap detection (time-based)
+interface GpsMarkerSettings {
+    gateTimeOffset: number;  // Time offset in seconds from start of selected data
+    // Legacy fields for backwards compatibility (deprecated)
+    lat?: number;
+    lon?: number;
+    dataIndex?: number;
+}
+
+// GPS marker settings for Out and Back mode (time-based, two gates)
+interface OutAndBackMarkerSettings {
+    gateATimeOffset: number;  // Gate A time offset in seconds from start
+    gateBTimeOffset: number;  // Gate B time offset in seconds from start (must be > gateA)
+    // Legacy fields for backwards compatibility (deprecated)
+    markerA?: {
+        lat: number;
+        lon: number;
+        dataIndex: number;
+    };
+    markerB?: {
+        lat: number;
+        lon: number;
+        dataIndex: number;
+    };
+}
+
 interface StoredParameters {
     fileHash: string;
     parameters: AnalysisParameters;
     lapSettings: { [lapKey: string]: LapSettings }; // Key is lap indices joined by '-' (e.g., "0", "1-2-3")
+    gpsMarkerSettings?: { [lapKey: string]: GpsMarkerSettings }; // GPS marker per lap selection
+    outAndBackMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // Out and Back markers per lap selection
     lastUsed: number; // timestamp
     fileName?: string; // optional, for debugging
 }
@@ -315,8 +343,10 @@ export class ParameterStorage {
                             wind_speed: null,
                             wind_direction: null,
                             wind_speed_unit: 'm/s',
+                            air_speed_offset: 2,
                             velodrome: false,
-                            auto_lap_detection: 'None'
+                            auto_lap_detection: 'None',
+                            auto_calculate_rho: false
                         },
                         lapSettings: {},
                         lastUsed: Date.now()
@@ -382,6 +412,331 @@ export class ParameterStorage {
             };
         });
     }
+
+    /**
+     * Save GPS marker settings for a specific file and lap selection
+     */
+    async saveGpsMarkerSettings(
+        fileHash: string,
+        selectedLaps: number[],
+        markerSettings: GpsMarkerSettings
+    ): Promise<void> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot save GPS marker settings');
+            return;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+
+            const getRequest = objectStore.get(fileHash);
+
+            getRequest.onsuccess = () => {
+                let existingData = getRequest.result as StoredParameters | undefined;
+
+                if (!existingData) {
+                    console.warn('⚠️ No existing data found for file, creating default entry for GPS marker');
+                    existingData = {
+                        fileHash,
+                        parameters: {
+                            system_mass: 75,
+                            rho: 1.225,
+                            eta: 0.97,
+                            cda: null,
+                            crr: null,
+                            cda_min: 0.15,
+                            cda_max: 0.5,
+                            crr_min: 0.002,
+                            crr_max: 0.015,
+                            wind_speed: null,
+                            wind_direction: null,
+                            wind_speed_unit: 'm/s',
+                            air_speed_offset: 2,
+                            velodrome: false,
+                            auto_lap_detection: 'None',
+                            auto_calculate_rho: false
+                        },
+                        lapSettings: {},
+                        gpsMarkerSettings: {},
+                        lastUsed: Date.now()
+                    };
+                }
+
+                // Ensure gpsMarkerSettings exists
+                if (!existingData.gpsMarkerSettings) {
+                    existingData.gpsMarkerSettings = {};
+                }
+
+                // Update GPS marker settings
+                existingData.gpsMarkerSettings[lapKey] = markerSettings;
+                existingData.lastUsed = Date.now();
+
+                const putRequest = objectStore.put(existingData);
+
+                putRequest.onsuccess = () => {
+                    console.log(`✅ GPS marker saved for lap key: ${lapKey}`);
+                    resolve();
+                };
+
+                putRequest.onerror = () => {
+                    console.error('❌ Failed to save GPS marker settings:', putRequest.error);
+                    reject(putRequest.error);
+                };
+            };
+
+            getRequest.onerror = () => {
+                console.error('❌ Failed to get existing data:', getRequest.error);
+                reject(getRequest.error);
+            };
+        });
+    }
+
+    /**
+     * Load GPS marker settings for a specific file and lap selection
+     */
+    async loadGpsMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<GpsMarkerSettings | null> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot load GPS marker settings');
+            return null;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readonly');
+            const objectStore = transaction.objectStore(this.storeName);
+            const request = objectStore.get(fileHash);
+
+            request.onsuccess = () => {
+                const result = request.result as StoredParameters | undefined;
+                if (result && result.gpsMarkerSettings && result.gpsMarkerSettings[lapKey]) {
+                    console.log(`✅ GPS marker loaded for lap key: ${lapKey}`);
+                    resolve(result.gpsMarkerSettings[lapKey]);
+                } else {
+                    resolve(null);
+                }
+            };
+
+            request.onerror = () => {
+                console.error('❌ Failed to load GPS marker settings:', request.error);
+                reject(request.error);
+            };
+        });
+    }
+
+    /**
+     * Clear GPS marker settings for a specific file and lap selection
+     */
+    async clearGpsMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<void> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot clear GPS marker settings');
+            return;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+
+            const getRequest = objectStore.get(fileHash);
+
+            getRequest.onsuccess = () => {
+                const existingData = getRequest.result as StoredParameters | undefined;
+
+                if (existingData && existingData.gpsMarkerSettings && existingData.gpsMarkerSettings[lapKey]) {
+                    delete existingData.gpsMarkerSettings[lapKey];
+                    existingData.lastUsed = Date.now();
+
+                    const putRequest = objectStore.put(existingData);
+
+                    putRequest.onsuccess = () => {
+                        console.log(`✅ GPS marker cleared for lap key: ${lapKey}`);
+                        resolve();
+                    };
+
+                    putRequest.onerror = () => {
+                        console.error('❌ Failed to clear GPS marker settings:', putRequest.error);
+                        reject(putRequest.error);
+                    };
+                } else {
+                    resolve();
+                }
+            };
+
+            getRequest.onerror = () => {
+                console.error('❌ Failed to get existing data:', getRequest.error);
+                reject(getRequest.error);
+            };
+        });
+    }
+
+    // ==================== Out and Back Marker Settings ====================
+
+    /**
+     * Save Out and Back marker settings for a specific file and lap selection
+     */
+    async saveOutAndBackMarkerSettings(
+        fileHash: string,
+        selectedLaps: number[],
+        markerSettings: OutAndBackMarkerSettings
+    ): Promise<void> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot save Out and Back marker settings');
+            return;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+
+            const getRequest = objectStore.get(fileHash);
+
+            getRequest.onsuccess = () => {
+                let existingData = getRequest.result as StoredParameters | undefined;
+
+                if (!existingData) {
+                    console.warn('⚠️ No existing data found for file, creating default entry for Out and Back markers');
+                    existingData = {
+                        fileHash,
+                        parameters: {
+                            system_mass: 75,
+                            rho: 1.225,
+                            eta: 0.97,
+                            cda: null,
+                            crr: null,
+                            cda_min: 0.15,
+                            cda_max: 0.5,
+                            crr_min: 0.002,
+                            crr_max: 0.015,
+                            wind_speed: null,
+                            wind_direction: null,
+                            wind_speed_unit: 'm/s',
+                            air_speed_offset: 2,
+                            velodrome: false,
+                            auto_lap_detection: 'None',
+                            auto_calculate_rho: false
+                        },
+                        lapSettings: {},
+                        gpsMarkerSettings: {},
+                        outAndBackMarkerSettings: {},
+                        lastUsed: Date.now()
+                    };
+                }
+
+                // Ensure outAndBackMarkerSettings exists
+                if (!existingData.outAndBackMarkerSettings) {
+                    existingData.outAndBackMarkerSettings = {};
+                }
+
+                // Update Out and Back marker settings
+                existingData.outAndBackMarkerSettings[lapKey] = markerSettings;
+                existingData.lastUsed = Date.now();
+
+                const putRequest = objectStore.put(existingData);
+
+                putRequest.onsuccess = () => {
+                    console.log(`✅ Out and Back markers saved for lap key: ${lapKey}`);
+                    resolve();
+                };
+
+                putRequest.onerror = () => {
+                    console.error('❌ Failed to save Out and Back marker settings:', putRequest.error);
+                    reject(putRequest.error);
+                };
+            };
+
+            getRequest.onerror = () => {
+                console.error('❌ Failed to get existing data:', getRequest.error);
+                reject(getRequest.error);
+            };
+        });
+    }
+
+    /**
+     * Load Out and Back marker settings for a specific file and lap selection
+     */
+    async loadOutAndBackMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<OutAndBackMarkerSettings | null> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot load Out and Back marker settings');
+            return null;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readonly');
+            const objectStore = transaction.objectStore(this.storeName);
+            const request = objectStore.get(fileHash);
+
+            request.onsuccess = () => {
+                const result = request.result as StoredParameters | undefined;
+                if (result && result.outAndBackMarkerSettings && result.outAndBackMarkerSettings[lapKey]) {
+                    console.log(`✅ Out and Back markers loaded for lap key: ${lapKey}`);
+                    resolve(result.outAndBackMarkerSettings[lapKey]);
+                } else {
+                    resolve(null);
+                }
+            };
+
+            request.onerror = () => {
+                console.error('❌ Failed to load Out and Back marker settings:', request.error);
+                reject(request.error);
+            };
+        });
+    }
+
+    /**
+     * Clear Out and Back marker settings for a specific file and lap selection
+     */
+    async clearOutAndBackMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<void> {
+        if (!this.db) {
+            console.warn('IndexedDB not initialized, cannot clear Out and Back marker settings');
+            return;
+        }
+
+        const lapKey = this.getLapKey(selectedLaps);
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+
+            const getRequest = objectStore.get(fileHash);
+
+            getRequest.onsuccess = () => {
+                const existingData = getRequest.result as StoredParameters | undefined;
+
+                if (existingData && existingData.outAndBackMarkerSettings && existingData.outAndBackMarkerSettings[lapKey]) {
+                    delete existingData.outAndBackMarkerSettings[lapKey];
+                    existingData.lastUsed = Date.now();
+
+                    const putRequest = objectStore.put(existingData);
+
+                    putRequest.onsuccess = () => {
+                        console.log(`✅ Out and Back markers cleared for lap key: ${lapKey}`);
+                        resolve();
+                    };
+
+                    putRequest.onerror = () => {
+                        console.error('❌ Failed to clear Out and Back marker settings:', putRequest.error);
+                        reject(putRequest.error);
+                    };
+                } else {
+                    resolve();
+                }
+            };
+
+            getRequest.onerror = () => {
+                console.error('❌ Failed to get existing data:', getRequest.error);
+                reject(getRequest.error);
+            };
+        });
+    }
 }
 
-export type { LapSettings };
+export type { LapSettings, GpsMarkerSettings, OutAndBackMarkerSettings };
