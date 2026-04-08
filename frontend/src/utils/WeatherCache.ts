@@ -3,14 +3,15 @@
  * Weather data never expires - identical queries return cached results indefinitely
  */
 
-import { TrimRegionMetadata } from './GeoCalculations';
+import { TrimRegionMetadata, roundToNearest15Min } from './GeoCalculations';
 import { WeatherAPI, WeatherResponse, WeatherAPIError } from './WeatherAPI';
 
 export interface WeatherCacheKey {
-    lat: number;      // Rounded to 6 decimals
-    lon: number;      // Rounded to 6 decimals
-    date: string;     // YYYY-MM-DD
-    hour: number;     // 0-23 (UTC)
+    lat: number;        // Rounded to 6 decimals
+    lon: number;        // Rounded to 6 decimals
+    date: string;       // YYYY-MM-DD
+    slotHour: number;   // 0-23 (UTC), hour of nearest 15-min slot
+    slotMinute: number; // 0, 15, 30, or 45 (nearest 15-min slot)
 }
 
 export interface WeatherCacheEntry {
@@ -106,7 +107,7 @@ export class WeatherCache {
             console.log('💾 Weather data found in cache (permanent):', {
                 location: `${key.lat}, ${key.lon}`,
                 date: key.date,
-                hour: key.hour,
+                time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`,
                 cachedSince: new Date(cached.cachedAt).toISOString()
             });
             return cached;
@@ -130,7 +131,7 @@ export class WeatherCache {
             console.log('💾 Weather data cached permanently:', {
                 location: `${key.lat}, ${key.lon}`,
                 date: key.date,
-                hour: key.hour
+                time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`
             });
 
             return entry;
@@ -148,13 +149,14 @@ export class WeatherCache {
      * Build cache key from metadata
      */
     private buildCacheKey(metadata: TrimRegionMetadata): WeatherCacheKey {
-        const date = metadata.middleDate;
+        const slot = roundToNearest15Min(metadata.middleDate);
 
         return {
             lat: metadata.avgLat,
             lon: metadata.avgLon,
-            date: date.toISOString().split('T')[0], // YYYY-MM-DD
-            hour: date.getUTCHours()
+            date: slot.date,
+            slotHour: slot.slotHour,
+            slotMinute: slot.slotMinute
         };
     }
 
@@ -162,7 +164,7 @@ export class WeatherCache {
      * Generate unique string key for IndexedDB storage
      */
     private generateCacheKeyString(key: WeatherCacheKey): string {
-        return `${key.lat.toFixed(6)}_${key.lon.toFixed(6)}_${key.date}_${key.hour}`;
+        return `${key.lat.toFixed(6)}_${key.lon.toFixed(6)}_${key.date}_${key.slotHour}:${String(key.slotMinute).padStart(2, '0')}`;
     }
 
     /**
@@ -242,7 +244,7 @@ export class WeatherCache {
         console.log('🔄 Updated cache entry with complete data:', {
             location: `${key.lat}, ${key.lon}`,
             date: key.date,
-            hour: key.hour
+            time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`
         });
     }
 

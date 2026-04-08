@@ -6,7 +6,7 @@ import { ViewportAdapter } from './utils/ViewportAdapter';
 import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
 import { ResultsStorage, type VEAnalysisResult } from './utils/ResultsStorage';
 import { DEMManager, ElevationProfileCache } from './utils/DEMManager';
-import { calculateTrimRegionMetadata, formatCoordinates } from './utils/GeoCalculations';
+import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } from './utils/GeoCalculations';
 import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
 import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
 import { GibliCsvParser, type GibliCsvData, CsvParseError } from './utils/CsvParser';
@@ -1142,8 +1142,9 @@ async function calculateAutoRho(): Promise<number | null> {
             console.log('  Trim Range:', `${trimStart} to ${trimEnd}`);
             console.log('═══════════════════════════════════════════════════════\n');
 
-            // Generate query key (rounded to hour precision to match API granularity)
-            const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${metadata.middleDate.toISOString().substring(0, 13)}`;
+            // Generate query key (rounded to nearest 15-min slot to match API granularity)
+            const slot = roundToNearest15Min(metadata.middleDate);
+            const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, '0')}:${String(slot.slotMinute).padStart(2, '0')}`;
 
             // Check if query has actually changed
             if (lastWeatherQueryKey === queryKey) {

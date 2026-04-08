@@ -2,6 +2,46 @@
  * Geospatial calculations for weather data retrieval
  */
 
+export interface RoundedTimeSlot {
+    date: string;          // YYYY-MM-DD (may advance to next day on midnight overflow)
+    slotHour: number;      // 0-23, hour component of nearest 15-min slot
+    slotMinute: number;    // 0, 15, 30, or 45, minute component of nearest 15-min slot
+    nearestHour: number;   // 0-23, independently rounded to nearest hour (for hourly API fallback)
+}
+
+/**
+ * Round a UTC date to the nearest 15-minute slot and nearest hour.
+ * Handles midnight overflow (e.g., 23:53 → 00:00 next day).
+ */
+export function roundToNearest15Min(date: Date): RoundedTimeSlot {
+    const totalMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
+
+    // Round to nearest 15-min slot
+    const nearest15 = Math.round(totalMinutes / 15) * 15;
+
+    // Handle overflow past midnight
+    const adjustedDate = new Date(date);
+    if (nearest15 >= 1440) {
+        adjustedDate.setUTCDate(adjustedDate.getUTCDate() + 1);
+    }
+    const slotMinutes = nearest15 % 1440;
+
+    // Nearest hour (independently rounded — may differ from slotHour)
+    const nearestHourTotal = Math.round(totalMinutes / 60) * 60;
+    const nearestHour = (nearestHourTotal % 1440) / 60;
+
+    const dateStr = nearest15 >= 1440
+        ? adjustedDate.toISOString().split('T')[0]
+        : date.toISOString().split('T')[0];
+
+    return {
+        date: dateStr,
+        slotHour: Math.floor(slotMinutes / 60),
+        slotMinute: slotMinutes % 60,
+        nearestHour
+    };
+}
+
 export interface TrimRegionMetadata {
     avgLat: number;           // Average latitude (6 decimal precision)
     avgLon: number;           // Average longitude (6 decimal precision)

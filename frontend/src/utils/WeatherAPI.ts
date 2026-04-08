@@ -3,13 +3,15 @@
  * Fetches temperature, dew point, and pressure data for air density calculations
  */
 
-import { TrimRegionMetadata } from './GeoCalculations';
+import { TrimRegionMetadata, roundToNearest15Min } from './GeoCalculations';
 
 export interface WeatherQuery {
-    latitude: number;     // Rounded to 6 decimals
-    longitude: number;    // Rounded to 6 decimals
-    date: string;         // YYYY-MM-DD format
-    hour: number;         // 0-23 (UTC)
+    latitude: number;      // Rounded to 6 decimals
+    longitude: number;     // Rounded to 6 decimals
+    date: string;          // YYYY-MM-DD format
+    slotHour: number;      // 0-23 (UTC), hour of nearest 15-min slot
+    slotMinute: number;    // 0, 15, 30, or 45 (nearest 15-min slot)
+    nearestHour: number;   // 0-23 (UTC), independently rounded to nearest hour
 }
 
 export interface WeatherResponse {
@@ -51,16 +53,42 @@ export class WeatherAPI {
         const query = this.buildQuery(metadata);
         const daysDiff = this.calculateDaysDifference(metadata.middleDate);
 
-        // Select API based on age
+        // Try Forecast API first (supports minutely_15), fall back to Archive API
+        // Forecast API accepts dates up to ~82 days back but may return all-null data
+        // for dates older than ~69 days. Archive API is the reliable fallback.
         const useForecastAPI = daysDiff <= this.forecastMaxDays;
-        const apiType = useForecastAPI ? 'Forecast' : 'Archive';
-        const baseUrl = useForecastAPI ? this.forecastBaseUrl : this.archiveBaseUrl;
 
-        // Build API URL with precise parameters
-        const url = this.buildApiUrl(baseUrl, query);
+        if (useForecastAPI) {
+            const result = await this.fetchFromAPI('Forecast', this.forecastBaseUrl, query, daysDiff, '15min', true);
+            if (result) return result;
+
+            // Forecast API returned all-null data — fall back to Archive
+            console.log('⚠️ Forecast API returned null data, falling back to Archive API');
+        }
+
+        // Archive API always has data — non-null assertion is safe here
+        return (await this.fetchFromAPI('Archive', this.archiveBaseUrl, query, daysDiff, 'hourly'))!;
+    }
+
+    /**
+     * Fetch and extract weather data from a specific API endpoint
+     */
+    private async fetchFromAPI(
+        apiType: string,
+        baseUrl: string,
+        query: WeatherQuery,
+        daysDiff: number,
+        resolution: '15min' | 'hourly',
+        allowNullFallback: boolean = false
+    ): Promise<WeatherResponse | null> {
+        const url = this.buildApiUrl(baseUrl, query, resolution);
+
+        const timeStr = resolution === '15min'
+            ? `${query.date}T${String(query.slotHour).padStart(2, '0')}:${String(query.slotMinute).padStart(2, '0')} UTC`
+            : `${query.date}T${String(query.nearestHour).padStart(2, '0')}:00 UTC`;
 
         console.log('═══════════════════════════════════════════════════════');
-        console.log(`🌐 OPEN-METEO ${apiType.toUpperCase()} API REQUEST`);
+        console.log(`🌐 OPEN-METEO ${apiType.toUpperCase()} API REQUEST (${resolution})`);
         console.log('═══════════════════════════════════════════════════════');
         console.log('🔀 API Type:', apiType, `(${daysDiff} days ago)`);
         console.log('📍 Location:', {
@@ -69,8 +97,9 @@ export class WeatherAPI {
         });
         console.log('📅 Date/Time:', {
             date: query.date,
-            hour: query.hour,
-            utc: `${query.date}T${String(query.hour).padStart(2, '0')}:00 UTC`
+            slot: `${String(query.slotHour).padStart(2, '0')}:${String(query.slotMinute).padStart(2, '0')}`,
+            nearestHour: query.nearestHour,
+            utc: timeStr
         });
         console.log('⏱️  Days Past:', daysDiff);
         console.log('🔗 Full URL:', url);
@@ -92,23 +121,32 @@ export class WeatherAPI {
 
             const data = await response.json();
 
-            console.log('📦 Raw API Response:', {
-                hourlyTimes: data.hourly?.time?.length || 0,
-                firstTime: data.hourly?.time?.[0],
-                lastTime: data.hourly?.time?.[data.hourly?.time?.length - 1]
-            });
-
-            // Validate response structure
-            if (!data.hourly || !data.hourly.time) {
-                throw new WeatherAPIError(
-                    'Invalid API response: missing hourly data',
-                    'INVALID_RESPONSE',
-                    { data }
-                );
+            // Extract weather data based on resolution
+            let weatherData: WeatherResponse;
+            if (resolution === '15min') {
+                const has15minData = data.minutely_15?.temperature_2m?.some((v: number | null) => v !== null);
+                if (has15minData) {
+                    weatherData = this.extractMinutely15Data(data, query);
+                } else {
+                    // Check if hourly fallback within this response has data
+                    const hasHourlyData = data.hourly?.temperature_2m?.some((v: number | null) => v !== null);
+                    if (hasHourlyData) {
+                        console.log('⚠️ minutely_15 data is all null, using hourly from same response');
+                        weatherData = this.extractHourlyData(data, query);
+                    } else if (allowNullFallback) {
+                        // Both minutely_15 and hourly are null — signal caller to try Archive API
+                        console.log('⚠️ Both minutely_15 and hourly data are null in Forecast response');
+                        return null;
+                    } else {
+                        throw new WeatherAPIError(
+                            'Weather data is all null in API response',
+                            'NULL_DATA'
+                        );
+                    }
+                }
+            } else {
+                weatherData = this.extractHourlyData(data, query);
             }
-
-            // Extract weather data for specific hour
-            const weatherData = this.extractHourlyData(data, query);
 
             console.log('═══════════════════════════════════════════════════════');
             console.log('✅ WEATHER DATA RECEIVED');
@@ -124,15 +162,10 @@ export class WeatherAPI {
             return weatherData;
 
         } catch (error) {
-            console.error('❌ Fetch failed with error:', error);
-            console.error('Error type:', error.constructor.name);
-            console.error('Error message:', error instanceof Error ? error.message : String(error));
-
             if (error instanceof WeatherAPIError) {
                 throw error;
             }
 
-            // Network or other errors
             throw new WeatherAPIError(
                 `Failed to fetch weather data: ${error instanceof Error ? error.message : 'Unknown error'}`,
                 'FETCH_ERROR',
@@ -145,13 +178,15 @@ export class WeatherAPI {
      * Build weather query from trim region metadata
      */
     private buildQuery(metadata: TrimRegionMetadata): WeatherQuery {
-        const date = metadata.middleDate;
+        const slot = roundToNearest15Min(metadata.middleDate);
 
         return {
             latitude: metadata.avgLat,
             longitude: metadata.avgLon,
-            date: date.toISOString().split('T')[0], // YYYY-MM-DD
-            hour: date.getUTCHours()
+            date: slot.date,
+            slotHour: slot.slotHour,
+            slotMinute: slot.slotMinute,
+            nearestHour: slot.nearestHour
         };
     }
 
@@ -170,27 +205,122 @@ export class WeatherAPI {
      * Build complete API URL with query parameters
      * Both APIs use start_date/end_date for efficient single-day queries
      */
-    private buildApiUrl(baseUrl: string, query: WeatherQuery): string {
-        // Both Forecast and Archive APIs support start_date/end_date
-        // This fetches only 24 hourly data points for the specific day
+    private buildApiUrl(baseUrl: string, query: WeatherQuery, resolution: '15min' | 'hourly'): string {
         const params = new URLSearchParams({
             latitude: query.latitude.toString(),
             longitude: query.longitude.toString(),
             start_date: query.date,
             end_date: query.date,
-            hourly: 'temperature_2m,dew_point_2m,surface_pressure,wind_speed_10m,wind_direction_10m',
             timezone: 'UTC',
             wind_speed_unit: 'ms'  // Request wind speed in m/s (default is km/h)
         });
+
+        if (resolution === '15min') {
+            // Use minutely_15 for temp, dew point, wind; hourly for surface_pressure
+            // Always request full hourly set as fallback (minutely_15 returns nulls for older dates ~70+ days)
+            params.set('minutely_15', 'temperature_2m,dew_point_2m,wind_speed_10m,wind_direction_10m');
+            params.set('hourly', 'temperature_2m,dew_point_2m,surface_pressure,wind_speed_10m,wind_direction_10m');
+        } else {
+            params.set('hourly', 'temperature_2m,dew_point_2m,surface_pressure,wind_speed_10m,wind_direction_10m');
+        }
+
         return `${baseUrl}?${params}`;
     }
 
     /**
-     * Extract weather data for specific hour from API response
+     * Extract weather data from minutely_15 response (Forecast API)
+     * Gets temp, dew point, wind from minutely_15; pressure from hourly
+     */
+    private extractMinutely15Data(data: any, query: WeatherQuery): WeatherResponse {
+        const targetTimestamp = `${query.date}T${String(query.slotHour).padStart(2, '0')}:${String(query.slotMinute).padStart(2, '0')}`;
+
+        // Validate minutely_15 data exists
+        if (!data.minutely_15?.time) {
+            throw new WeatherAPIError(
+                'Invalid API response: missing minutely_15 data',
+                'INVALID_RESPONSE',
+                { data }
+            );
+        }
+
+        // Find matching 15-min slot
+        const slotIndex = data.minutely_15.time.findIndex((time: string) =>
+            time.startsWith(targetTimestamp)
+        );
+
+        if (slotIndex === -1) {
+            throw new WeatherAPIError(
+                `No 15-min weather data available for ${targetTimestamp}`,
+                'DATA_NOT_FOUND',
+                { targetTimestamp, availableTimes: data.minutely_15.time }
+            );
+        }
+
+        const temperature = data.minutely_15.temperature_2m?.[slotIndex];
+        const dewPoint = data.minutely_15.dew_point_2m?.[slotIndex];
+        const windSpeed = data.minutely_15.wind_speed_10m?.[slotIndex];
+        const windDirection = data.minutely_15.wind_direction_10m?.[slotIndex];
+
+        // Get surface_pressure from hourly data (nearest hour)
+        const hourTimestamp = `${query.date}T${String(query.nearestHour).padStart(2, '0')}:00`;
+        if (!data.hourly?.time) {
+            throw new WeatherAPIError(
+                'Invalid API response: missing hourly data for surface_pressure',
+                'INVALID_RESPONSE',
+                { data }
+            );
+        }
+        const hourIndex = data.hourly.time.findIndex((time: string) =>
+            time.startsWith(hourTimestamp)
+        );
+        const pressure = hourIndex !== -1 ? data.hourly.surface_pressure?.[hourIndex] : undefined;
+
+        console.log('🔍 Extracted 15-min weather values at index', slotIndex, ':', {
+            temperature,
+            dewPoint,
+            pressure: `${pressure} (hourly index ${hourIndex})`,
+            windSpeed,
+            windDirection,
+            timestamp: data.minutely_15.time?.[slotIndex]
+        });
+
+        // Validate all required fields
+        if (
+            temperature == null || dewPoint == null || pressure == null ||
+            windSpeed == null || windDirection == null
+        ) {
+            throw new WeatherAPIError(
+                'Incomplete weather data in API response',
+                'INCOMPLETE_DATA',
+                { temperature, dewPoint, pressure, windSpeed, windDirection, slotIndex, hourIndex }
+            );
+        }
+
+        this.validateWeatherValues(temperature, dewPoint, pressure, windSpeed, windDirection);
+
+        return {
+            temperature,
+            dewPoint,
+            pressure,
+            windSpeed,
+            windDirection,
+            queriedAt: Date.now()
+        };
+    }
+
+    /**
+     * Extract weather data for specific hour from API response (Archive API fallback)
      */
     private extractHourlyData(data: any, query: WeatherQuery): WeatherResponse {
-        // Build target timestamp string (ISO format, hour precision)
-        const targetTimestamp = `${query.date}T${String(query.hour).padStart(2, '0')}:00`;
+        const targetTimestamp = `${query.date}T${String(query.nearestHour).padStart(2, '0')}:00`;
+
+        if (!data.hourly?.time) {
+            throw new WeatherAPIError(
+                'Invalid API response: missing hourly data',
+                'INVALID_RESPONSE',
+                { data }
+            );
+        }
 
         // Find matching hour in response
         const hourIndex = data.hourly.time.findIndex((time: string) =>
@@ -205,14 +335,13 @@ export class WeatherAPI {
             );
         }
 
-        // Extract values
         const temperature = data.hourly.temperature_2m?.[hourIndex];
         const dewPoint = data.hourly.dew_point_2m?.[hourIndex];
         const pressure = data.hourly.surface_pressure?.[hourIndex];
         const windSpeed = data.hourly.wind_speed_10m?.[hourIndex];
         const windDirection = data.hourly.wind_direction_10m?.[hourIndex];
 
-        console.log('🔍 Extracted weather values at index', hourIndex, ':', {
+        console.log('🔍 Extracted hourly weather values at index', hourIndex, ':', {
             temperature,
             dewPoint,
             pressure,
@@ -221,26 +350,10 @@ export class WeatherAPI {
             timestamp: data.hourly.time?.[hourIndex]
         });
 
-        // Validate all required fields are present
         if (
-            temperature === undefined ||
-            temperature === null ||
-            dewPoint === undefined ||
-            dewPoint === null ||
-            pressure === undefined ||
-            pressure === null ||
-            windSpeed === undefined ||
-            windSpeed === null ||
-            windDirection === undefined ||
-            windDirection === null
+            temperature == null || dewPoint == null || pressure == null ||
+            windSpeed == null || windDirection == null
         ) {
-            console.error('❌ Missing weather fields:', {
-                hasTemp: temperature !== undefined && temperature !== null,
-                hasDewPoint: dewPoint !== undefined && dewPoint !== null,
-                hasPressure: pressure !== undefined && pressure !== null,
-                hasWindSpeed: windSpeed !== undefined && windSpeed !== null,
-                hasWindDirection: windDirection !== undefined && windDirection !== null
-            });
             throw new WeatherAPIError(
                 'Incomplete weather data in API response',
                 'INCOMPLETE_DATA',
@@ -248,7 +361,6 @@ export class WeatherAPI {
             );
         }
 
-        // Validate values are reasonable
         this.validateWeatherValues(temperature, dewPoint, pressure, windSpeed, windDirection);
 
         return {
