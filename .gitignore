@@ -28,6 +28,8 @@ backend/target/
 # Editor directories and files
 .vscode/
 .idea/
+.pi/
+.pi-lens/
 *.suo
 *.ntvs*
 *.njsproj
