@@ -33,6 +33,14 @@ import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDen
 // Plotly.js type declaration
 declare const Plotly: any;
 
+// Plotly monkey-patches an `on` method onto divs after `Plotly.newPlot()`
+// to let callers subscribe to plotly_* events (e.g. plotly_relayout).
+// Plotly's own @types aren't installed (it's loaded via CDN), so declare
+// the minimum surface we use.
+interface PlotlyHTMLElement extends HTMLElement {
+    on(event: string, callback: (data: any) => void): void;
+}
+
 // Helper function to dynamically load and wait for Plotly
 function waitForPlotly(): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -7968,7 +7976,7 @@ async function createVirtualElevationPlots(
             // Link the x-axes so they zoom/pan together (with guards to prevent infinite loops)
             let isRelayoutInProgress = false;
 
-            vePlotDiv.on('plotly_relayout', (eventData: any) => {
+            (vePlotDiv as PlotlyHTMLElement).on('plotly_relayout', (eventData: any) => {
                 if (isRelayoutInProgress) return;
 
                 if (eventData['xaxis.range[0]'] !== undefined && eventData['xaxis.range[1]'] !== undefined) {
@@ -7987,7 +7995,7 @@ async function createVirtualElevationPlots(
                 }
             });
 
-            residualsPlotDiv.on('plotly_relayout', (eventData: any) => {
+            (residualsPlotDiv as PlotlyHTMLElement).on('plotly_relayout', (eventData: any) => {
                 if (isRelayoutInProgress) return;
 
                 if (eventData['xaxis.range[0]'] !== undefined && eventData['xaxis.range[1]'] !== undefined) {
