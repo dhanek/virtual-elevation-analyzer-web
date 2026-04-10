@@ -13,6 +13,7 @@ pub struct DEMProcessor {
     data: Vec<f32>, // Full raster data
     wgs84_proj: Option<Proj>, // WGS84 projection
     dem_proj: Option<Proj>,   // DEM CRS projection
+    logged_first_lookup: bool, // Only log diagnostics once per instance
 }
 
 /// GeoTransform contains the affine transformation parameters
@@ -31,6 +32,8 @@ struct GeoTransform {
     rotation_x: f64,
     /// Rotation parameter (usually 0)
     rotation_y: f64,
+    /// EPSG code from GeoKeyDirectoryTag (ProjectedCSTypeGeoKey or GeographicTypeGeoKey)
+    epsg_code: Option<u16>,
 }
 
 impl GeoTransform {
@@ -104,7 +107,52 @@ impl DEMProcessor {
         let (width, height) = decoder.dimensions()
             .map_err(|e| JsValue::from_str(&format!("Failed to get image dimensions: {}", e)))?;
 
-        // Read the image data
+        // IMPORTANT: Read GeoTIFF tags and nodata BEFORE read_image().
+        // Some TIFF decoders (especially for tiled/compressed images) corrupt IFD
+        // access after read_image(), causing tag reads to fail silently.
+        //
+        // Strategy: Always try embedded GeoTIFF tags first (most authoritative).
+        // Fall back to world file if tags are missing/invalid.
+        let transform = {
+            // 1. Try embedded GeoTIFF tags (works for most GeoTIFF files including AWS tiles)
+            let geotiff_transform = Self::parse_geotiff_tags(&mut decoder, width, height);
+
+            let geotiff_bounds_valid = geotiff_transform.as_ref().map_or(false, |gt| {
+                let max_x = gt.origin_x + (width as f64 * gt.pixel_width);
+                let max_y = gt.origin_y + (height as f64 * gt.pixel_height);
+                !(gt.origin_x.abs() < 1.0 && gt.origin_y.abs() < 1.0
+                    && max_x.abs() < 2.0 && max_y.abs() < 2.0)
+            });
+
+            if let Some(ref gt) = geotiff_transform {
+                if geotiff_bounds_valid {
+                    web_sys::console::log_1(&format!(
+                        "Using embedded GeoTIFF tags: origin=({}, {}), pixel_size=({}, {}), epsg={:?}",
+                        gt.origin_x, gt.origin_y, gt.pixel_width, gt.pixel_height, gt.epsg_code
+                    ).into());
+                } else {
+                    web_sys::console::warn_1(&"GeoTIFF tags found but bounds look invalid, will try fallback".into());
+                }
+            }
+
+            match (geotiff_transform, geotiff_bounds_valid, &world_file_data) {
+                // GeoTIFF tags with valid bounds → use them
+                (Some(gt), true, _) => gt,
+                // GeoTIFF tags failed or invalid, world file available → use world file
+                (_, _, Some(ref wf)) => {
+                    web_sys::console::log_1(&"Falling back to world file for georeferencing".into());
+                    Self::parse_world_file(wf)?
+                },
+                // GeoTIFF tags present but bounds questionable, no world file → use tags anyway
+                (Some(gt), false, None) => gt,
+                // Nothing available → full fallback
+                (None, _, None) => Self::parse_geotransform_fallback(&mut decoder, filename.as_deref(), width, height)?,
+            }
+        };
+
+        let explicit_nodata = Self::parse_nodata(&mut decoder);
+
+        // Now read the image data (may invalidate further tag reads)
         let image_data = decoder.read_image()
             .map_err(|e| {
                 let error_msg = format!("{}", e);
@@ -164,27 +212,26 @@ impl DEMProcessor {
         };
         web_sys::console::log_1(&format!("TIFF data type: {}", data_type_name).into());
 
+        // Determine nodata value: explicit tag > data-type default > -9999
+        let nodata_value = match explicit_nodata {
+            Some(v) => v,
+            None => {
+                let default = match &image_data {
+                    tiff::decoder::DecodingResult::I16(_) => -32768.0,  // i16::MIN — standard SRTM/AWS nodata
+                    tiff::decoder::DecodingResult::I32(_) => -2147483648.0, // i32::MIN
+                    _ => -9999.0,
+                };
+                web_sys::console::log_1(&format!("No GDAL_NODATA tag, using type-based default: {}", default).into());
+                default
+            }
+        };
+
         if is_u8 {
             web_sys::console::warn_1(&"Warning: U8 DEM detected (8-bit, 0-255 range). This is a low-quality format with limited elevation range.".into());
         }
 
         // Convert to f32 array
         let data = Self::convert_to_f32(image_data, width as usize * height as usize)?;
-
-        // Note: We do NOT filter 255 values for U8 DEMs.
-        // The TIFF has a proper nodata value (-9999), and 255m is a valid elevation.
-        // If the DEM has invalid data, it should be marked with the proper nodata value.
-
-        // Parse GeoTIFF tags for geospatial metadata
-        // If world file is provided, use it; otherwise try GeoTIFF tags
-        let transform = if let Some(ref world_file) = world_file_data {
-            Self::parse_world_file(world_file)?
-        } else {
-            Self::parse_geotransform(&mut decoder, filename.as_deref(), width, height)?
-        };
-
-        // Get nodata value (default to -9999 if not specified)
-        let nodata_value = Self::parse_nodata(&mut decoder).unwrap_or(-9999.0);
 
         // Validate: if world file is provided without .prj file, warn user
         if world_file_data.is_some() && proj_file_data.is_none() {
@@ -213,8 +260,12 @@ impl DEMProcessor {
             ).into());
         }
 
-        // Initialize coordinate transformers based on detected projection
-        let (wgs84_proj, dem_proj) = if let Some(ref prj_content) = proj_file_data {
+        // Initialize coordinate transformers based on detected projection.
+        // Prefer EPSG code from GeoTIFF tags (most reliable), then PRJ file, then heuristics.
+        let (wgs84_proj, dem_proj) = if transform.epsg_code.is_some() {
+            // GeoTIFF tags provided an EPSG code — use it directly (most reliable)
+            Self::setup_projection(&transform)?
+        } else if let Some(ref prj_content) = proj_file_data {
             Self::setup_projection_from_prj(&transform, prj_content)?
         } else {
             Self::setup_projection(&transform)?
@@ -228,6 +279,7 @@ impl DEMProcessor {
             data,
             wgs84_proj,
             dem_proj,
+            logged_first_lookup: false,
         })
     }
 
@@ -251,7 +303,13 @@ impl DEMProcessor {
 
                 match proj4rs::transform::transform(wgs84, dem, &mut point) {
                     Ok(_) => (point.0, point.1),
-                    Err(_) => {
+                    Err(e) => {
+                        if !self.logged_first_lookup {
+                            web_sys::console::warn_1(&format!(
+                                "proj4rs transform failed for ({}, {}): {:?}", lat, lon, e
+                            ).into());
+                            self.logged_first_lookup = true;
+                        }
                         altitudes.push(f64::NAN);
                         continue;
                     }
@@ -264,19 +322,50 @@ impl DEMProcessor {
             // Convert geographic coordinates to pixel coordinates
             let (col, row) = self.transform.geo_to_pixel(x, y);
 
-            // Check if coordinates are within bounds
-            if col < 0.0 || row < 0.0 || col >= self.width as f64 || row >= self.height as f64 {
+            // Log the first lookup for diagnostics (once per DEMProcessor instance)
+            if !self.logged_first_lookup {
+                web_sys::console::log_1(&format!(
+                    "DEM lookup: ({:.5}, {:.5}) -> CRS ({:.2}, {:.2}) -> pixel ({:.2}, {:.2})",
+                    lat, lon, x, y, col, row
+                ).into());
+            }
+
+            // Check if coordinates are within bounds.
+            // The origin is the CENTER of pixel (0,0) (world file convention),
+            // so valid floating-point coordinates range from -0.5 to (dim - 0.5).
+            // We do the bounds check AFTER rounding to nearest pixel, which is
+            // more correct for nearest-neighbor sampling.
+            let col_nearest = col.round() as i64;
+            let row_nearest = row.round() as i64;
+            if col_nearest < 0 || row_nearest < 0
+                || col_nearest >= self.width as i64
+                || row_nearest >= self.height as i64
+            {
+                if !self.logged_first_lookup {
+                    web_sys::console::warn_1(&format!(
+                        "DEM lookup: pixel ({:.2}, {:.2}) -> nearest ({}, {}) out of bounds ({}x{})",
+                        col, row, col_nearest, row_nearest, self.width, self.height
+                    ).into());
+                    self.logged_first_lookup = true;
+                }
                 altitudes.push(f64::NAN);
                 continue;
             }
 
-            // Get elevation value with robust interpolation
-            let elevation = self.get_interpolated_value(col, row);
+            // Get elevation value at the nearest pixel
+            let elevation = self.get_pixel_value(col_nearest as usize, row_nearest as usize);
 
             // Check for nodata
             if elevation.is_nan() || (elevation - self.nodata_value as f32).abs() < 0.01 {
                 altitudes.push(f64::NAN);
             } else {
+                if !self.logged_first_lookup {
+                    web_sys::console::log_1(&format!(
+                        "DEM lookup: ({:.5}, {:.5}) -> elevation {:.1}m (pixel {},{}) [{}x{} tile]",
+                        lat, lon, elevation, col_nearest, row_nearest, self.width, self.height
+                    ).into());
+                    self.logged_first_lookup = true;
+                }
                 altitudes.push(elevation as f64);
             }
         }
@@ -312,29 +401,6 @@ impl DEMProcessor {
         }
     }
 
-    fn get_interpolated_value(&self, col: f64, row: f64) -> f32 {
-        // Nearest-neighbor lookup (matches Python rasterio implementation)
-        // For high-resolution DEMs with 1-second GPS sampling, taking the exact
-        // pixel value is simpler and often better than interpolation
-        let col_nearest = col.round() as usize;
-        let row_nearest = row.round() as usize;
-
-        // Bounds check
-        if col_nearest >= self.width as usize || row_nearest >= self.height as usize {
-            return f32::NAN;
-        }
-
-        let value = self.get_pixel_value(col_nearest, row_nearest);
-        let nodata = self.nodata_value as f32;
-
-        // Return NaN if this is a nodata pixel
-        if (value - nodata).abs() < 0.01 {
-            f32::NAN
-        } else {
-            value
-        }
-    }
-
     fn convert_to_f32(data: DecodingResult, _size: usize) -> Result<Vec<f32>, JsValue> {
         match data {
             DecodingResult::U8(values) => Ok(values.iter().map(|&v| v as f32).collect()),
@@ -350,21 +416,14 @@ impl DEMProcessor {
         }
     }
 
-    fn parse_geotransform(
-        decoder: &mut Decoder<Cursor<&[u8]>>,
+    /// Fallback geotransform parsing when GeoTIFF tags are not available.
+    /// Tries filename-based detection and generic defaults.
+    fn parse_geotransform_fallback(
+        _decoder: &mut Decoder<Cursor<&[u8]>>,
         filename: Option<&str>,
         width: u32,
         height: u32
     ) -> Result<GeoTransform, JsValue> {
-        // First, try to read GeoTIFF tags (ModelPixelScaleTag and ModelTiepointTag)
-        if let Some(transform) = Self::parse_geotiff_tags(decoder, width, height) {
-            web_sys::console::log_1(&format!(
-                "Parsed GeoTIFF tags: origin=({}, {}), pixel_size=({}, {})",
-                transform.origin_x, transform.origin_y, transform.pixel_width, transform.pixel_height
-            ).into());
-            return Ok(transform);
-        }
-
         // Try to parse SRTM-style filename (e.g., N47E007.tif or n47_e007_1arc_v3.tif)
         if let Some(fname) = filename {
             if let Some(transform) = Self::parse_srtm_filename(fname, width, height) {
@@ -397,6 +456,7 @@ impl DEMProcessor {
             pixel_height,
             rotation_x: 0.0,
             rotation_y: 0.0,
+            epsg_code: None,
         })
     }
 
@@ -405,21 +465,19 @@ impl DEMProcessor {
         _width: u32,
         _height: u32
     ) -> Option<GeoTransform> {
-        // GeoTIFF Tag IDs:
-        // 33550 = ModelPixelScaleTag (pixel size in geo units)
-        // 33922 = ModelTiepointTag (tie points: pixel -> geo coord mapping)
-        // 34264 = ModelTransformationTag (full affine transformation)
-        // 34735 = GeoKeyDirectoryTag
-        // 34736 = GeoDoubleParamsTag
-        // 34737 = GeoAsciiParamsTag
+        // GeoTIFF tags — use the named Tag enum variants, NOT Tag::Unknown(id).
+        // Tag::Unknown(34735) != Tag::GeoKeyDirectoryTag in the tiff crate's
+        // PartialEq/Hash impl, so Unknown(id) will never match the IFD HashMap.
 
         // Try to read GDAL_METADATA tag (42112) which might contain transformation info
         if let Ok(metadata) = decoder.get_tag_ascii_string(Tag::Unknown(42112)) {
             web_sys::console::log_1(&format!("Found GDAL_METADATA: {}", metadata).into());
         }
 
-        // Check for GeoKeyDirectoryTag (34735) - contains projection info
-        match decoder.get_tag_u16_vec(Tag::Unknown(34735)) {
+        // Check for GeoKeyDirectoryTag - contains projection info
+        let mut epsg_code: Option<u16> = None;
+        let mut raster_type: u16 = 1; // Default: PixelIsArea (1). PixelIsPoint = 2.
+        match decoder.get_tag_u16_vec(Tag::GeoKeyDirectoryTag) {
             Ok(geokeys) => {
                 web_sys::console::log_1(&format!("Found GeoKeyDirectoryTag (34735): {} entries", geokeys.len() / 4).into());
                 // Parse key directory: each entry is [KeyID, TIFFTagLocation, Count, Value_Offset]
@@ -430,9 +488,23 @@ impl DEMProcessor {
                         // Log important keys
                         match key_id {
                             1024 => web_sys::console::log_1(&format!("  GTModelTypeGeoKey: {}", value).into()),
-                            1025 => web_sys::console::log_1(&format!("  GTRasterTypeGeoKey: {}", value).into()),
-                            2048 => web_sys::console::log_1(&format!("  GeographicTypeGeoKey: {}", value).into()),
-                            3072 => web_sys::console::log_1(&format!("  ProjectedCSTypeGeoKey: {}", value).into()),
+                            1025 => {
+                                web_sys::console::log_1(&format!("  GTRasterTypeGeoKey: {} ({})", value,
+                                    if value == 1 { "PixelIsArea" } else if value == 2 { "PixelIsPoint" } else { "Unknown" }
+                                ).into());
+                                raster_type = value;
+                            },
+                            2048 => {
+                                web_sys::console::log_1(&format!("  GeographicTypeGeoKey: {}", value).into());
+                                if epsg_code.is_none() {
+                                    epsg_code = Some(value);
+                                }
+                            },
+                            3072 => {
+                                web_sys::console::log_1(&format!("  ProjectedCSTypeGeoKey: {}", value).into());
+                                // ProjectedCSTypeGeoKey takes priority over GeographicTypeGeoKey
+                                epsg_code = Some(value);
+                            },
                             3076 => web_sys::console::log_1(&format!("  ProjLinearUnitsGeoKey: {}", value).into()),
                             _ => {}
                         }
@@ -444,24 +516,24 @@ impl DEMProcessor {
             }
         }
 
-        // Check for GeoDoubleParamsTag (34736) - contains double precision params
-        match decoder.get_tag_f64_vec(Tag::Unknown(34736)) {
+        // Check for GeoDoubleParamsTag - contains double precision params
+        match decoder.get_tag_f64_vec(Tag::GeoDoubleParamsTag) {
             Ok(params) => {
-                web_sys::console::log_1(&format!("Found GeoDoubleParamsTag (34736): {:?}", params).into());
+                web_sys::console::log_1(&format!("Found GeoDoubleParamsTag: {:?}", params).into());
             },
             Err(_) => {}
         }
 
-        // Check for GeoAsciiParamsTag (34737) - contains ASCII params (like CRS name)
-        match decoder.get_tag_ascii_string(Tag::Unknown(34737)) {
+        // Check for GeoAsciiParamsTag - contains ASCII params (like CRS name)
+        match decoder.get_tag_ascii_string(Tag::GeoAsciiParamsTag) {
             Ok(params) => {
-                web_sys::console::log_1(&format!("Found GeoAsciiParamsTag (34737): {}", params).into());
+                web_sys::console::log_1(&format!("Found GeoAsciiParamsTag: {}", params).into());
             },
             Err(_) => {}
         }
 
-        // Try ModelTransformationTag (34264) first - this is a direct affine matrix
-        match decoder.get_tag_f64_vec(Tag::Unknown(34264)) {
+        // Try ModelTransformationTag first - this is a direct affine matrix
+        match decoder.get_tag_f64_vec(Tag::ModelTransformationTag) {
             Ok(transform_matrix) => {
                 if transform_matrix.len() == 16 {
                     web_sys::console::log_1(&format!("Found ModelTransformationTag (34264): {:?}", transform_matrix).into());
@@ -477,24 +549,25 @@ impl DEMProcessor {
                         pixel_height: transform_matrix[5],  // Scale Y (already negative in most cases)
                         rotation_x: transform_matrix[4],    // Rotation X
                         rotation_y: transform_matrix[1],    // Rotation Y
+                        epsg_code,
                     });
                 } else {
-                    web_sys::console::log_1(&format!("ModelTransformationTag (34264) has wrong length: {} (expected 16)", transform_matrix.len()).into());
+                    web_sys::console::log_1(&format!("ModelTransformationTag has wrong length: {} (expected 16)", transform_matrix.len()).into());
                 }
             },
             Err(e) => {
-                web_sys::console::log_1(&format!("No ModelTransformationTag (34264): {:?}", e).into());
+                web_sys::console::log_1(&format!("No ModelTransformationTag: {:?}", e).into());
             }
         }
 
-        // Try to read ModelPixelScaleTag (33550) - contains [ScaleX, ScaleY, ScaleZ]
-        let pixel_scale = match decoder.get_tag_f64_vec(Tag::Unknown(33550)) {
+        // Try to read ModelPixelScaleTag - contains [ScaleX, ScaleY, ScaleZ]
+        let pixel_scale = match decoder.get_tag_f64_vec(Tag::ModelPixelScaleTag) {
             Ok(scale) if scale.len() >= 2 => {
                 web_sys::console::log_1(&format!("Found ModelPixelScaleTag: {:?}", scale).into());
                 scale
             },
             Err(e) => {
-                web_sys::console::log_1(&format!("Failed to read ModelPixelScaleTag (33550): {:?}", e).into());
+                web_sys::console::log_1(&format!("Failed to read ModelPixelScaleTag: {:?}", e).into());
                 return None;
             },
             Ok(scale) => {
@@ -503,15 +576,15 @@ impl DEMProcessor {
             }
         };
 
-        // Try to read ModelTiepointTag (33922) - contains [I, J, K, X, Y, Z, ...]
+        // Try to read ModelTiepointTag - contains [I, J, K, X, Y, Z, ...]
         // where (I,J,K) is pixel coordinate and (X,Y,Z) is geographic coordinate
-        let tiepoints = match decoder.get_tag_f64_vec(Tag::Unknown(33922)) {
+        let tiepoints = match decoder.get_tag_f64_vec(Tag::ModelTiepointTag) {
             Ok(points) if points.len() >= 6 => {
                 web_sys::console::log_1(&format!("Found ModelTiepointTag: {:?}", points).into());
                 points
             },
             Err(e) => {
-                web_sys::console::log_1(&format!("Failed to read ModelTiepointTag (33922): {:?}", e).into());
+                web_sys::console::log_1(&format!("Failed to read ModelTiepointTag: {:?}", e).into());
                 return None;
             },
             Ok(points) => {
@@ -530,18 +603,33 @@ impl DEMProcessor {
         let scale_x = pixel_scale[0];
         let scale_y = pixel_scale[1];
 
-        // Calculate origin (top-left corner of top-left pixel)
-        // For X: origin_x = geo_x - (pixel_i * scale_x)
-        //   Moving left (decreasing pixel_i) increases geo_x, so we subtract
-        // For Y: origin_y = geo_y + (pixel_j * scale_y)
-        //   Moving up (decreasing pixel_j) increases geo_y, so we add
-        //   (scale_y is positive, but we'll negate it when storing as pixel_height)
-        let origin_x = geo_x - (pixel_i * scale_x);
-        let origin_y = geo_y + (pixel_j * scale_y);
+        // Calculate origin based on raster type.
+        // GTRasterTypeGeoKey:
+        //   1 = PixelIsArea: tiepoint is upper-left CORNER of the pixel
+        //   2 = PixelIsPoint: tiepoint is the CENTER of the pixel
+        //
+        // Our GeoTransform stores the CENTER of pixel (0,0) as origin
+        // (matching world file convention), so we need to adjust for PixelIsArea.
+        let origin_x;
+        let origin_y;
+
+        if raster_type == 2 {
+            // PixelIsPoint: tiepoint IS the center of pixel (I,J)
+            // Origin (center of pixel 0,0) = tiepoint - pixel_offset * scale
+            origin_x = geo_x - (pixel_i * scale_x);
+            origin_y = geo_y + (pixel_j * scale_y);
+            web_sys::console::log_1(&"GeoTIFF: PixelIsPoint — tiepoint is pixel center".into());
+        } else {
+            // PixelIsArea (default): tiepoint is upper-left CORNER of pixel (I,J)
+            // Origin (center of pixel 0,0) = corner + half pixel
+            origin_x = geo_x - (pixel_i * scale_x) + scale_x * 0.5;
+            origin_y = geo_y + (pixel_j * scale_y) - scale_y * 0.5;
+            web_sys::console::log_1(&"GeoTIFF: PixelIsArea — tiepoint is pixel corner, adjusting to center".into());
+        }
 
         web_sys::console::log_1(&format!(
-            "GeoTIFF tags - Tiepoint: pixel({}, {})->geo({}, {}), Scale: ({}, {})",
-            pixel_i, pixel_j, geo_x, geo_y, scale_x, scale_y
+            "GeoTIFF tags - Tiepoint: pixel({}, {})->geo({}, {}), Scale: ({}, {}), Origin (center of UL pixel): ({}, {})",
+            pixel_i, pixel_j, geo_x, geo_y, scale_x, scale_y, origin_x, origin_y
         ).into());
 
         Some(GeoTransform {
@@ -551,6 +639,7 @@ impl DEMProcessor {
             pixel_height: -scale_y, // Negative because Y decreases as we go down in raster
             rotation_x: 0.0,
             rotation_y: 0.0,
+            epsg_code,
         })
     }
 
@@ -606,6 +695,7 @@ impl DEMProcessor {
             pixel_height,
             rotation_x,
             rotation_y,
+            epsg_code: None,
         })
     }
 
@@ -657,6 +747,7 @@ impl DEMProcessor {
                     pixel_height: -pixel_size,
                     rotation_x: 0.0,
                     rotation_y: 0.0,
+                    epsg_code: None,
                 });
             } else {
                 // Geographic coordinates: Standard SRTM (1° tiles)
@@ -670,6 +761,7 @@ impl DEMProcessor {
                     pixel_height,
                     rotation_x: 0.0,
                     rotation_y: 0.0,
+                    epsg_code: None,
                 });
             }
         }
@@ -780,16 +872,74 @@ impl DEMProcessor {
             pixel_height: -pixel_size, // Negative because Y increases downward in raster
             rotation_x: 0.0,
             rotation_y: 0.0,
+            epsg_code: None,
         })
     }
 
-    fn parse_nodata(_decoder: &mut Decoder<Cursor<&[u8]>>) -> Option<f64> {
-        // Try to read GDAL_NODATA tag
-        // For now, return default
-        Some(-9999.0)
+    fn parse_nodata(decoder: &mut Decoder<Cursor<&[u8]>>) -> Option<f64> {
+        // GDAL_NODATA is stored as an ASCII string in TIFF tag 42113
+        match decoder.get_tag_ascii_string(Tag::GdalNodata) {
+            Ok(s) => {
+                let trimmed = s.trim().trim_end_matches('\0');
+                match trimmed.parse::<f64>() {
+                    Ok(val) => {
+                        web_sys::console::log_1(&format!("GDAL_NODATA tag found: {}", val).into());
+                        Some(val)
+                    }
+                    Err(_) => {
+                        web_sys::console::log_1(&format!("GDAL_NODATA tag unparseable: '{}'", trimmed).into());
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                // No GDAL_NODATA tag present
+                None
+            }
+        }
     }
 
     fn setup_projection(transform: &GeoTransform) -> Result<(Option<Proj>, Option<Proj>), JsValue> {
+        // If we have an explicit EPSG code from GeoTIFF tags, use it directly
+        if let Some(epsg) = transform.epsg_code {
+            match epsg {
+                4326 => {
+                    web_sys::console::log_1(&"EPSG:4326 (WGS84 geographic), no transformation needed".into());
+                    return Ok((None, None));
+                },
+                3857 => {
+                    web_sys::console::log_1(&"EPSG:3857 (Web Mercator) detected, setting up WGS84→Web Mercator transformation".into());
+                    let wgs84 = Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs")
+                        .map_err(|e| JsValue::from_str(&format!("Failed to create WGS84 projection: {:?}", e)))?;
+                    let web_mercator = Proj::from_proj_string(
+                        "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +no_defs"
+                    ).map_err(|e| JsValue::from_str(&format!("Failed to create Web Mercator projection: {:?}", e)))?;
+                    return Ok((Some(wgs84), Some(web_mercator)));
+                },
+                code if code >= 32601 && code <= 32660 => {
+                    let zone = code - 32600;
+                    web_sys::console::log_1(&format!("EPSG:{} (UTM Zone {}N) detected", code, zone).into());
+                    let wgs84 = Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs")
+                        .map_err(|e| JsValue::from_str(&format!("Failed to create WGS84 projection: {:?}", e)))?;
+                    let utm = Proj::from_proj_string(&format!("+proj=utm +zone={} +datum=WGS84 +units=m +no_defs", zone))
+                        .map_err(|e| JsValue::from_str(&format!("Failed to create UTM projection: {:?}", e)))?;
+                    return Ok((Some(wgs84), Some(utm)));
+                },
+                code if code >= 32701 && code <= 32760 => {
+                    let zone = code - 32700;
+                    web_sys::console::log_1(&format!("EPSG:{} (UTM Zone {}S) detected", code, zone).into());
+                    let wgs84 = Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs")
+                        .map_err(|e| JsValue::from_str(&format!("Failed to create WGS84 projection: {:?}", e)))?;
+                    let utm = Proj::from_proj_string(&format!("+proj=utm +zone={} +south +datum=WGS84 +units=m +no_defs", zone))
+                        .map_err(|e| JsValue::from_str(&format!("Failed to create UTM projection: {:?}", e)))?;
+                    return Ok((Some(wgs84), Some(utm)));
+                },
+                _ => {
+                    web_sys::console::log_1(&format!("EPSG:{} detected but no built-in handler, falling back to coordinate heuristics", epsg).into());
+                }
+            }
+        }
+
         // Detect if DEM uses projected coordinates vs geographic (WGS84)
         if transform.origin_x.abs() > 1000.0 || transform.origin_y.abs() > 1000.0 {
             // Projected coordinates detected
@@ -798,10 +948,18 @@ impl DEMProcessor {
             let x = transform.origin_x;
             let y = transform.origin_y;
 
+            // Web Mercator (EPSG:3857): coordinates range ±20,037,508
+            if x.abs() > 10_000_000.0 || y.abs() > 10_000_000.0 {
+                web_sys::console::log_1(&"Detected large projected coordinates (likely EPSG:3857 Web Mercator), setting up transformation".into());
+                let wgs84 = Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs")
+                    .map_err(|e| JsValue::from_str(&format!("Failed to create WGS84 projection: {:?}", e)))?;
+                let web_mercator = Proj::from_proj_string(
+                    "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +no_defs"
+                ).map_err(|e| JsValue::from_str(&format!("Failed to create Web Mercator projection: {:?}", e)))?;
+                Ok((Some(wgs84), Some(web_mercator)))
             // UTM zones for North America: X ~200,000-800,000, Y ~0-10,000,000
             // ETRS89LAEA for Europe: X ~2,500,000-7,500,000, Y ~1,300,000-5,500,000
-
-            if x > 2_000_000.0 && x < 8_000_000.0 && y > 1_000_000.0 && y < 6_000_000.0 {
+            } else if x > 2_000_000.0 && x < 8_000_000.0 && y > 1_000_000.0 && y < 6_000_000.0 {
                 // Likely European projection (ETRS89LAEA)
                 web_sys::console::log_1(&"Detected projected CRS, setting up WGS84→ETRS89LAEA transformation".into());
 
@@ -897,6 +1055,19 @@ impl DEMProcessor {
         } else {
             "WGS84"
         };
+
+        // Check for Mercator (Web Mercator / Pseudo-Mercator / Mercator_1SP)
+        if prj_content.contains("Mercator") && !prj_content.contains("Transverse_Mercator") {
+            web_sys::console::log_1(&"Detected Mercator projection from .prj file, setting up WGS84→Web Mercator transformation".into());
+
+            let wgs84 = Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs")
+                .map_err(|e| JsValue::from_str(&format!("Failed to create WGS84 projection: {:?}", e)))?;
+            let web_mercator = Proj::from_proj_string(
+                "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +no_defs"
+            ).map_err(|e| JsValue::from_str(&format!("Failed to create Web Mercator projection: {:?}", e)))?;
+
+            return Ok((Some(wgs84), Some(web_mercator)));
+        }
 
         // First, try to parse Transverse Mercator parameters directly from PARAMETER fields
         // This handles both custom TM projections and UTM variants with non-standard parameters
@@ -1112,6 +1283,7 @@ mod tests {
             pixel_height: -1.0,
             rotation_x: 0.0,
             rotation_y: 0.0,
+            epsg_code: None,
         };
 
         let (x, y) = transform.pixel_to_geo(10.0, 20.0);

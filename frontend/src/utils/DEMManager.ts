@@ -7,6 +7,7 @@ import { DEMProcessor } from '../../pkg/virtual_elevation_analyzer';
 export class DEMManager {
     private demProcessor: DEMProcessor | null = null;
     private demFile: File | null = null;
+    private demName: string | null = null;
     private demFileLoaded: boolean = false;
 
     /**
@@ -56,6 +57,34 @@ export class DEMManager {
             this.demFile = null;
             this.demFileLoaded = false;
             throw new Error(`Failed to load DEM file: ${error}`);
+        }
+    }
+
+    /**
+     * Load DEM data from a raw ArrayBuffer (e.g., fetched from a remote API)
+     * @param data The DEM data as Uint8Array (GeoTIFF bytes)
+     * @param name A display name for this DEM source
+     * @param worldFileContent Optional world file (.tfw) content for georeferencing
+     * @param projFileContent Optional projection file (.prj) content for CRS
+     */
+    async loadFromArrayBuffer(data: Uint8Array, name: string, worldFileContent?: string, projFileContent?: string): Promise<void> {
+        try {
+            this.demProcessor = (worldFileContent || projFileContent)
+                ? DEMProcessor.new_with_world_file(data, name, worldFileContent, projFileContent)
+                : new DEMProcessor(data, name);
+            this.demFile = null;
+            this.demName = name;
+            this.demFileLoaded = true;
+
+            console.log('DEM loaded from ArrayBuffer:', name);
+            console.log('DEM metadata:', this.demProcessor.get_metadata());
+            console.log('DEM bounds:', this.demProcessor.get_bounds());
+        } catch (error) {
+            this.demProcessor = null;
+            this.demFile = null;
+            this.demName = null;
+            this.demFileLoaded = false;
+            throw new Error(`Failed to load DEM from buffer: ${error}`);
         }
     }
 
@@ -130,6 +159,15 @@ export class DEMManager {
     }
 
     /**
+     * Look up elevation for a single point (used by MultiDEMManager for tile routing)
+     */
+    singleLookup(lat: number, lon: number): number {
+        if (!this.demProcessor || !this.demFileLoaded) return NaN;
+        const result = this.demProcessor.batch_lookup([lat], [lon]);
+        return result[0];
+    }
+
+    /**
      * Check if a DEM file is currently loaded
      */
     isDEMLoaded(): boolean {
@@ -140,7 +178,7 @@ export class DEMManager {
      * Get the currently loaded DEM file name
      */
     getDEMFileName(): string | null {
-        return this.demFile ? this.demFile.name : null;
+        return this.demFile ? this.demFile.name : this.demName;
     }
 
     /**
@@ -166,6 +204,7 @@ export class DEMManager {
             this.demProcessor = null;
         }
         this.demFile = null;
+        this.demName = null;
         this.demFileLoaded = false;
     }
 

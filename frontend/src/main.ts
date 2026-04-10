@@ -6,6 +6,9 @@ import { ViewportAdapter } from './utils/ViewportAdapter';
 import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
 import { ResultsStorage, type VEAnalysisResult } from './utils/ResultsStorage';
 import { DEMManager, ElevationProfileCache } from './utils/DEMManager';
+import { RemoteDEMConfig, type DEMSourceType } from './utils/RemoteDEMConfig';
+import { RemoteDEMService } from './utils/RemoteDEMService';
+import { MultiDEMManager, type DEMSourceResult } from './utils/MultiDEMManager';
 import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } from './utils/GeoCalculations';
 import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
 import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
@@ -91,7 +94,10 @@ const demFileInfo = document.getElementById('demFileInfo') as HTMLDivElement;
 const demFileName = document.getElementById('demFileName') as HTMLSpanElement;
 const demFileMetadata = document.getElementById('demFileMetadata') as HTMLDivElement;
 const clearDemButton = document.getElementById('clearDemButton') as HTMLButtonElement;
-const correctElevationCheckbox = document.getElementById('correctElevationCheckbox') as HTMLInputElement;
+// DEM source selector & status
+const remoteDEMSelector = document.getElementById('remoteDEMSelector') as HTMLSelectElement;
+const localDEMFileSection = document.getElementById('localDEMFileSection') as HTMLDivElement;
+const remoteDEMStatus = document.getElementById('remoteDEMStatus') as HTMLDivElement;
 
 let selectedFile: File | null = null;
 let fitProcessor: FitFileProcessor | null = null;
@@ -132,6 +138,12 @@ let elevationCache: ElevationProfileCache = new ElevationProfileCache();
 let selectedDEMFile: File | null = null;
 let elevationCorrectionEnabled: boolean = false;
 let elevationErrorRate: number = 0;
+
+// Remote DEM state
+let multiDEMManager: MultiDEMManager = new MultiDEMManager();
+let remoteDEMService: RemoteDEMService = new RemoteDEMService();
+let remoteDEMSources: DEMSourceType[] = [];
+let remoteDEMResults: Map<DEMSourceType, DEMSourceResult> | null = null;
 
 // GPS Lap Detection state
 let gpsLapDetectionResult: GpsLapDetectionResult | null = null;
@@ -245,9 +257,53 @@ clearDemButton.addEventListener('click', () => {
     clearDEMFile();
 });
 
-correctElevationCheckbox.addEventListener('change', (event) => {
-    elevationCorrectionEnabled = (event.target as HTMLInputElement).checked;
+// DEM source selection: aws-terrain (default), none, local
+function updateDEMSourceSelection(value: string): void {
+    // Show local file section only when "local" is selected
+    localDEMFileSection.classList.toggle('hidden', value !== 'local');
+
+    // Update description text
+    const desc = document.getElementById('demDescription');
+    if (desc) {
+        switch (value) {
+            case 'aws-terrain':
+                desc.textContent = 'AWS Terrain Tiles are downloaded automatically to provide accurate elevation data.';
+                break;
+            case 'none':
+                desc.textContent = 'Using the elevation recorded in the FIT file (GPS / barometer).';
+                break;
+            case 'local':
+                desc.textContent = 'Upload a local GeoTIFF DEM file to use as elevation source.';
+                break;
+        }
+    }
+
+    // Set remote sources for AWS; clear for none/local
+    if (value === 'aws-terrain') {
+        remoteDEMSources = ['aws-terrain'];
+    } else {
+        remoteDEMSources = [];
+    }
+
+    RemoteDEMConfig.setPreferredSources(value === 'none' ? [] : [value as DEMSourceType]);
+}
+
+remoteDEMSelector.addEventListener('change', (event) => {
+    updateDEMSourceSelection((event.target as HTMLSelectElement).value);
 });
+
+// Restore saved DEM preference
+const savedSources = RemoteDEMConfig.getPreferredSources();
+if (savedSources.length > 0 && savedSources.includes('aws-terrain')) {
+    remoteDEMSelector.value = 'aws-terrain';
+} else if (savedSources.length === 0) {
+    // Check if user explicitly saved "none"
+    const raw = localStorage.getItem('remote-dem-sources');
+    if (raw && JSON.parse(raw).length === 0) {
+        remoteDEMSelector.value = 'none';
+    }
+}
+updateDEMSourceSelection(remoteDEMSelector.value);
 
 // DEM file handling functions
 async function handleDEMFileSelection(files: FileList): Promise<void> {
@@ -296,9 +352,6 @@ async function handleDEMFileSelection(files: FileList): Promise<void> {
             <p>Bounds: [${bounds![0].toFixed(2)}, ${bounds![1].toFixed(2)}, ${bounds![2].toFixed(2)}, ${bounds![3].toFixed(2)}]</p>
         `;
 
-        // Enable correction checkbox
-        correctElevationCheckbox.disabled = false;
-        correctElevationCheckbox.checked = true;
         elevationCorrectionEnabled = true;
 
         hideLoading();
@@ -314,8 +367,6 @@ function clearDEMFile(): void {
     demManager.clearDEM();
     selectedDEMFile = null;
     demFileInfo.classList.add('hidden');
-    correctElevationCheckbox.disabled = true;
-    correctElevationCheckbox.checked = false;
     elevationCorrectionEnabled = false;
     demFileInput.value = '';
     elevationErrorRate = 0;
@@ -461,6 +512,73 @@ async function processFitFile(file: File) {
                 showError(`Warning: DEM correction failed: ${demError}. Using GPS altitude.`);
                 // Continue with original GPS altitude
             }
+        }
+
+        // Apply remote DEM elevation correction(s) if any sources selected
+        remoteDEMResults = null;
+        if (remoteDEMSources.length > 0 && result.fit_data) {
+            const fitData = result.fit_data;
+            const lats = fitData.position_lat;
+            const lons = fitData.position_long;
+            const originalAltitudes = fitData.altitude;
+
+            if (lats && lons && originalAltitudes) {
+                try {
+                    showLoading('Downloading remote DEM data...');
+                    remoteDEMStatus.classList.remove('hidden');
+                    remoteDEMStatus.textContent = 'Fetching elevation data...';
+
+                    multiDEMManager.clearAll();
+
+                    const fetchResults = await remoteDEMService.fetchForRoute(
+                        Array.from(lats), Array.from(lons), remoteDEMSources,
+                        {},
+                        (_source, stage, _percent) => {
+                            remoteDEMStatus.textContent = stage;
+                        }
+                    );
+
+                    // Load each source into MultiDEMManager
+                    for (const [source, data] of fetchResults) {
+                        showLoading(`Loading ${source} DEM...`);
+                        await multiDEMManager.loadSource(source, data);
+                    }
+
+                    // Correct elevations for all sources
+                    showLoading('Correcting elevation from remote DEM...');
+                    remoteDEMResults = await multiDEMManager.correctAllSources(
+                        Array.from(lats), Array.from(lons), Array.from(originalAltitudes)
+                    );
+
+                    // Apply the best available DEM as actual elevation
+                    const bestSource: DEMSourceType | undefined =
+                        remoteDEMResults.has('aws-terrain') ? 'aws-terrain' : undefined;
+                    if (bestSource) {
+                        const bestDEM = remoteDEMResults.get(bestSource)!;
+                        if (bestDEM.errorRate < 0.5) {
+                            result.fit_data.set_altitude(bestDEM.elevations);
+                            console.log(`Applied ${bestSource} DEM as actual elevation (error rate: ${(bestDEM.errorRate * 100).toFixed(1)}%)`);
+                        } else {
+                            console.warn(`${bestSource} DEM error rate too high (${(bestDEM.errorRate * 100).toFixed(1)}%), keeping FIT elevation`);
+                        }
+                    }
+
+                    // Update status display
+                    const statusParts: string[] = [];
+                    for (const [source, demRes] of remoteDEMResults) {
+                        const coverage = ((1 - demRes.errorRate) * 100).toFixed(1);
+                        statusParts.push(`AWS Terrain: ${coverage}% coverage`);
+                    }
+                    remoteDEMStatus.textContent = statusParts.join(' | ');
+
+                    console.log('Remote DEM results:', Object.fromEntries(remoteDEMResults));
+                } catch (remoteDemError) {
+                    console.warn('Remote DEM correction failed:', remoteDemError);
+                    remoteDEMStatus.textContent = `Failed: ${remoteDemError}`;
+                }
+            }
+        } else {
+            remoteDEMStatus.classList.add('hidden');
         }
 
         hideLoading();
@@ -2991,6 +3109,8 @@ async function handleAnalyze() {
         let filteredAirDensity: number[] = [];
         let filteredTemperature: number[] = [];
 
+
+
         for (let i = 0; i < allTimestamps.length; i++) {
             let isInSelectedLap: boolean;
 
@@ -3020,6 +3140,7 @@ async function handleAnalyze() {
                 filteredWindSpeed.push(allWindSpeed[i]);
                 filteredAirDensity.push(allAirDensity[i] || 0);
                 filteredTemperature.push(allTemperature[i] || 0);
+
             }
         }
 
@@ -7493,6 +7614,10 @@ async function createVirtualElevationPlots(trimStart: number, trimEnd: number, v
         });
     }
 
+    // Note: Remote DEM (AWS/local) elevation is applied as actual elevation
+    // in fitData before analysis, so the black "Actual Elevation" trace
+    // already shows the DEM-corrected profile. No separate trace needed.
+
     // Calculate shared x-axis range (trim region + context)
     const xMin = extendedStart;
     const xMax = extendedEnd - 1;
@@ -8166,7 +8291,8 @@ async function createVirtualElevationPlotsComparison(trimStart: number, trimEnd:
         hovermode: 'closest'
     };
 
-    Plotly.newPlot('vePlot', [veTrace2, actualTrace, veTrace1], veLayout, {responsive: true});
+    const comparisonTraces = [veTrace2, actualTrace, veTrace1];
+    Plotly.newPlot('vePlot', comparisonTraces, veLayout, {responsive: true});
 
     // Plot 2: Residuals comparison
     const residualsTrace2 = {
