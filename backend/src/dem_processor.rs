@@ -207,6 +207,7 @@ impl DEMProcessor {
             tiff::decoder::DecodingResult::I16(_) => "I16 (16-bit signed)",
             tiff::decoder::DecodingResult::I32(_) => "I32 (32-bit signed)",
             tiff::decoder::DecodingResult::I64(_) => "I64 (64-bit signed)",
+            tiff::decoder::DecodingResult::F16(_) => "F16 (16-bit float)",
             tiff::decoder::DecodingResult::F32(_) => "F32 (32-bit float)",
             tiff::decoder::DecodingResult::F64(_) => "F64 (64-bit float)",
         };
@@ -411,6 +412,7 @@ impl DEMProcessor {
             DecodingResult::I16(values) => Ok(values.iter().map(|&v| v as f32).collect()),
             DecodingResult::I32(values) => Ok(values.iter().map(|&v| v as f32).collect()),
             DecodingResult::I64(values) => Ok(values.iter().map(|&v| v as f32).collect()),
+            DecodingResult::F16(values) => Ok(values.iter().map(|v| v.to_f32()).collect()),
             DecodingResult::F32(values) => Ok(values),
             DecodingResult::F64(values) => Ok(values.iter().map(|&v| v as f32).collect()),
         }
