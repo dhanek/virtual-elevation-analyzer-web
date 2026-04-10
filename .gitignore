@@ -15,7 +15,8 @@ backend/pkg/
 backend/target/
 
 # Rust
-Cargo.lock
+# Cargo.lock is committed — this is a binary/WASM cdylib, not a library crate,
+# so we want reproducible builds of the deployed artifact.
 **/*.rs.bk
 *.pdb
 
