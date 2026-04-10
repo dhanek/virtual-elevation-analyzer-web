@@ -9,7 +9,7 @@
 
 Ordered by *leverage / effort*. Items 1–3 unblock everything else and should be done first.
 
-- [ ] **1. Fix CI type checking** (~1 h) — Add `npm run check` step to `.github/workflows/deploy.yml` **before** `npm run build`; pin `vite` to `^7.1` and `typescript` to `^5.6` (current values `^8.0.7` / `^6.0.2` don't exist); move `typescript` from `dependencies` to `devDependencies`. See [§2](#2-typescript-strict-mode-is-enabled-but-not-actually-being-enforced--critical).
+- [x] **1. Fix CI type checking** (~1 h) — Added `npm run check` step to `.github/workflows/deploy.yml` before `npm run build`; moved `typescript` and `vite` from `dependencies` to `devDependencies`. **Correction:** my initial claim that `typescript ^6.0.2` and `vite ^8.0.7` don't exist was wrong — they were released and are the current latest stable versions. Versions left as-is. CI will now fail until item 4 is complete. See [§2](#2-typescript-strict-mode-is-enabled-but-not-actually-being-enforced--critical).
 - [ ] **2. Commit `Cargo.lock`** (5 min) — Remove from `.gitignore`, run `cargo generate-lockfile`, commit. See [§3](#3-commit-cargolock--medium).
 - [ ] **3. Add golden tests for `virtual_elevation.rs`** (½ day) — Flat-ride VE ≈ 0, headwind, R² on synthetic linear profile. Safety net before any refactor. See [§8](#8-no-test-coverage--medium).
 - [ ] **4. Fix the 76 existing `tsc --noEmit` errors** (1–2 days) — Real fixes, not `@ts-ignore`. Biggest buckets: `Float64Array` vs `number[]`, `currentParameters is possibly 'null'`, `@wasm/...` missing module. See [§2](#2-typescript-strict-mode-is-enabled-but-not-actually-being-enforced--critical).
@@ -113,17 +113,19 @@ But `tsc --noEmit` currently fails with **76 errors**:
 - `vite build` does **not** type-check. It transpiles per file via esbuild/rolldown. So CI passes and the site deploys even with 76 TS errors.
 - The `check` script (`"check": "tsc --noEmit"`) exists in `frontend/package.json` but the GitHub Actions workflow never calls it.
 - `package-lock.json` is committed, but TypeScript is listed in **`dependencies`** (runtime) instead of `devDependencies`. Not harmful per se, but it's a sign that the setup hasn't been reviewed.
-- Frontend is on `vite ^8.0.7` and `typescript ^6.0.2` — both **don't exist as released versions** (TypeScript is currently 5.x, Vite is currently 7.x). `npm install` is silently resolving to the latest allowed by the caret, meaning builds are not reproducible across environments. This should be pinned.
+- ~~Frontend is on `vite ^8.0.7` and `typescript ^6.0.2` — both don't exist as released versions.~~ **Correction:** these versions do exist and are the current latest stable releases (TypeScript 6.0.2 and Vite 8.0.8). The original report was wrong on this point. `package-lock.json` is committed and CI uses `npm ci`, so builds are reproducible.
 
 ### Recommended fix
 
-1. Add a CI step in `.github/workflows/deploy.yml` before the Vite build:
+1. ✅ Add a CI step in `.github/workflows/deploy.yml` before the Vite build (done — see commit on `refactoring` branch):
    ```yaml
-   - name: Type check
-     run: cd frontend && npm run check
+   - name: Type Check Frontend
+     run: |
+       cd frontend
+       npm run check
    ```
-   Run this **before** `npm run build`. Fail the deploy on TS errors.
-2. Pin TypeScript/Vite to actually existing versions (`typescript ^5.6`, `vite ^7.1`), move TypeScript to `devDependencies`, re-run `npm install` and commit the lockfile.
+   This runs **after** WASM build (because `@wasm/...` imports need the `pkg/` directory) and **before** `npm run build`. Fails the deploy on TS errors.
+2. ✅ Move TypeScript and Vite to `devDependencies` (done). Versions kept at `^6.0.2` / `^8.0.7` since those are the current latest stable.
 3. Fix the real errors instead of silencing them. Most fall into three buckets:
    - **`Float64Array` vs `number[]`** — either add helper `fromWasmArray()` conversions, or update the TS signatures to accept `Float64Array | number[]` (use `ArrayLike<number>`). This is a known friction point with wasm-bindgen and deserves a dedicated type.
    - **`'currentParameters' is possibly 'null'`** — disappears once `AppState` (§1) asserts initialization.
@@ -153,8 +155,8 @@ For a **binary / WASM cdylib** (not a library crate for downstream consumers), y
 
 - **`comlink`** is in `frontend/package.json` dependencies but zero references exist in `frontend/src`. The README even has `web workers + comlink` in the architecture section, but no worker exists. Either remove comlink or actually use a worker — and the WASM work is CPU-heavy enough (1.8 MB wasm, synchronous VE recalcs on every slider move) that **offloading VE calculation to a worker is a legitimate next step**, not decoration. Right now every slider drag blocks the main thread.
 - **`vite.config.ts`** has `worker: { format: 'es' }` configured for workers that don't exist.
-- **`typescript`** is in `dependencies` instead of `devDependencies`.
-- `vite ^8.0.7`, `typescript ^6.0.2`, `@types/node ^25.5.2`, `browser-fs-access ^0.38.0` — at least Vite 8 and TypeScript 6 are future/non-existent versions, see §2.
+- ~~**`typescript`** is in `dependencies` instead of `devDependencies`.~~ ✅ Fixed in item 1.
+- ~~`vite ^8.0.7`, `typescript ^6.0.2` — Vite 8 and TypeScript 6 are future/non-existent versions.~~ **Correction:** they do exist and are current latest stable, see §2.
 
 ---
 
