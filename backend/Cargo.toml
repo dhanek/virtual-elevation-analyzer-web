@@ -19,9 +19,6 @@ web-sys = { version = "0.3.72", features = [
   "Blob",
 ] }
 
-# Numerical Computing
-num-traits = "0.2"
-
 # FIT File Processing
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
