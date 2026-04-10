@@ -4378,6 +4378,14 @@ function renderGpsLapVEPlots(
 }
 
 async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], temperature: number[] = [], cdaReference: number[] | null = null, defaultAirSpeedOffset: number = 0) {
+    // currentParameters is set by the AnalysisParameters component when
+    // the user enters values — this function cannot run before that.
+    // Narrow `currentParameters` from '... | null' for the rest of the body.
+    if (!currentParameters) {
+        console.error('showVirtualElevationAnalysisInline: currentParameters is null');
+        return;
+    }
+
     // Store analyzed laps globally for save functionality
     currentAnalyzedLaps = analyzedLaps;
     // Store filtered data globally for save functionality
@@ -5053,6 +5061,16 @@ async function saveMapTrimSettings() {
 }
 
 function setupVESliders(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], defaultAirSpeedOffset: number) {
+    // setupVESliders is only called after currentParameters has been set
+    // in showVirtualElevationAnalysisInline. Capture into a const local
+    // so nested slider callbacks can close over a non-null reference
+    // (top-level narrowing doesn't propagate into callback scopes).
+    if (!currentParameters) {
+        console.error('setupVESliders: currentParameters is null');
+        return;
+    }
+    const params = currentParameters;
+
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
@@ -5261,7 +5279,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const value = parseFloat(cdaValue.value);
         if (isNaN(value)) return;
 
-        const clamped = Math.max(currentParameters.cda_min, Math.min(value, currentParameters.cda_max));
+        const clamped = Math.max(params.cda_min, Math.min(value, params.cda_max));
 
         cdaSlider.value = clamped.toString();
         cdaValue.value = clamped.toFixed(3);
@@ -5278,7 +5296,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const value = parseFloat(crrValue.value);
         if (isNaN(value)) return;
 
-        const clamped = Math.max(currentParameters.crr_min, Math.min(value, currentParameters.crr_max));
+        const clamped = Math.max(params.crr_min, Math.min(value, params.crr_max));
 
         crrSlider.value = clamped.toString();
         crrValue.value = clamped.toFixed(4);
@@ -5717,6 +5735,12 @@ function updateVEPlots(timestamps: number[], power: number[], velocity: number[]
 }
 
 async function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
+    // Narrow `currentParameters` from '... | null' for the rest of the body.
+    if (!currentParameters) {
+        console.error('updateVEPlotsWithWindSource: currentParameters is null');
+        return;
+    }
+
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
     const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
 
@@ -8384,6 +8408,12 @@ async function createVirtualElevationPlotsComparison(
 }
 
 async function createWindSpeedPlot(_timestamps: number[], velocity: number[], windSpeed: number[], _distance: number[], trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
+    // Narrow `currentParameters` from '... | null' for the rest of the body.
+    if (!currentParameters) {
+        console.error('createWindSpeedPlot: currentParameters is null');
+        return;
+    }
+
     // Wait for Plotly to load
     let Plotly;
     try {
