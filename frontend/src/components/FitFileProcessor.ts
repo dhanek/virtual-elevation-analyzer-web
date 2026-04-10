@@ -42,12 +42,13 @@ export class FitFileProcessor {
       console.log('✅ WASM module initialized successfully');
     } catch (error) {
       console.error('❌ Failed to load WASM module:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
       console.error('Error details:', {
-        message: error?.message,
-        stack: error?.stack,
-        name: error?.name
+        message: err.message,
+        stack: err.stack,
+        name: err.name
       });
-      throw new Error(`Failed to initialize WebAssembly module: ${error?.message || error}`);
+      throw new Error(`Failed to initialize WebAssembly module: ${err.message}`);
     }
   }
 

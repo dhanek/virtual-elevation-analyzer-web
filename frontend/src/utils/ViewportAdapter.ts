@@ -89,7 +89,7 @@ export class ViewportAdapter {
     }
 
     private calculateOptimalMapHeight(): number {
-        const { width, height, category } = this.viewportInfo;
+        const { height, category } = this.viewportInfo;
 
         switch (category) {
             case 'mobile':

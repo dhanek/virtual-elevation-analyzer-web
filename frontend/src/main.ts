@@ -128,7 +128,6 @@ let currentVEResult: VEAnalysisResult | null = null;
 let currentWindSource: 'constant' | 'fit' | 'compare' | 'none' = 'none';
 let currentAnalyzedLaps: number[] = [];
 let currentFilteredData: { power: number[], velocity: number[], temperature: number[], timestamps: number[] } | null = null;
-let _veCalculator: any = null; // VE calculator instance for air speed calibration (unused, reserved for future)
 let airSpeedCalibrationPercent: number = 0; // Air speed calibration percentage (-20 to +20)
 let resultsStorage: ResultsStorage = new ResultsStorage();
 
@@ -150,7 +149,9 @@ let gpsLapDetectionResult: GpsLapDetectionResult | null = null;
 let gpsDetectedLaps: DetectedLap[] = [];
 let gpsSelectedLaps: number[] = [];  // Selected GPS-detected laps for VE analysis
 let isGpsLapModeActive: boolean = false;  // Flag for GPS lap mode in VE analysis
-let isOutAndBackModeActive: boolean = false;  // Flag for Out and Back mode in VE analysis
+// NOTE: A parallel `isOutAndBackModeActive` flag used to live here, but it
+// was write-only (set in handleAnalyze, never read). Out-and-back mode is
+// detected per-function via `lapDetectionMode === 'GPS based out and back'`.
 let currentGpsLapIndexRanges: Array<{ startIdx: number; endIdx: number }> | null = null;  // Current GPS lap ranges
 let previousAutoLapDetection: string = 'None';  // Track previous value to detect changes
 
@@ -565,7 +566,7 @@ async function processFitFile(file: File) {
 
                     // Update status display
                     const statusParts: string[] = [];
-                    for (const [source, demRes] of remoteDEMResults) {
+                    for (const [, demRes] of remoteDEMResults) {
                         const coverage = ((1 - demRes.errorRate) * 100).toFixed(1);
                         statusParts.push(`AWS Terrain: ${coverage}% coverage`);
                     }
@@ -3301,7 +3302,6 @@ async function handleAnalyze() {
 
         // Store GPS lap mode state globally for use in VE analysis
         isGpsLapModeActive = isGpsLapMode && selectedLapIndexRanges !== null;
-        isOutAndBackModeActive = isOutAndBackMode && selectedOutAndBackSections !== null;
         currentGpsLapIndexRanges = selectedLapIndexRanges;
 
         // Show VE analysis based on mode
@@ -3634,8 +3634,9 @@ async function showGpsLapVEPlot(
     // Determine which wind source should be selected
     // If preservedWindSource is provided, use it; otherwise use default based on data availability
     const selectedWindSource = preservedWindSource || (hasWindSpeed ? 'fit' : 'constant');
-    // Ensure Plotly is loaded
-    const Plotly = await waitForPlotly();
+    // Ensure Plotly is loaded (side effect only; Plotly is accessed via the
+    // global in downstream helpers).
+    await waitForPlotly();
 
     // Show the VE analysis section
     const veSection = document.getElementById('veAnalysisSection') as HTMLElement;
@@ -5792,8 +5793,8 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 currentParameters.velodrome
             );
 
-            // Store calculator2 globally for air speed calibration (it has the air_speed data)
-            _veCalculator = calculator2;
+            // NOTE: calculator2 used to be stored in a `_veCalculator` global
+            // "for air speed calibration" but was never read downstream.
 
             const result1 = calculator1.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
             const result2 = calculator2.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
@@ -5835,8 +5836,11 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 console.log('Wind speed param:', currentParameters.wind_speed ?? 0, 'Wind direction:', currentParameters.wind_direction ?? 0);
             } else {
                 // Use FIT file wind data
-                // Apply time offset first (to sync with ground speed)
-                const windSpeedOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+                // Apply time offset first (to sync with ground speed).
+                // Default of 2s matches the sibling branch above (line 5764)
+                // — the old code referenced an undefined `defaultAirSpeedOffset`
+                // which would have thrown ReferenceError at runtime.
+                const windSpeedOffset = currentParameters?.air_speed_offset ?? 2;
                 useWindSpeed = applyAirSpeedOffset(windSpeed, windSpeedOffset);
                 console.log('Using FIT wind data with offset:', windSpeedOffset, 'seconds');
                 console.log('Sample offset wind_speed values:', useWindSpeed.slice(0, 5));
@@ -5908,8 +5912,8 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                     currentParameters!.velodrome
                 );
 
-            // Store calculator globally for air speed calibration
-            _veCalculator = calculator;
+            // NOTE: calculator used to be stored in a `_veCalculator` global
+            // "for air speed calibration" but was never read downstream.
 
             const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
@@ -6301,8 +6305,9 @@ interface OutAndBackVEProfile {
     totalDistance: number;
 }
 
-// Store Out and Back profiles globally for recalculation
-let currentOutAndBackProfiles: OutAndBackVEProfile[] = [];
+// Store Out and Back sections globally for recalculation.
+// NOTE: A parallel `currentOutAndBackProfiles` used to live here but was
+// write-only (assigned in two places, never read).
 let currentOutAndBackSections: OutAndBackSection[] = [];
 
 /**
@@ -6480,8 +6485,6 @@ async function showOutAndBackVEAnalysis(
         showError('No valid out-and-back sections to analyze');
         return;
     }
-
-    currentOutAndBackProfiles = profiles;
 
     // Calculate mean actual elevation profile (mirroring inbound)
     const meanElevation = calculateOutAndBackMeanElevation(profiles);
@@ -7463,8 +7466,6 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
         return;
     }
 
-    currentOutAndBackProfiles = profiles;
-
     // Recalculate mean elevation
     const meanElevation = calculateOutAndBackMeanElevation(profiles);
 
@@ -8333,7 +8334,7 @@ async function createVirtualElevationPlotsComparison(trimStart: number, trimEnd:
     Plotly.newPlot('veResidualsPlot', [residualsTrace2, residualsTrace1, zeroLine], residualsLayout, {responsive: true});
 }
 
-async function createWindSpeedPlot(timestamps: number[], velocity: number[], windSpeed: number[], distance: number[], trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
+async function createWindSpeedPlot(_timestamps: number[], velocity: number[], windSpeed: number[], _distance: number[], trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
     // Wait for Plotly to load
     let Plotly;
     try {
@@ -8422,8 +8423,8 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], win
     const offsetWindSpeed = hasWindSpeed ? applyAirSpeedOffset(windSpeed, windSpeedOffset) : windSpeed;
     const windSpeedKmh = hasWindSpeed ? offsetWindSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
 
-    // Use time (seconds) instead of distance for x-axis
-    const timeSeconds = timestamps.map((t, i) => i);
+    // Time-based x-axis (the actual arrays are built below; a previous
+    // `timeSeconds` helper was dead code and has been removed).
     const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
     const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
     const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
@@ -8615,7 +8616,7 @@ async function createWindSpeedPlot(timestamps: number[], velocity: number[], win
     Plotly.newPlot('windSpeedPlot', traces, layout, {responsive: true});
 }
 
-async function createSpeedPowerPlot(timestamps: number[], velocity: number[], power: number[], trimStart: number, trimEnd: number) {
+async function createSpeedPowerPlot(_timestamps: number[], velocity: number[], power: number[], trimStart: number, trimEnd: number) {
     // Wait for Plotly to load
     let Plotly;
     try {
@@ -8638,8 +8639,7 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
     // Convert velocity to km/h
     const speedKmh = velocity.map(v => v * 3.6);
 
-    // Use time (seconds) for x-axis
-    const timeSeconds = timestamps.map((t, i) => i);
+    // Time-based x-axis (the actual arrays are built below).
     const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
     const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
     const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
@@ -8797,7 +8797,7 @@ async function createSpeedPowerPlot(timestamps: number[], velocity: number[], po
     Plotly.newPlot('speedPowerPlot', traces, layout, {responsive: true});
 }
 
-async function createVirtualDistancePlot(timestamps: number[], velocity: number[], windSpeed: number[], distance: number[], trimStart: number, trimEnd: number) {
+async function createVirtualDistancePlot(timestamps: number[], velocity: number[], windSpeed: number[], _distance: number[], trimStart: number, trimEnd: number) {
     // Wait for Plotly to load
     let Plotly;
     try {
@@ -8845,8 +8845,7 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
     const vdAirKm = vdAir.map(d => d / 1000);
     const vdGroundKm = vdGround.map(d => d / 1000);
 
-    // Use time (seconds) for x-axis
-    const timeSeconds = timestamps.map((t, i) => i);
+    // Time-based x-axis (the actual arrays are built below).
     const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
     const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
     const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];

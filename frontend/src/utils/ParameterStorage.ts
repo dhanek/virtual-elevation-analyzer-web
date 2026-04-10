@@ -65,7 +65,6 @@ export class ParameterStorage {
 
             request.onupgradeneeded = (event) => {
                 const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
-                const newVersion = (event as IDBVersionChangeEvent).newVersion;
 
                 const db = (event.target as IDBOpenDBRequest).result;
                 const transaction = (event.target as IDBOpenDBRequest).transaction!;
@@ -197,9 +196,6 @@ export class ParameterStorage {
                 if (result) {
                     resolve(result.parameters);
                 } else {
-                    // Debug: show what hashes we DO have
-                    objectStore.getAllKeys().onsuccess = (e: any) => {
-                    };
                     resolve(null);
                 }
             };

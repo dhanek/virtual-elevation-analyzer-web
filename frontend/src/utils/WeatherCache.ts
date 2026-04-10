@@ -141,7 +141,8 @@ export class WeatherCache {
             if (error instanceof WeatherAPIError) {
                 throw error;
             }
-            throw new Error(`Failed to fetch weather data: ${error.message}`);
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to fetch weather data: ${message}`);
         }
     }
 

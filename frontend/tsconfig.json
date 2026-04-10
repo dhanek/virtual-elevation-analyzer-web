@@ -13,6 +13,12 @@
     "isolatedModules": true,
     "noEmit": true,
 
+    /* Path aliases — must mirror vite.config.ts `resolve.alias`.
+       Paths are resolved relative to this tsconfig.json file. */
+    "paths": {
+      "@wasm/*": ["./pkg/*"]
+    },
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
