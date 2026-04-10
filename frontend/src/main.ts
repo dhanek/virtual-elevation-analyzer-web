@@ -5799,17 +5799,23 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             const result1 = calculator1.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
             const result2 = calculator2.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
-            // Store first result globally for save functionality (use constant wind result)
+            // Store first result globally for save functionality (use constant wind result).
+            // VEResult's Float64Array fields are passed through directly — no
+            // need to copy to number[] since VEAnalysisResult now mirrors the
+            // WASM shape exactly.
             currentVEResult = {
-                virtual_elevation: Array.from(result1.virtual_elevation),
-                virtual_slope: Array.from(result1.virtual_slope || []),
-                acceleration: Array.from(result1.acceleration || []),
-                effective_wind: Array.from(result1.effective_wind || []),
-                apparent_velocity: Array.from(result1.apparent_velocity || []),
-                r2: result1.r2 || 0,
-                rmse: result1.rmse || 0,
-                ve_elevation_diff: result1.ve_elevation_diff || 0,
-                actual_elevation_diff: result1.actual_elevation_diff || 0
+                virtual_elevation: result1.virtual_elevation,
+                virtual_slope: result1.virtual_slope,
+                acceleration: result1.acceleration,
+                effective_wind: result1.effective_wind,
+                apparent_velocity: result1.apparent_velocity,
+                r2: result1.r2,
+                rmse: result1.rmse,
+                ve_elevation_diff: result1.ve_elevation_diff,
+                actual_elevation_diff: result1.actual_elevation_diff,
+                virtual_distance_air: result1.virtual_distance_air,
+                virtual_distance_ground: result1.virtual_distance_ground,
+                vd_difference_percent: result1.vd_difference_percent,
             };
             currentWindSource = 'compare';
 
@@ -5966,7 +5972,9 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
 
     const Plotly = await waitForPlotly();
 
-    // Extract arrays from currentFitData
+    // Extract arrays from currentFitData as typed locals. The `as number[]`
+    // casts are required because Array.from(Float64Array) infers unknown[]
+    // in TS 6.x due to how typed-array iterators are declared.
     const allTimestamps = Array.from(currentFitData.timestamps) as number[];
     const allPower = Array.from(currentFitData.power) as number[];
     const allVelocity = Array.from(currentFitData.velocity) as number[];
@@ -5975,20 +5983,23 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
     const allAltitude = Array.from(currentFitData.altitude) as number[];
     const allDistance = Array.from(currentFitData.distance) as number[];
 
-    // Handle wind/air speed
-    const hasAirSpeed = currentFitData.air_speed && Array.from(currentFitData.air_speed).some((v: number) => !isNaN(v) && v !== 0);
-    const hasWindSpeed = currentFitData.wind_speed && Array.from(currentFitData.wind_speed).some((v: number) => !isNaN(v) && v !== 0);
+    // Handle wind/air speed. Copy to typed locals up front so .some/.map
+    // don't trip over the Array.from inference issue.
+    const airSpeedArr: number[] = currentFitData.air_speed ? Array.from(currentFitData.air_speed) as number[] : [];
+    const windSpeedArr: number[] = currentFitData.wind_speed ? Array.from(currentFitData.wind_speed) as number[] : [];
+    const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
+    const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
     let allWindSpeed: number[];
 
     if (hasAirSpeed) {
-        const rawYaw = currentFitData.wind_yaw || new Array(currentFitData.air_speed.length).fill(0);
-        allWindSpeed = Array.from(currentFitData.air_speed).map((magnitude: number, i: number) => {
+        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
+        allWindSpeed = airSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
     } else if (hasWindSpeed) {
-        const rawYaw = currentFitData.wind_yaw || new Array(currentFitData.wind_speed.length).fill(0);
-        allWindSpeed = Array.from(currentFitData.wind_speed).map((magnitude: number, i: number) => {
+        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
+        allWindSpeed = windSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
@@ -6050,16 +6061,18 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
         const totalDistance = relativeDistances[relativeDistances.length - 1];
 
         try {
-            // Create VE calculator for this lap
+            // Create VE calculator for this lap. The WASM boundary wants
+            // Float64Array; our per-lap buffers were accumulated via .push
+            // so they're number[].
             const calculator = create_ve_calculator(
-                lapTimestamps,
-                lapPower,
-                lapVelocity,
-                lapPositionLat,
-                lapPositionLong,
-                lapAltitude,
-                lapDistance,
-                lapWindSpeed,
+                new Float64Array(lapTimestamps),
+                new Float64Array(lapPower),
+                new Float64Array(lapVelocity),
+                new Float64Array(lapPositionLat),
+                new Float64Array(lapPositionLong),
+                new Float64Array(lapAltitude),
+                new Float64Array(lapDistance),
+                new Float64Array(lapWindSpeed),
                 currentParameters.system_mass,
                 currentParameters.rho,
                 currentParameters.eta,
@@ -6324,7 +6337,8 @@ async function showOutAndBackVEAnalysis(
     currentOutAndBackSections = sections;
     const profiles: OutAndBackVEProfile[] = [];
 
-    // Extract arrays from fitData
+    // Extract arrays from fitData as typed locals (see note in the sibling
+    // cluster above about the TS 6 Array.from inference issue).
     const allTimestamps = Array.from(fitData.timestamps) as number[];
     const allPower = Array.from(fitData.power) as number[];
     const allVelocity = Array.from(fitData.velocity) as number[];
@@ -6333,9 +6347,11 @@ async function showOutAndBackVEAnalysis(
     const allAltitude = Array.from(fitData.altitude) as number[];
     const allDistance = Array.from(fitData.distance) as number[];
 
-    // Handle wind/air speed
-    const hasAirSpeed = fitData.air_speed && Array.from(fitData.air_speed).some((v: number) => !isNaN(v) && v !== 0);
-    const hasWindSpeed = fitData.wind_speed && Array.from(fitData.wind_speed).some((v: number) => !isNaN(v) && v !== 0);
+    // Handle wind/air speed via typed locals.
+    const airSpeedArr: number[] = fitData.air_speed ? Array.from(fitData.air_speed) as number[] : [];
+    const windSpeedArr: number[] = fitData.wind_speed ? Array.from(fitData.wind_speed) as number[] : [];
+    const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
+    const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
 
     // Check wind source selection (if UI exists)
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -6348,8 +6364,8 @@ async function showOutAndBackVEAnalysis(
         allWindSpeed = new Array(allTimestamps.length).fill(NaN);
         console.log('Out and Back VE: Using constant wind settings');
     } else if (hasAirSpeed) {
-        const rawYaw = fitData.wind_yaw || new Array(fitData.air_speed.length).fill(0);
-        let baseWindSpeed = Array.from(fitData.air_speed).map((magnitude: number, i: number) => {
+        const rawYaw: number[] = fitData.wind_yaw ? Array.from(fitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
+        let baseWindSpeed = airSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
@@ -6362,8 +6378,8 @@ async function showOutAndBackVEAnalysis(
             : baseWindSpeed;
         console.log(`Out and Back VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${airSpeedCalibrationPercent}%)`);
     } else if (hasWindSpeed) {
-        const rawYaw = fitData.wind_yaw || new Array(fitData.wind_speed.length).fill(0);
-        let baseWindSpeed = Array.from(fitData.wind_speed).map((magnitude: number, i: number) => {
+        const rawYaw: number[] = fitData.wind_yaw ? Array.from(fitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
+        let baseWindSpeed = windSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
@@ -7320,7 +7336,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     // Recalculate VE for all sections
     const profiles: OutAndBackVEProfile[] = [];
 
-    // Extract arrays from currentFitData
+    // Extract arrays from currentFitData as typed locals (see note above).
     const allTimestamps = Array.from(currentFitData.timestamps) as number[];
     const allPower = Array.from(currentFitData.power) as number[];
     const allVelocity = Array.from(currentFitData.velocity) as number[];
@@ -7329,9 +7345,11 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     const allAltitude = Array.from(currentFitData.altitude) as number[];
     const allDistance = Array.from(currentFitData.distance) as number[];
 
-    // Handle wind/air speed - check wind source selection
-    const hasAirSpeed = currentFitData.air_speed && Array.from(currentFitData.air_speed).some((v: number) => !isNaN(v) && v !== 0);
-    const hasWindSpeed = currentFitData.wind_speed && Array.from(currentFitData.wind_speed).some((v: number) => !isNaN(v) && v !== 0);
+    // Handle wind/air speed via typed locals - check wind source selection
+    const airSpeedArr: number[] = currentFitData.air_speed ? Array.from(currentFitData.air_speed) as number[] : [];
+    const windSpeedArr: number[] = currentFitData.wind_speed ? Array.from(currentFitData.wind_speed) as number[] : [];
+    const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
+    const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
 
     // Check wind source selection
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -7344,8 +7362,8 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
         allWindSpeed = new Array(allTimestamps.length).fill(NaN);
         console.log('Out and Back VE update: Using constant wind settings');
     } else if (hasAirSpeed) {
-        const rawYaw = currentFitData.wind_yaw || new Array(currentFitData.air_speed.length).fill(0);
-        let baseWindSpeed = Array.from(currentFitData.air_speed).map((magnitude: number, i: number) => {
+        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
+        let baseWindSpeed = airSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
@@ -7358,8 +7376,8 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
             : baseWindSpeed;
         console.log(`Out and Back VE update: Using FIT air speed data (calibration: ${airSpeedCalibrationPercent}%)`);
     } else if (hasWindSpeed) {
-        const rawYaw = currentFitData.wind_yaw || new Array(currentFitData.wind_speed.length).fill(0);
-        let baseWindSpeed = Array.from(currentFitData.wind_speed).map((magnitude: number, i: number) => {
+        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
+        let baseWindSpeed = windSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
@@ -7492,7 +7510,17 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     console.log(`Out and Back VE plots updated with ${profiles.length} sections, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
 }
 
-async function createVirtualElevationPlots(trimStart: number, trimEnd: number, virtualElevation: number[], actualElevation: number[]) {
+async function createVirtualElevationPlots(
+    trimStart: number,
+    trimEnd: number,
+    virtualElevationIn: Float64Array | number[],
+    actualElevationIn: Float64Array | number[],
+) {
+    // Convert once at the boundary. Downstream .slice/.length/.map all
+    // work on either input, but Float64Array.slice returns Float64Array
+    // which fouls the existing `.map(...)` calls that expect number[].
+    const virtualElevation: number[] = Array.from(virtualElevationIn);
+    const actualElevation: number[] = Array.from(actualElevationIn);
     console.log('Creating VE plots:', {
         trimStart,
         trimEnd,
@@ -7986,12 +8014,22 @@ async function updateCdaValidationPlots(
 
     const avgCdaRef = validCda.reduce((sum, c) => sum + c, 0) / validCda.length;
 
-    // Create calculator for reference CdA calculation
-    // Uses SAME air speed/wind data as the slider CdA calculation
+    // Create calculator for reference CdA calculation.
+    // Uses SAME air speed/wind data as the slider CdA calculation.
+    // The WASM boundary takes Float64Array; our inputs here are number[],
+    // so wrap each once and reuse.
+    const f64Timestamps = new Float64Array(timestamps);
+    const f64Power = new Float64Array(power);
+    const f64Velocity = new Float64Array(velocity);
+    const f64PositionLat = new Float64Array(positionLat);
+    const f64PositionLong = new Float64Array(positionLong);
+    const f64Altitude = new Float64Array(altitude);
+    const f64Distance = new Float64Array(distance);
+    const f64WindSpeed = new Float64Array(windSpeed);
     const refCalculator = currentRhoArray
         ? create_ve_calculator_with_rho_array(
-            timestamps, power, velocity, positionLat, positionLong, altitude, distance,
-            windSpeed,
+            f64Timestamps, f64Power, f64Velocity, f64PositionLat, f64PositionLong, f64Altitude, f64Distance,
+            f64WindSpeed,
             new Float64Array(currentRhoArray),
             currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
             currentParameters.cda, crrOptimized,
@@ -8000,8 +8038,8 @@ async function updateCdaValidationPlots(
             currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
         )
         : create_ve_calculator(
-            timestamps, power, velocity, positionLat, positionLong, altitude, distance,
-            windSpeed,
+            f64Timestamps, f64Power, f64Velocity, f64PositionLat, f64PositionLong, f64Altitude, f64Distance,
+            f64WindSpeed,
             currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
             currentParameters.cda, crrOptimized,
             currentParameters.cda_min, currentParameters.cda_max,
@@ -8223,7 +8261,18 @@ function updateVEMetricsComparison(result1: any, result2: any) {
     if (actualGainValue) actualGainValue.textContent = result1.actual_elevation_diff.toFixed(1) + ' m';
 }
 
-async function createVirtualElevationPlotsComparison(trimStart: number, trimEnd: number, virtualElevation1: number[], virtualElevation2: number[], actualElevation: number[]) {
+async function createVirtualElevationPlotsComparison(
+    trimStart: number,
+    trimEnd: number,
+    virtualElevation1In: Float64Array | number[],
+    virtualElevation2In: Float64Array | number[],
+    actualElevationIn: Float64Array | number[],
+) {
+    // Normalize WASM Float64Array inputs to plain number[] once. See the
+    // companion note in createVirtualElevationPlots.
+    const virtualElevation1: number[] = Array.from(virtualElevation1In);
+    const virtualElevation2: number[] = Array.from(virtualElevation2In);
+    const actualElevation: number[] = Array.from(actualElevationIn);
     // Wait for Plotly to load
     let Plotly;
     try {

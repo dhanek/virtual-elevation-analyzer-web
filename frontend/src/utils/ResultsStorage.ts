@@ -1,16 +1,30 @@
 import { fileSave } from 'browser-fs-access';
 import { AnalysisParameters } from '../components/AnalysisParameters';
 
+// Shape of a VE analysis result kept in IndexedDB.
+//
+// The array fields are `Float64Array` to match the WASM `VEResult` class
+// exactly — this lets `currentVEResult = wasmResult` work without a copy.
+// They are `readonly` because VEResult's fields are readonly and widening
+// them here would break assignment from a VEResult instance.
+//
+// The per-sample arrays other than `virtual_elevation` are optional because
+// GPS-lap mode only produces a single combined virtual_elevation profile
+// (per-sample slope/acceleration/wind/apparent_velocity are not meaningful
+// across stitched laps).
 export interface VEAnalysisResult {
-    virtual_elevation: number[];
-    virtual_slope: number[];
-    acceleration: number[];
-    effective_wind: number[];
-    apparent_velocity: number[];
+    readonly virtual_elevation: Float64Array;
+    readonly virtual_slope?: Float64Array;
+    readonly acceleration?: Float64Array;
+    readonly effective_wind?: Float64Array;
+    readonly apparent_velocity?: Float64Array;
     r2: number;
     rmse: number;
     ve_elevation_diff: number;
     actual_elevation_diff: number;
+    virtual_distance_air: number;
+    virtual_distance_ground: number;
+    vd_difference_percent: number;
 }
 
 export interface SaveResultData {

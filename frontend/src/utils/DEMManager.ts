@@ -109,8 +109,12 @@ export class DEMManager {
         }
 
         try {
-            // Perform batch lookup
-            const demElevations = this.demProcessor.batch_lookup(lats, lons);
+            // Perform batch lookup. The WASM signature takes Float64Array;
+            // our lats/lons are number[] from JS callers, so convert once.
+            const demElevations = this.demProcessor.batch_lookup(
+                new Float64Array(lats),
+                new Float64Array(lons),
+            );
 
             // Merge with fallback altitudes where DEM lookup failed
             const correctedElevations: number[] = [];
@@ -163,7 +167,10 @@ export class DEMManager {
      */
     singleLookup(lat: number, lon: number): number {
         if (!this.demProcessor || !this.demFileLoaded) return NaN;
-        const result = this.demProcessor.batch_lookup([lat], [lon]);
+        const result = this.demProcessor.batch_lookup(
+            new Float64Array([lat]),
+            new Float64Array([lon]),
+        );
         return result[0];
     }
 
@@ -189,9 +196,13 @@ export class DEMManager {
     }
 
     /**
-     * Get DEM bounds [min_lon, min_lat, max_lon, max_lat]
+     * Get DEM bounds [min_lon, min_lat, max_lon, max_lat].
+     *
+     * Returns a Float64Array rather than number[] because `get_bounds()`
+     * comes straight from wasm-bindgen and copying to a plain array would
+     * be a needless allocation. Callers can index it like a normal array.
      */
-    getDEMBounds(): number[] | null {
+    getDEMBounds(): Float64Array | null {
         return this.demProcessor ? this.demProcessor.get_bounds() : null;
     }
 

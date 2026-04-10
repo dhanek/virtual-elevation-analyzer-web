@@ -12,7 +12,8 @@ export interface DEMSourceResult {
     elevations: number[];
     errorRate: number;
     metadata: string | null;
-    bounds: number[] | null;
+    // Matches DEMManager.getDEMBounds(): a zero-copy view of the WASM array.
+    bounds: Float64Array | null;
 }
 
 /**
