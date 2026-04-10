@@ -27,6 +27,14 @@ jobs:
           toolchain: stable
           target: wasm32-unknown-unknown
 
+      - name: Test Backend (native)
+        # Runs Rust unit tests on the host target. Keeps the VE math
+        # (virtual_elevation.rs) and related modules under a safety net
+        # before WASM is built. See REFACTORING_REPORT.md item 3.
+        run: |
+          cd backend
+          cargo test --lib
+
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
