@@ -14,7 +14,7 @@ Based on the revised refactoring plan validated against the current codebase.
 | 12 | ✅ Done | Add a frontend lint + test baseline | Added ESLint + Vitest to `frontend/`, introduced baseline scripts/config (`lint`, `test`, `eslint.config.js`, `vitest.config.ts`), added initial unit tests for wind/supplementary-series helpers, and wired lint/tests into `.github/workflows/deploy.yml`. |
 | 13 | ✅ Done | Introduce a leveled `log.ts` and remove raw debug spam | Added `frontend/src/utils/log.ts`, replaced raw `console.*` across `frontend/src` with leveled logger calls, and enforced `no-console` via ESLint outside the logger implementation. |
 | 14 | ✅ Done | Simplify the misleading security layer | Replaced the misleading frontend `DataProtection` security wrapper with explicit file-validation helpers, removed runtime CSP injection and unload-time “secure memory wipe”, and reduced backend FIT validation to a small internal helper instead of an exported `SecurityValidator` API. |
-| 15 | ⬜ Not started | Split `backend/src/dem_processor.rs` into focused modules | Backend refactor. |
+| 15 | ✅ Done | Split `backend/src/dem_processor.rs` into focused modules | Kept the public `DEMProcessor` API intact while splitting the large backend DEM module into `backend/src/dem_processor/{tiff_loader,geotransform,projection,sampler}.rs` plus a thin root file with shared types/tests. |
 | 16 | ⬜ Not started | Move CSS out of `frontend/index.html` | Large inline stylesheet still present. |
 | 17 | ⬜ Not started | Split and modernize the docs | Doc drift cleanup still pending. |
 | 18 | ⬜ Not started | Replace magic numbers with named, local constants | Still pending. |
