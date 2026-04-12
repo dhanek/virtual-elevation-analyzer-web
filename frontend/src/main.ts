@@ -1339,11 +1339,6 @@ function setupLapSelectionHandlers() {
 
 // ==================== GPS Lap Detection Functions ====================
 
-// Track if GPS lap detection event handlers have been set up
-let gpsLapHandlersInitialized = false;
-// Store reference to current handler function so we can update it
-let gpsUpdateGateHandler: ((timeOffset: number) => void) | null = null;
-
 /**
  * Setup GPS lap detection UI and handlers (slider-based gate positioning)
  */
@@ -1432,31 +1427,21 @@ async function setupGpsLapDetection() {
         }
     };
 
-    // Store reference to update handler
-    gpsUpdateGateHandler = updateGatePosition;
+    gateSlider.oninput = () => {
+        gateValue.value = gateSlider.value;
+        void updateGatePosition(parseInt(gateSlider.value));
+    };
 
-    // Only add event handlers once
-    if (!gpsLapHandlersInitialized) {
-        // Setup slider event handlers
-        gateSlider.addEventListener('input', () => {
-            gateValue.value = gateSlider.value;
-            gpsUpdateGateHandler?.(parseInt(gateSlider.value));
-        });
-
-        gateValue.addEventListener('change', () => {
-            const maxSecondsNow = parseInt(gateSlider.max);
-            const val = Math.max(0, Math.min(parseInt(gateValue.value) || 0, maxSecondsNow));
-            gateValue.value = String(val);
-            gateSlider.value = String(val);
-            gpsUpdateGateHandler?.(val);
-        });
-
-        gpsLapHandlersInitialized = true;
-        log.debug('GPS lap detection slider handlers initialized');
-    }
+    gateValue.onchange = () => {
+        const maxSecondsNow = parseInt(gateSlider.max);
+        const val = Math.max(0, Math.min(parseInt(gateValue.value) || 0, maxSecondsNow));
+        gateValue.value = String(val);
+        gateSlider.value = String(val);
+        void updateGatePosition(val);
+    };
 
     // Initial detection with loaded/default offset
-    updateGatePosition(initialOffset);
+    void updateGatePosition(initialOffset);
 }
 
 /**
@@ -1671,11 +1656,6 @@ function handleGpsLapSelectionChange() {
 
 // ==================== Out and Back Detection Functions ====================
 
-// Track if Out and Back event handlers have been set up
-let outAndBackHandlersInitialized = false;
-// Store references to current handler functions so we can update them
-let oabUpdateGatesHandler: (() => void) | null = null;
-
 /**
  * Setup Out and Back detection UI and handlers (slider-based gate positioning)
  */
@@ -1792,58 +1772,47 @@ async function setupOutAndBackDetection() {
         }
     };
 
-    // Store reference to update handler
-    oabUpdateGatesHandler = updateGates;
-
-    // Only add event handlers once
-    if (!outAndBackHandlersInitialized) {
-        // Setup slider event handlers for Gate A
-        gateASlider.addEventListener('input', () => {
-            let val = parseInt(gateASlider.value);
-            const maxA = parseInt(gateBSlider.value) - 1;
-            if (val >= maxA) {
-                val = maxA;
-                gateASlider.value = String(val);
-            }
-            gateAValue.value = String(val);
-            oabUpdateGatesHandler?.();
-        });
-
-        gateAValue.addEventListener('change', () => {
-            const maxA = parseInt(gateBSlider.value) - 1;
-            let val = Math.max(0, Math.min(parseInt(gateAValue.value) || 0, maxA));
-            gateAValue.value = String(val);
+    gateASlider.oninput = () => {
+        let val = parseInt(gateASlider.value);
+        const maxA = parseInt(gateBSlider.value) - 1;
+        if (val >= maxA) {
+            val = maxA;
             gateASlider.value = String(val);
-            oabUpdateGatesHandler?.();
-        });
+        }
+        gateAValue.value = String(val);
+        void updateGates();
+    };
 
-        // Setup slider event handlers for Gate B
-        gateBSlider.addEventListener('input', () => {
-            let val = parseInt(gateBSlider.value);
-            const minB = parseInt(gateASlider.value) + 1;
-            if (val <= minB) {
-                val = minB;
-                gateBSlider.value = String(val);
-            }
-            gateBValue.value = String(val);
-            oabUpdateGatesHandler?.();
-        });
+    gateAValue.onchange = () => {
+        const maxA = parseInt(gateBSlider.value) - 1;
+        const val = Math.max(0, Math.min(parseInt(gateAValue.value) || 0, maxA));
+        gateAValue.value = String(val);
+        gateASlider.value = String(val);
+        void updateGates();
+    };
 
-        gateBValue.addEventListener('change', () => {
-            const maxSecondsNow = parseInt(gateBSlider.max);
-            const minB = parseInt(gateASlider.value) + 1;
-            let val = Math.max(minB, Math.min(parseInt(gateBValue.value) || 0, maxSecondsNow));
-            gateBValue.value = String(val);
+    gateBSlider.oninput = () => {
+        let val = parseInt(gateBSlider.value);
+        const minB = parseInt(gateASlider.value) + 1;
+        if (val <= minB) {
+            val = minB;
             gateBSlider.value = String(val);
-            oabUpdateGatesHandler?.();
-        });
+        }
+        gateBValue.value = String(val);
+        void updateGates();
+    };
 
-        outAndBackHandlersInitialized = true;
-        log.debug('Out and Back slider handlers initialized');
-    }
+    gateBValue.onchange = () => {
+        const maxSecondsNow = parseInt(gateBSlider.max);
+        const minB = parseInt(gateASlider.value) + 1;
+        const val = Math.max(minB, Math.min(parseInt(gateBValue.value) || 0, maxSecondsNow));
+        gateBValue.value = String(val);
+        gateBSlider.value = String(val);
+        void updateGates();
+    };
 
     // Initial detection with loaded/default offsets
-    updateGates();
+    void updateGates();
 }
 
 /**
@@ -2522,10 +2491,6 @@ function initializeSection3() {
     const fitData = appState.currentFitData;
     const laps = appState.currentLaps;
     if (!analysisSection || !fitData || !laps.length) return;
-
-    // Reset handler initialization flags since HTML is being recreated
-    gpsLapHandlersInitialized = false;
-    outAndBackHandlersInitialized = false;
 
     const hasGpsData = appState.currentFitResult?.parsing_statistics?.has_gps_data ?? false;
     const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
@@ -3272,10 +3237,6 @@ async function showGpsLapVEPlot(
         log.error('VE analysis content container not found');
         return;
     }
-
-    // Store lap profiles globally for recalculation
-    (window as any).__gpsLapProfiles = lapProfiles;
-    (window as any).__gpsMeanElevation = meanElevation;
 
     // Calculate initial statistics
     const initialStats = calculateGpsLapStats(lapProfiles, meanElevation);
@@ -6218,10 +6179,6 @@ async function showOutAndBackVEPlot(
         log.error('VE analysis content container not found');
         return;
     }
-
-    // Store profiles globally for recalculation
-    (window as any).__outAndBackProfiles = profiles;
-    (window as any).__outAndBackMeanElevation = meanElevation;
 
     // Calculate initial statistics
     const initialStats = calculateOutAndBackStats(profiles, meanElevation);
