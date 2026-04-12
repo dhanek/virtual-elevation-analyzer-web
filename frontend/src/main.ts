@@ -28,6 +28,11 @@ import { AppState } from './state/AppState';
 import { createFitLoadedActivity, loadCsvActivity } from './activity/ActivityLoader';
 import { createAnalysisInput, type AnalysisInput } from './analysis/AnalysisInput';
 import { getNormalizedActivityArrays } from './analysis/ActivityArrayCache';
+import {
+    buildSegmentSupplementarySeries,
+    calculateConstantApparentWindSeries,
+    type SegmentSupplementarySeries,
+} from './analysis/SegmentSupplementarySeries';
 import { extractSegmentData } from './analysis/SegmentExtractor';
 import { createVeCalculator } from './analysis/VeCalculatorFactory';
 import { applyAirSpeedOffset, calculateAirSpeedSyncError, resolveWindSeries } from './analysis/WindSourceResolver';
@@ -39,6 +44,11 @@ import {
     buildVirtualElevationFigures,
     buildWindSpeedFigure,
 } from './plots/StandardPlotBuilders';
+import {
+    buildMultiSegmentPowerFigure,
+    buildMultiSegmentVirtualDistanceFigure,
+    buildMultiSegmentWindFigure,
+} from './plots/MultiSegmentPlotBuilders';
 import { collectSelectionIndices, getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
 import init, { AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
@@ -2960,11 +2970,23 @@ async function handleAnalyze() {
 
 // ==================== GPS Lap VE Analysis ====================
 
+const MULTI_SEGMENT_COLORS = [
+    '#4363d8',
+    '#e6194b',
+    '#3cb44b',
+    '#f58231',
+    '#911eb4',
+    '#46f0f0',
+    '#f032e6',
+    '#bcf60c',
+];
+
 interface LapVEProfile {
     lapNumber: number;
     distances: number[];      // km, relative to gate crossing (starting at 0)
     virtualElevation: number[];
     actualElevation: number[];
+    supplementarySeries: SegmentSupplementarySeries;
     duration: number;         // seconds
     totalDistance: number;    // km
 }
@@ -3052,13 +3074,22 @@ async function showGpsLapVEAnalysis(
             continue;
         }
 
-        // Make distances relative to lap start (0 at gate crossing)
-        const startDistance = lapDistance[0];
-        const relativeDistances = lapDistance.map(d => (d - startDistance) / 1000); // Convert to km
+        const supplementarySeries = buildSegmentSupplementarySeries({
+            timestamps: lapTimestamps,
+            power: lapPower,
+            velocity: lapVelocity,
+            positionLat: lapPositionLat,
+            positionLong: lapPositionLong,
+            distance: lapDistance,
+            windSpeed: lapWindSpeed,
+            params,
+            selectedWindSource: gpsLapWindResolution.selectedWindSource,
+        });
+        const relativeDistances = supplementarySeries.distancesKm;
 
         // Calculate duration
         const duration = lapTimestamps[lapTimestamps.length - 1] - lapTimestamps[0];
-        const totalDistance = relativeDistances[relativeDistances.length - 1];
+        const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
 
         try {
             const calculator = createVeCalculator({
@@ -3091,6 +3122,7 @@ async function showGpsLapVEAnalysis(
                 distances: relativeDistances,
                 virtualElevation: veArray,
                 actualElevation: actualElevation,
+                supplementarySeries,
                 duration,
                 totalDistance
             });
@@ -3209,9 +3241,11 @@ async function showGpsLapVEPlot(
     defaultAirSpeedOffset: number,
     preservedWindSource: string | null = null
 ) {
-    // Determine which wind source should be selected
-    // If preservedWindSource is provided, use it; otherwise use default based on data availability
     const selectedWindSource = preservedWindSource || (hasWindSpeed ? 'fit' : 'constant');
+    const effectiveWindSource = selectedWindSource === 'compare' ? 'fit' : selectedWindSource;
+    const showWindTab = hasWindSpeed || hasConstantWind;
+    const showFitWindControls = hasWindSpeed && effectiveWindSource === 'fit';
+    const showVirtualDistanceTab = showFitWindControls;
     // Ensure Plotly is loaded (side effect only; Plotly is accessed via the
     // global in downstream helpers).
     await waitForPlotly();
@@ -3306,11 +3340,11 @@ async function showGpsLapVEPlot(
                     <div class="ve-plots">
                         <div class="ve-tabs">
                             <button class="ve-tab-button active" data-tab="ve">VE</button>
-                            ${(hasWindSpeed || hasConstantWind) ? `
+                            ${showWindTab ? `
                             <button class="ve-tab-button" data-tab="wind">Wind</button>
                             ` : ''}
                             <button class="ve-tab-button" data-tab="power">Power</button>
-                            ${hasWindSpeed ? `
+                            ${showVirtualDistanceTab ? `
                             <button class="ve-tab-button" data-tab="vd">VD</button>
                             ` : ''}
                         </div>
@@ -3334,10 +3368,10 @@ async function showGpsLapVEPlot(
                             </div>
                         </div>
 
-                        ${(hasWindSpeed || hasConstantWind) ? `
+                        ${showWindTab ? `
                         <div class="ve-tab-content" id="wind-tab">
                             <div id="gpsLapWindPlot" class="ve-plot" style="height: 600px;"></div>
-                            ${hasWindSpeed ? `
+                            ${showFitWindControls ? `
                             <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
                                 <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
                                 <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
@@ -3356,7 +3390,7 @@ async function showGpsLapVEPlot(
                             <div id="gpsLapPowerPlot" class="ve-plot" style="height: 600px;"></div>
                         </div>
 
-                        ${hasWindSpeed ? `
+                        ${showVirtualDistanceTab ? `
                         <div class="ve-tab-content" id="vd-tab">
                             <div id="gpsLapVdPlot" class="ve-plot" style="height: 600px;"></div>
                         </div>
@@ -3371,7 +3405,7 @@ async function showGpsLapVEPlot(
     setupGpsLapSliderHandlers(params);
 
     // Setup tab switching
-    setupGpsLapTabSwitching(lapProfiles, hasWindSpeed, hasConstantWind);
+    setupGpsLapTabSwitching(lapProfiles, showWindTab, showVirtualDistanceTab);
 
     // Setup wind source radio button listeners
     const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
@@ -3597,7 +3631,7 @@ function setupGpsLapSliderHandlers(_params: AnalysisParameters) {
 /**
  * Setup tab switching for GPS lap mode
  */
-function setupGpsLapTabSwitching(lapProfiles: LapVEProfile[], hasWindSpeed: boolean, hasConstantWind: boolean) {
+function setupGpsLapTabSwitching(lapProfiles: LapVEProfile[], showWindTab: boolean, showVirtualDistanceTab: boolean) {
     const tabButtons = document.querySelectorAll('.ve-tab-button');
     tabButtons.forEach(button => {
         button.addEventListener('click', (e) => {
@@ -3615,11 +3649,11 @@ function setupGpsLapTabSwitching(lapProfiles: LapVEProfile[], hasWindSpeed: bool
             document.getElementById(`${tabName}-tab`)?.classList.add('active');
 
             // Render tab-specific content when switched to
-            if (tabName === 'wind' && (hasWindSpeed || hasConstantWind)) {
+            if (tabName === 'wind' && showWindTab) {
                 renderGpsLapWindPlot(lapProfiles);
             } else if (tabName === 'power') {
                 renderGpsLapPowerPlot(lapProfiles);
-            } else if (tabName === 'vd' && hasWindSpeed) {
+            } else if (tabName === 'vd' && showVirtualDistanceTab) {
                 renderGpsLapVdPlot(lapProfiles);
             }
         });
@@ -3697,73 +3731,74 @@ async function saveGpsLapScreenshot() {
     }
 }
 
+function getMultiSegmentColor(index: number): string {
+    return MULTI_SEGMENT_COLORS[index % MULTI_SEGMENT_COLORS.length];
+}
+
 /**
  * Render stacked Wind plot for GPS lap mode
  */
-function renderGpsLapWindPlot(_lapProfiles: LapVEProfile[]) {
+function renderGpsLapWindPlot(lapProfiles: LapVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
 
     const plotDiv = document.getElementById('gpsLapWindPlot');
     if (!plotDiv) return;
 
-    // For now, show a placeholder - stacked wind plots will show wind speed per lap
-    const layout = {
-        title: 'Wind Speed by Lap',
-        xaxis: { title: 'Distance (km)' },
-        yaxis: { title: 'Wind Speed (m/s)' },
-        showlegend: true,
-        margin: { t: 40, r: 20, b: 50, l: 60 }
-    };
+    const figure = buildMultiSegmentWindFigure({
+        title: 'Apparent Wind Speed by Lap',
+        series: lapProfiles.map((lap, index) => ({
+            label: `Lap ${lap.lapNumber}`,
+            color: getMultiSegmentColor(index),
+            metrics: lap.supplementarySeries,
+        })),
+    });
 
-    // TODO: Add stacked wind speed traces per lap
-    Plotly.newPlot('gpsLapWindPlot', [], layout, { responsive: true });
+    Plotly.newPlot('gpsLapWindPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
  * Render stacked Power plot for GPS lap mode
  */
-function renderGpsLapPowerPlot(_lapProfiles: LapVEProfile[]) {
+function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
 
     const plotDiv = document.getElementById('gpsLapPowerPlot');
     if (!plotDiv) return;
 
-    // For now, show a placeholder - stacked power plots will show power per lap
-    const layout = {
+    const figure = buildMultiSegmentPowerFigure({
         title: 'Power by Lap',
-        xaxis: { title: 'Distance (km)' },
-        yaxis: { title: 'Power (W)' },
-        showlegend: true,
-        margin: { t: 40, r: 20, b: 50, l: 60 }
-    };
+        series: lapProfiles.map((lap, index) => ({
+            label: `Lap ${lap.lapNumber}`,
+            color: getMultiSegmentColor(index),
+            metrics: lap.supplementarySeries,
+        })),
+    });
 
-    // TODO: Add stacked power traces per lap
-    Plotly.newPlot('gpsLapPowerPlot', [], layout, { responsive: true });
+    Plotly.newPlot('gpsLapPowerPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
  * Render stacked VD plot for GPS lap mode
  */
-function renderGpsLapVdPlot(_lapProfiles: LapVEProfile[]) {
+function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
 
     const plotDiv = document.getElementById('gpsLapVdPlot');
     if (!plotDiv) return;
 
-    // For now, show a placeholder - stacked VD plots will show virtual distance per lap
-    const layout = {
-        title: 'Virtual Distance by Lap',
-        xaxis: { title: 'Distance (km)' },
-        yaxis: { title: 'Virtual Distance (km)' },
-        showlegend: true,
-        margin: { t: 40, r: 20, b: 50, l: 60 }
-    };
+    const figure = buildMultiSegmentVirtualDistanceFigure({
+        title: 'Virtual Distance Difference by Lap',
+        series: lapProfiles.map((lap, index) => ({
+            label: `Lap ${lap.lapNumber}`,
+            color: getMultiSegmentColor(index),
+            metrics: lap.supplementarySeries,
+        })),
+    });
 
-    // TODO: Add stacked VD traces per lap
-    Plotly.newPlot('gpsLapVdPlot', [], layout, { responsive: true });
+    Plotly.newPlot('gpsLapVdPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -5556,13 +5591,22 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
             continue;
         }
 
-        // Make distances relative to lap start (0 at gate crossing)
-        const startDistance = lapDistance[0];
-        const relativeDistances = lapDistance.map(d => (d - startDistance) / 1000); // Convert to km
+        const supplementarySeries = buildSegmentSupplementarySeries({
+            timestamps: lapTimestamps,
+            power: lapPower,
+            velocity: lapVelocity,
+            positionLat: lapPositionLat,
+            positionLong: lapPositionLong,
+            distance: lapDistance,
+            windSpeed: lapWindSpeed,
+            params: appState.currentParameters,
+            selectedWindSource: gpsLapUpdateWindResolution.selectedWindSource,
+        });
+        const relativeDistances = supplementarySeries.distancesKm;
 
         // Calculate duration
         const duration = lapTimestamps[lapTimestamps.length - 1] - lapTimestamps[0];
-        const totalDistance = relativeDistances[relativeDistances.length - 1];
+        const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
 
         try {
             const calculator = createVeCalculator({
@@ -5595,6 +5639,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
                 distances: relativeDistances,
                 virtualElevation: veArray,
                 actualElevation: actualElevation,
+                supplementarySeries,
                 duration,
                 totalDistance
             });
@@ -5633,7 +5678,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
         virtual_distance_ground: 0,
         vd_difference_percent: 0
     };
-    appState.currentWindSource = 'none';  // GPS lap mode doesn't use wind tabs
+    appState.currentWindSource = 'none';  // GPS lap mode stores aggregate VE metrics separately from the standard-mode wind source state.
 
     // Store filtered data globally for save functionality (combine all lap data)
     const combinedPower: number[] = [];
@@ -5792,6 +5837,19 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
     Plotly.newPlot('vePlot', veTraces, veLayout, { responsive: true });
     Plotly.newPlot('veResidualsPlot', residualTraces, residualLayout, { responsive: true });
 
+    const windTab = document.getElementById('wind-tab');
+    if (windTab?.classList.contains('active')) {
+        renderGpsLapWindPlot(lapVEProfiles);
+    }
+    const powerTab = document.getElementById('power-tab');
+    if (powerTab?.classList.contains('active')) {
+        renderGpsLapPowerPlot(lapVEProfiles);
+    }
+    const vdTab = document.getElementById('vd-tab');
+    if (vdTab?.classList.contains('active')) {
+        renderGpsLapVdPlot(lapVEProfiles);
+    }
+
     console.log(`GPS Lap VE plots updated with ${lapVEProfiles.length} laps, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
 }
 
@@ -5802,9 +5860,11 @@ interface OutAndBackVEProfile {
     outboundDistances: number[];      // km, relative to gate A
     outboundVE: number[];
     outboundActualElevation: number[];
+    outboundSeries: SegmentSupplementarySeries | null;
     inboundDistances: number[];       // km, relative to gate B (will be mirrored)
     inboundVE: number[];
     inboundActualElevation: number[];
+    inboundSeries: SegmentSupplementarySeries | null;
     outboundDuration: number;
     inboundDuration: number;
     totalDistance: number;
@@ -5872,9 +5932,11 @@ async function showOutAndBackVEAnalysis(
             outboundDistances: [],
             outboundVE: [],
             outboundActualElevation: [],
+            outboundSeries: null,
             inboundDistances: [],
             inboundVE: [],
             inboundActualElevation: [],
+            inboundSeries: null,
             outboundDuration: section.outboundDuration,
             inboundDuration: section.inboundDuration,
             totalDistance: section.totalDistance
@@ -5913,9 +5975,18 @@ async function showOutAndBackVEAnalysis(
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, outboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
 
-                // Make distances relative to start
-                const startDist = outboundData.distance[0];
-                profile.outboundDistances = outboundData.distance.map(d => (d - startDist) / 1000);
+                profile.outboundSeries = buildSegmentSupplementarySeries({
+                    timestamps: outboundData.timestamps,
+                    power: outboundData.power,
+                    velocity: outboundData.velocity,
+                    positionLat: outboundData.positionLat,
+                    positionLong: outboundData.positionLong,
+                    distance: outboundData.distance,
+                    windSpeed: outboundData.windSpeed,
+                    params,
+                    selectedWindSource: outAndBackWindResolution.selectedWindSource,
+                });
+                profile.outboundDistances = profile.outboundSeries.distancesKm;
                 profile.outboundVE = veArray;
                 profile.outboundActualElevation = params.velodrome
                     ? new Array(outboundData.altitude.length).fill(0)
@@ -5958,9 +6029,18 @@ async function showOutAndBackVEAnalysis(
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, inboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
 
-                // Make distances relative to start
-                const startDist = inboundData.distance[0];
-                profile.inboundDistances = inboundData.distance.map(d => (d - startDist) / 1000);
+                profile.inboundSeries = buildSegmentSupplementarySeries({
+                    timestamps: inboundData.timestamps,
+                    power: inboundData.power,
+                    velocity: inboundData.velocity,
+                    positionLat: inboundData.positionLat,
+                    positionLong: inboundData.positionLong,
+                    distance: inboundData.distance,
+                    windSpeed: inboundData.windSpeed,
+                    params,
+                    selectedWindSource: outAndBackWindResolution.selectedWindSource,
+                });
+                profile.inboundDistances = profile.inboundSeries.distancesKm;
                 profile.inboundVE = veArray;
                 profile.inboundActualElevation = params.velodrome
                     ? new Array(inboundData.altitude.length).fill(0)
@@ -6107,9 +6187,12 @@ async function showOutAndBackVEPlot(
     defaultAirSpeedOffset: number,
     preservedWindSource: string | null = null
 ) {
-    // Determine which wind source should be selected
-    // If preservedWindSource is provided, use it; otherwise use default based on data availability
     const selectedWindSource = preservedWindSource || (hasWindSpeed ? 'fit' : 'constant');
+    const effectiveWindSource = selectedWindSource === 'compare' ? 'fit' : selectedWindSource;
+    const showWindTab = hasWindSpeed || hasConstantWind;
+    const showFitWindControls = hasWindSpeed && effectiveWindSource === 'fit';
+    const showVirtualDistanceTab = showFitWindControls;
+
 
     const Plotly = await waitForPlotly();
 
@@ -6203,11 +6286,11 @@ async function showOutAndBackVEPlot(
                     <div class="ve-plots">
                         <div class="ve-tabs">
                             <button class="ve-tab-button active" data-tab="ve">VE</button>
-                            ${(hasWindSpeed || hasConstantWind) ? `
+                            ${showWindTab ? `
                             <button class="ve-tab-button" data-tab="wind">Wind</button>
                             ` : ''}
                             <button class="ve-tab-button" data-tab="power">Power</button>
-                            ${hasWindSpeed ? `
+                            ${showVirtualDistanceTab ? `
                             <button class="ve-tab-button" data-tab="vd">VD</button>
                             ` : ''}
                         </div>
@@ -6228,10 +6311,10 @@ async function showOutAndBackVEPlot(
                             <div id="oabClosingError" style="margin-top: 0.5rem; padding: 0.5rem 1rem; background: #f5f5f5; border-radius: 4px; font-size: 0.9rem; display: none;"></div>
                         </div>
 
-                        ${(hasWindSpeed || hasConstantWind) ? `
+                        ${showWindTab ? `
                         <div class="ve-tab-content" id="wind-tab">
                             <div id="oabWindPlot" class="ve-plot" style="height: 600px;"></div>
-                            ${hasWindSpeed ? `
+                            ${showFitWindControls ? `
                             <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
                                 <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
                                 <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
@@ -6250,7 +6333,7 @@ async function showOutAndBackVEPlot(
                             <div id="oabPowerPlot" class="ve-plot" style="height: 600px;"></div>
                         </div>
 
-                        ${hasWindSpeed ? `
+                        ${showVirtualDistanceTab ? `
                         <div class="ve-tab-content" id="vd-tab">
                             <div id="oabVdPlot" class="ve-plot" style="height: 600px;"></div>
                         </div>
@@ -6265,16 +6348,14 @@ async function showOutAndBackVEPlot(
     setupOutAndBackSliderSync();
 
     // Setup tab switching
-    setupOutAndBackTabSwitching(profiles, hasWindSpeed, hasConstantWind);
+    setupOutAndBackTabSwitching(profiles, showWindTab, showVirtualDistanceTab);
 
     // Setup wind source radio button listeners
     const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
     windSourceRadios.forEach(radio => {
         radio.addEventListener('change', () => {
             console.log('Wind source changed - triggering Out and Back VE recalculation');
-            const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
-            const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
-            updateOutAndBackVEPlots(cda, crr);
+            recalculateOutAndBackVE();
         });
     });
 
@@ -6351,6 +6432,31 @@ async function showOutAndBackVEPlot(
     veSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+async function recalculateOutAndBackVE() {
+    if (!appState.currentFitData || !appState.currentParameters || !appState.currentOutAndBackSections || appState.currentOutAndBackSections.length === 0) {
+        console.error('Cannot recalculate Out and Back VE: missing data, parameters, or sections');
+        return;
+    }
+
+    const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
+    const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
+    const updatedParams = { ...appState.currentParameters, cda, crr };
+
+    showLoading('Recalculating VE with new parameters...');
+
+    try {
+        await showOutAndBackVEAnalysis(
+            appState.currentOutAndBackSections,
+            appState.currentFitData,
+            updatedParams,
+            appState.currentParameters.air_speed_offset ?? 2,
+        );
+    } catch (err) {
+        console.error('Out and Back recalculation failed:', err);
+        hideLoading();
+    }
+}
+
 /**
  * Setup slider-input sync for Out and Back controls with dynamic recalculation (uses standard slider IDs)
  */
@@ -6393,7 +6499,7 @@ function setupOutAndBackSliderSync() {
 /**
  * Setup tab switching for Out and Back mode
  */
-function setupOutAndBackTabSwitching(profiles: OutAndBackVEProfile[], hasWindSpeed: boolean, hasConstantWind: boolean) {
+function setupOutAndBackTabSwitching(profiles: OutAndBackVEProfile[], showWindTab: boolean, showVirtualDistanceTab: boolean) {
     const tabButtons = document.querySelectorAll('.ve-tab-button');
     tabButtons.forEach(button => {
         button.addEventListener('click', (e) => {
@@ -6411,81 +6517,100 @@ function setupOutAndBackTabSwitching(profiles: OutAndBackVEProfile[], hasWindSpe
             document.getElementById(`${tabName}-tab`)?.classList.add('active');
 
             // Render tab-specific content when switched to
-            if (tabName === 'wind' && (hasWindSpeed || hasConstantWind)) {
+            if (tabName === 'wind' && showWindTab) {
                 renderOutAndBackWindPlot(profiles);
             } else if (tabName === 'power') {
                 renderOutAndBackPowerPlot(profiles);
-            } else if (tabName === 'vd' && hasWindSpeed) {
+            } else if (tabName === 'vd' && showVirtualDistanceTab) {
                 renderOutAndBackVdPlot(profiles);
             }
         });
     });
 }
 
+function buildOutAndBackMultiSegmentSeries(profiles: OutAndBackVEProfile[]) {
+    return profiles.flatMap((profile, index) => {
+        const color = getMultiSegmentColor(index);
+        const series = [] as Array<{
+            label: string;
+            color: string;
+            metrics: SegmentSupplementarySeries;
+            dash?: 'solid' | 'dash';
+        }>;
+
+        if (profile.outboundSeries) {
+            series.push({
+                label: `Section ${profile.sectionNumber} Out`,
+                color,
+                metrics: profile.outboundSeries,
+            });
+        }
+
+        if (profile.inboundSeries) {
+            series.push({
+                label: `Section ${profile.sectionNumber} Back`,
+                color,
+                metrics: profile.inboundSeries,
+                dash: 'dash',
+            });
+        }
+
+        return series;
+    });
+}
+
 /**
  * Render stacked Wind plot for Out and Back mode
  */
-function renderOutAndBackWindPlot(_profiles: OutAndBackVEProfile[]) {
+function renderOutAndBackWindPlot(profiles: OutAndBackVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
 
     const plotDiv = document.getElementById('oabWindPlot');
     if (!plotDiv) return;
 
-    // Placeholder for stacked wind plots
-    const layout = {
-        title: 'Wind Speed by Section',
-        xaxis: { title: 'Distance (km)' },
-        yaxis: { title: 'Wind Speed (m/s)' },
-        showlegend: true,
-        margin: { t: 40, r: 20, b: 50, l: 60 }
-    };
+    const figure = buildMultiSegmentWindFigure({
+        title: 'Apparent Wind Speed by Section',
+        series: buildOutAndBackMultiSegmentSeries(profiles),
+    });
 
-    Plotly.newPlot('oabWindPlot', [], layout, { responsive: true });
+    Plotly.newPlot('oabWindPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
  * Render stacked Power plot for Out and Back mode
  */
-function renderOutAndBackPowerPlot(_profiles: OutAndBackVEProfile[]) {
+function renderOutAndBackPowerPlot(profiles: OutAndBackVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
 
     const plotDiv = document.getElementById('oabPowerPlot');
     if (!plotDiv) return;
 
-    // Placeholder for stacked power plots
-    const layout = {
+    const figure = buildMultiSegmentPowerFigure({
         title: 'Power by Section',
-        xaxis: { title: 'Distance (km)' },
-        yaxis: { title: 'Power (W)' },
-        showlegend: true,
-        margin: { t: 40, r: 20, b: 50, l: 60 }
-    };
+        series: buildOutAndBackMultiSegmentSeries(profiles),
+    });
 
-    Plotly.newPlot('oabPowerPlot', [], layout, { responsive: true });
+    Plotly.newPlot('oabPowerPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
  * Render stacked VD plot for Out and Back mode
  */
-function renderOutAndBackVdPlot(_profiles: OutAndBackVEProfile[]) {
+function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
 
     const plotDiv = document.getElementById('oabVdPlot');
     if (!plotDiv) return;
 
-    // Placeholder for stacked VD plots
-    const layout = {
-        title: 'Virtual Distance by Section',
-        xaxis: { title: 'Distance (km)' },
-        yaxis: { title: 'Virtual Distance (km)' },
-        showlegend: true,
-        margin: { t: 40, r: 20, b: 50, l: 60 }
-    };
+    const figure = buildMultiSegmentVirtualDistanceFigure({
+        title: 'Virtual Distance Difference by Section',
+        series: buildOutAndBackMultiSegmentSeries(profiles),
+    });
 
-    Plotly.newPlot('oabVdPlot', [], layout, { responsive: true });
+    Plotly.newPlot('oabVdPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -6819,9 +6944,11 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
             outboundDistances: [],
             outboundVE: [],
             outboundActualElevation: [],
+            outboundSeries: null,
             inboundDistances: [],
             inboundVE: [],
             inboundActualElevation: [],
+            inboundSeries: null,
             outboundDuration: section.outboundDuration,
             inboundDuration: section.inboundDuration,
             totalDistance: section.totalDistance
@@ -6860,8 +6987,18 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, outboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
 
-                const startDist = outboundData.distance[0];
-                profile.outboundDistances = outboundData.distance.map(d => (d - startDist) / 1000);
+                profile.outboundSeries = buildSegmentSupplementarySeries({
+                    timestamps: outboundData.timestamps,
+                    power: outboundData.power,
+                    velocity: outboundData.velocity,
+                    positionLat: outboundData.positionLat,
+                    positionLong: outboundData.positionLong,
+                    distance: outboundData.distance,
+                    windSpeed: outboundData.windSpeed,
+                    params: appState.currentParameters,
+                    selectedWindSource: outAndBackUpdateWindResolution.selectedWindSource,
+                });
+                profile.outboundDistances = profile.outboundSeries.distancesKm;
                 profile.outboundVE = veArray;
                 profile.outboundActualElevation = appState.currentParameters.velodrome
                     ? new Array(outboundData.altitude.length).fill(0)
@@ -6904,8 +7041,18 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, inboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
 
-                const startDist = inboundData.distance[0];
-                profile.inboundDistances = inboundData.distance.map(d => (d - startDist) / 1000);
+                profile.inboundSeries = buildSegmentSupplementarySeries({
+                    timestamps: inboundData.timestamps,
+                    power: inboundData.power,
+                    velocity: inboundData.velocity,
+                    positionLat: inboundData.positionLat,
+                    positionLong: inboundData.positionLong,
+                    distance: inboundData.distance,
+                    windSpeed: inboundData.windSpeed,
+                    params: appState.currentParameters,
+                    selectedWindSource: outAndBackUpdateWindResolution.selectedWindSource,
+                });
+                profile.inboundDistances = profile.inboundSeries.distancesKm;
                 profile.inboundVE = veArray;
                 profile.inboundActualElevation = appState.currentParameters.velodrome
                     ? new Array(inboundData.altitude.length).fill(0)
@@ -6947,6 +7094,19 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
 
     // Re-render plots
     renderOutAndBackPlots(Plotly, profiles, meanElevation);
+
+    const windTab = document.getElementById('wind-tab');
+    if (windTab?.classList.contains('active')) {
+        renderOutAndBackWindPlot(profiles);
+    }
+    const powerTab = document.getElementById('power-tab');
+    if (powerTab?.classList.contains('active')) {
+        renderOutAndBackPowerPlot(profiles);
+    }
+    const vdTab = document.getElementById('vd-tab');
+    if (vdTab?.classList.contains('active')) {
+        renderOutAndBackVdPlot(profiles);
+    }
 
     console.log(`Out and Back VE plots updated with ${profiles.length} sections, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
 }
@@ -7386,21 +7546,13 @@ async function createWindSpeedPlot(analysisInput: AnalysisInput, trimStart: numb
 
     let constantWindApparentKmh: number[] | undefined;
     if (hasConstantWind) {
-        const riderBearings = appState.filteredVEData
-            ? calculateRiderBearings(appState.filteredVEData.positionLat, appState.filteredVEData.positionLong)
-            : [];
-        const configuredWindSpeed = appState.currentParameters.wind_speed || 0;
-        const configuredWindDirection = appState.currentParameters.wind_direction || 0;
-
-        constantWindApparentKmh = velocity.map((groundSpeed, index) => {
-            const bearing = riderBearings.length > index ? riderBearings[index] : 0;
-            let angleDiff = Math.abs(configuredWindDirection - bearing);
-            if (angleDiff > 180) {
-                angleDiff = 360 - angleDiff;
-            }
-            const effectiveWind = configuredWindSpeed * Math.cos(angleDiff * Math.PI / 180);
-            return (groundSpeed + effectiveWind) * 3.6;
-        });
+        const constantWindApparentSpeed = calculateConstantApparentWindSeries(
+            velocity,
+            appState.filteredVEData?.positionLat ?? [],
+            appState.filteredVEData?.positionLong ?? [],
+            appState.currentParameters,
+        );
+        constantWindApparentKmh = constantWindApparentSpeed.map(value => value * 3.6);
     }
 
     const figure = buildWindSpeedFigure({
@@ -7411,33 +7563,6 @@ async function createWindSpeedPlot(analysisInput: AnalysisInput, trimStart: numb
     });
 
     await Plotly.newPlot('windSpeedPlot', figure.data, figure.layout, figure.config);
-}
-
-function calculateRiderBearings(positionLat: number[], positionLong: number[]): number[] {
-    if (positionLat.length === 0 || positionLong.length === 0) {
-        return [];
-    }
-
-    const riderBearings = new Array(positionLat.length).fill(0);
-    for (let i = 1; i < positionLat.length; i++) {
-        const lat1 = positionLat[i - 1] * Math.PI / 180;
-        const lat2 = positionLat[i] * Math.PI / 180;
-        const lon1 = positionLong[i - 1] * Math.PI / 180;
-        const lon2 = positionLong[i] * Math.PI / 180;
-
-        const deltaLongitude = lon2 - lon1;
-        const y = Math.sin(deltaLongitude) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLongitude);
-        let bearing = Math.atan2(y, x) * 180 / Math.PI;
-        bearing = (bearing + 360) % 360;
-        riderBearings[i] = bearing;
-    }
-
-    if (riderBearings.length > 1) {
-        riderBearings[0] = riderBearings[1];
-    }
-
-    return riderBearings;
 }
 
 async function createSpeedPowerPlot(analysisInput: AnalysisInput, trimStart: number, trimEnd: number) {
