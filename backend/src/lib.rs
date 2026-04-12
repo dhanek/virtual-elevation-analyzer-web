@@ -12,7 +12,6 @@ pub use air_density::*;
 pub use dem_processor::*;
 pub use fit_parser::*;
 pub use fitparser_wrapper::*;
-pub use security::*;
 pub use virtual_elevation::*;
 
 // Initialize WASM module

@@ -1,4 +1,4 @@
-import { DataProtection } from './utils/DataProtection';
+import { getActivityFileType, validateActivityFile, validateFitMagicNumber } from './utils/FileValidation';
 import { FitFileProcessor } from './components/FitFileProcessor';
 import { MapVisualization } from './components/MapVisualization';
 import { AnalysisParametersComponent, AnalysisParameters } from './components/AnalysisParameters';
@@ -101,9 +101,6 @@ function waitForPlotly(): Promise<any> {
         document.head.appendChild(script);
     });
 }
-
-// Initialize security measures
-DataProtection.setupContentSecurityPolicy();
 
 // DOM elements
 const fitFileInput = document.getElementById('fitFileInput') as HTMLInputElement;
@@ -368,7 +365,7 @@ function clearDEMFile(): void {
 // File validation and display
 async function handleFileSelection(file: File) {
     // Validate file type and size
-    if (!DataProtection.validateFileType(file)) {
+    if (!validateActivityFile(file)) {
         showError('Please select a valid FIT or CSV file (.fit or .csv extension, under 50MB)');
         return;
     }
@@ -407,7 +404,7 @@ analyzeButton.addEventListener('click', async () => {
 
     try {
         // Detect file type
-        const fileType = DataProtection.getFileType(appState.selectedFile);
+        const fileType = getActivityFileType(appState.selectedFile);
 
         if (fileType === 'fit') {
             await processFitFile(appState.selectedFile);
@@ -432,7 +429,7 @@ async function processFitFile(file: File) {
         showLoading('Reading FIT file...');
 
         // Additional validation
-        const isValidMagicNumber = await DataProtection.validateFitMagicNumber(file);
+        const isValidMagicNumber = await validateFitMagicNumber(file);
         if (!isValidMagicNumber) {
             showError('Invalid FIT file format. Please select a valid FIT file.');
             hideLoading();
@@ -7632,5 +7629,4 @@ window.addEventListener('beforeunload', () => {
     if (mapVisualization) {
         mapVisualization.destroy();
     }
-    DataProtection.secureMemoryWipe();
 });

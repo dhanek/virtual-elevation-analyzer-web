@@ -1,7 +1,7 @@
-use wasm_bindgen::prelude::*;
-use serde::{Deserialize, Serialize};
-use byteorder::{ByteOrder, LittleEndian};
 use crate::fitparser_wrapper::FitParserWrapper;
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[wasm_bindgen]
@@ -286,7 +286,7 @@ impl ParsingStatistics {
 #[wasm_bindgen]
 pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
     // Validate file header
-    crate::security::SecurityValidator::new().validate_fit_data(file_data)
+    crate::security::validate_fit_data(file_data)
         .map_err(|e| JsValue::from_str(&format!("Validation error: {:?}", e)))?;
 
     if file_data.len() < 12 {
@@ -308,7 +308,8 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
     let parser = FitParserWrapper::new(file_data.to_vec())
         .map_err(|e| JsValue::from_str(&format!("Failed to create FIT parser: {}", e)))?;
 
-    let (fit_records, fit_laps) = parser.parse()
+    let (fit_records, fit_laps) = parser
+        .parse()
         .map_err(|e| JsValue::from_str(&format!("Failed to parse FIT data: {}", e)))?;
 
     // Convert FIT records to our data structure
@@ -347,7 +348,6 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         air_density_data.push(record.air_density.unwrap_or(0.0));
         road_speed.push(record.road_speed.unwrap_or(0.0));
     }
-
 
     let fit_data = FitData {
         timestamps,
@@ -408,12 +408,20 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         total_distance_m: total_distance,
         avg_power: if has_power_data {
             let valid_power: Vec<f64> = power.iter().filter(|&&p| p > 0.0).cloned().collect();
-            if valid_power.is_empty() { 0.0 } else { valid_power.iter().sum::<f64>() / valid_power.len() as f64 }
-        } else { 0.0 },
+            if valid_power.is_empty() {
+                0.0
+            } else {
+                valid_power.iter().sum::<f64>() / valid_power.len() as f64
+            }
+        } else {
+            0.0
+        },
         max_power: power.iter().fold(0.0, |a, &b| a.max(b)),
         avg_speed_ms: if !velocity.is_empty() {
             velocity.iter().sum::<f64>() / velocity.len() as f64
-        } else { 0.0 },
+        } else {
+            0.0
+        },
         max_speed_ms: velocity.iter().fold(0.0, |a, &b| a.max(b)),
     };
 
