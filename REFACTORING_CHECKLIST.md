@@ -6,7 +6,7 @@ Based on the revised refactoring plan validated against the current codebase.
 |---|---|---|---|
 | 5 | ✅ Done | Introduce typed `AppState` + unified `LoadedActivity` model | Added `frontend/src/state/AppState.ts`, moved frontend state behind `appState`, added `LoadedActivity`, `ActivityData`, `SelectedSlice`, and normalized CSV activity loading. |
 | 6 | ✅ Done | Extract `ActivityLoader`, `WindSourceResolver`, and `SegmentExtractor` | Added `frontend/src/activity/ActivityLoader.ts`, `frontend/src/analysis/WindSourceResolver.ts`, and `frontend/src/analysis/SegmentExtractor.ts`; rewired `frontend/src/main.ts` to use them. |
-| 7 | ⬜ Not started | Extract `AnalysisInput` / `PlotContext` + pure plot modules | Plotting and VE orchestration are still interleaved in `frontend/src/main.ts`. |
+| 7 | ✅ Done | Extract `AnalysisInput` / `PlotContext` + pure plot modules | Added `frontend/src/analysis/AnalysisInput.ts`, `frontend/src/plots/PlotContext.ts`, and `frontend/src/plots/StandardPlotBuilders.ts`; rewired standard VE/wind/power/VD plotting in `frontend/src/main.ts` to use typed inputs and pure builders. |
 | 8 | ⬜ Not started | Replace mode branching with mode modules (`standard`, `gpsLap`, `outAndBack`) | `handleAnalyze()` still branches heavily by mode. |
 | 9 | ⬜ Not started | Cache normalized arrays and centralize VE calculator creation | Calculator wiring is still duplicated across several paths. |
 | 10 | ⬜ Not started | Collapse backend VE duplication in `backend/src/virtual_elevation.rs` | Backend refactor. |

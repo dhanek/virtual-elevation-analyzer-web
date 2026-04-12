@@ -26,8 +26,17 @@ import {
 } from './utils/GpsLapDetection';
 import { AppState } from './state/AppState';
 import { createFitLoadedActivity, loadCsvActivity } from './activity/ActivityLoader';
+import { createAnalysisInput, type AnalysisInput } from './analysis/AnalysisInput';
 import { extractSegmentData } from './analysis/SegmentExtractor';
 import { applyAirSpeedOffset, calculateAirSpeedSyncError, resolveWindSeries } from './analysis/WindSourceResolver';
+import { createPlotContext } from './plots/PlotContext';
+import {
+    buildSpeedPowerFigure,
+    buildVirtualDistanceFigure,
+    buildVirtualElevationComparisonFigures,
+    buildVirtualElevationFigures,
+    buildWindSpeedFigure,
+} from './plots/StandardPlotBuilders';
 import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -4373,6 +4382,16 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
 }
 
 async function initializeVEAnalysis(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], analyzedLaps: number[], defaultAirSpeedOffset: number) {
+    const analysisInput = createAnalysisInput({
+        timestamps,
+        power,
+        velocity,
+        positionLat,
+        positionLong,
+        altitude,
+        distance,
+        windSpeed,
+    });
 
     // Try to load saved lap settings for this file and lap combination
     let savedSettings: LapSettings | null = null;
@@ -4443,17 +4462,17 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
             // If switching to wind tab, create the wind plot
             if (tabName === 'wind') {
                 setTimeout(() => {
-                    createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd, defaultAirSpeedOffset);
+                    createWindSpeedPlot(analysisInput,trimStart, trimEnd, defaultAirSpeedOffset);
                 }, 100);
             } else if (tabName === 'power') {
                 // Create speed & power plot
                 setTimeout(() => {
-                    createSpeedPowerPlot(timestamps, velocity, power, trimStart, trimEnd);
+                    createSpeedPowerPlot(analysisInput, trimStart, trimEnd);
                 }, 100);
             } else if (tabName === 'vd') {
                 // Create virtual distance plot
                 setTimeout(() => {
-                    createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
+                    createVirtualDistancePlot(analysisInput,trimStart, trimEnd);
                 }, 100);
             } else if (tabName === 've') {
                 // Resize VE plots when switching back
@@ -4482,7 +4501,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
         trimEnd: initialTrimEnd
     });
     setTimeout(() => {
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,initialTrimStart, initialTrimEnd);
+        updateVEPlots(analysisInput,initialTrimStart, initialTrimEnd);
 
         // CdA validation plots will be rendered dynamically by updateVEPlots if CdA reference exists
 
@@ -4811,6 +4830,17 @@ async function saveMapTrimSettings() {
 }
 
 function setupVESliders(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], defaultAirSpeedOffset: number) {
+    const analysisInput = createAnalysisInput({
+        timestamps,
+        power,
+        velocity,
+        positionLat,
+        positionLong,
+        altitude,
+        distance,
+        windSpeed,
+    });
+
     // setupVESliders is only called after appState.currentParameters has been set
     // in showVirtualElevationAnalysisInline. Capture into a const local
     // so nested slider callbacks can close over a non-null reference
@@ -4853,20 +4883,20 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             return;
         }
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,value, trimEnd);
+        updateVEPlots(analysisInput,value, trimEnd);
 
         // Update other plots if they're visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,value, trimEnd, defaultAirSpeedOffset);
+            createWindSpeedPlot(analysisInput,value, trimEnd, defaultAirSpeedOffset);
         }
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
-            createSpeedPowerPlot(timestamps, velocity, power, value, trimEnd);
+            createSpeedPowerPlot(analysisInput, value, trimEnd);
         }
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,value, trimEnd);
+            createVirtualDistancePlot(analysisInput,value, trimEnd);
         }
 
         // Auto-zoom map to trim region
@@ -4899,20 +4929,20 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             return;
         }
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, value);
+        updateVEPlots(analysisInput,trimStart, value);
 
         // Update other plots if they're visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, value, defaultAirSpeedOffset);
+            createWindSpeedPlot(analysisInput,trimStart, value, defaultAirSpeedOffset);
         }
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
-            createSpeedPowerPlot(timestamps, velocity, power, trimStart, value);
+            createSpeedPowerPlot(analysisInput, trimStart, value);
         }
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, value);
+            createVirtualDistancePlot(analysisInput,trimStart, value);
         }
 
         // Auto-zoom map to trim region
@@ -4930,7 +4960,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+        updateVEPlots(analysisInput,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -4942,7 +4972,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+        updateVEPlots(analysisInput,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -4959,24 +4989,24 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         trimStartSlider.value = clamped.toString();
         trimStartValue.value = clamped.toString();
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,clamped, trimEnd);
+        updateVEPlots(analysisInput,clamped, trimEnd);
 
         // Update wind speed plot if it's visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,clamped, trimEnd, defaultAirSpeedOffset);
+            createWindSpeedPlot(analysisInput,clamped, trimEnd, defaultAirSpeedOffset);
         }
 
         // Update power plot if it's visible
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
-            createSpeedPowerPlot(timestamps, velocity, power, clamped, trimEnd);
+            createSpeedPowerPlot(analysisInput, clamped, trimEnd);
         }
 
         // Update VD plot if it's visible
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,clamped, trimEnd);
+            createVirtualDistancePlot(analysisInput,clamped, trimEnd);
         }
 
         if (mapVisualization && appState.filteredVEData) {
@@ -4997,24 +5027,24 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         trimEndSlider.value = clamped.toString();
         trimEndValue.value = clamped.toString();
 
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, clamped);
+        updateVEPlots(analysisInput,trimStart, clamped);
 
         // Update wind speed plot if it's visible
         const windTab = document.getElementById('wind-tab');
         if (windTab && windTab.classList.contains('active')) {
-            createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, clamped, defaultAirSpeedOffset);
+            createWindSpeedPlot(analysisInput,trimStart, clamped, defaultAirSpeedOffset);
         }
 
         // Update power plot if it's visible
         const powerTab = document.getElementById('power-tab');
         if (powerTab && powerTab.classList.contains('active')) {
-            createSpeedPowerPlot(timestamps, velocity, power, trimStart, clamped);
+            createSpeedPowerPlot(analysisInput, trimStart, clamped);
         }
 
         // Update VD plot if it's visible
         const vdTab = document.getElementById('vd-tab');
         if (vdTab && vdTab.classList.contains('active')) {
-            createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, clamped);
+            createVirtualDistancePlot(analysisInput,trimStart, clamped);
         }
 
         if (mapVisualization && appState.filteredVEData) {
@@ -5036,7 +5066,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+        updateVEPlots(analysisInput,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -5053,7 +5083,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+        updateVEPlots(analysisInput,trimStart, trimEnd);
 
         // Save lap settings
         saveCurrentLapSettings();
@@ -5110,7 +5140,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Update VE calculation with new wind source
-            updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, trimStart, trimEnd, windSource);
+            updateVEPlotsWithWindSource(analysisInput, trimStart, trimEnd, windSource);
         });
     });
 
@@ -5130,12 +5160,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Trigger full recalculation (which will apply calibration when creating calculator)
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+            updateVEPlots(analysisInput,trimStart, trimEnd);
 
             // Update VD tab if visible
             const vdTab = document.getElementById('vd-tab');
             if (vdTab && vdTab.classList.contains('active')) {
-                createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
+                createVirtualDistancePlot(analysisInput,trimStart, trimEnd);
             }
 
             // Save lap settings with new calibration value
@@ -5158,12 +5188,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const trimEnd = parseInt(trimEndSlider.value);
 
             // Trigger full recalculation
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+            updateVEPlots(analysisInput,trimStart, trimEnd);
 
             // Update VD tab if visible
             const vdTab = document.getElementById('vd-tab');
             if (vdTab && vdTab.classList.contains('active')) {
-                createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
+                createVirtualDistancePlot(analysisInput,trimStart, trimEnd);
             }
 
             // Save lap settings with new calibration value
@@ -5213,12 +5243,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                     appState.airSpeedCalibrationPercent = clampedPercent;
 
                     // Trigger recalculation
-                    updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+                    updateVEPlots(analysisInput,trimStart, trimEnd);
 
                     // Update VD tab if visible
                     const vdTab = document.getElementById('vd-tab');
                     if (vdTab && vdTab.classList.contains('active')) {
-                        createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd);
+                        createVirtualDistancePlot(analysisInput,trimStart, trimEnd);
                     }
 
                     // Save settings
@@ -5257,12 +5287,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             }
 
             // Trigger full recalculation with new offset
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+            updateVEPlots(analysisInput,trimStart, trimEnd);
 
             // Update wind plot if visible
             const windTab = document.getElementById('wind-tab');
             if (windTab && windTab.classList.contains('active')) {
-                createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd, defaultAirSpeedOffset);
+                createWindSpeedPlot(analysisInput,trimStart, trimEnd, defaultAirSpeedOffset);
             }
 
             // Save lap settings with new offset value
@@ -5292,12 +5322,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             }
 
             // Trigger full recalculation
-            updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
+            updateVEPlots(analysisInput,trimStart, trimEnd);
 
             // Update wind plot if visible
             const windTab = document.getElementById('wind-tab');
             if (windTab && windTab.classList.contains('active')) {
-                createWindSpeedPlot(timestamps, velocity, windSpeed, distance,trimStart, trimEnd, defaultAirSpeedOffset);
+                createWindSpeedPlot(analysisInput,trimStart, trimEnd, defaultAirSpeedOffset);
             }
 
             // Save settings
@@ -5421,7 +5451,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
  * Negative offset shifts air speed earlier (e.g., -2 means use air speed from 2 seconds earlier)
  * Positive offset shifts air speed later (e.g., +2 means use air speed from 2 seconds later)
  */
-function updateVEPlots(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number) {
+function updateVEPlots(analysisInput: AnalysisInput, trimStart: number, trimEnd: number) {
     // Check which wind source is currently selected
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
     const windSource = windSourceRadio ? windSourceRadio.value : 'fit';
@@ -5429,10 +5459,12 @@ function updateVEPlots(timestamps: number[], power: number[], velocity: number[]
     console.log('updateVEPlots: Using wind source:', windSource);
 
     // Use the wind source specific function
-    updateVEPlotsWithWindSource(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, trimStart, trimEnd, windSource);
+    updateVEPlotsWithWindSource(analysisInput, trimStart, trimEnd, windSource);
 }
 
-async function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
+async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimStart: number, trimEnd: number, windSource: string) {
+    const { timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed } = analysisInput;
+
     // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
     if (!appState.currentParameters) {
         console.error('updateVEPlotsWithWindSource: appState.currentParameters is null');
@@ -7192,380 +7224,18 @@ async function createVirtualElevationPlots(
         return;
     }
 
-    // Calculate context range (+/- 5s, but limited by actual trim)
-    const contextBefore = Math.min(trimStart, 5);
-    const contextAfter = Math.min(virtualElevation.length - 1 - trimEnd, 5);
-
-    // Extended range including context
-    const extendedStart = trimStart - contextBefore;
-    const extendedEnd = trimEnd + 1 + contextAfter; // +1 because trimEnd is now inclusive
-
-    // Create distance array for x-axis (simplified as time points)
-    const timePoints = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
-    // Include boundary points to avoid gaps
-    const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
-    const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
-
-    // Trim the data arrays - trimEnd is inclusive, so slice to trimEnd + 1
-    const trimmedVirtualElevation = virtualElevation.slice(trimStart, trimEnd + 1);
-    const trimmedActualElevation = actualElevation.slice(trimStart, trimEnd + 1);
-
-    // Context data (before and after) - include boundary points
-    const contextVirtualBefore = contextBefore > 0 ? virtualElevation.slice(extendedStart, trimStart + 1) : [];
-    const contextActualBefore = contextBefore > 0 ? actualElevation.slice(extendedStart, trimStart + 1) : [];
-    const contextVirtualAfter = contextAfter > 0 ? virtualElevation.slice(trimEnd, extendedEnd) : [];
-    const contextActualAfter = contextAfter > 0 ? actualElevation.slice(trimEnd, extendedEnd) : [];
-
-    // Offset virtual elevation to start at the same point as actual elevation
-    const veOffset = trimmedActualElevation[0] - trimmedVirtualElevation[0];
-    const offsetVirtualElevation = Array.from(trimmedVirtualElevation).map(ve => ve + veOffset);
-    const offsetContextVirtualBefore = Array.from(contextVirtualBefore).map(ve => ve + veOffset);
-    const offsetContextVirtualAfter = Array.from(contextVirtualAfter).map(ve => ve + veOffset);
-
-    // Create elevation profile plot
-    const elevationPlotData = [];
-
-    // Add context before trim (low opacity)
-    if (contextBefore > 0) {
-        elevationPlotData.push({
-            x: timePointsBefore,
-            y: offsetContextVirtualBefore,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VE (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-        elevationPlotData.push({
-            x: timePointsBefore,
-            y: Array.from(contextActualBefore),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Actual (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-    }
-
-    // Main trimmed data (full opacity)
-    elevationPlotData.push({
-        x: timePoints,
-        y: offsetVirtualElevation,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Virtual Elevation',
-        line: { color: '#4363d8', width: 2 }
-    });
-    elevationPlotData.push({
-        x: timePoints,
-        y: trimmedActualElevation,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Actual Elevation',
-        line: { color: '#000000', width: 2 }
-    });
-
-    // Add context after trim (low opacity)
-    if (contextAfter > 0) {
-        elevationPlotData.push({
-            x: timePointsAfter,
-            y: offsetContextVirtualAfter,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VE (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-        elevationPlotData.push({
-            x: timePointsAfter,
-            y: Array.from(contextActualAfter),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Actual (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-    }
-
-    // Note: Remote DEM (AWS/local) elevation is applied as actual elevation
-    // in fitData before analysis, so the black "Actual Elevation" trace
-    // already shows the DEM-corrected profile. No separate trace needed.
-
-    // Calculate shared x-axis range (trim region + context)
-    const xMin = extendedStart;
-    const xMax = extendedEnd - 1;
-
-    // Get current CdA and Crr values for annotation
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
     const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
     const cdaValue = cdaSlider ? parseFloat(cdaSlider.value).toFixed(3) : '0.300';
     const crrValue = crrSlider ? parseFloat(crrSlider.value).toFixed(4) : '0.0050';
-
-    // Find optimal annotation position to avoid blocking plot content and legend
-    const findOptimalAnnotationPosition = (elevationData: number[], timeData: number[]): { x: number, y: number, xanchor: string, yanchor: string } => {
-        if (elevationData.length === 0) {
-            return { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' };
-        }
-
-        const minElev = Math.min(...elevationData);
-        const maxElev = Math.max(...elevationData);
-        const elevRange = maxElev - minElev;
-        const minTime = Math.min(...timeData);
-        const maxTime = Math.max(...timeData);
-        const timeRange = maxTime - minTime;
-
-        // Define 3 corner regions (excluding top-left where legend is)
-        // Each corner is 30% of the range from edges
-        const corners = [
-            { name: 'top-right', x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top',
-              timeMin: minTime + 0.7 * timeRange, timeMax: maxTime,
-              elevMin: minElev + 0.7 * elevRange, elevMax: maxElev },
-            { name: 'bottom-right', x: 0.98, y: 0.02, xanchor: 'right', yanchor: 'bottom',
-              timeMin: minTime + 0.7 * timeRange, timeMax: maxTime,
-              elevMin: minElev, elevMax: minElev + 0.3 * elevRange },
-            { name: 'bottom-left', x: 0.02, y: 0.02, xanchor: 'left', yanchor: 'bottom',
-              timeMin: minTime, timeMax: minTime + 0.3 * timeRange,
-              elevMin: minElev, elevMax: minElev + 0.3 * elevRange }
-            // Top-left excluded because legend is there
-        ];
-
-        // Count data points in each corner region
-        const cornerScores = corners.map(corner => {
-            let pointsInCorner = 0;
-            for (let i = 0; i < elevationData.length; i++) {
-                if (timeData[i] >= corner.timeMin && timeData[i] <= corner.timeMax &&
-                    elevationData[i] >= corner.elevMin && elevationData[i] <= corner.elevMax) {
-                    pointsInCorner++;
-                }
-            }
-            return { ...corner, score: pointsInCorner };
-        });
-
-        // Find corner with fewest data points
-        const bestCorner = cornerScores.reduce((best, current) =>
-            current.score < best.score ? current : best
-        );
-
-        return {
-            x: bestCorner.x,
-            y: bestCorner.y,
-            xanchor: bestCorner.xanchor,
-            yanchor: bestCorner.yanchor
-        };
-    };
-
-    // Combine all elevation data for analysis (prioritize main data over context)
-    const allElevationData = [...offsetVirtualElevation, ...trimmedActualElevation];
-    const allTimeData = [...timePoints, ...timePoints];
-    const annotationPos = findOptimalAnnotationPosition(allElevationData, allTimeData);
-
-    const elevationPlotLayout = {
-        title: {
-            text: 'Virtual vs Actual Elevation Profile',
-            font: { size: 14 }
-        },
-        xaxis: {
-            title: '',  // Remove x-axis title from top plot
-            showgrid: true,
-            gridcolor: '#e0e0e0',
-            showticklabels: false,  // Hide x-axis labels on top plot
-            range: [xMin, xMax]  // Fixed range to match residuals plot
-        },
-        yaxis: {
-            title: 'Elevation (m)',
-            showgrid: true,
-            gridcolor: '#e0e0e0'
-        },
-        legend: {
-            x: 0.02,
-            y: 0.98,
-            bgcolor: 'rgba(255,255,255,0.8)'
-        },
-        shapes: [
-            // Trim start vertical line
-            {
-                type: 'line',
-                x0: trimStart,
-                x1: trimStart,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            },
-            // Trim end vertical line
-            {
-                type: 'line',
-                x0: trimEnd,
-                x1: trimEnd,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            }
-        ],
-        annotations: [{
-            text: `CdA: ${cdaValue}<br>Crr: ${crrValue}`,
-            xref: 'paper',
-            yref: 'paper',
-            x: annotationPos.x,
-            y: annotationPos.y,
-            xanchor: annotationPos.xanchor as 'left' | 'right',
-            yanchor: annotationPos.yanchor as 'top' | 'bottom',
-            showarrow: false,
-            bgcolor: 'rgba(255,255,255,0.9)',
-            bordercolor: '#4363d8',
-            borderwidth: 1,
-            borderpad: 6,
-            font: {
-                size: 12,
-                family: 'monospace',
-                color: '#2d3748'
-            }
-        }],
-        margin: { l: 60, r: 20, t: 40, b: 5 },  // Reduced bottom margin
-        height: 350,  // Fixed height for alignment
-        plot_bgcolor: '#fafafa',
-        paper_bgcolor: 'white'
-    };
-
-    // Create residuals plot (using offset virtual elevation)
-    const residuals = offsetVirtualElevation.map((ve, i) => ve - trimmedActualElevation[i]);
-    const residualsBefore = contextBefore > 0 ? offsetContextVirtualBefore.map((ve, i) => ve - contextActualBefore[i]) : [];
-    const residualsAfter = contextAfter > 0 ? offsetContextVirtualAfter.map((ve, i) => ve - contextActualAfter[i]) : [];
-
-    const residualsPlotData = [];
-
-    // Add context before trim (low opacity)
-    if (contextBefore > 0) {
-        residualsPlotData.push({
-            x: timePointsBefore,
-            y: residualsBefore,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Residuals (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-    }
-
-    // Main residuals (full opacity)
-    residualsPlotData.push({
-        x: timePoints,
-        y: residuals,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'VE - Actual',
-        line: { color: '#4363d8', width: 2 }
+    const plotContext = createPlotContext(virtualElevation.length, trimStart, trimEnd);
+    const figures = buildVirtualElevationFigures({
+        context: plotContext,
+        virtualElevation,
+        actualElevation,
+        cdaLabel: cdaValue,
+        crrLabel: crrValue,
     });
-
-    // Add context after trim (low opacity)
-    if (contextAfter > 0) {
-        residualsPlotData.push({
-            x: timePointsAfter,
-            y: residualsAfter,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Residuals (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-    }
-
-    // Zero line
-    const allTimePoints = [...timePointsBefore, ...timePoints, ...timePointsAfter];
-    if (allTimePoints.length > 0) {
-        residualsPlotData.push({
-            x: [allTimePoints[0], allTimePoints[allTimePoints.length - 1]],
-            y: [0, 0],
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Zero Line',
-            line: { color: '#7f8c8d', width: 1, dash: 'dash' },
-            showlegend: false
-        });
-    }
-
-    const residualsPlotLayout = {
-        title: {
-            text: 'Residuals (Virtual - Actual Elevation)',
-            font: { size: 12 }  // Smaller title
-        },
-        xaxis: {
-            title: 'Time (seconds)',
-            showgrid: true,
-            gridcolor: '#e0e0e0',
-            range: [xMin, xMax]  // Same range as elevation plot
-        },
-        yaxis: {
-            title: 'Residuals (m)',  // Shortened title
-            showgrid: true,
-            gridcolor: '#e0e0e0',
-            zeroline: true,
-            zerolinecolor: '#7f8c8d',
-            zerolinewidth: 1
-        },
-        legend: {
-            x: 0.02,
-            y: 0.98,
-            bgcolor: 'rgba(255,255,255,0.8)'
-        },
-        shapes: [
-            // Trim start vertical line
-            {
-                type: 'line',
-                x0: trimStart,
-                x1: trimStart,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            },
-            // Trim end vertical line
-            {
-                type: 'line',
-                x0: trimEnd,
-                x1: trimEnd,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            }
-        ],
-        margin: { l: 60, r: 20, t: 30, b: 60 },  // Adjusted margins
-        height: 200,  // Fixed height for alignment
-        plot_bgcolor: '#fafafa',
-        paper_bgcolor: 'white'
-    };
-
-    // Common plot configuration
-    const config = {
-        responsive: true,
-        displayModeBar: true,
-        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
-        displaylogo: false
-    };
 
     // Create the plots
     try {
@@ -7574,19 +7244,19 @@ async function createVirtualElevationPlots(
 
         console.log('Plot divs found:', { vePlot: !!vePlotDiv, residualsPlot: !!residualsPlotDiv });
         console.log('Plot data:', {
-            elevationPoints: elevationPlotData[0].x.length,
-            residualsPoints: residualsPlotData[0].x.length,
-            sampleVirtualElevation: trimmedVirtualElevation.slice(0, 5),
-            sampleActualElevation: trimmedActualElevation.slice(0, 5)
+            elevationPoints: figures.elevation.data.length,
+            residualsPoints: figures.residuals.data.length,
+            sampleVirtualElevation: virtualElevation.slice(trimStart, trimStart + 5),
+            sampleActualElevation: actualElevation.slice(trimStart, trimStart + 5)
         });
 
         if (vePlotDiv && residualsPlotDiv) {
             console.log('Creating elevation plot...');
-            await Plotly.newPlot(vePlotDiv, elevationPlotData, elevationPlotLayout, config);
+            await Plotly.newPlot(vePlotDiv, figures.elevation.data, figures.elevation.layout, figures.elevation.config);
             console.log('Elevation plot created');
 
             console.log('Creating residuals plot...');
-            await Plotly.newPlot(residualsPlotDiv, residualsPlotData, residualsPlotLayout, config);
+            await Plotly.newPlot(residualsPlotDiv, figures.residuals.data, figures.residuals.layout, figures.residuals.config);
             console.log('Residuals plot created');
 
             // Link the x-axes so they zoom/pan together (with guards to prevent infinite loops)
@@ -7934,111 +7604,25 @@ async function createVirtualElevationPlotsComparison(
         return;
     }
 
-    // Create distance array for x-axis
-    const timePoints = Array.from({length: trimEnd - trimStart}, (_, i) => i + trimStart);
+    const figures = buildVirtualElevationComparisonFigures({
+        context: createPlotContext(virtualElevation1.length, trimStart, trimEnd, 0),
+        virtualElevationConstant: virtualElevation1,
+        virtualElevationFit: virtualElevation2,
+        actualElevation,
+    });
 
-    // Trim the data arrays
-    const trimmedVirtualElevation1 = virtualElevation1.slice(trimStart, trimEnd);
-    const trimmedVirtualElevation2 = virtualElevation2.slice(trimStart, trimEnd);
-    const trimmedActualElevation = actualElevation.slice(trimStart, trimEnd);
-
-    // Apply offset to both VE curves to start at the same point as actual elevation
-    const veOffset1 = trimmedActualElevation[0] - trimmedVirtualElevation1[0];
-    const offsetVirtualElevation1 = Array.from(trimmedVirtualElevation1).map(ve => ve + veOffset1);
-
-    const veOffset2 = trimmedActualElevation[0] - trimmedVirtualElevation2[0];
-    const offsetVirtualElevation2 = Array.from(trimmedVirtualElevation2).map(ve => ve + veOffset2);
-
-    // Calculate residuals for both
-    const residuals1 = offsetVirtualElevation1.map((ve, i) => ve - trimmedActualElevation[i]);
-    const residuals2 = offsetVirtualElevation2.map((ve, i) => ve - trimmedActualElevation[i]);
-
-    // Plot 1: Virtual Elevation Profile (comparison)
-    const veTrace2 = {
-        x: timePoints,
-        y: offsetVirtualElevation2,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'VE (FIT Air Speed)',
-        line: { color: '#4363d8', width: 2 }
-    };
-
-    const actualTrace = {
-        x: timePoints,
-        y: Array.from(trimmedActualElevation),
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Actual Elevation',
-        line: { color: '#000000', width: 2 }
-    };
-
-    const veTrace1 = {
-        x: timePoints,
-        y: offsetVirtualElevation1,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'VE (Constant Wind)',
-        line: { color: '#a9a9a9', width: 2 }
-    };
-
-    const veLayout = {
-        title: 'Virtual Elevation Comparison',
-        xaxis: { title: 'Time Point' },
-        yaxis: { title: 'Elevation (m)' },
-        showlegend: true,
-        hovermode: 'closest'
-    };
-
-    const comparisonTraces = [veTrace2, actualTrace, veTrace1];
-    Plotly.newPlot('vePlot', comparisonTraces, veLayout, {responsive: true});
-
-    // Plot 2: Residuals comparison
-    const residualsTrace2 = {
-        x: timePoints,
-        y: residuals2,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Residuals (FIT Air Speed)',
-        line: { color: '#4363d8', width: 2 }
-    };
-
-    const residualsTrace1 = {
-        x: timePoints,
-        y: residuals1,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Residuals (Constant Wind)',
-        line: { color: '#a9a9a9', width: 2 }
-    };
-
-    const zeroLine = {
-        x: timePoints,
-        y: new Array(timePoints.length).fill(0),
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Zero',
-        line: { color: '#95a5a6', width: 1, dash: 'dash' }
-    };
-
-    const residualsLayout = {
-        title: 'Residuals Comparison (Virtual - Actual)',
-        xaxis: { title: 'Time Point' },
-        yaxis: { title: 'Residual (m)' },
-        showlegend: true,
-        hovermode: 'closest'
-    };
-
-    Plotly.newPlot('veResidualsPlot', [residualsTrace2, residualsTrace1, zeroLine], residualsLayout, {responsive: true});
+    await Plotly.newPlot('vePlot', figures.elevation.data, figures.elevation.layout, figures.elevation.config);
+    await Plotly.newPlot('veResidualsPlot', figures.residuals.data, figures.residuals.layout, figures.residuals.config);
 }
 
-async function createWindSpeedPlot(_timestamps: number[], velocity: number[], windSpeed: number[], _distance: number[], trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
-    // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
+async function createWindSpeedPlot(analysisInput: AnalysisInput, trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
+    const { velocity, windSpeed } = analysisInput;
+
     if (!appState.currentParameters) {
         console.error('createWindSpeedPlot: appState.currentParameters is null');
         return;
     }
 
-    // Wait for Plotly to load
     let Plotly;
     try {
         Plotly = await waitForPlotly();
@@ -8049,278 +7633,71 @@ async function createWindSpeedPlot(_timestamps: number[], velocity: number[], wi
         return;
     }
 
-    // Calculate effective wind from constant wind parameters
-    const hasWindSpeed = windSpeed.some(val => !isNaN(val) && val !== 0);
+    const hasWindSpeed = windSpeed.some(value => !isNaN(value) && value !== 0);
     const hasConstantWind = appState.currentParameters.wind_speed !== undefined && appState.currentParameters.wind_speed !== 0 &&
-                            appState.currentParameters.wind_direction !== undefined;
+        appState.currentParameters.wind_direction !== undefined;
+    const windSpeedOffset = appState.currentParameters.air_speed_offset ?? defaultAirSpeedOffset;
+    const fitWindSpeedKmh = hasWindSpeed
+        ? applyAirSpeedOffset(windSpeed, windSpeedOffset).map(value => isNaN(value) ? null : value * 3.6)
+        : new Array<number | null>(velocity.length).fill(null);
 
-    // Calculate context range (+/- 5s, but limited by actual trim)
-    const contextBefore = Math.min(trimStart, 5);
-    const contextAfter = Math.min(velocity.length - trimEnd, 5);
-
-    // Extended range including context
-    const extendedStart = trimStart - contextBefore;
-    const extendedEnd = trimEnd + contextAfter;
-
-    // Convert velocity to km/h
-    const groundSpeedKmh = velocity.map(v => v * 3.6);
-
-    // Calculate constant wind apparent speed if configured
-    let constantWindApparent: number[] = [];
+    let constantWindApparentKmh: number[] | undefined;
     if (hasConstantWind) {
-        const windSpeedMs = appState.currentParameters.wind_speed || 0;
-        const windDirection = appState.currentParameters.wind_direction || 0;
+        const riderBearings = appState.filteredVEData
+            ? calculateRiderBearings(appState.filteredVEData.positionLat, appState.filteredVEData.positionLong)
+            : [];
+        const configuredWindSpeed = appState.currentParameters.wind_speed || 0;
+        const configuredWindDirection = appState.currentParameters.wind_direction || 0;
 
-        // Get rider bearings from filtered VE data (matches the Rust calculation)
-        let riderBearings: number[] = [];
-        if (appState.filteredVEData && appState.filteredVEData.positionLat.length > 0) {
-            // Calculate bearing for each point based on GPS movement
-            riderBearings = new Array(appState.filteredVEData.positionLat.length).fill(0);
-
-            for (let i = 1; i < appState.filteredVEData.positionLat.length; i++) {
-                const lat1 = appState.filteredVEData.positionLat[i - 1] * Math.PI / 180;
-                const lat2 = appState.filteredVEData.positionLat[i] * Math.PI / 180;
-                const lon1 = appState.filteredVEData.positionLong[i - 1] * Math.PI / 180;
-                const lon2 = appState.filteredVEData.positionLong[i] * Math.PI / 180;
-
-                const dLon = lon2 - lon1;
-                const y = Math.sin(dLon) * Math.cos(lat2);
-                const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-                let bearing = Math.atan2(y, x) * 180 / Math.PI;
-                bearing = (bearing + 360) % 360; // Normalize to 0-360
-
-                riderBearings[i] = bearing;
-            }
-            // Fill first point with second point's bearing
-            if (riderBearings.length > 1) {
-                riderBearings[0] = riderBearings[1];
-            }
-        }
-
-        constantWindApparent = velocity.map((v, i) => {
-            // Use calculated bearing if available, otherwise default to 0
-            const bearing = riderBearings.length > i ? riderBearings[i] : 0;
-
-            // Calculate angle difference between wind and rider direction
-            // Wind direction: direction wind is COMING FROM (meteorological convention)
-            // Rider bearing: direction rider is MOVING TOWARDS
-            let angleDiff = Math.abs(windDirection - bearing);
-
-            // Normalize to 0-180 degrees (shortest angle)
+        constantWindApparentKmh = velocity.map((groundSpeed, index) => {
+            const bearing = riderBearings.length > index ? riderBearings[index] : 0;
+            let angleDiff = Math.abs(configuredWindDirection - bearing);
             if (angleDiff > 180) {
                 angleDiff = 360 - angleDiff;
             }
-
-            // Calculate effective wind component
-            // angle_diff = 0°   -> headwind (full resistance) -> cos(0) = +1
-            // angle_diff = 90°  -> crosswind (no effect) -> cos(90) = 0
-            // angle_diff = 180° -> tailwind (full assistance) -> cos(180) = -1
-            const effectiveWind = windSpeedMs * Math.cos(angleDiff * Math.PI / 180);
-
-            return (v + effectiveWind) * 3.6; // Convert to km/h
+            const effectiveWind = configuredWindSpeed * Math.cos(angleDiff * Math.PI / 180);
+            return (groundSpeed + effectiveWind) * 3.6;
         });
     }
 
-    // Calculate FIT wind speed in km/h (with offset applied)
-    const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
-    const offsetWindSpeed = hasWindSpeed ? applyAirSpeedOffset(windSpeed, windSpeedOffset) : windSpeed;
-    const windSpeedKmh = hasWindSpeed ? offsetWindSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
-
-    // Time-based x-axis (the actual arrays are built below; a previous
-    // `timeSeconds` helper was dead code and has been removed).
-    const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
-    const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
-    const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
-
-    // Prepare traces with context (low opacity before/after)
-    const traces: any[] = [];
-
-    // Add context before trim (low opacity) for all traces
-    if (contextBefore > 0) {
-        // Ground speed context
-        traces.push({
-            x: timePointsBefore,
-            y: groundSpeedKmh.slice(extendedStart, trimStart + 1),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Ground Speed (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-
-        // FIT wind speed context
-        if (hasWindSpeed) {
-            traces.push({
-                x: timePointsBefore,
-                y: windSpeedKmh.slice(extendedStart, trimStart + 1),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (FIT Air) (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false
-            });
-        }
-
-        // Constant wind context
-        if (hasConstantWind) {
-            traces.push({
-                x: timePointsBefore,
-                y: constantWindApparent.slice(extendedStart, trimStart + 1),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (Constant Wind) (trimmed)',
-                line: { color: '#a9a9a9', width: 2 },
-                opacity: 0.2,
-                showlegend: false
-            });
-        }
-    }
-
-    // Main trimmed data (full opacity)
-    // Ground speed
-    traces.push({
-        x: timePointsMain,
-        y: groundSpeedKmh.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Ground Speed',
-        line: { color: '#000000', width: 2 }
+    const figure = buildWindSpeedFigure({
+        context: createPlotContext(velocity.length, trimStart, trimEnd),
+        velocity,
+        fitWindSpeedKmh,
+        constantWindApparentKmh,
     });
 
-    // FIT wind speed
-    if (hasWindSpeed) {
-        traces.push({
-            x: timePointsMain,
-            y: windSpeedKmh.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Apparent (FIT Air)',
-            line: { color: '#4363d8', width: 2 }
-        });
-    }
-
-    // Constant wind
-    if (hasConstantWind) {
-        traces.push({
-            x: timePointsMain,
-            y: constantWindApparent.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Apparent (Constant Wind)',
-            line: { color: '#a9a9a9', width: 2 }
-        });
-    }
-
-    // Add context after trim (low opacity) for all traces
-    if (contextAfter > 0) {
-        // Ground speed context
-        traces.push({
-            x: timePointsAfter,
-            y: groundSpeedKmh.slice(trimEnd, extendedEnd), // trimEnd not trimEnd-1 since we want data after
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Ground Speed (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-
-        // FIT wind speed context
-        if (hasWindSpeed) {
-            traces.push({
-                x: timePointsAfter,
-                y: windSpeedKmh.slice(trimEnd, extendedEnd),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (FIT Air) (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false
-            });
-        }
-
-        // Constant wind context
-        if (hasConstantWind) {
-            traces.push({
-                x: timePointsAfter,
-                y: constantWindApparent.slice(trimEnd, extendedEnd),
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (Constant Wind) (trimmed)',
-                line: { color: '#a9a9a9', width: 2 },
-                opacity: 0.2,
-                showlegend: false
-            });
-        }
-    }
-
-    // Calculate x-axis range to show trim region +/- context (already calculated above)
-    const xMin = trimStart - contextBefore;
-    const xMax = trimEnd + contextAfter;
-
-    const layout = {
-        title: {
-            text: 'Wind Speed Analysis',
-            font: { size: 14 }
-        },
-        xaxis: {
-            title: 'Time (seconds)',
-            showgrid: true,
-            gridcolor: '#e0e0e0',
-            range: [xMin, xMax]
-        },
-        yaxis: {
-            title: 'Speed (km/h)',
-            showgrid: true,
-            gridcolor: '#e0e0e0'
-        },
-        legend: {
-            x: 0.02,
-            y: 0.98,
-            bgcolor: 'rgba(255,255,255,0.8)'
-        },
-        shapes: [
-            // Trim start vertical line
-            {
-                type: 'line',
-                x0: trimStart,
-                x1: trimStart,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            },
-            // Trim end vertical line
-            {
-                type: 'line',
-                x0: trimEnd,
-                x1: trimEnd,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            }
-        ],
-        margin: { l: 60, r: 20, t: 40, b: 60 },
-        plot_bgcolor: '#fafafa',
-        paper_bgcolor: 'white'
-    };
-
-    Plotly.newPlot('windSpeedPlot', traces, layout, {responsive: true});
+    await Plotly.newPlot('windSpeedPlot', figure.data, figure.layout, figure.config);
 }
 
-async function createSpeedPowerPlot(_timestamps: number[], velocity: number[], power: number[], trimStart: number, trimEnd: number) {
-    // Wait for Plotly to load
+function calculateRiderBearings(positionLat: number[], positionLong: number[]): number[] {
+    if (positionLat.length === 0 || positionLong.length === 0) {
+        return [];
+    }
+
+    const riderBearings = new Array(positionLat.length).fill(0);
+    for (let i = 1; i < positionLat.length; i++) {
+        const lat1 = positionLat[i - 1] * Math.PI / 180;
+        const lat2 = positionLat[i] * Math.PI / 180;
+        const lon1 = positionLong[i - 1] * Math.PI / 180;
+        const lon2 = positionLong[i] * Math.PI / 180;
+
+        const deltaLongitude = lon2 - lon1;
+        const y = Math.sin(deltaLongitude) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLongitude);
+        let bearing = Math.atan2(y, x) * 180 / Math.PI;
+        bearing = (bearing + 360) % 360;
+        riderBearings[i] = bearing;
+    }
+
+    if (riderBearings.length > 1) {
+        riderBearings[0] = riderBearings[1];
+    }
+
+    return riderBearings;
+}
+
+async function createSpeedPowerPlot(analysisInput: AnalysisInput, trimStart: number, trimEnd: number) {
     let Plotly;
     try {
         Plotly = await waitForPlotly();
@@ -8331,177 +7708,16 @@ async function createSpeedPowerPlot(_timestamps: number[], velocity: number[], p
         return;
     }
 
-    // Calculate context range (+/- 5s, but limited by actual trim)
-    const contextBefore = Math.min(trimStart, 5);
-    const contextAfter = Math.min(velocity.length - 1 - trimEnd, 5);
-
-    // Extended range including context
-    const extendedStart = trimStart - contextBefore;
-    const extendedEnd = trimEnd + 1 + contextAfter; // +1 because trimEnd is now inclusive
-
-    // Convert velocity to km/h
-    const speedKmh = velocity.map(v => v * 3.6);
-
-    // Time-based x-axis (the actual arrays are built below).
-    const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
-    const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
-    const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
-
-    // Prepare traces with context (low opacity before/after)
-    const traces: any[] = [];
-
-    // Add context before trim (low opacity)
-    if (contextBefore > 0) {
-        // Speed context
-        traces.push({
-            x: timePointsBefore,
-            y: speedKmh.slice(extendedStart, trimStart + 1),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Speed (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-            yaxis: 'y'
-        });
-
-        // Power context
-        traces.push({
-            x: timePointsBefore,
-            y: power.slice(extendedStart, trimStart + 1),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Power (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-            yaxis: 'y2'
-        });
-    }
-
-    // Main trimmed data (full opacity)
-    // Speed (black, left y-axis)
-    traces.push({
-        x: timePointsMain,
-        y: speedKmh.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Speed',
-        line: { color: '#000000', width: 2 },
-        yaxis: 'y'
+    const figure = buildSpeedPowerFigure({
+        context: createPlotContext(analysisInput.velocity.length, trimStart, trimEnd),
+        velocity: analysisInput.velocity,
+        power: analysisInput.power,
     });
 
-    // Power (blue, right y-axis)
-    traces.push({
-        x: timePointsMain,
-        y: power.slice(trimStart, trimEnd + 1), // +1 for inclusive trimEnd
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Power',
-        line: { color: '#4363d8', width: 2 },
-        yaxis: 'y2'
-    });
-
-    // Add context after trim (low opacity)
-    if (contextAfter > 0) {
-        // Speed context
-        traces.push({
-            x: timePointsAfter,
-            y: speedKmh.slice(trimEnd, extendedEnd), // trimEnd not trimEnd-1 since we want data after
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Speed (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-            yaxis: 'y'
-        });
-
-        // Power context
-        traces.push({
-            x: timePointsAfter,
-            y: power.slice(trimEnd, extendedEnd),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Power (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-            yaxis: 'y2'
-        });
-    }
-
-    const layout = {
-        title: {
-            text: 'Speed & Power',
-            font: { size: 14 }
-        },
-        xaxis: {
-            title: 'Time (seconds)',
-            showgrid: true,
-            gridcolor: '#e0e0e0',
-            range: [extendedStart, extendedEnd - 1]
-        },
-        yaxis: {
-            title: 'Speed (km/h)',
-            titlefont: { color: '#000000' },
-            tickfont: { color: '#000000' },
-            showgrid: true,
-            gridcolor: '#e0e0e0'
-        },
-        yaxis2: {
-            title: 'Power (W)',
-            titlefont: { color: '#4363d8' },
-            tickfont: { color: '#4363d8' },
-            overlaying: 'y',
-            side: 'right',
-            showgrid: false
-        },
-        legend: {
-            x: 0.02,
-            y: 0.98,
-            bgcolor: 'rgba(255,255,255,0.8)'
-        },
-        shapes: [
-            // Trim start vertical line
-            {
-                type: 'line',
-                x0: trimStart,
-                x1: trimStart,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            },
-            // Trim end vertical line
-            {
-                type: 'line',
-                x0: trimEnd,
-                x1: trimEnd,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            }
-        ],
-        margin: { l: 60, r: 60, t: 40, b: 60 },
-        plot_bgcolor: '#fafafa',
-        paper_bgcolor: 'white'
-    };
-
-    Plotly.newPlot('speedPowerPlot', traces, layout, {responsive: true});
+    await Plotly.newPlot('speedPowerPlot', figure.data, figure.layout, figure.config);
 }
 
-async function createVirtualDistancePlot(timestamps: number[], velocity: number[], windSpeed: number[], _distance: number[], trimStart: number, trimEnd: number) {
-    // Wait for Plotly to load
+async function createVirtualDistancePlot(analysisInput: AnalysisInput, trimStart: number, trimEnd: number) {
     let Plotly;
     try {
         Plotly = await waitForPlotly();
@@ -8512,182 +7728,15 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
         return;
     }
 
-    // Calculate context range (+/- 5s, but limited by actual trim)
-    const contextBefore = Math.min(trimStart, 5);
-    const contextAfter = Math.min(velocity.length - 1 - trimEnd, 5);
-
-    // Extended range including context
-    const extendedStart = trimStart - contextBefore;
-    const extendedEnd = trimEnd + 1 + contextAfter;
-
-    // Apply wind speed calibration
-    const calibratedWindSpeed = appState.airSpeedCalibrationPercent !== 0
-        ? windSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-        : windSpeed;
-
-    // Calculate cumulative virtual distances starting from trimStart (both start at 0)
-    const vdAir: number[] = new Array(timestamps.length).fill(0);
-    const vdGround: number[] = new Array(timestamps.length).fill(0);
-
-    // Calculate from trim start onwards
-    for (let i = trimStart + 1; i < timestamps.length; i++) {
-        const dt = timestamps[i] - timestamps[i - 1];
-
-        // Wind speed is already apparent velocity - just apply calibration
-        const apparentSpeed = (!isNaN(calibratedWindSpeed[i])) ? calibratedWindSpeed[i] : 0;
-        const windDist = (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
-        vdAir[i] = vdAir[i - 1] + windDist;
-
-        // Ground speed VD (cumulative)
-        const groundSpeedVal = (!isNaN(velocity[i]) && velocity[i] > 0) ? velocity[i] : 0;
-        const groundDist = groundSpeedVal * dt;
-        vdGround[i] = vdGround[i - 1] + groundDist;
-    }
-
-    // Convert to kilometers
-    const vdAirKm = vdAir.map(d => d / 1000);
-    const vdGroundKm = vdGround.map(d => d / 1000);
-
-    // Time-based x-axis (the actual arrays are built below).
-    const timePointsBefore = contextBefore > 0 ? Array.from({length: contextBefore + 1}, (_, i) => i + extendedStart) : [];
-    const timePointsMain = Array.from({length: trimEnd - trimStart + 1}, (_, i) => i + trimStart);
-    const timePointsAfter = contextAfter > 0 ? Array.from({length: contextAfter + 1}, (_, i) => i + trimEnd) : [];
-
-    // Prepare traces with context (low opacity before/after)
-    const traces: any[] = [];
-
-    // Add context before trim (low opacity)
-    if (contextBefore > 0) {
-        // VD Air context
-        traces.push({
-            x: timePointsBefore,
-            y: vdAirKm.slice(extendedStart, trimStart + 1),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VD Air (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-
-        // VD Ground context
-        traces.push({
-            x: timePointsBefore,
-            y: vdGroundKm.slice(extendedStart, trimStart + 1),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VD Ground (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-    }
-
-    // Main trimmed data (full opacity)
-    // VD from Air Speed (blue)
-    traces.push({
-        x: timePointsMain,
-        y: vdAirKm.slice(trimStart, trimEnd + 1),
-        type: 'scatter',
-        mode: 'lines',
-        name: 'VD from Air Speed',
-        line: { color: '#4363d8', width: 2 }
+    const figure = buildVirtualDistanceFigure({
+        context: createPlotContext(analysisInput.velocity.length, trimStart, trimEnd),
+        timestamps: analysisInput.timestamps,
+        velocity: analysisInput.velocity,
+        windSpeed: analysisInput.windSpeed,
+        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
     });
 
-    // VD from Ground Speed (black)
-    traces.push({
-        x: timePointsMain,
-        y: vdGroundKm.slice(trimStart, trimEnd + 1),
-        type: 'scatter',
-        mode: 'lines',
-        name: 'VD from Ground Speed',
-        line: { color: '#000000', width: 2 }
-    });
-
-    // Add context after trim (low opacity)
-    if (contextAfter > 0) {
-        // VD Air context
-        traces.push({
-            x: timePointsAfter,
-            y: vdAirKm.slice(trimEnd, extendedEnd),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VD Air (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-
-        // VD Ground context
-        traces.push({
-            x: timePointsAfter,
-            y: vdGroundKm.slice(trimEnd, extendedEnd),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VD Ground (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false
-        });
-    }
-
-    const layout = {
-        title: {
-            text: 'Virtual Distance: Air Speed vs Ground Speed',
-            font: { size: 14 }
-        },
-        xaxis: {
-            title: 'Time (seconds)',
-            showgrid: true,
-            gridcolor: '#e0e0e0',
-            range: [extendedStart, extendedEnd - 1]
-        },
-        yaxis: {
-            title: 'Cumulative Distance (km)',
-            showgrid: true,
-            gridcolor: '#e0e0e0'
-        },
-        legend: {
-            x: 0.02,
-            y: 0.98,
-            bgcolor: 'rgba(255,255,255,0.8)'
-        },
-        shapes: [
-            // Trim start vertical line
-            {
-                type: 'line',
-                x0: trimStart,
-                x1: trimStart,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            },
-            // Trim end vertical line
-            {
-                type: 'line',
-                x0: trimEnd,
-                x1: trimEnd,
-                y0: 0,
-                y1: 1,
-                yref: 'paper',
-                line: {
-                    color: 'rgba(100, 100, 100, 0.3)',
-                    width: 1.5,
-                    dash: 'dash'
-                }
-            }
-        ],
-        margin: { l: 60, r: 60, t: 40, b: 60 },
-        plot_bgcolor: '#fafafa',
-        paper_bgcolor: 'white'
-    };
-
-    Plotly.newPlot('vdPlot', traces, layout, {responsive: true});
+    await Plotly.newPlot('vdPlot', figure.data, figure.layout, figure.config);
 }
 
 // Clear saved parameters and results button
