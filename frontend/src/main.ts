@@ -12,8 +12,7 @@ import { MultiDEMManager } from './utils/MultiDEMManager';
 import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } from './utils/GeoCalculations';
 import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
 import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
-import { GibliCsvParser, type GibliCsvData, CsvParseError } from './utils/CsvParser';
-import { interpolateAllData, analyzeTimeIntervals } from './utils/DataInterpolation';
+import { CsvParseError, type GibliCsvData } from './utils/CsvParser';
 import {
     GpsLapDetector,
     OutAndBackDetector,
@@ -25,7 +24,10 @@ import {
     formatLapDuration,
     formatLapDistance
 } from './utils/GpsLapDetection';
-import { AppState, createLoadedActivity, createSelectedSlice, type ActivityData, type ActivityResult } from './state/AppState';
+import { AppState } from './state/AppState';
+import { createFitLoadedActivity, loadCsvActivity } from './activity/ActivityLoader';
+import { extractSegmentData } from './analysis/SegmentExtractor';
+import { applyAirSpeedOffset, calculateAirSpeedSyncError, resolveWindSeries } from './analysis/WindSourceResolver';
 import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -423,8 +425,7 @@ async function processFitFile(file: File) {
         }
 
         const result = await fitProcessor.processFitFile(file);
-        appState.setLoadedActivity(createLoadedActivity({
-            source: 'fit',
+        appState.setLoadedActivity(createFitLoadedActivity({
             file,
             fileHash: appState.currentFileHash,
             result,
@@ -586,114 +587,6 @@ async function processFitFile(file: File) {
     }
 }
 
-// Helper function to calculate cumulative distance from GPS coordinates
-function calculateDistanceArray(lats: number[], lons: number[]): number[] {
-    const distances: number[] = [0];
-    let cumulative = 0;
-
-    for (let i = 1; i < lats.length; i++) {
-        const lat1 = lats[i - 1];
-        const lon1 = lons[i - 1];
-        const lat2 = lats[i];
-        const lon2 = lons[i];
-
-        // Haversine formula
-        const R = 6371000; // Earth's radius in meters
-        const φ1 = lat1 * Math.PI / 180;
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                  Math.cos(φ1) * Math.cos(φ2) *
-                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const d = R * c;
-
-        cumulative += d;
-        distances.push(cumulative);
-    }
-
-    return distances;
-}
-
-// Generate laps from CSV lap number column
-function generateLapsFromCsv(csvData: GibliCsvData): any[] {
-    if (!csvData.hasLapData || !csvData.lapNumber) {
-        return [];
-    }
-
-    const laps: any[] = [];
-    const uniqueLapNumbers = Array.from(new Set(csvData.lapNumber.filter(n => !isNaN(n)))).sort((a, b) => a - b);
-
-    for (const lapNum of uniqueLapNumbers) {
-        const indices = csvData.lapNumber
-            .map((n, i) => n === lapNum ? i : -1)
-            .filter(i => i !== -1);
-
-        if (indices.length > 0) {
-            const startIdx = indices[0];
-            const endIdx = indices[indices.length - 1];
-
-            laps.push({
-                lap_number: lapNum,
-                start_time: csvData.timestamps[startIdx],
-                end_time: csvData.timestamps[endIdx],
-                total_elapsed_time: csvData.timestamps[endIdx] - csvData.timestamps[startIdx],
-                start_index: startIdx,
-                end_index: endIdx,
-                total_distance: 0, // Will calculate if needed
-            });
-        }
-    }
-
-    return laps;
-}
-
-function createCsvActivityData(csvData: GibliCsvData): ActivityData {
-    const distance = calculateDistanceArray(csvData.positionLat, csvData.positionLong);
-
-    // Convert wind angle + magnitude into rider-direction wind speed.
-    const windSpeed = csvData.windAngle.map((angleDeg, i) => {
-        const magnitude = csvData.airSpeed[i];
-        if (isNaN(angleDeg) || isNaN(magnitude)) {
-            return 0;
-        }
-        const angleRad = (angleDeg * Math.PI) / 180;
-        return Math.cos(angleRad) * magnitude;
-    });
-
-    console.log('📊 Calculated wind speed from CSV:', {
-        sampleAngles: csvData.windAngle.slice(0, 5),
-        sampleMagnitudes: csvData.airSpeed.slice(0, 5),
-        sampleWindSpeeds: windSpeed.slice(0, 5),
-        nonZeroCount: windSpeed.filter(ws => Math.abs(ws) > 0.1).length
-    });
-
-    return {
-        timestamps: csvData.timestamps,
-        position_lat: csvData.positionLat,
-        position_long: csvData.positionLong,
-        altitude: csvData.altitude,
-        velocity: csvData.velocity,
-        power: csvData.power,
-        air_speed: csvData.airSpeed,
-        distance,
-        wind_speed: windSpeed,
-        wind_yaw: csvData.windAngle || new Array(csvData.timestamps.length).fill(0),
-        air_density_data: new Array(csvData.timestamps.length).fill(0),
-        road_speed: new Array(csvData.timestamps.length).fill(0),
-        temperature: csvData.temperature || new Array(csvData.timestamps.length).fill(0),
-        battery_soc: new Array(csvData.timestamps.length).fill(0),
-        heart_rate: new Array(csvData.timestamps.length).fill(0),
-        cadence: new Array(csvData.timestamps.length).fill(0),
-        record_count: csvData.timestamps.length,
-        humidity: csvData.humidity,
-        pressure: csvData.pressure,
-        cda_reference: csvData.cdaReference,
-    };
-}
-
 // Display CSV results (similar to displayResults but for CSV)
 async function displayCsvResults(csvData: GibliCsvData, result: any) {
     const stats = result.parsing_statistics;
@@ -820,102 +713,22 @@ async function processCsvFile(file: File) {
 
         showLoading('Parsing CSV data...');
 
-        // Parse CSV
-        let csvData: GibliCsvData;
-        try {
-            csvData = GibliCsvParser.parse(text);
-        } catch (parseError) {
-            if (parseError instanceof CsvParseError) {
-                showError(`CSV parsing error:\n${parseError.message}`);
-            } else {
-                showError(`Failed to parse CSV file: ${parseError}`);
-            }
-            hideLoading();
-            return;
-        }
-
-        // Show summary
-        console.log('CSV Data Summary:');
-        console.log(GibliCsvParser.getSummary(csvData));
-
-        // Analyze time intervals
-        const intervals = analyzeTimeIntervals(csvData.timestamps);
-        console.log('Time interval statistics:', intervals);
-
-        // Interpolate to 1Hz if needed
-        if (intervals.std > 0.1) {
-            showLoading('Interpolating data to 1Hz...');
-            console.log('Non-uniform time series detected, interpolating to 1Hz');
-
-            const dataToInterpolate: Record<string, number[]> = {
-                velocity: csvData.velocity,
-                power: csvData.power,
-                airSpeed: csvData.airSpeed,
-                windAngle: csvData.windAngle,
-                altitude: csvData.altitude,
-                positionLat: csvData.positionLat,
-                positionLong: csvData.positionLong,
-            };
-
-            // Add optional arrays if they exist
-            if (csvData.temperature) dataToInterpolate.temperature = csvData.temperature;
-            if (csvData.humidity) dataToInterpolate.humidity = csvData.humidity;
-            if (csvData.pressure) dataToInterpolate.pressure = csvData.pressure;
-            if (csvData.cdaReference) dataToInterpolate.cdaReference = csvData.cdaReference;
-            if (csvData.lapNumber) dataToInterpolate.lapNumber = csvData.lapNumber;
-
-            const interpolated = interpolateAllData(csvData.timestamps, dataToInterpolate);
-
-            // Replace with interpolated data
-            csvData.timestamps = interpolated.timestamps;
-            csvData.velocity = interpolated.velocity;
-            csvData.power = interpolated.power;
-            csvData.airSpeed = interpolated.airSpeed;
-            csvData.windAngle = interpolated.windAngle;
-            csvData.altitude = interpolated.altitude;
-            csvData.positionLat = interpolated.positionLat;
-            csvData.positionLong = interpolated.positionLong;
-            if (interpolated.temperature) csvData.temperature = interpolated.temperature;
-            if (interpolated.humidity) csvData.humidity = interpolated.humidity;
-            if (interpolated.pressure) csvData.pressure = interpolated.pressure;
-            if (interpolated.cdaReference) csvData.cdaReference = interpolated.cdaReference;
-            if (interpolated.lapNumber) csvData.lapNumber = interpolated.lapNumber;
-
-            console.log(`Interpolated to ${csvData.timestamps.length} data points at 1Hz`);
-        }
-
-        // Create a unified result structure similar to FIT file processing
-        showLoading('Creating data structure...');
-
-        // Calculate distance from GPS coordinates (used in initializeSection3Csv)
-        const _distance = calculateDistanceArray(csvData.positionLat, csvData.positionLong);
-        void _distance; // Reserved for future use
-
-        // Create wind speed array from air speed (wind magnitude is already air speed)
-        // Wind speed in this context is the environmental wind, which we'll calculate later
-        const _windSpeed = new Array(csvData.timestamps.length).fill(0);
-        void _windSpeed; // Reserved for future use
-
-        // Create a mock result structure that mirrors FIT file result
-        const activityData = createCsvActivityData(csvData);
-        const result: ActivityResult = {
-            fit_data: activityData,
-            parsing_statistics: {
-                has_power_data: csvData.power.some(p => !isNaN(p) && p > 0),
-                has_gps_data: csvData.positionLat.some(lat => !isNaN(lat)),
-                has_altitude_data: csvData.altitude.some(alt => !isNaN(alt)),
-                has_air_speed_data: csvData.airSpeed.some(as => !isNaN(as) && as > 0),
-                data_points: csvData.timestamps.length,
-            },
-            laps: csvData.hasLapData ? generateLapsFromCsv(csvData) : [],
-        };
-
-        appState.setLoadedActivity(createLoadedActivity({
-            source: 'csv',
+        const loadedCsv = loadCsvActivity({
             file,
             fileHash: appState.currentFileHash,
-            result,
-        }));
+            text,
+        });
+        const { csvData, result, loadedActivity, summary, intervals, wasInterpolated } = loadedCsv;
+
+        console.log('CSV Data Summary:');
+        console.log(summary);
+        console.log('Time interval statistics:', intervals);
+
+        if (wasInterpolated) {
+            console.log('Non-uniform time series detected, interpolated to 1Hz');
+        }
+
+        appState.setLoadedActivity(loadedActivity);
 
         hideLoading();
         await displayCsvResults(csvData, result);
@@ -937,6 +750,10 @@ async function processCsvFile(file: File) {
     } catch (err) {
         hideLoading();
         console.error('Error processing CSV file:', err);
+        if (err instanceof CsvParseError) {
+            showError(`CSV parsing error:\n${err.message}`);
+            return;
+        }
         showError(`Error processing CSV file: ${err}`);
     }
 }
@@ -3013,39 +2830,25 @@ async function handleAnalyze() {
         const allPositionLong = fitData.position_long;
         const allAltitude = fitData.altitude;
         const allDistance = fitData.distance;
-        // Process wind data: consolidate air_speed and wind_speed into single apparent velocity field
-        const hasAirSpeed = fitData.air_speed && (Array.from(fitData.air_speed) as number[]).some((v: number) => !isNaN(v) && v !== 0);
-        const hasWindSpeed = fitData.wind_speed && (Array.from(fitData.wind_speed) as number[]).some((v: number) => !isNaN(v) && v !== 0);
         const hasWindYaw = fitData.wind_yaw && (Array.from(fitData.wind_yaw) as number[]).some((yaw: number) => !isNaN(yaw) && yaw !== 0);
+        const initialWindResolution = resolveWindSeries({
+            fitData,
+            windSource: 'fit',
+            applyOffset: false,
+        });
+        const { defaultAirSpeedOffset } = initialWindResolution;
+        const allWindSpeed = initialWindResolution.windSpeed;
 
-        let allWindSpeed: any;
-        let defaultAirSpeedOffset: number;
-
-        // Simplify: Always triangulate using yaw (forcing yaw=0 if not present gives same result as no triangulation)
-        if (hasAirSpeed) {
+        if (initialWindResolution.dataSource === 'air_speed') {
             console.log('🌬️ Found air speed data, using it as apparent wind speed');
-            const rawYaw = fitData.wind_yaw || new Array(fitData.air_speed.length).fill(0);
-            allWindSpeed = (Array.from(fitData.air_speed) as number[]).map((magnitude: number, i: number) => {
-                const yaw = rawYaw[i] || 0;
-                return Math.cos(yaw * Math.PI / 180) * magnitude;
-            });
-            defaultAirSpeedOffset = 2; // air_speed columns default to 2s offset
-        } else if (hasWindSpeed) {
+        } else if (initialWindResolution.dataSource === 'wind_speed') {
             if (hasWindYaw) {
                 console.log('🌬️ Found wind speed with yaw, triangulating for apparent wind speed');
             } else {
                 console.log('🌬️ Found wind speed without yaw, using it as apparent wind speed');
             }
-            const rawYaw = fitData.wind_yaw || new Array(fitData.wind_speed.length).fill(0);
-            allWindSpeed = (Array.from(fitData.wind_speed) as number[]).map((magnitude: number, i: number) => {
-                const yaw = rawYaw[i] || 0;
-                return Math.cos(yaw * Math.PI / 180) * magnitude;
-            });
-            defaultAirSpeedOffset = 0; // wind_speed columns default to 0s offset
         } else {
             console.log('🌬️ No air/wind speed data found, using constant wind as source');
-            allWindSpeed = new Array(fitData.timestamps.length).fill(0);
-            defaultAirSpeedOffset = 0;
         }
 
         const allAirDensity = fitData.air_density_data || [];
@@ -3351,50 +3154,28 @@ async function showGpsLapVEAnalysis(
     const allDistance = Array.from(fitData.distance) as number[];
 
     // Handle wind/air speed
-    const hasAirSpeed = fitData.air_speed && (Array.from(fitData.air_speed) as number[]).some((v: number) => !isNaN(v) && v !== 0);
-    const hasWindSpeed = fitData.wind_speed && (Array.from(fitData.wind_speed) as number[]).some((v: number) => !isNaN(v) && v !== 0);
-
-    // Check wind source selection (if UI exists)
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
-    const selectedWindSource = windSourceRadio ? windSourceRadio.value : (hasAirSpeed || hasWindSpeed ? 'fit' : 'constant');
+    const gpsLapWindResolution = resolveWindSeries({
+        fitData,
+        windSource: windSourceRadio ? windSourceRadio.value : null,
+        params,
+        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+    });
+    const {
+        hasAirSpeed,
+        hasWindSpeed,
+        defaultAirSpeedOffset: defaultOffset,
+        windSpeed: allWindSpeed,
+    } = gpsLapWindResolution;
+    const windSpeedOffset = params?.air_speed_offset ?? defaultOffset;
 
-    let allWindSpeed: number[];
-    const defaultOffset = 2; // Default air speed offset
-
-    if (selectedWindSource === 'constant') {
-        // Use constant wind - fill with NaN so calculator uses constant wind settings
-        allWindSpeed = new Array(allTimestamps.length).fill(NaN);
+    if (gpsLapWindResolution.selectedWindSource === 'constant') {
         console.log('GPS Lap VE: Using constant wind settings');
-    } else if (hasAirSpeed) {
-        const rawYaw = fitData.wind_yaw || new Array(fitData.air_speed.length).fill(0);
-        let baseWindSpeed = (Array.from(fitData.air_speed) as number[]).map((magnitude: number, i: number) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-        // Apply time offset
-        const windSpeedOffset = params?.air_speed_offset ?? defaultOffset;
-        baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
-        // Apply calibration if set
-        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-            : baseWindSpeed;
+    } else if (gpsLapWindResolution.dataSource === 'air_speed') {
         console.log(`GPS Lap VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
-    } else if (hasWindSpeed) {
-        const rawYaw = fitData.wind_yaw || new Array(fitData.wind_speed.length).fill(0);
-        let baseWindSpeed = (Array.from(fitData.wind_speed) as number[]).map((magnitude: number, i: number) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-        // Apply time offset
-        const windSpeedOffset = params?.air_speed_offset ?? defaultOffset;
-        baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
-        // Apply calibration if set
-        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-            : baseWindSpeed;
+    } else if (gpsLapWindResolution.dataSource === 'wind_speed') {
         console.log(`GPS Lap VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
-        allWindSpeed = new Array(allTimestamps.length).fill(0);
         console.log('GPS Lap VE: No wind data available');
     }
 
@@ -5640,58 +5421,6 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
  * Negative offset shifts air speed earlier (e.g., -2 means use air speed from 2 seconds earlier)
  * Positive offset shifts air speed later (e.g., +2 means use air speed from 2 seconds later)
  */
-function applyAirSpeedOffset(airSpeed: number[], offsetSeconds: number): number[] {
-    if (offsetSeconds === 0 || airSpeed.length === 0) {
-        return airSpeed;
-    }
-
-    const offsetIndices = Math.round(offsetSeconds); // Assuming 1Hz sampling rate
-    const result = new Array(airSpeed.length);
-
-    for (let i = 0; i < airSpeed.length; i++) {
-        const sourceIndex = i + offsetIndices;
-        if (sourceIndex >= 0 && sourceIndex < airSpeed.length) {
-            result[i] = airSpeed[sourceIndex];
-        } else {
-            result[i] = NaN; // Out of bounds
-        }
-    }
-
-    return result;
-}
-
-/**
- * Calculate synchronization error metric between ground speed and air speed
- * Returns sum of absolute differences (lower is better)
- */
-function calculateAirSpeedSyncError(
-    groundSpeed: number[],
-    airSpeed: number[],
-    offsetSeconds: number,
-    trimStart: number,
-    trimEnd: number
-): number {
-    // Apply offset to air speed
-    const offsetAirSpeed = applyAirSpeedOffset(airSpeed, offsetSeconds);
-
-    let sumAbsDiff = 0;
-    let validCount = 0;
-
-    for (let i = trimStart; i <= trimEnd && i < groundSpeed.length; i++) {
-        const ground = groundSpeed[i];
-        const air = offsetAirSpeed[i];
-
-        // Only include valid data points where both speeds are available
-        if (!isNaN(ground) && !isNaN(air) && ground > 0 && air > 0) {
-            sumAbsDiff += Math.abs(air - ground);
-            validCount++;
-        }
-    }
-
-    // Return average absolute difference (normalized by count)
-    return validCount > 0 ? sumAbsDiff / validCount : NaN;
-}
-
 function updateVEPlots(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number) {
     // Check which wind source is currently selected
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -5957,7 +5686,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
 /**
  * Update VE plots for GPS lap mode - calculates VE for each lap and shows stacked plot
  */
-async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string) {
+async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string) {
     if (!appState.currentFitData || !appState.currentGpsLapIndexRanges || !appState.currentParameters) {
         console.error('Missing data for GPS lap VE update');
         return;
@@ -5976,29 +5705,13 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
     const allAltitude = Array.from(appState.currentFitData.altitude) as number[];
     const allDistance = Array.from(appState.currentFitData.distance) as number[];
 
-    // Handle wind/air speed. Copy to typed locals up front so .some/.map
-    // don't trip over the Array.from inference issue.
-    const airSpeedArr: number[] = appState.currentFitData.air_speed ? Array.from(appState.currentFitData.air_speed) as number[] : [];
-    const windSpeedArr: number[] = appState.currentFitData.wind_speed ? Array.from(appState.currentFitData.wind_speed) as number[] : [];
-    const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
-    const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
-    let allWindSpeed: number[];
-
-    if (hasAirSpeed) {
-        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
-        allWindSpeed = airSpeedArr.map((magnitude, i) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-    } else if (hasWindSpeed) {
-        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
-        allWindSpeed = windSpeedArr.map((magnitude, i) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-    } else {
-        allWindSpeed = new Array(allTimestamps.length).fill(0);
-    }
+    const gpsLapUpdateWindResolution = resolveWindSeries({
+        fitData: appState.currentFitData,
+        windSource,
+        params: appState.currentParameters,
+        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+    });
+    const allWindSpeed = gpsLapUpdateWindResolution.windSpeed;
 
     // Color palette for laps
     const lapColors = [
@@ -6340,51 +6053,27 @@ async function showOutAndBackVEAnalysis(
     const allDistance = Array.from(fitData.distance) as number[];
 
     // Handle wind/air speed via typed locals.
-    const airSpeedArr: number[] = fitData.air_speed ? Array.from(fitData.air_speed) as number[] : [];
-    const windSpeedArr: number[] = fitData.wind_speed ? Array.from(fitData.wind_speed) as number[] : [];
-    const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
-    const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
-
-    // Check wind source selection (if UI exists)
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
-    const selectedWindSource = windSourceRadio ? windSourceRadio.value : (hasAirSpeed || hasWindSpeed ? 'fit' : 'constant');
+    const outAndBackWindResolution = resolveWindSeries({
+        fitData,
+        windSource: windSourceRadio ? windSourceRadio.value : null,
+        params,
+        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+    });
+    const {
+        hasAirSpeed,
+        hasWindSpeed,
+        windSpeed: allWindSpeed,
+    } = outAndBackWindResolution;
+    const windSpeedOffset = params?.air_speed_offset ?? defaultAirSpeedOffset;
 
-    let allWindSpeed: number[];
-
-    if (selectedWindSource === 'constant') {
-        // Use constant wind - fill with NaN so calculator uses constant wind settings
-        allWindSpeed = new Array(allTimestamps.length).fill(NaN);
+    if (outAndBackWindResolution.selectedWindSource === 'constant') {
         console.log('Out and Back VE: Using constant wind settings');
-    } else if (hasAirSpeed) {
-        const rawYaw: number[] = fitData.wind_yaw ? Array.from(fitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
-        let baseWindSpeed = airSpeedArr.map((magnitude, i) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-        // Apply time offset
-        const windSpeedOffset = params?.air_speed_offset ?? defaultAirSpeedOffset;
-        baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
-        // Apply calibration if set
-        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-            : baseWindSpeed;
+    } else if (outAndBackWindResolution.dataSource === 'air_speed') {
         console.log(`Out and Back VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
-    } else if (hasWindSpeed) {
-        const rawYaw: number[] = fitData.wind_yaw ? Array.from(fitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
-        let baseWindSpeed = windSpeedArr.map((magnitude, i) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-        // Apply time offset
-        const windSpeedOffset = params?.air_speed_offset ?? defaultAirSpeedOffset;
-        baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
-        // Apply calibration if set
-        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-            : baseWindSpeed;
+    } else if (outAndBackWindResolution.dataSource === 'wind_speed') {
         console.log(`Out and Back VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
-        allWindSpeed = new Array(allTimestamps.length).fill(0);
         console.log('Out and Back VE: No wind data available');
     }
 
@@ -6408,11 +6097,18 @@ async function showOutAndBackVEAnalysis(
 
         // Process outbound segment (A → B)
         try {
-            const outboundData = extractSegmentData(
-                section.outboundStartIdx, section.outboundEndIdx,
-                allTimestamps, allPower, allVelocity, allPositionLat, allPositionLong,
-                allAltitude, allDistance, allWindSpeed
-            );
+            const outboundData = extractSegmentData({
+                startIdx: section.outboundStartIdx,
+                endIdx: section.outboundEndIdx,
+                allTimestamps,
+                allPower,
+                allVelocity,
+                allPositionLat,
+                allPositionLong,
+                allAltitude,
+                allDistance,
+                allWindSpeed,
+            });
 
             if (outboundData.timestamps.length >= 10) {
                 const calculator = create_ve_calculator(
@@ -6446,11 +6142,18 @@ async function showOutAndBackVEAnalysis(
 
         // Process inbound segment (B → A)
         try {
-            const inboundData = extractSegmentData(
-                section.inboundStartIdx, section.inboundEndIdx,
-                allTimestamps, allPower, allVelocity, allPositionLat, allPositionLong,
-                allAltitude, allDistance, allWindSpeed
-            );
+            const inboundData = extractSegmentData({
+                startIdx: section.inboundStartIdx,
+                endIdx: section.inboundEndIdx,
+                allTimestamps,
+                allPower,
+                allVelocity,
+                allPositionLat,
+                allPositionLong,
+                allAltitude,
+                allDistance,
+                allWindSpeed,
+            });
 
             if (inboundData.timestamps.length >= 10) {
                 const calculator = create_ve_calculator(
@@ -6512,40 +6215,6 @@ async function showOutAndBackVEAnalysis(
 /**
  * Extract segment data between start and end indices
  */
-function extractSegmentData(
-    startIdx: number, endIdx: number,
-    allTimestamps: number[], allPower: number[], allVelocity: number[],
-    allPositionLat: number[], allPositionLong: number[],
-    allAltitude: number[], allDistance: number[], allWindSpeed: number[]
-): {
-    timestamps: number[]; power: number[]; velocity: number[];
-    positionLat: number[]; positionLong: number[];
-    altitude: number[]; distance: number[]; windSpeed: number[];
-} {
-    const selectedSlice = createSelectedSlice({
-        startIdx,
-        endIdx,
-        allTimestamps,
-        allPower,
-        allVelocity,
-        allPositionLat,
-        allPositionLong,
-        allAltitude,
-        allDistance,
-        allWindSpeed,
-    });
-
-    return {
-        timestamps: selectedSlice.timestamps,
-        power: selectedSlice.power,
-        velocity: selectedSlice.velocity,
-        positionLat: selectedSlice.positionLat,
-        positionLong: selectedSlice.positionLong,
-        altitude: selectedSlice.altitude,
-        distance: selectedSlice.distance,
-        windSpeed: selectedSlice.windSpeed,
-    };
-}
 
 /**
  * Calculate mean actual elevation profile for Out and Back (with inbound mirrored)
@@ -7340,51 +7009,22 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     const allDistance = Array.from(appState.currentFitData.distance) as number[];
 
     // Handle wind/air speed via typed locals - check wind source selection
-    const airSpeedArr: number[] = appState.currentFitData.air_speed ? Array.from(appState.currentFitData.air_speed) as number[] : [];
-    const windSpeedArr: number[] = appState.currentFitData.wind_speed ? Array.from(appState.currentFitData.wind_speed) as number[] : [];
-    const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
-    const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
-
-    // Check wind source selection
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
-    const selectedWindSource = windSourceRadio ? windSourceRadio.value : (hasAirSpeed || hasWindSpeed ? 'fit' : 'constant');
+    const outAndBackUpdateWindResolution = resolveWindSeries({
+        fitData: appState.currentFitData,
+        windSource: windSourceRadio ? windSourceRadio.value : null,
+        params: appState.currentParameters,
+        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+    });
+    const allWindSpeed = outAndBackUpdateWindResolution.windSpeed;
 
-    let allWindSpeed: number[];
-
-    if (selectedWindSource === 'constant') {
-        // Use constant wind - fill with NaN so calculator uses constant wind settings
-        allWindSpeed = new Array(allTimestamps.length).fill(NaN);
+    if (outAndBackUpdateWindResolution.selectedWindSource === 'constant') {
         console.log('Out and Back VE update: Using constant wind settings');
-    } else if (hasAirSpeed) {
-        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
-        let baseWindSpeed = airSpeedArr.map((magnitude, i) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-        // Apply time offset
-        const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? 2;
-        baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
-        // Apply calibration if set
-        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-            : baseWindSpeed;
+    } else if (outAndBackUpdateWindResolution.dataSource === 'air_speed') {
         console.log(`Out and Back VE update: Using FIT air speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
-    } else if (hasWindSpeed) {
-        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
-        let baseWindSpeed = windSpeedArr.map((magnitude, i) => {
-            const yaw = rawYaw[i] || 0;
-            return Math.cos(yaw * Math.PI / 180) * magnitude;
-        });
-        // Apply time offset
-        const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? 2;
-        baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
-        // Apply calibration if set
-        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
-            : baseWindSpeed;
+    } else if (outAndBackUpdateWindResolution.dataSource === 'wind_speed') {
         console.log(`Out and Back VE update: Using FIT wind speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
-        allWindSpeed = new Array(allTimestamps.length).fill(0);
         console.log('Out and Back VE update: No wind data available');
     }
 
@@ -7404,11 +7044,18 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
 
         // Process outbound
         try {
-            const outboundData = extractSegmentData(
-                section.outboundStartIdx, section.outboundEndIdx,
-                allTimestamps, allPower, allVelocity, allPositionLat, allPositionLong,
-                allAltitude, allDistance, allWindSpeed
-            );
+            const outboundData = extractSegmentData({
+                startIdx: section.outboundStartIdx,
+                endIdx: section.outboundEndIdx,
+                allTimestamps,
+                allPower,
+                allVelocity,
+                allPositionLat,
+                allPositionLong,
+                allAltitude,
+                allDistance,
+                allWindSpeed,
+            });
 
             if (outboundData.timestamps.length >= 10) {
                 const calculator = create_ve_calculator(
@@ -7437,11 +7084,18 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
 
         // Process inbound
         try {
-            const inboundData = extractSegmentData(
-                section.inboundStartIdx, section.inboundEndIdx,
-                allTimestamps, allPower, allVelocity, allPositionLat, allPositionLong,
-                allAltitude, allDistance, allWindSpeed
-            );
+            const inboundData = extractSegmentData({
+                startIdx: section.inboundStartIdx,
+                endIdx: section.inboundEndIdx,
+                allTimestamps,
+                allPower,
+                allVelocity,
+                allPositionLat,
+                allPositionLong,
+                allAltitude,
+                allDistance,
+                allWindSpeed,
+            });
 
             if (inboundData.timestamps.length >= 10) {
                 const calculator = create_ve_calculator(

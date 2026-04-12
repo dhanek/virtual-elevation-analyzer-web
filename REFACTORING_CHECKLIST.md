@@ -5,7 +5,7 @@ Based on the revised refactoring plan validated against the current codebase.
 | Step | Status | Summary | Notes |
 |---|---|---|---|
 | 5 | ✅ Done | Introduce typed `AppState` + unified `LoadedActivity` model | Added `frontend/src/state/AppState.ts`, moved frontend state behind `appState`, added `LoadedActivity`, `ActivityData`, `SelectedSlice`, and normalized CSV activity loading. |
-| 6 | ⬜ Not started | Extract `ActivityLoader`, `WindSourceResolver`, and `SegmentExtractor` | Loader and slicing logic still mostly live in `frontend/src/main.ts`. |
+| 6 | ✅ Done | Extract `ActivityLoader`, `WindSourceResolver`, and `SegmentExtractor` | Added `frontend/src/activity/ActivityLoader.ts`, `frontend/src/analysis/WindSourceResolver.ts`, and `frontend/src/analysis/SegmentExtractor.ts`; rewired `frontend/src/main.ts` to use them. |
 | 7 | ⬜ Not started | Extract `AnalysisInput` / `PlotContext` + pure plot modules | Plotting and VE orchestration are still interleaved in `frontend/src/main.ts`. |
 | 8 | ⬜ Not started | Replace mode branching with mode modules (`standard`, `gpsLap`, `outAndBack`) | `handleAnalyze()` still branches heavily by mode. |
 | 9 | ⬜ Not started | Cache normalized arrays and centralize VE calculator creation | Calculator wiring is still duplicated across several paths. |
