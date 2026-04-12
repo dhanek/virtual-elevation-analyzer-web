@@ -8,7 +8,7 @@ Based on the revised refactoring plan validated against the current codebase.
 | 6 | ✅ Done | Extract `ActivityLoader`, `WindSourceResolver`, and `SegmentExtractor` | Added `frontend/src/activity/ActivityLoader.ts`, `frontend/src/analysis/WindSourceResolver.ts`, and `frontend/src/analysis/SegmentExtractor.ts`; rewired `frontend/src/main.ts` to use them. |
 | 7 | ✅ Done | Extract `AnalysisInput` / `PlotContext` + pure plot modules | Added `frontend/src/analysis/AnalysisInput.ts`, `frontend/src/plots/PlotContext.ts`, and `frontend/src/plots/StandardPlotBuilders.ts`; rewired standard VE/wind/power/VD plotting in `frontend/src/main.ts` to use typed inputs and pure builders. |
 | 8 | ✅ Done | Replace mode branching with mode modules (`standard`, `gpsLap`, `outAndBack`) | Added `frontend/src/modes/analysis/*` mode handlers and rewired `handleAnalyze()` to dispatch through them instead of hard-coded branching. |
-| 9 | ⬜ Not started | Cache normalized arrays and centralize VE calculator creation | Calculator wiring is still duplicated across several paths. |
+| 9 | ✅ Done | Cache normalized arrays and centralize VE calculator creation | Added `frontend/src/analysis/ActivityArrayCache.ts` and `frontend/src/analysis/VeCalculatorFactory.ts`; cached normalized activity arrays/Float64Array wrappers and replaced repeated calculator wiring in `frontend/src/main.ts`. |
 | 10 | ⬜ Not started | Collapse backend VE duplication in `backend/src/virtual_elevation.rs` | Backend refactor. |
 | 11 | ⬜ Not started | Implement or hide empty GPS-lap and out-and-back wind / power / VD tabs | Placeholder plots still exist. |
 | 12 | ⬜ Not started | Add a frontend lint + test baseline | No dedicated lint/test baseline added yet. |

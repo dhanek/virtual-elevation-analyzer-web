@@ -27,7 +27,9 @@ import {
 import { AppState } from './state/AppState';
 import { createFitLoadedActivity, loadCsvActivity } from './activity/ActivityLoader';
 import { createAnalysisInput, type AnalysisInput } from './analysis/AnalysisInput';
+import { getNormalizedActivityArrays } from './analysis/ActivityArrayCache';
 import { extractSegmentData } from './analysis/SegmentExtractor';
+import { createVeCalculator } from './analysis/VeCalculatorFactory';
 import { applyAirSpeedOffset, calculateAirSpeedSyncError, resolveWindSeries } from './analysis/WindSourceResolver';
 import { createPlotContext } from './plots/PlotContext';
 import {
@@ -38,7 +40,7 @@ import {
     buildWindSpeedFigure,
 } from './plots/StandardPlotBuilders';
 import { collectSelectionIndices, getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
-import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
+import init, { AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -2775,14 +2777,15 @@ async function handleAnalyze() {
             throw new Error('No analysis data available');
         }
 
-        const allTimestamps = fitData.timestamps;
-        const allPower = fitData.power;
-        const allVelocity = fitData.velocity;
-        const allPositionLat = fitData.position_lat;
-        const allPositionLong = fitData.position_long;
-        const allAltitude = fitData.altitude;
-        const allDistance = fitData.distance;
-        const hasWindYaw = fitData.wind_yaw && (Array.from(fitData.wind_yaw) as number[]).some((yaw: number) => !isNaN(yaw) && yaw !== 0);
+        const normalizedArrays = getNormalizedActivityArrays(fitData);
+        const allTimestamps = normalizedArrays.timestamps;
+        const allPower = normalizedArrays.power;
+        const allVelocity = normalizedArrays.velocity;
+        const allPositionLat = normalizedArrays.positionLat;
+        const allPositionLong = normalizedArrays.positionLong;
+        const allAltitude = normalizedArrays.altitude;
+        const allDistance = normalizedArrays.distance;
+        const hasWindYaw = normalizedArrays.windYaw.some((yaw: number) => !isNaN(yaw) && yaw !== 0);
         const initialWindResolution = resolveWindSeries({
             fitData,
             windSource: 'fit',
@@ -2803,11 +2806,11 @@ async function handleAnalyze() {
             console.log('🌬️ No air/wind speed data found, using constant wind as source');
         }
 
-        const allAirDensity = fitData.air_density_data || [];
-        const allTemperature = fitData.temperature || [];
+        const allAirDensity = normalizedArrays.airDensity;
+        const allTemperature = normalizedArrays.temperature;
 
-        const hasRoadSpeed = fitData.road_speed && (Array.from(fitData.road_speed) as number[]).some((v: number) => !isNaN(v) && v !== 0);
-        const hasEnhancedSpeed = (Array.from(allVelocity) as number[]).some((v: number) => !isNaN(v) && v !== 0);
+        const hasRoadSpeed = normalizedArrays.roadSpeed.some((v: number) => !isNaN(v) && v !== 0);
+        const hasEnhancedSpeed = allVelocity.some((v: number) => !isNaN(v) && v !== 0);
         if (hasRoadSpeed && hasEnhancedSpeed) {
             console.log('🚴 Found enhanced speed and road speed, prefer road speed');
         }
@@ -2869,52 +2872,20 @@ async function handleAnalyze() {
             }
         }
 
-        const calculator = appState.currentRhoArray
-            ? create_ve_calculator_with_rho_array(
-                new Float64Array(filteredTimestamps),
-                new Float64Array(filteredPower),
-                new Float64Array(filteredVelocity),
-                new Float64Array(filteredPositionLat),
-                new Float64Array(filteredPositionLong),
-                new Float64Array(filteredAltitude),
-                new Float64Array(filteredDistance),
-                new Float64Array(filteredWindSpeed),
-                new Float64Array(appState.currentRhoArray),
-                appState.currentParameters.system_mass,
-                appState.currentParameters.rho,
-                appState.currentParameters.eta,
-                appState.currentParameters.cda,
-                appState.currentParameters.crr,
-                appState.currentParameters.cda_min,
-                appState.currentParameters.cda_max,
-                appState.currentParameters.crr_min,
-                appState.currentParameters.crr_max,
-                appState.currentParameters.wind_speed,
-                appState.currentParameters.wind_direction,
-                appState.currentParameters.velodrome
-            )
-            : create_ve_calculator(
-                new Float64Array(filteredTimestamps),
-                new Float64Array(filteredPower),
-                new Float64Array(filteredVelocity),
-                new Float64Array(filteredPositionLat),
-                new Float64Array(filteredPositionLong),
-                new Float64Array(filteredAltitude),
-                new Float64Array(filteredDistance),
-                new Float64Array(filteredWindSpeed),
-                appState.currentParameters.system_mass,
-                appState.currentParameters.rho,
-                appState.currentParameters.eta,
-                appState.currentParameters.cda,
-                appState.currentParameters.crr,
-                appState.currentParameters.cda_min,
-                appState.currentParameters.cda_max,
-                appState.currentParameters.crr_min,
-                appState.currentParameters.crr_max,
-                appState.currentParameters.wind_speed,
-                appState.currentParameters.wind_direction,
-                appState.currentParameters.velodrome
-            );
+        const calculator = createVeCalculator({
+            timestamps: filteredTimestamps,
+            power: filteredPower,
+            velocity: filteredVelocity,
+            positionLat: filteredPositionLat,
+            positionLong: filteredPositionLong,
+            altitude: filteredAltitude,
+            distance: filteredDistance,
+            windSpeed: filteredWindSpeed,
+            rhoArray: appState.currentRhoArray,
+            params: appState.currentParameters,
+            cda: appState.currentParameters.cda,
+            crr: appState.currentParameters.crr,
+        });
 
         const cda = appState.currentParameters.cda ?? 0.3;
         const crr = appState.currentParameters.crr ?? 0.008;
@@ -2923,10 +2894,9 @@ async function handleAnalyze() {
         const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
         let filteredCdaReference: number[] | null = null;
-        if (fitData.cda_reference) {
+        if (normalizedArrays.cdaReference) {
             console.log('📊 Data has CdA reference - will enable validation tab');
-            const fullCdaReference = fitData.cda_reference;
-            filteredCdaReference = selectedIndices.map(index => fullCdaReference[index]);
+            filteredCdaReference = selectedIndices.map(index => normalizedArrays.cdaReference![index]);
         }
 
         hideLoading();
@@ -3012,14 +2982,14 @@ async function showGpsLapVEAnalysis(
 
     const lapVEProfiles: LapVEProfile[] = [];
 
-    // Extract arrays from fitData
-    const allTimestamps = Array.from(fitData.timestamps) as number[];
-    const allPower = Array.from(fitData.power) as number[];
-    const allVelocity = Array.from(fitData.velocity) as number[];
-    const allPositionLat = Array.from(fitData.position_lat) as number[];
-    const allPositionLong = Array.from(fitData.position_long) as number[];
-    const allAltitude = Array.from(fitData.altitude) as number[];
-    const allDistance = Array.from(fitData.distance) as number[];
+    const normalizedArrays = getNormalizedActivityArrays(fitData);
+    const allTimestamps = normalizedArrays.timestamps;
+    const allPower = normalizedArrays.power;
+    const allVelocity = normalizedArrays.velocity;
+    const allPositionLat = normalizedArrays.positionLat;
+    const allPositionLong = normalizedArrays.positionLong;
+    const allAltitude = normalizedArrays.altitude;
+    const allDistance = normalizedArrays.distance;
 
     // Handle wind/air speed
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -3091,29 +3061,19 @@ async function showGpsLapVEAnalysis(
         const totalDistance = relativeDistances[relativeDistances.length - 1];
 
         try {
-            // Create VE calculator for this lap
-            const calculator = create_ve_calculator(
-                new Float64Array(lapTimestamps),
-                new Float64Array(lapPower),
-                new Float64Array(lapVelocity),
-                new Float64Array(lapPositionLat),
-                new Float64Array(lapPositionLong),
-                new Float64Array(lapAltitude),
-                new Float64Array(lapDistance),
-                new Float64Array(lapWindSpeed),
-                params.system_mass,
-                params.rho,
-                params.eta,
+            const calculator = createVeCalculator({
+                timestamps: lapTimestamps,
+                power: lapPower,
+                velocity: lapVelocity,
+                positionLat: lapPositionLat,
+                positionLong: lapPositionLong,
+                altitude: lapAltitude,
+                distance: lapDistance,
+                windSpeed: lapWindSpeed,
+                params,
                 cda,
                 crr,
-                params.cda_min,
-                params.cda_max,
-                params.crr_min,
-                params.crr_max,
-                params.wind_speed,
-                params.wind_direction,
-                params.velodrome
-            );
+            });
 
             // Calculate VE for full lap
             const result = calculator.calculate_virtual_elevation(cda, crr, 0, lapTimestamps.length - 1);
@@ -5349,28 +5309,19 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
 
             // Calculator 1: Use constant wind
             const constantWindSpeed = new Array(windSpeed.length).fill(NaN);
-            const calculator1 = create_ve_calculator(
-                new Float64Array(timestamps),
-                new Float64Array(power),
-                new Float64Array(velocity),
-                new Float64Array(positionLat),
-                new Float64Array(positionLong),
-                new Float64Array(altitude),
-                new Float64Array(distance),
-                new Float64Array(constantWindSpeed),
-                appState.currentParameters.system_mass,
-                appState.currentParameters.rho,
-                appState.currentParameters.eta,
+            const calculator1 = createVeCalculator({
+                timestamps,
+                power,
+                velocity,
+                positionLat,
+                positionLong,
+                altitude,
+                distance,
+                windSpeed: constantWindSpeed,
+                params: appState.currentParameters,
                 cda,
                 crr,
-                appState.currentParameters.cda_min,
-                appState.currentParameters.cda_max,
-                appState.currentParameters.crr_min,
-                appState.currentParameters.crr_max,
-                appState.currentParameters.wind_speed,
-                appState.currentParameters.wind_direction,
-                appState.currentParameters.velodrome
-            );
+            });
 
             // Calculator 2: Use FIT file wind data
             // Apply time offset first (to sync with ground speed)
@@ -5383,28 +5334,19 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
                 ? offsetWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
                 : offsetWindSpeed;
 
-            const calculator2 = create_ve_calculator(
-                new Float64Array(timestamps),
-                new Float64Array(power),
-                new Float64Array(velocity),
-                new Float64Array(positionLat),
-                new Float64Array(positionLong),
-                new Float64Array(altitude),
-                new Float64Array(distance),
-                new Float64Array(calibratedWindSpeed),
-                appState.currentParameters.system_mass,
-                appState.currentParameters.rho,
-                appState.currentParameters.eta,
+            const calculator2 = createVeCalculator({
+                timestamps,
+                power,
+                velocity,
+                positionLat,
+                positionLong,
+                altitude,
+                distance,
+                windSpeed: calibratedWindSpeed,
+                params: appState.currentParameters,
                 cda,
                 crr,
-                appState.currentParameters.cda_min,
-                appState.currentParameters.cda_max,
-                appState.currentParameters.crr_min,
-                appState.currentParameters.crr_max,
-                appState.currentParameters.wind_speed,
-                appState.currentParameters.wind_direction,
-                appState.currentParameters.velodrome
-            );
+            });
 
             // NOTE: calculator2 used to be stored in a `_veCalculator` global
             // "for air speed calibration" but was never read downstream.
@@ -5483,53 +5425,20 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
                 ? useWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
                 : useWindSpeed;
 
-            // Use rho array version if we have per-datapoint rho
-            const calculator = appState.currentRhoArray
-                ? create_ve_calculator_with_rho_array(
-                    new Float64Array(timestamps),
-                    new Float64Array(power),
-                    new Float64Array(velocity),
-                    new Float64Array(positionLat),
-                    new Float64Array(positionLong),
-                    new Float64Array(altitude),
-                    new Float64Array(distance),
-                    new Float64Array(calibratedWindSpeed),
-                    new Float64Array(appState.currentRhoArray),
-                    appState.currentParameters!.system_mass,
-                    appState.currentParameters!.rho,
-                    appState.currentParameters!.eta,
-                    cda,
-                    crr,
-                    appState.currentParameters!.cda_min,
-                    appState.currentParameters!.cda_max,
-                    appState.currentParameters!.crr_min,
-                    appState.currentParameters!.crr_max,
-                    appState.currentParameters!.wind_speed,
-                    appState.currentParameters!.wind_direction,
-                    appState.currentParameters!.velodrome
-                )
-                : create_ve_calculator(
-                    new Float64Array(timestamps),
-                    new Float64Array(power),
-                    new Float64Array(velocity),
-                    new Float64Array(positionLat),
-                    new Float64Array(positionLong),
-                    new Float64Array(altitude),
-                    new Float64Array(distance),
-                    new Float64Array(calibratedWindSpeed),
-                    appState.currentParameters!.system_mass,
-                    appState.currentParameters!.rho,
-                    appState.currentParameters!.eta,
-                    cda,
-                    crr,
-                    appState.currentParameters!.cda_min,
-                    appState.currentParameters!.cda_max,
-                    appState.currentParameters!.crr_min,
-                    appState.currentParameters!.crr_max,
-                    appState.currentParameters!.wind_speed,
-                    appState.currentParameters!.wind_direction,
-                    appState.currentParameters!.velodrome
-                );
+            const calculator = createVeCalculator({
+                timestamps,
+                power,
+                velocity,
+                positionLat,
+                positionLong,
+                altitude,
+                distance,
+                windSpeed: calibratedWindSpeed,
+                rhoArray: appState.currentRhoArray,
+                params: appState.currentParameters,
+                cda,
+                crr,
+            });
 
             // NOTE: calculator used to be stored in a `_veCalculator` global
             // "for air speed calibration" but was never read downstream.
@@ -5585,16 +5494,14 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
 
     const Plotly = await waitForPlotly();
 
-    // Extract arrays from appState.currentFitData as typed locals. The `as number[]`
-    // casts are required because Array.from(Float64Array) infers unknown[]
-    // in TS 6.x due to how typed-array iterators are declared.
-    const allTimestamps = Array.from(appState.currentFitData.timestamps) as number[];
-    const allPower = Array.from(appState.currentFitData.power) as number[];
-    const allVelocity = Array.from(appState.currentFitData.velocity) as number[];
-    const allPositionLat = Array.from(appState.currentFitData.position_lat) as number[];
-    const allPositionLong = Array.from(appState.currentFitData.position_long) as number[];
-    const allAltitude = Array.from(appState.currentFitData.altitude) as number[];
-    const allDistance = Array.from(appState.currentFitData.distance) as number[];
+    const normalizedArrays = getNormalizedActivityArrays(appState.currentFitData);
+    const allTimestamps = normalizedArrays.timestamps;
+    const allPower = normalizedArrays.power;
+    const allVelocity = normalizedArrays.velocity;
+    const allPositionLat = normalizedArrays.positionLat;
+    const allPositionLong = normalizedArrays.positionLong;
+    const allAltitude = normalizedArrays.altitude;
+    const allDistance = normalizedArrays.distance;
 
     const gpsLapUpdateWindResolution = resolveWindSeries({
         fitData: appState.currentFitData,
@@ -5658,31 +5565,19 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
         const totalDistance = relativeDistances[relativeDistances.length - 1];
 
         try {
-            // Create VE calculator for this lap. The WASM boundary wants
-            // Float64Array; our per-lap buffers were accumulated via .push
-            // so they're number[].
-            const calculator = create_ve_calculator(
-                new Float64Array(lapTimestamps),
-                new Float64Array(lapPower),
-                new Float64Array(lapVelocity),
-                new Float64Array(lapPositionLat),
-                new Float64Array(lapPositionLong),
-                new Float64Array(lapAltitude),
-                new Float64Array(lapDistance),
-                new Float64Array(lapWindSpeed),
-                appState.currentParameters.system_mass,
-                appState.currentParameters.rho,
-                appState.currentParameters.eta,
+            const calculator = createVeCalculator({
+                timestamps: lapTimestamps,
+                power: lapPower,
+                velocity: lapVelocity,
+                positionLat: lapPositionLat,
+                positionLong: lapPositionLong,
+                altitude: lapAltitude,
+                distance: lapDistance,
+                windSpeed: lapWindSpeed,
+                params: appState.currentParameters,
                 cda,
                 crr,
-                appState.currentParameters.cda_min,
-                appState.currentParameters.cda_max,
-                appState.currentParameters.crr_min,
-                appState.currentParameters.crr_max,
-                appState.currentParameters.wind_speed,
-                appState.currentParameters.wind_direction,
-                appState.currentParameters.velodrome
-            );
+            });
 
             // Calculate VE for full lap
             const result = calculator.calculate_virtual_elevation(cda, crr, 0, lapTimestamps.length - 1);
@@ -5933,15 +5828,14 @@ async function showOutAndBackVEAnalysis(
     appState.currentOutAndBackSections = sections;
     const profiles: OutAndBackVEProfile[] = [];
 
-    // Extract arrays from fitData as typed locals (see note in the sibling
-    // cluster above about the TS 6 Array.from inference issue).
-    const allTimestamps = Array.from(fitData.timestamps) as number[];
-    const allPower = Array.from(fitData.power) as number[];
-    const allVelocity = Array.from(fitData.velocity) as number[];
-    const allPositionLat = Array.from(fitData.position_lat) as number[];
-    const allPositionLong = Array.from(fitData.position_long) as number[];
-    const allAltitude = Array.from(fitData.altitude) as number[];
-    const allDistance = Array.from(fitData.distance) as number[];
+    const normalizedArrays = getNormalizedActivityArrays(fitData);
+    const allTimestamps = normalizedArrays.timestamps;
+    const allPower = normalizedArrays.power;
+    const allVelocity = normalizedArrays.velocity;
+    const allPositionLat = normalizedArrays.positionLat;
+    const allPositionLong = normalizedArrays.positionLong;
+    const allAltitude = normalizedArrays.altitude;
+    const allDistance = normalizedArrays.distance;
 
     // Handle wind/air speed via typed locals.
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -6002,19 +5896,19 @@ async function showOutAndBackVEAnalysis(
             });
 
             if (outboundData.timestamps.length >= 10) {
-                const calculator = create_ve_calculator(
-                    new Float64Array(outboundData.timestamps),
-                    new Float64Array(outboundData.power),
-                    new Float64Array(outboundData.velocity),
-                    new Float64Array(outboundData.positionLat),
-                    new Float64Array(outboundData.positionLong),
-                    new Float64Array(outboundData.altitude),
-                    new Float64Array(outboundData.distance),
-                    new Float64Array(outboundData.windSpeed),
-                    params.system_mass, params.rho, params.eta,
-                    cda, crr, params.cda_min, params.cda_max, params.crr_min, params.crr_max,
-                    params.wind_speed, params.wind_direction, params.velodrome
-                );
+                const calculator = createVeCalculator({
+                    timestamps: outboundData.timestamps,
+                    power: outboundData.power,
+                    velocity: outboundData.velocity,
+                    positionLat: outboundData.positionLat,
+                    positionLong: outboundData.positionLong,
+                    altitude: outboundData.altitude,
+                    distance: outboundData.distance,
+                    windSpeed: outboundData.windSpeed,
+                    params,
+                    cda,
+                    crr,
+                });
 
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, outboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
@@ -6047,19 +5941,19 @@ async function showOutAndBackVEAnalysis(
             });
 
             if (inboundData.timestamps.length >= 10) {
-                const calculator = create_ve_calculator(
-                    new Float64Array(inboundData.timestamps),
-                    new Float64Array(inboundData.power),
-                    new Float64Array(inboundData.velocity),
-                    new Float64Array(inboundData.positionLat),
-                    new Float64Array(inboundData.positionLong),
-                    new Float64Array(inboundData.altitude),
-                    new Float64Array(inboundData.distance),
-                    new Float64Array(inboundData.windSpeed),
-                    params.system_mass, params.rho, params.eta,
-                    cda, crr, params.cda_min, params.cda_max, params.crr_min, params.crr_max,
-                    params.wind_speed, params.wind_direction, params.velodrome
-                );
+                const calculator = createVeCalculator({
+                    timestamps: inboundData.timestamps,
+                    power: inboundData.power,
+                    velocity: inboundData.velocity,
+                    positionLat: inboundData.positionLat,
+                    positionLong: inboundData.positionLong,
+                    altitude: inboundData.altitude,
+                    distance: inboundData.distance,
+                    windSpeed: inboundData.windSpeed,
+                    params,
+                    cda,
+                    crr,
+                });
 
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, inboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
@@ -6890,14 +6784,14 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     // Recalculate VE for all sections
     const profiles: OutAndBackVEProfile[] = [];
 
-    // Extract arrays from appState.currentFitData as typed locals (see note above).
-    const allTimestamps = Array.from(appState.currentFitData.timestamps) as number[];
-    const allPower = Array.from(appState.currentFitData.power) as number[];
-    const allVelocity = Array.from(appState.currentFitData.velocity) as number[];
-    const allPositionLat = Array.from(appState.currentFitData.position_lat) as number[];
-    const allPositionLong = Array.from(appState.currentFitData.position_long) as number[];
-    const allAltitude = Array.from(appState.currentFitData.altitude) as number[];
-    const allDistance = Array.from(appState.currentFitData.distance) as number[];
+    const normalizedArrays = getNormalizedActivityArrays(appState.currentFitData);
+    const allTimestamps = normalizedArrays.timestamps;
+    const allPower = normalizedArrays.power;
+    const allVelocity = normalizedArrays.velocity;
+    const allPositionLat = normalizedArrays.positionLat;
+    const allPositionLong = normalizedArrays.positionLong;
+    const allAltitude = normalizedArrays.altitude;
+    const allDistance = normalizedArrays.distance;
 
     // Handle wind/air speed via typed locals - check wind source selection
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
@@ -6949,15 +6843,19 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
             });
 
             if (outboundData.timestamps.length >= 10) {
-                const calculator = create_ve_calculator(
-                    new Float64Array(outboundData.timestamps), new Float64Array(outboundData.power), new Float64Array(outboundData.velocity),
-                    new Float64Array(outboundData.positionLat), new Float64Array(outboundData.positionLong), new Float64Array(outboundData.altitude),
-                    new Float64Array(outboundData.distance), new Float64Array(outboundData.windSpeed),
-                    appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
-                    cda, crr, appState.currentParameters.cda_min, appState.currentParameters.cda_max,
-                    appState.currentParameters.crr_min, appState.currentParameters.crr_max,
-                    appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
-                );
+                const calculator = createVeCalculator({
+                    timestamps: outboundData.timestamps,
+                    power: outboundData.power,
+                    velocity: outboundData.velocity,
+                    positionLat: outboundData.positionLat,
+                    positionLong: outboundData.positionLong,
+                    altitude: outboundData.altitude,
+                    distance: outboundData.distance,
+                    windSpeed: outboundData.windSpeed,
+                    params: appState.currentParameters,
+                    cda,
+                    crr,
+                });
 
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, outboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
@@ -6989,15 +6887,19 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
             });
 
             if (inboundData.timestamps.length >= 10) {
-                const calculator = create_ve_calculator(
-                    new Float64Array(inboundData.timestamps), new Float64Array(inboundData.power), new Float64Array(inboundData.velocity),
-                    new Float64Array(inboundData.positionLat), new Float64Array(inboundData.positionLong), new Float64Array(inboundData.altitude),
-                    new Float64Array(inboundData.distance), new Float64Array(inboundData.windSpeed),
-                    appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
-                    cda, crr, appState.currentParameters.cda_min, appState.currentParameters.cda_max,
-                    appState.currentParameters.crr_min, appState.currentParameters.crr_max,
-                    appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
-                );
+                const calculator = createVeCalculator({
+                    timestamps: inboundData.timestamps,
+                    power: inboundData.power,
+                    velocity: inboundData.velocity,
+                    positionLat: inboundData.positionLat,
+                    positionLong: inboundData.positionLong,
+                    altitude: inboundData.altitude,
+                    distance: inboundData.distance,
+                    windSpeed: inboundData.windSpeed,
+                    params: appState.currentParameters,
+                    cda,
+                    crr,
+                });
 
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, inboundData.timestamps.length - 1);
                 const veArray = Array.from(result.virtual_elevation as Float64Array);
@@ -7191,38 +7093,20 @@ async function updateCdaValidationPlots(
 
     const avgCdaRef = validCda.reduce((sum, c) => sum + c, 0) / validCda.length;
 
-    // Create calculator for reference CdA calculation.
-    // Uses SAME air speed/wind data as the slider CdA calculation.
-    // The WASM boundary takes Float64Array; our inputs here are number[],
-    // so wrap each once and reuse.
-    const f64Timestamps = new Float64Array(timestamps);
-    const f64Power = new Float64Array(power);
-    const f64Velocity = new Float64Array(velocity);
-    const f64PositionLat = new Float64Array(positionLat);
-    const f64PositionLong = new Float64Array(positionLong);
-    const f64Altitude = new Float64Array(altitude);
-    const f64Distance = new Float64Array(distance);
-    const f64WindSpeed = new Float64Array(windSpeed);
-    const refCalculator = appState.currentRhoArray
-        ? create_ve_calculator_with_rho_array(
-            f64Timestamps, f64Power, f64Velocity, f64PositionLat, f64PositionLong, f64Altitude, f64Distance,
-            f64WindSpeed,
-            new Float64Array(appState.currentRhoArray),
-            appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
-            appState.currentParameters.cda, crrOptimized,
-            appState.currentParameters.cda_min, appState.currentParameters.cda_max,
-            appState.currentParameters.crr_min, appState.currentParameters.crr_max,
-            appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
-        )
-        : create_ve_calculator(
-            f64Timestamps, f64Power, f64Velocity, f64PositionLat, f64PositionLong, f64Altitude, f64Distance,
-            f64WindSpeed,
-            appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
-            appState.currentParameters.cda, crrOptimized,
-            appState.currentParameters.cda_min, appState.currentParameters.cda_max,
-            appState.currentParameters.crr_min, appState.currentParameters.crr_max,
-            appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
-        );
+    const refCalculator = createVeCalculator({
+        timestamps,
+        power,
+        velocity,
+        positionLat,
+        positionLong,
+        altitude,
+        distance,
+        windSpeed,
+        rhoArray: appState.currentRhoArray,
+        params: appState.currentParameters,
+        cda: appState.currentParameters.cda,
+        crr: crrOptimized,
+    });
 
     // Calculate VE with per-datapoint CdA reference array
     // Pre-process: Replace any NaN values with the average to avoid using default 0.3
