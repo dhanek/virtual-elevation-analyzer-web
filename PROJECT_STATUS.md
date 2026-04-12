@@ -67,7 +67,7 @@ These are the main remaining engineering issues, not blockers for using the app:
 
 1. `frontend/src/main.ts` is still too large and UI-heavy.
 2. Some generated HTML in TypeScript still uses inline styling even though `index.html` styling was extracted.
-3. Web-worker offloading is **not** implemented yet and is intentionally deferred until profiling justifies it.
+3. Web-worker offloading is **not** implemented yet and remains intentionally deferred after profiling; `npm run profile:slider` shows the cached recompute core is already in the low-single-digit millisecond range on this machine, so remaining latency is more likely DOM / Plotly work.
 4. Frontend automated test coverage exists, but it is still small relative to the codebase.
 
 ## Current priorities

@@ -8,12 +8,12 @@
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "lint": "eslint src --max-warnings=0",
-    "test": "vitest run"
+    "test": "vitest run",
+    "profile:slider": "vite-node scripts/profile-slider-recompute.ts"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",
     "browser-fs-access": "^0.38.0",
-    "comlink": "^4.4",
     "leaflet": "^1.9.4"
   },
   "devDependencies": {
