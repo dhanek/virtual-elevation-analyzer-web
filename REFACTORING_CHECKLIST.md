@@ -16,7 +16,7 @@ Based on the revised refactoring plan validated against the current codebase.
 | 14 | ✅ Done | Simplify the misleading security layer | Replaced the misleading frontend `DataProtection` security wrapper with explicit file-validation helpers, removed runtime CSP injection and unload-time “secure memory wipe”, and reduced backend FIT validation to a small internal helper instead of an exported `SecurityValidator` API. |
 | 15 | ✅ Done | Split `backend/src/dem_processor.rs` into focused modules | Kept the public `DEMProcessor` API intact while splitting the large backend DEM module into `backend/src/dem_processor/{tiff_loader,geotransform,projection,sampler}.rs` plus a thin root file with shared types/tests. |
 | 16 | ✅ Done | Move CSS out of `frontend/index.html` | Extracted the large inline stylesheet into `frontend/src/styles/index.css`, linked it from `frontend/index.html`, and removed remaining inline `style` attributes from the HTML file. |
-| 17 | ⬜ Not started | Split and modernize the docs | Doc drift cleanup still pending. |
+| 17 | ✅ Done | Split and modernize the docs | Rewrote the stale top-level docs, added `ARCHITECTURE.md` and `ROADMAP.md`, refreshed `README.md` / `PROJECT_STATUS.md` / `DEPLOYMENT.md`, and converted `README-IMPLEMENTATION.md` into an explicit historical archive note. |
 | 18 | ⬜ Not started | Replace magic numbers with named, local constants | Still pending. |
 | 19 | ⬜ Not started | Remove lifecycle guard flags and write-only globals once mode lifecycle is encapsulated | Depends on steps 7–8. |
 | 20 | ⬜ Not started | Profile slider recompute; only then add a Web Worker if it is still needed | Intentionally deferred until after cleanup/profiling. |

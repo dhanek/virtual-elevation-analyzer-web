@@ -1,198 +1,80 @@
-# Virtual Elevation Analyzer - Project Status
+# Project Status
 
-## ✅ Implemented Features (Current State)
+Snapshot updated: 2026-04-12
 
-### Core Functionality
-- ✅ **FIT File Parsing** - Full implementation in Rust/WASM
-- ✅ **Virtual Elevation Calculation** - Complete with Robert Chung's algorithm
-- ✅ **GPS Lap Detection** - Multiple analysis types supported
-- ✅ **Real-time VE Analysis** - Interactive parameter adjustment
-- ✅ **Plotly.js Visualization** - VE plots, residuals, wind, and power plots
-- ✅ **Map Integration** - Leaflet with GPS track visualization
-- ✅ **Trim Controls** - Start/end trimming with real-time preview
-- ✅ **CdA/Crr Optimization** - Slider controls with live updates
-- ✅ **Wind Source Selection** - Constant wind, FIT file airspeed, and comparison mode
-- ✅ **Wind Indicator** - Visual overlay on map showing wind conditions
-- ✅ **Responsive UI** - Dieter Rams-inspired minimal design
-- ✅ **Data Security** - All processing happens locally in browser
-- ✅ **GitHub Pages Deployment** - Automated CI/CD workflow
+## Overall state
 
-### User Interface
-- ✅ **Section 1**: FIT File Upload with validation
-- ✅ **Section 2**: Analysis Parameters (compact, minimal design)
-- ✅ **Section 3**: Map Analysis & Lap Selection
-  - Lap selection with checkboxes
-  - Map visualization with trim markers
-  - GPS track overlay
-  - Wind direction indicator
-- ✅ **Section 4**: Virtual Elevation Analysis
-  - VE plot with synchronized residuals
-  - Wind speed analysis plot (dual y-axis)
-  - Speed & power plot (dual y-axis)
-  - Compact metrics display
-  - Tab switching between plots
-  - Save results functionality
+The application is functional, deployable, and under active internal cleanup.
 
-### Performance & Security
-- ✅ **WebAssembly Performance** - Fast numerical calculations
-- ✅ **Web Worker Integration** - Non-blocking UI
-- ✅ **Input Validation** - Secure FIT file processing
-- ✅ **Memory Management** - Efficient data handling
-- ✅ **No Server Communication** - Complete privacy
+### User-facing capabilities already in place
 
-## 🚧 Pending Implementation
+- FIT file loading and parsing in Rust/WASM
+- CSV activity loading and normalization into the same frontend activity model
+- Standard VE workflow for a selected activity slice
+- GPS-lap workflow with multi-lap VE, wind, power, and virtual-distance views
+- Out-and-back workflow with section-based VE, wind, power, and virtual-distance views
+- Map-based ride visualization and trim selection for GPS activities
+- Constant-wind and FIT-air-speed-driven analysis paths
+- Elevation correction via remote terrain tiles and local DEM files
+- Local persistence for parameters and stored analysis results
+- Screenshot/result export features in the UI
+- GitHub Pages deployment pipeline with backend tests and frontend check/lint/test/build
 
-### High Priority
-1. **Activity Parameter Persistence** (Phase 4.4)
-   - Save parameters per activity file using IndexedDB
-   - Auto-load saved parameters on file re-upload
-   - File hash-based parameter matching
-   - Parameter suggestions based on similar activities
+## Quality gates currently enforced
 
-2. **CSV/JSON Export**
-   - Export analysis results
-   - Export processed data
-   - Configurable export formats
+CI and local validation now cover:
 
-3. **DEM Data Integration** (Phase 4.1)
-   - Client-side elevation correction
-   - Tile-based DEM loading
-   - IndexedDB caching
-
-### Medium Priority
-4. **Enhanced Analysis Types**
-   - Out and Back analysis refinement
-   - GPS Gate analysis implementation
-   - Auto lap detection improvements
-
-5. **Optimization Features**
-   - CdA/Crr automatic optimization
-   - Multi-parameter optimization
-   - Result comparison view
-
-6. **User Experience**
-   - Tutorial/onboarding flow
-   - Keyboard shortcuts
-   - Drag-and-drop file upload
-   - Recent files list
-
-### Low Priority
-7. **Advanced Features**
-   - Multiple file comparison
-   - Historical trend analysis
-   - Advanced statistics
-   - Custom report generation
-
-## 📁 Project Structure
-
-```
-virtual-elevation-analyzer-web/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml          # GitHub Actions deployment
-├── backend/                    # Rust/WASM core
-│   ├── src/
-│   │   ├── lib.rs             # Main WASM entry point
-│   │   ├── fit_parser.rs      # FIT file parsing
-│   │   ├── virtual_elevation.rs  # VE calculations
-│   │   ├── security.rs        # Input validation
-│   │   └── utils.rs           # Helper functions
-│   ├── Cargo.toml
-│   └── pkg/                   # Generated WASM (gitignored)
-├── frontend/                   # TypeScript/Vite frontend
-│   ├── src/
-│   │   ├── main.ts            # Main application logic
-│   │   ├── components/
-│   │   │   ├── AnalysisParameters.ts
-│   │   │   ├── FitFileProcessor.ts
-│   │   │   └── MapVisualization.ts
-│   │   └── utils/
-│   │       ├── DataProtection.ts
-│   │       └── ViewportAdapter.ts
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── pkg/                   # WASM files (gitignored)
-├── dist/                       # Build output (gitignored)
-├── .gitignore
-├── DEPLOYMENT.md              # Deployment guide
-├── PROJECT_STATUS.md          # This file
-└── README.md                  # Original migration plan
-```
-
-## 🚀 Deployment
-
-**Live URL**: https://dhanek.github.io/virtual-elevation-analyzer-web/
-
-Automated deployment via GitHub Actions on every push to `main`.
-
-## 📊 Current vs Planned Features
-
-| Feature Category | Planned | Implemented | Percentage |
-|-----------------|---------|-------------|------------|
-| Core Algorithm | 5 | 5 | 100% |
-| FIT Processing | 4 | 4 | 100% |
-| Visualization | 6 | 6 | 100% |
-| Analysis Types | 4 | 3 | 75% |
-| UI/UX | 8 | 8 | 100% |
-| Data Persistence | 3 | 0 | 0% |
-| DEM Integration | 2 | 0 | 0% |
-| Export Features | 3 | 1 | 33% |
-
-**Overall Progress: ~75% Complete**
-
-## 🔧 Development Workflow
-
-### Build Commands
 ```bash
-# Build WASM module
-cd backend
-wasm-pack build --target web --out-dir ../frontend/pkg
-
-# Run development server
-cd frontend
-npm run dev
-
-# Build for production
-npm run build
+cd backend && cargo test --lib
+cd backend && wasm-pack build --target web --out-dir ../frontend/pkg
+cd frontend && npm run check
+cd frontend && npm run lint
+cd frontend && npm run test
+cd frontend && npm run build
 ```
 
-### Testing Locally
-1. Build WASM: `cd backend && wasm-pack build --target web --out-dir ../frontend/pkg`
-2. Start dev server: `cd frontend && npm run dev`
-3. Open browser to http://localhost:5173
+## Current architecture snapshot
 
-### Deploy to GitHub Pages
-1. Commit changes
-2. Push to `main` branch
-3. GitHub Actions automatically builds and deploys
+### Frontend
 
-## 🎯 Next Steps (Prioritized)
+The frontend has been partially decomposed from a single god-module into focused areas:
 
-1. **Implement Activity Parameter Persistence**
-   - Create `ActivityStorage` class in frontend
-   - Add IndexedDB integration
-   - Implement file hash-based parameter matching
+- `frontend/src/state/AppState.ts` — typed application state
+- `frontend/src/activity/ActivityLoader.ts` — FIT/CSV normalization
+- `frontend/src/analysis/*` — slice extraction, wind resolution, cached arrays, VE helpers
+- `frontend/src/modes/analysis/*` — standard / GPS-lap / out-and-back mode handlers
+- `frontend/src/plots/*` — pure figure/trace builders
+- `frontend/src/utils/*` — storage, DEM, weather, logging, validation helpers
+- `frontend/src/styles/index.css` — extracted stylesheet for the static shell
 
-2. **Add Export Functionality**
-   - CSV export for analysis results
-   - JSON export for raw data
-   - PNG export for plots
+The main remaining frontend structural issue is that `frontend/src/main.ts` still owns a large amount of DOM composition, HTML-string templating, and event wiring.
 
-3. **DEM Data Integration**
-   - Research client-side DEM tile sources
-   - Implement tile-based loading
-   - Add elevation correction toggle
+### Backend
 
-4. **Polish & Testing**
-   - Cross-browser testing
-   - Performance optimization
-   - User feedback integration
+The backend is organized around a small number of focused Rust/WASM modules:
 
-## 📝 Notes
+- `fit_parser.rs` — FIT parsing
+- `virtual_elevation.rs` — VE calculations and result types
+- `air_density.rs` — air-density calculations
+- `dem_processor.rs` + `dem_processor/*` — DEM loading, projection, and sampling
+- `security.rs` — small internal FIT validation helper
 
-- All emojis removed for Dieter Rams-inspired minimal design
-- Wind indicator shows on map when wind parameters are set
-- Section 2 redesigned for compact, functional layout
-- Deployment configured for GitHub Pages with automated CI/CD
-- .gitignore properly configured (reduced from 2000+ to 11 untracked files)
+The recent backend refactors already removed major duplication from `virtual_elevation.rs` and split the large DEM module into submodules.
+
+## Known gaps / active cleanup areas
+
+These are the main remaining engineering issues, not blockers for using the app:
+
+1. `frontend/src/main.ts` is still too large and UI-heavy.
+2. Some generated HTML in TypeScript still uses inline styling even though `index.html` styling was extracted.
+3. Web-worker offloading is **not** implemented yet and is intentionally deferred until profiling justifies it.
+4. Frontend automated test coverage exists, but it is still small relative to the codebase.
+
+## Current priorities
+
+Short-term priorities are tracked in:
+
+- [REFACTORING_CHECKLIST.md](REFACTORING_CHECKLIST.md)
+- [ROADMAP.md](ROADMAP.md)
+
+For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
