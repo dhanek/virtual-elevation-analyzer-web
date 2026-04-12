@@ -37,6 +37,7 @@ import {
     buildVirtualElevationFigures,
     buildWindSpeedFigure,
 } from './plots/StandardPlotBuilders';
+import { collectSelectionIndices, getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
 import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -2730,21 +2731,11 @@ function updateAnalyzeButton() {
 
 async function handleAnalyze() {
     const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
-    const isGpsLapMode = lapDetectionMode === 'GPS based lap splitting';
-    const isOutAndBackMode = lapDetectionMode === 'GPS based out and back';
+    const modeHandler = getAnalysisModeHandler(lapDetectionMode);
+    const selection = modeHandler.prepareSelection(appState);
 
-    // Check which lap/section selection to use
-    let effectiveSelectedItems: number[];
-    if (isOutAndBackMode) {
-        effectiveSelectedItems = appState.outAndBackSelectedSections;
-    } else if (isGpsLapMode) {
-        effectiveSelectedItems = appState.gpsSelectedLaps;
-    } else {
-        effectiveSelectedItems = appState.selectedLaps;
-    }
-
-    if (!appState.currentParameters || effectiveSelectedItems.length === 0) {
-        alert(isOutAndBackMode ? 'Please select sections and set parameters first.' : 'Please select laps and set parameters first.');
+    if (!appState.currentParameters || selection.selectedItems.length === 0) {
+        alert(selection.emptySelectionMessage);
         return;
     }
 
@@ -2753,85 +2744,37 @@ async function handleAnalyze() {
         return;
     }
 
-    // For GPS lap mode, validate we have detected laps
-    if (isGpsLapMode && appState.gpsDetectedLaps.length === 0) {
-        alert('Please set a GPS gate to detect laps first.');
-        return;
-    }
-
-    // For Out and Back mode, validate we have detected sections
-    if (isOutAndBackMode && appState.outAndBackSections.length === 0) {
-        alert('Please set both GPS gates to detect sections first.');
+    const validationMessage = modeHandler.validate(appState);
+    if (validationMessage) {
+        alert(validationMessage);
         return;
     }
 
     // Note: Auto-rho will be triggered AFTER VE analysis when trim sliders are created
     // (trim sliders don't exist yet at this point)
-
     try {
         showLoading('Preparing data for Virtual Elevation analysis...');
 
-        // Determine data ranges based on mode
-        let selectedLapData: any[];
-        let selectedLapIndexRanges: Array<{ startIdx: number; endIdx: number }> | null = null;
-        let selectedOutAndBackSections: OutAndBackSection[] | null = null;
-
-        if (isOutAndBackMode) {
-            // Out and Back mode: use detected section index ranges
-            selectedOutAndBackSections = appState.outAndBackSections.filter(section =>
-                appState.outAndBackSelectedSections.includes(section.sectionNumber)
-            );
-            // For VE analysis, we'll process outbound and inbound separately
-            // Create ranges for combined outbound+inbound data
-            selectedLapIndexRanges = [];
-            selectedOutAndBackSections.forEach(section => {
-                selectedLapIndexRanges!.push({
-                    startIdx: section.outboundStartIdx,
-                    endIdx: section.outboundEndIdx
-                });
-                selectedLapIndexRanges!.push({
-                    startIdx: section.inboundStartIdx,
-                    endIdx: section.inboundEndIdx
-                });
-            });
-            selectedLapData = selectedOutAndBackSections;
-            console.log('Out and Back mode - selected sections:', selectedOutAndBackSections);
-        } else if (isGpsLapMode) {
-            // GPS lap mode: use detected lap index ranges
-            const selectedGpsLaps = appState.gpsDetectedLaps.filter(lap =>
-                appState.gpsSelectedLaps.includes(lap.lapNumber)
-            );
-            selectedLapIndexRanges = selectedGpsLaps.map(lap => ({
-                startIdx: lap.startIdx,
-                endIdx: lap.endIdx
-            }));
-            // Create synthetic lap data for logging
-            selectedLapData = selectedGpsLaps;
-            console.log('GPS lap mode - selected lap index ranges:', selectedLapIndexRanges);
+        if (selection.mode === 'outAndBack') {
+            console.log('Out and Back mode - selected sections:', selection.outAndBackSections);
+        } else if (selection.mode === 'gpsLap') {
+            console.log('GPS lap mode - selected lap index ranges:', selection.indexRanges);
         } else {
-            // Normal mode: use FIT lap time ranges
-            selectedLapData = effectiveSelectedItems.map(lapNumber => appState.currentLaps[lapNumber - 1]);
-            console.log('Normal mode - selected lap data:', selectedLapData);
+            console.log('Normal mode - selected lap data:', selection.selectedEntries);
         }
 
-        // Debug: Check the full result structure
         console.log('appState.currentFitResult structure:', appState.currentFitResult);
         console.log('appState.currentFitResult keys:', appState.currentFitResult ? Object.keys(appState.currentFitResult) : 'null');
 
-        // Get unified data structure (works for both FIT and CSV)
         if (!appState.currentFitResult) {
             throw new Error('No data available for analysis');
         }
 
-        // Use appState.currentFitData which is either:
-        // - WASM FitData object (from FIT file)
-        // - JavaScript object with same structure (from CSV file)
         const fitData = appState.currentFitData || appState.currentFitResult.fit_data;
         if (!fitData) {
             throw new Error('No analysis data available');
         }
 
-        // Access data directly as properties (Float64Arrays), not as functions
         const allTimestamps = fitData.timestamps;
         const allPower = fitData.power;
         const allVelocity = fitData.velocity;
@@ -2863,74 +2806,42 @@ async function handleAnalyze() {
         const allAirDensity = fitData.air_density_data || [];
         const allTemperature = fitData.temperature || [];
 
-        // Check speed source
         const hasRoadSpeed = fitData.road_speed && (Array.from(fitData.road_speed) as number[]).some((v: number) => !isNaN(v) && v !== 0);
         const hasEnhancedSpeed = (Array.from(allVelocity) as number[]).some((v: number) => !isNaN(v) && v !== 0);
         if (hasRoadSpeed && hasEnhancedSpeed) {
             console.log('🚴 Found enhanced speed and road speed, prefer road speed');
         }
 
-        // Filter data points based on mode
-        let selectedLapTimeRanges: Array<{ start: number; end: number }> | null = null;
-        if (!isGpsLapMode) {
-            selectedLapTimeRanges = selectedLapData.map(lap => ({
-                start: lap.start_time,
-                end: lap.end_time
-            }));
-        }
+        const selectedIndices = collectSelectionIndices(selection, allTimestamps);
 
-        // Filter data points by selected lap ranges (time or index based)
-        let filteredTimestamps: number[] = [];
-        let filteredPower: number[] = [];
-        let filteredVelocity: number[] = [];
-        let filteredPositionLat: number[] = [];
-        let filteredPositionLong: number[] = [];
-        let filteredAltitude: number[] = [];
-        let filteredDistance: number[] = [];
-        let filteredWindSpeed: number[] = [];
-        let filteredAirDensity: number[] = [];
-        let filteredTemperature: number[] = [];
+        const filteredTimestamps: number[] = [];
+        const filteredPower: number[] = [];
+        const filteredVelocity: number[] = [];
+        const filteredPositionLat: number[] = [];
+        const filteredPositionLong: number[] = [];
+        const filteredAltitude: number[] = [];
+        const filteredDistance: number[] = [];
+        const filteredWindSpeed: number[] = [];
+        const filteredAirDensity: number[] = [];
+        const filteredTemperature: number[] = [];
 
-
-
-        for (let i = 0; i < allTimestamps.length; i++) {
-            let isInSelectedLap: boolean;
-
-            if ((isGpsLapMode || isOutAndBackMode) && selectedLapIndexRanges) {
-                // GPS lap mode or Out and Back mode: check if index falls within any selected index range
-                isInSelectedLap = selectedLapIndexRanges.some(range =>
-                    i >= range.startIdx && i <= range.endIdx
-                );
-            } else if (selectedLapTimeRanges) {
-                // Normal mode: check timestamp
-                const timestamp = allTimestamps[i];
-                isInSelectedLap = selectedLapTimeRanges.some(range =>
-                    timestamp >= range.start && timestamp <= range.end
-                );
-            } else {
-                isInSelectedLap = false;
-            }
-
-            if (isInSelectedLap) {
-                filteredTimestamps.push(allTimestamps[i]);
-                filteredPower.push(allPower[i]);
-                filteredVelocity.push(allVelocity[i]);
-                filteredPositionLat.push(allPositionLat[i]);
-                filteredPositionLong.push(allPositionLong[i]);
-                filteredAltitude.push(allAltitude[i]);
-                filteredDistance.push(allDistance[i]);
-                filteredWindSpeed.push(allWindSpeed[i]);
-                filteredAirDensity.push(allAirDensity[i] || 0);
-                filteredTemperature.push(allTemperature[i] || 0);
-
-            }
+        for (const index of selectedIndices) {
+            filteredTimestamps.push(allTimestamps[index]);
+            filteredPower.push(allPower[index]);
+            filteredVelocity.push(allVelocity[index]);
+            filteredPositionLat.push(allPositionLat[index]);
+            filteredPositionLong.push(allPositionLong[index]);
+            filteredAltitude.push(allAltitude[index]);
+            filteredDistance.push(allDistance[index]);
+            filteredWindSpeed.push(allWindSpeed[index]);
+            filteredAirDensity.push(allAirDensity[index] || 0);
+            filteredTemperature.push(allTemperature[index] || 0);
         }
 
         if (filteredTimestamps.length === 0) {
             throw new Error('No valid data points found in selected laps');
         }
 
-        // Check if we have sufficient power data
         const powerDataPoints = filteredPower.filter(p => p > 0).length;
         if (powerDataPoints < filteredTimestamps.length * 0.5) {
             console.warn(`Only ${powerDataPoints}/${filteredTimestamps.length} records have power data`);
@@ -2938,44 +2849,19 @@ async function handleAnalyze() {
 
         showLoading('Running Virtual Elevation calculation...');
 
-        // Check for per-datapoint air density (priority: FIT file column > environmental calculation > Weather API)
-        appState.currentRhoArray = null; // Reset global rho array
-
-        // PRIORITY 1: Use air_density from FIT file if available
+        appState.currentRhoArray = null;
         const hasAirDensityData = filteredAirDensity.length > 0 &&
             filteredAirDensity.some(rho => !isNaN(rho) && rho > 0);
 
         if (hasAirDensityData) {
             console.log('💨 Found air density data, using it for calculations');
             appState.currentRhoArray = filteredAirDensity;
-        }
-        // PRIORITY 2: Calculate from environmental data if available
-        else {
+        } else {
             const hasEnvironmentalData = fitData.temperature && fitData.humidity && fitData.pressure;
             if (hasEnvironmentalData) {
                 const fullRhoArray = calculateRhoArrayFromFitData(fitData);
-
                 if (fullRhoArray) {
-                    // Filter rho array to match selected laps (using same logic as main filter)
-                    appState.currentRhoArray = [];
-                    for (let i = 0; i < allTimestamps.length; i++) {
-                        let isInSelectedLap: boolean;
-                        if (isGpsLapMode && selectedLapIndexRanges) {
-                            isInSelectedLap = selectedLapIndexRanges.some(range =>
-                                i >= range.startIdx && i <= range.endIdx
-                            );
-                        } else if (selectedLapTimeRanges) {
-                            const timestamp = allTimestamps[i];
-                            isInSelectedLap = selectedLapTimeRanges.some(range =>
-                                timestamp >= range.start && timestamp <= range.end
-                            );
-                        } else {
-                            isInSelectedLap = false;
-                        }
-                        if (isInSelectedLap) {
-                            appState.currentRhoArray.push(fullRhoArray[i]);
-                        }
-                    }
+                    appState.currentRhoArray = selectedIndices.map(index => fullRhoArray[index]);
                     console.log('💨 Calculated air density from environmental data');
                 }
             } else {
@@ -2983,8 +2869,6 @@ async function handleAnalyze() {
             }
         }
 
-        // Create Virtual Elevation calculator with filtered data
-        // Use the rho array version if we have per-datapoint rho from CSV
         const calculator = appState.currentRhoArray
             ? create_ve_calculator_with_rho_array(
                 new Float64Array(filteredTimestamps),
@@ -2996,19 +2880,18 @@ async function handleAnalyze() {
                 new Float64Array(filteredDistance),
                 new Float64Array(filteredWindSpeed),
                 new Float64Array(appState.currentRhoArray),
-                // Parameters
-                appState.currentParameters!.system_mass,
-                appState.currentParameters!.rho,
-                appState.currentParameters!.eta,
-                appState.currentParameters!.cda,
-                appState.currentParameters!.crr,
-                appState.currentParameters!.cda_min,
-                appState.currentParameters!.cda_max,
-                appState.currentParameters!.crr_min,
-                appState.currentParameters!.crr_max,
-                appState.currentParameters!.wind_speed,
-                appState.currentParameters!.wind_direction,
-                appState.currentParameters!.velodrome
+                appState.currentParameters.system_mass,
+                appState.currentParameters.rho,
+                appState.currentParameters.eta,
+                appState.currentParameters.cda,
+                appState.currentParameters.crr,
+                appState.currentParameters.cda_min,
+                appState.currentParameters.cda_max,
+                appState.currentParameters.crr_min,
+                appState.currentParameters.crr_max,
+                appState.currentParameters.wind_speed,
+                appState.currentParameters.wind_direction,
+                appState.currentParameters.velodrome
             )
             : create_ve_calculator(
                 new Float64Array(filteredTimestamps),
@@ -3019,108 +2902,84 @@ async function handleAnalyze() {
                 new Float64Array(filteredAltitude),
                 new Float64Array(filteredDistance),
                 new Float64Array(filteredWindSpeed),
-                // Parameters
-                appState.currentParameters!.system_mass,
-                appState.currentParameters!.rho,
-                appState.currentParameters!.eta,
-                appState.currentParameters!.cda,
-                appState.currentParameters!.crr,
-                appState.currentParameters!.cda_min,
-                appState.currentParameters!.cda_max,
-                appState.currentParameters!.crr_min,
-                appState.currentParameters!.crr_max,
-                appState.currentParameters!.wind_speed,
-                appState.currentParameters!.wind_direction,
-                appState.currentParameters!.velodrome
+                appState.currentParameters.system_mass,
+                appState.currentParameters.rho,
+                appState.currentParameters.eta,
+                appState.currentParameters.cda,
+                appState.currentParameters.crr,
+                appState.currentParameters.cda_min,
+                appState.currentParameters.cda_max,
+                appState.currentParameters.crr_min,
+                appState.currentParameters.crr_max,
+                appState.currentParameters.wind_speed,
+                appState.currentParameters.wind_direction,
+                appState.currentParameters.velodrome
             );
 
-        // Use provided CdA and Crr values, or defaults for optimization
-        const cda = appState.currentParameters!.cda ?? 0.3; // Use middle of range if optimizing
-        const crr = appState.currentParameters!.crr ?? 0.008; // Use middle of range if optimizing
-
-        // Initial trim values - full dataset
+        const cda = appState.currentParameters.cda ?? 0.3;
+        const crr = appState.currentParameters.crr ?? 0.008;
         const trimStart = 0;
         const trimEnd = filteredTimestamps.length - 1;
-
         const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
-        // If data has CdA reference data, filter it for the selected laps
-        // (validation will be calculated dynamically when plots update)
         let filteredCdaReference: number[] | null = null;
         if (fitData.cda_reference) {
             console.log('📊 Data has CdA reference - will enable validation tab');
-
-            // Filter CdA reference to match selected laps (using same logic as main filter)
             const fullCdaReference = fitData.cda_reference;
-            filteredCdaReference = [];
-            for (let i = 0; i < allTimestamps.length; i++) {
-                let isInSelectedLap: boolean;
-                if (isGpsLapMode && selectedLapIndexRanges) {
-                    isInSelectedLap = selectedLapIndexRanges.some(range =>
-                        i >= range.startIdx && i <= range.endIdx
-                    );
-                } else if (selectedLapTimeRanges) {
-                    const timestamp = allTimestamps[i];
-                    isInSelectedLap = selectedLapTimeRanges.some(range =>
-                        timestamp >= range.start && timestamp <= range.end
-                    );
-                } else {
-                    isInSelectedLap = false;
-                }
-                if (isInSelectedLap) {
-                    filteredCdaReference.push(fullCdaReference[i]);
-                }
-            }
+            filteredCdaReference = selectedIndices.map(index => fullCdaReference[index]);
         }
 
         hideLoading();
 
-        // Store filtered position data for map trimming
         appState.filteredVEData = {
             positionLat: filteredPositionLat,
-            positionLong: filteredPositionLong
+            positionLong: filteredPositionLong,
         };
 
-        // Store GPS lap mode state globally for use in VE analysis
-        appState.isGpsLapModeActive = isGpsLapMode && selectedLapIndexRanges !== null;
-        appState.currentGpsLapIndexRanges = selectedLapIndexRanges;
+        modeHandler.syncState(appState, selection);
 
-        // Show VE analysis based on mode
-        if (isOutAndBackMode && selectedOutAndBackSections) {
-            // Out and Back mode: use special visualization with mirrored inbound
-            showOutAndBackVEAnalysis(
-                selectedOutAndBackSections,
-                appState.currentFitData,
-                appState.currentParameters,
-                defaultAirSpeedOffset
-            );
-        } else if (isGpsLapMode && selectedLapIndexRanges) {
-            // GPS lap mode: use stacked lap visualization
-            showGpsLapVEAnalysis(
-                selectedLapIndexRanges,
-                appState.currentFitData,
-                appState.currentParameters,
-                defaultAirSpeedOffset
-            );
-        } else {
-            // Normal mode: use standard VE analysis
-            showVirtualElevationAnalysisInline(
-                result,
-                effectiveSelectedItems,
-            filteredTimestamps,
-            filteredPower,
-            filteredVelocity,
-            filteredPositionLat,
-            filteredPositionLong,
-            filteredAltitude,
-            filteredDistance,
-            filteredWindSpeed,
-            filteredTemperature,
-            filteredCdaReference,
-            defaultAirSpeedOffset
-            );
-        }
-
+        await modeHandler.render({
+            appState,
+            selection,
+            fitData,
+            params: appState.currentParameters,
+            defaultAirSpeedOffset,
+            initialResult: result,
+            filteredData: {
+                timestamps: filteredTimestamps,
+                power: filteredPower,
+                velocity: filteredVelocity,
+                positionLat: filteredPositionLat,
+                positionLong: filteredPositionLong,
+                altitude: filteredAltitude,
+                distance: filteredDistance,
+                windSpeed: filteredWindSpeed,
+                temperature: filteredTemperature,
+                cdaReference: filteredCdaReference,
+            },
+            callbacks: {
+                standard: ({ initialResult, analyzedLaps, timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, temperature, cdaReference, defaultAirSpeedOffset }) =>
+                    showVirtualElevationAnalysisInline(
+                        initialResult,
+                        analyzedLaps,
+                        timestamps,
+                        power,
+                        velocity,
+                        positionLat,
+                        positionLong,
+                        altitude,
+                        distance,
+                        windSpeed,
+                        temperature,
+                        cdaReference,
+                        defaultAirSpeedOffset,
+                    ),
+                gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
+                    showGpsLapVEAnalysis(lapIndexRanges, fitData, params, defaultAirSpeedOffset),
+                outAndBack: ({ sections, fitData, params, defaultAirSpeedOffset }) =>
+                    showOutAndBackVEAnalysis(sections, fitData, params, defaultAirSpeedOffset),
+            },
+        });
     } catch (err) {
         console.error('Virtual Elevation analysis failed:', err);
         hideLoading();
