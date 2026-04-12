@@ -175,6 +175,13 @@ pub struct VirtualElevationCalculator {
     air_speed_calibration: f64, // air_speed multiplier (1.0 = no adjustment, 1.1 = +10%, 0.9 = -10%)
 }
 
+struct VirtualSlopeResult {
+    virtual_slope: Vec<f64>,
+    acceleration: Vec<f64>,
+    effective_wind: Vec<f64>,
+    apparent_velocity: Vec<f64>,
+}
+
 #[wasm_bindgen]
 impl VirtualElevationCalculator {
     #[wasm_bindgen(constructor)]
@@ -408,55 +415,24 @@ impl VirtualElevationCalculator {
         (vd_wind, vd_ground, vd_diff_percent)
     }
 
-    /// Calculate virtual slope
-    fn calculate_virtual_slope(&self, cda: f64, crr: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let acceleration = self.calculate_acceleration();
-        let effective_wind = self.calculate_effective_wind();
-        let apparent_velocity = self.get_apparent_velocity(&effective_wind);
-
-        let mut slope = Vec::new();
-
-        for i in 0..self.data.velocity.len() {
-            let v = self.data.velocity[i].max(0.001); // Avoid division by zero
-            let w = self.data.power[i] * self.params.eta;
-            let a = acceleration[i];
-            let va = apparent_velocity[i];
-
-            // Use per-datapoint rho if available, otherwise use the parameter value
-            let rho = self
-                .data
-                .rho_array
-                .as_ref()
-                .and_then(|arr| arr.get(i).copied())
-                .unwrap_or(self.params.rho);
-
-            // Virtual slope calculation (Robert Chung's formula)
-            let virtual_slope = (w / (v * self.params.system_mass * 9.807))
-                - (cda * rho * va.powi(2) / (2.0 * self.params.system_mass * 9.807))
-                - crr
-                - (a / 9.807);
-
-            slope.push(if virtual_slope.is_finite() {
-                virtual_slope
-            } else {
-                0.0
-            });
-        }
-
-        (slope, effective_wind, apparent_velocity)
+    fn resolve_cda(base_cda: f64, cda_array: Option<&[f64]>, index: usize) -> f64 {
+        cda_array
+            .and_then(|arr| arr.get(index).copied())
+            .filter(|value| value.is_finite())
+            .unwrap_or(base_cda)
     }
 
-    /// Calculate virtual slope with per-datapoint CdA array
-    fn calculate_virtual_slope_with_cda_array(
+    fn calculate_virtual_slope_impl(
         &self,
-        cda_array: &[f64],
+        base_cda: f64,
+        cda_array: Option<&[f64]>,
         crr: f64,
-    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    ) -> VirtualSlopeResult {
         let acceleration = self.calculate_acceleration();
         let effective_wind = self.calculate_effective_wind();
         let apparent_velocity = self.get_apparent_velocity(&effective_wind);
 
-        let mut slope = Vec::new();
+        let mut virtual_slope = Vec::with_capacity(self.data.velocity.len());
 
         for i in 0..self.data.velocity.len() {
             let v = self.data.velocity[i].max(0.001); // Avoid division by zero
@@ -471,28 +447,75 @@ impl VirtualElevationCalculator {
                 .as_ref()
                 .and_then(|arr| arr.get(i).copied())
                 .unwrap_or(self.params.rho);
-
-            // Use per-datapoint CdA from array, handle NaN values
-            let cda = cda_array
-                .get(i)
-                .copied()
-                .filter(|&x| x.is_finite())
-                .unwrap_or(0.3); // Default to 0.3 if missing or NaN
+            let cda = Self::resolve_cda(base_cda, cda_array, i);
 
             // Virtual slope calculation (Robert Chung's formula)
-            let virtual_slope = (w / (v * self.params.system_mass * 9.807))
+            let slope = (w / (v * self.params.system_mass * 9.807))
                 - (cda * rho * va.powi(2) / (2.0 * self.params.system_mass * 9.807))
                 - crr
                 - (a / 9.807);
 
-            slope.push(if virtual_slope.is_finite() {
-                virtual_slope
-            } else {
-                0.0
-            });
+            virtual_slope.push(if slope.is_finite() { slope } else { 0.0 });
         }
 
-        (slope, effective_wind, apparent_velocity)
+        VirtualSlopeResult {
+            virtual_slope,
+            acceleration,
+            effective_wind,
+            apparent_velocity,
+        }
+    }
+
+    fn build_virtual_elevation(&self, virtual_slope: &[f64]) -> Vec<f64> {
+        let mut virtual_elevation = Vec::with_capacity(virtual_slope.len());
+        let mut cumulative_elevation = 0.0;
+
+        for (&velocity, &slope) in self.data.velocity.iter().zip(virtual_slope.iter()) {
+            cumulative_elevation += velocity * self.dt * slope.atan().sin();
+            virtual_elevation.push(cumulative_elevation);
+        }
+
+        virtual_elevation
+    }
+
+    fn calculate_virtual_elevation_impl(
+        &self,
+        base_cda: f64,
+        cda_array: Option<&[f64]>,
+        crr: f64,
+        trim_start: usize,
+        trim_end: usize,
+    ) -> VEResult {
+        let VirtualSlopeResult {
+            virtual_slope,
+            acceleration,
+            effective_wind,
+            apparent_velocity,
+        } = self.calculate_virtual_slope_impl(base_cda, cda_array, crr);
+        let virtual_elevation = self.build_virtual_elevation(&virtual_slope);
+
+        // Calculate metrics if actual elevation is available
+        let (r2, rmse, ve_elevation_diff, actual_elevation_diff) =
+            self.calculate_metrics(&virtual_elevation, trim_start, trim_end);
+
+        // Calculate virtual distances within trim region
+        let (virtual_distance_air, virtual_distance_ground, vd_difference_percent) =
+            self.calculate_virtual_distances(trim_start, trim_end);
+
+        VEResult {
+            virtual_elevation,
+            virtual_slope,
+            acceleration,
+            effective_wind,
+            apparent_velocity,
+            r2,
+            rmse,
+            ve_elevation_diff,
+            actual_elevation_diff,
+            virtual_distance_air,
+            virtual_distance_ground,
+            vd_difference_percent,
+        }
     }
 
     /// Calculate virtual elevation profile
@@ -504,49 +527,7 @@ impl VirtualElevationCalculator {
         trim_start: usize,
         trim_end: usize,
     ) -> VEResult {
-        let (virtual_slope, effective_wind, apparent_velocity) =
-            self.calculate_virtual_slope(cda, crr);
-        let acceleration = self.calculate_acceleration();
-
-        // Calculate elevation changes
-        let mut delta_elevation = Vec::new();
-        for i in 0..virtual_slope.len() {
-            let v = self.data.velocity[i];
-            let slope = virtual_slope[i];
-            let delta_elev = v * self.dt * slope.atan().sin();
-            delta_elevation.push(delta_elev);
-        }
-
-        // Cumulative sum to get elevation profile
-        let mut virtual_elevation = Vec::new();
-        let mut cumsum = 0.0;
-        for delta in &delta_elevation {
-            cumsum += delta;
-            virtual_elevation.push(cumsum);
-        }
-
-        // Calculate metrics if actual elevation is available
-        let (r2, rmse, ve_elevation_diff, actual_elevation_diff) =
-            self.calculate_metrics(&virtual_elevation, trim_start, trim_end);
-
-        // Calculate virtual distances within trim region
-        let (virtual_distance_air, virtual_distance_ground, vd_difference_percent) =
-            self.calculate_virtual_distances(trim_start, trim_end);
-
-        VEResult {
-            virtual_elevation,
-            virtual_slope,
-            acceleration,
-            effective_wind,
-            apparent_velocity,
-            r2,
-            rmse,
-            ve_elevation_diff,
-            actual_elevation_diff,
-            virtual_distance_air,
-            virtual_distance_ground,
-            vd_difference_percent,
-        }
+        self.calculate_virtual_elevation_impl(cda, None, crr, trim_start, trim_end)
     }
 
     /// Calculate virtual elevation profile with per-datapoint CdA array
@@ -558,49 +539,7 @@ impl VirtualElevationCalculator {
         trim_start: usize,
         trim_end: usize,
     ) -> VEResult {
-        let (virtual_slope, effective_wind, apparent_velocity) =
-            self.calculate_virtual_slope_with_cda_array(cda_array, crr);
-        let acceleration = self.calculate_acceleration();
-
-        // Calculate elevation changes
-        let mut delta_elevation = Vec::new();
-        for i in 0..virtual_slope.len() {
-            let v = self.data.velocity[i];
-            let slope = virtual_slope[i];
-            let delta_elev = v * self.dt * slope.atan().sin();
-            delta_elevation.push(delta_elev);
-        }
-
-        // Cumulative sum to get elevation profile
-        let mut virtual_elevation = Vec::new();
-        let mut cumsum = 0.0;
-        for delta in &delta_elevation {
-            cumsum += delta;
-            virtual_elevation.push(cumsum);
-        }
-
-        // Calculate metrics if actual elevation is available
-        let (r2, rmse, ve_elevation_diff, actual_elevation_diff) =
-            self.calculate_metrics(&virtual_elevation, trim_start, trim_end);
-
-        // Calculate virtual distances within trim region
-        let (virtual_distance_air, virtual_distance_ground, vd_difference_percent) =
-            self.calculate_virtual_distances(trim_start, trim_end);
-
-        VEResult {
-            virtual_elevation,
-            virtual_slope,
-            acceleration,
-            effective_wind,
-            apparent_velocity,
-            r2,
-            rmse,
-            ve_elevation_diff,
-            actual_elevation_diff,
-            virtual_distance_air,
-            virtual_distance_ground,
-            vd_difference_percent,
-        }
+        self.calculate_virtual_elevation_impl(0.3, Some(cda_array), crr, trim_start, trim_end)
     }
 
     /// Calculate R², RMSE and elevation differences within trim region
@@ -703,63 +642,7 @@ impl VirtualElevationCalculator {
     }
 }
 
-/// Helper function to create VE calculator from JS data
-#[wasm_bindgen]
-pub fn create_ve_calculator(
-    // Data arrays
-    timestamps: Vec<f64>,
-    power: Vec<f64>,
-    velocity: Vec<f64>,
-    position_lat: Vec<f64>,
-    position_long: Vec<f64>,
-    altitude: Vec<f64>,
-    distance: Vec<f64>,
-    wind_speed: Vec<f64>,
-    // Parameters
-    system_mass: f64,
-    rho: f64,
-    eta: f64,
-    cda: Option<f64>,
-    crr: Option<f64>,
-    cda_min: f64,
-    cda_max: f64,
-    crr_min: f64,
-    crr_max: f64,
-    wind_speed_param: Option<f64>,
-    wind_direction: Option<f64>,
-    velodrome: bool,
-) -> VirtualElevationCalculator {
-    let data = VEData::new(
-        timestamps,
-        power,
-        velocity,
-        position_lat,
-        position_long,
-        altitude,
-        distance,
-        wind_speed,
-    );
-
-    let mut params = VEParameters::new();
-    params.system_mass = system_mass;
-    params.rho = rho;
-    params.eta = eta;
-    params.cda = cda;
-    params.crr = crr;
-    params.cda_min = cda_min;
-    params.cda_max = cda_max;
-    params.crr_min = crr_min;
-    params.crr_max = crr_max;
-    params.wind_speed = wind_speed_param;
-    params.wind_direction = wind_direction;
-    params.velodrome = velodrome;
-
-    VirtualElevationCalculator::new(data, params)
-}
-
-/// Helper function to create VE calculator from JS data with optional per-datapoint rho array
-#[wasm_bindgen]
-pub fn create_ve_calculator_with_rho_array(
+fn create_ve_calculator_impl(
     // Data arrays
     timestamps: Vec<f64>,
     power: Vec<f64>,
@@ -796,26 +679,130 @@ pub fn create_ve_calculator_with_rho_array(
         wind_speed,
     );
 
-    // Set rho array if provided
-    if let Some(rho_arr) = rho_array {
-        data.rho_array = Some(rho_arr);
+    if let Some(rho_array) = rho_array {
+        data.set_rho_array(rho_array);
     }
 
-    let mut params = VEParameters::new();
-    params.system_mass = system_mass;
-    params.rho = rho;
-    params.eta = eta;
-    params.cda = cda;
-    params.crr = crr;
-    params.cda_min = cda_min;
-    params.cda_max = cda_max;
-    params.crr_min = crr_min;
-    params.crr_max = crr_max;
-    params.wind_speed = wind_speed_param;
-    params.wind_direction = wind_direction;
-    params.velodrome = velodrome;
+    let params = VEParameters {
+        system_mass,
+        rho,
+        eta,
+        cda,
+        crr,
+        cda_min,
+        cda_max,
+        crr_min,
+        crr_max,
+        wind_speed: wind_speed_param,
+        wind_direction,
+        velodrome,
+    };
 
     VirtualElevationCalculator::new(data, params)
+}
+
+/// Helper function to create VE calculator from JS data
+#[wasm_bindgen]
+pub fn create_ve_calculator(
+    // Data arrays
+    timestamps: Vec<f64>,
+    power: Vec<f64>,
+    velocity: Vec<f64>,
+    position_lat: Vec<f64>,
+    position_long: Vec<f64>,
+    altitude: Vec<f64>,
+    distance: Vec<f64>,
+    wind_speed: Vec<f64>,
+    // Parameters
+    system_mass: f64,
+    rho: f64,
+    eta: f64,
+    cda: Option<f64>,
+    crr: Option<f64>,
+    cda_min: f64,
+    cda_max: f64,
+    crr_min: f64,
+    crr_max: f64,
+    wind_speed_param: Option<f64>,
+    wind_direction: Option<f64>,
+    velodrome: bool,
+) -> VirtualElevationCalculator {
+    create_ve_calculator_impl(
+        timestamps,
+        power,
+        velocity,
+        position_lat,
+        position_long,
+        altitude,
+        distance,
+        wind_speed,
+        None,
+        system_mass,
+        rho,
+        eta,
+        cda,
+        crr,
+        cda_min,
+        cda_max,
+        crr_min,
+        crr_max,
+        wind_speed_param,
+        wind_direction,
+        velodrome,
+    )
+}
+
+/// Helper function to create VE calculator from JS data with optional per-datapoint rho array
+#[wasm_bindgen]
+pub fn create_ve_calculator_with_rho_array(
+    // Data arrays
+    timestamps: Vec<f64>,
+    power: Vec<f64>,
+    velocity: Vec<f64>,
+    position_lat: Vec<f64>,
+    position_long: Vec<f64>,
+    altitude: Vec<f64>,
+    distance: Vec<f64>,
+    wind_speed: Vec<f64>,
+    // Optional rho array (if None, uses the single rho parameter)
+    rho_array: Option<Vec<f64>>,
+    // Parameters
+    system_mass: f64,
+    rho: f64,
+    eta: f64,
+    cda: Option<f64>,
+    crr: Option<f64>,
+    cda_min: f64,
+    cda_max: f64,
+    crr_min: f64,
+    crr_max: f64,
+    wind_speed_param: Option<f64>,
+    wind_direction: Option<f64>,
+    velodrome: bool,
+) -> VirtualElevationCalculator {
+    create_ve_calculator_impl(
+        timestamps,
+        power,
+        velocity,
+        position_lat,
+        position_long,
+        altitude,
+        distance,
+        wind_speed,
+        rho_array,
+        system_mass,
+        rho,
+        eta,
+        cda,
+        crr,
+        cda_min,
+        cda_max,
+        crr_min,
+        crr_max,
+        wind_speed_param,
+        wind_direction,
+        velodrome,
+    )
 }
 
 // ============================================================================
@@ -1193,5 +1180,102 @@ mod tests {
         assert_eq!(result.virtual_distance_air(), 0.0);
         assert_eq!(result.virtual_distance_ground(), 0.0);
         assert_eq!(result.vd_difference_percent(), 0.0);
+    }
+
+    /// A uniform per-datapoint CdA array should produce the same VE profile as
+    /// the scalar-CdA path.
+    #[test]
+    fn uniform_cda_array_matches_scalar_cda() {
+        let data = constant_ride(steady_state_power(), 100.0, vec![0.0; N]);
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        let scalar = calc.calculate_virtual_elevation(CDA, CRR, 0, N - 1);
+
+        let cda_array = vec![CDA; N];
+        let array = calc.calculate_virtual_elevation_with_cda_array(&cda_array, CRR, 0, N - 1);
+
+        let scalar_ve = scalar.virtual_elevation();
+        let array_ve = array.virtual_elevation();
+        assert_eq!(scalar_ve.len(), array_ve.len());
+        for (i, (&scalar_value, &array_value)) in scalar_ve.iter().zip(array_ve.iter()).enumerate()
+        {
+            assert!(
+                (scalar_value - array_value).abs() < 1e-9,
+                "uniform CdA array should match scalar CdA at i={}: {} vs {}",
+                i,
+                scalar_value,
+                array_value
+            );
+        }
+    }
+
+    /// A constant per-datapoint rho array should match the single-rho helper.
+    #[test]
+    fn constant_rho_array_matches_scalar_rho() {
+        let params = reference_params();
+        let data = constant_ride(steady_state_power(), 100.0, vec![0.0; N]);
+
+        let scalar = create_ve_calculator(
+            data.timestamps.clone(),
+            data.power.clone(),
+            data.velocity.clone(),
+            data.position_lat.clone(),
+            data.position_long.clone(),
+            data.altitude.clone(),
+            data.distance.clone(),
+            data.wind_speed.clone(),
+            params.system_mass,
+            params.rho,
+            params.eta,
+            params.cda,
+            params.crr,
+            params.cda_min,
+            params.cda_max,
+            params.crr_min,
+            params.crr_max,
+            params.wind_speed,
+            params.wind_direction,
+            params.velodrome,
+        )
+        .calculate_virtual_elevation(CDA, CRR, 0, N - 1);
+
+        let with_rho_array = create_ve_calculator_with_rho_array(
+            data.timestamps.clone(),
+            data.power.clone(),
+            data.velocity.clone(),
+            data.position_lat.clone(),
+            data.position_long.clone(),
+            data.altitude.clone(),
+            data.distance.clone(),
+            data.wind_speed.clone(),
+            Some(vec![RHO; N]),
+            params.system_mass,
+            params.rho,
+            params.eta,
+            params.cda,
+            params.crr,
+            params.cda_min,
+            params.cda_max,
+            params.crr_min,
+            params.crr_max,
+            params.wind_speed,
+            params.wind_direction,
+            params.velodrome,
+        )
+        .calculate_virtual_elevation(CDA, CRR, 0, N - 1);
+
+        let scalar_ve = scalar.virtual_elevation();
+        let rho_array_ve = with_rho_array.virtual_elevation();
+        assert_eq!(scalar_ve.len(), rho_array_ve.len());
+        for (i, (&scalar_value, &rho_array_value)) in
+            scalar_ve.iter().zip(rho_array_ve.iter()).enumerate()
+        {
+            assert!(
+                (scalar_value - rho_array_value).abs() < 1e-9,
+                "constant rho array should match scalar rho at i={}: {} vs {}",
+                i,
+                scalar_value,
+                rho_array_value
+            );
+        }
     }
 }
