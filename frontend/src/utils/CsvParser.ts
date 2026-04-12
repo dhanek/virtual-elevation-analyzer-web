@@ -1,3 +1,4 @@
+import { log } from './log';
 /**
  * CSV Parser for Gibli Aerosensor data
  * Parses CSV files with cycling sensor data and converts to unified format
@@ -89,7 +90,7 @@ export class GibliCsvParser {
         const rows = lines.slice(1).map((line, index) => {
             const values = line.split(',');
             if (values.length !== header.length) {
-                console.warn(`Row ${index + 2} has ${values.length} columns, expected ${header.length}`);
+                log.warn(`Row ${index + 2} has ${values.length} columns, expected ${header.length}`);
             }
             return values;
         });

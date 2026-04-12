@@ -6,6 +6,7 @@
 import { DEMManager } from './DEMManager';
 import { DEMSourceType } from './RemoteDEMConfig';
 import { RemoteDEMResult, latLonToTileXY } from './RemoteDEMService';
+import { log } from './log';
 
 export interface DEMSourceResult {
     source: DEMSourceType;
@@ -89,10 +90,10 @@ export class MultiDEMManager {
                     await mgr.loadFromArrayBuffer(tile.data, tile.name, worldFile, prjFile);
                     this.awsTileManagers.push({ manager: mgr, z, x, y });
                 } catch (err) {
-                    console.warn(`Failed to load AWS tile ${tile.name}:`, err);
+                    log.warn(`Failed to load AWS tile ${tile.name}:`, err);
                 }
             }
-            console.log(`AWS Terrain: loaded ${this.awsTileManagers.length}/${result.tiles.length} tiles`);
+            log.debug(`AWS Terrain: loaded ${this.awsTileManagers.length}/${result.tiles.length} tiles`);
         }
     }
 
@@ -119,7 +120,7 @@ export class MultiDEMManager {
                     bounds: otoMgr.getDEMBounds(),
                 });
             } catch (err) {
-                console.error('OpenTopography elevation correction failed:', err);
+                log.error('OpenTopography elevation correction failed:', err);
             }
         }
 
@@ -129,7 +130,7 @@ export class MultiDEMManager {
                 const result = this.correctWithAWSTiles(lats, lons, fallbackAltitudes);
                 results.set('aws-terrain', result);
             } catch (err) {
-                console.error('AWS Terrain elevation correction failed:', err);
+                log.error('AWS Terrain elevation correction failed:', err);
             }
         }
 

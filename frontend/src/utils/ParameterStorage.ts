@@ -1,4 +1,5 @@
 import { AnalysisParameters } from '../components/AnalysisParameters';
+import { log } from './log';
 
 interface LapSettings {
     trimStart: number;
@@ -54,7 +55,7 @@ export class ParameterStorage {
             const request = indexedDB.open(this.dbName, 3);
 
             request.onerror = () => {
-                console.error('❌ IndexedDB failed to open:', request.error);
+                log.error('❌ IndexedDB failed to open:', request.error);
                 reject(request.error);
             };
 
@@ -96,7 +97,7 @@ export class ParameterStorage {
                 // Migrate from version 2 to 3: airSpeedCalibration field added to LapSettings
                 // No migration needed - the field is optional and will be undefined for old records
                 if (oldVersion < 3) {
-                    console.log('✅ Migrated to version 3: airSpeedCalibration support added');
+                    log.debug('✅ Migrated to version 3: airSpeedCalibration support added');
                 }
             };
         });
@@ -130,7 +131,7 @@ export class ParameterStorage {
      */
     async saveParameters(fileHash: string, parameters: AnalysisParameters, fileName?: string): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot save parameters');
+            log.warn('IndexedDB not initialized, cannot save parameters');
             return;
         }
 
@@ -164,13 +165,13 @@ export class ParameterStorage {
             };
 
                 request.onerror = () => {
-                    console.error('❌ Failed to save parameters:', request.error);
+                    log.error('❌ Failed to save parameters:', request.error);
                     reject(request.error);
                 };
             };
 
             getRequest.onerror = () => {
-                console.error('❌ Failed to get existing data:', getRequest.error);
+                log.error('❌ Failed to get existing data:', getRequest.error);
                 reject(getRequest.error);
             };
         });
@@ -181,7 +182,7 @@ export class ParameterStorage {
      */
     async loadParameters(fileHash: string): Promise<AnalysisParameters | null> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot load parameters');
+            log.warn('IndexedDB not initialized, cannot load parameters');
             return null;
         }
 
@@ -201,7 +202,7 @@ export class ParameterStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to load parameters:', request.error);
+                log.error('❌ Failed to load parameters:', request.error);
                 reject(request.error);
             };
         });
@@ -223,7 +224,7 @@ export class ParameterStorage {
             };
 
             request.onerror = () => {
-                console.error('Failed to get all files:', request.error);
+                log.error('Failed to get all files:', request.error);
                 reject(request.error);
             };
         });
@@ -261,7 +262,7 @@ export class ParameterStorage {
             if (deleteCount > 0) {
             }
         } catch (error) {
-            console.error('Cleanup failed:', error);
+            log.error('Cleanup failed:', error);
         }
     }
 
@@ -281,7 +282,7 @@ export class ParameterStorage {
             };
 
             request.onerror = () => {
-                console.error('Failed to clear parameters:', request.error);
+                log.error('Failed to clear parameters:', request.error);
                 reject(request.error);
             };
         });
@@ -306,7 +307,7 @@ export class ParameterStorage {
         settings: LapSettings
     ): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot save lap settings');
+            log.warn('IndexedDB not initialized, cannot save lap settings');
             return;
         }
 
@@ -322,7 +323,7 @@ export class ParameterStorage {
                 let existingData = getRequest.result as StoredParameters | undefined;
 
                 if (!existingData) {
-                    console.warn('⚠️ No existing data found for file, creating default entry for lap settings');
+                    log.warn('⚠️ No existing data found for file, creating default entry for lap settings');
                     // Create a minimal entry with default parameters
                     existingData = {
                         fileHash,
@@ -365,13 +366,13 @@ export class ParameterStorage {
                 };
 
                 putRequest.onerror = () => {
-                    console.error('❌ Failed to save lap settings:', putRequest.error);
+                    log.error('❌ Failed to save lap settings:', putRequest.error);
                     reject(putRequest.error);
                 };
             };
 
             getRequest.onerror = () => {
-                console.error('❌ Failed to get existing data:', getRequest.error);
+                log.error('❌ Failed to get existing data:', getRequest.error);
                 reject(getRequest.error);
             };
         });
@@ -382,7 +383,7 @@ export class ParameterStorage {
      */
     async loadLapSettings(fileHash: string, selectedLaps: number[]): Promise<LapSettings | null> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot load lap settings');
+            log.warn('IndexedDB not initialized, cannot load lap settings');
             return null;
         }
 
@@ -403,7 +404,7 @@ export class ParameterStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to load lap settings:', request.error);
+                log.error('❌ Failed to load lap settings:', request.error);
                 reject(request.error);
             };
         });
@@ -418,7 +419,7 @@ export class ParameterStorage {
         markerSettings: GpsMarkerSettings
     ): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot save GPS marker settings');
+            log.warn('IndexedDB not initialized, cannot save GPS marker settings');
             return;
         }
 
@@ -434,7 +435,7 @@ export class ParameterStorage {
                 let existingData = getRequest.result as StoredParameters | undefined;
 
                 if (!existingData) {
-                    console.warn('⚠️ No existing data found for file, creating default entry for GPS marker');
+                    log.warn('⚠️ No existing data found for file, creating default entry for GPS marker');
                     existingData = {
                         fileHash,
                         parameters: {
@@ -473,18 +474,18 @@ export class ParameterStorage {
                 const putRequest = objectStore.put(existingData);
 
                 putRequest.onsuccess = () => {
-                    console.log(`✅ GPS marker saved for lap key: ${lapKey}`);
+                    log.debug(`✅ GPS marker saved for lap key: ${lapKey}`);
                     resolve();
                 };
 
                 putRequest.onerror = () => {
-                    console.error('❌ Failed to save GPS marker settings:', putRequest.error);
+                    log.error('❌ Failed to save GPS marker settings:', putRequest.error);
                     reject(putRequest.error);
                 };
             };
 
             getRequest.onerror = () => {
-                console.error('❌ Failed to get existing data:', getRequest.error);
+                log.error('❌ Failed to get existing data:', getRequest.error);
                 reject(getRequest.error);
             };
         });
@@ -495,7 +496,7 @@ export class ParameterStorage {
      */
     async loadGpsMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<GpsMarkerSettings | null> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot load GPS marker settings');
+            log.warn('IndexedDB not initialized, cannot load GPS marker settings');
             return null;
         }
 
@@ -509,7 +510,7 @@ export class ParameterStorage {
             request.onsuccess = () => {
                 const result = request.result as StoredParameters | undefined;
                 if (result && result.gpsMarkerSettings && result.gpsMarkerSettings[lapKey]) {
-                    console.log(`✅ GPS marker loaded for lap key: ${lapKey}`);
+                    log.debug(`✅ GPS marker loaded for lap key: ${lapKey}`);
                     resolve(result.gpsMarkerSettings[lapKey]);
                 } else {
                     resolve(null);
@@ -517,7 +518,7 @@ export class ParameterStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to load GPS marker settings:', request.error);
+                log.error('❌ Failed to load GPS marker settings:', request.error);
                 reject(request.error);
             };
         });
@@ -528,7 +529,7 @@ export class ParameterStorage {
      */
     async clearGpsMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot clear GPS marker settings');
+            log.warn('IndexedDB not initialized, cannot clear GPS marker settings');
             return;
         }
 
@@ -550,12 +551,12 @@ export class ParameterStorage {
                     const putRequest = objectStore.put(existingData);
 
                     putRequest.onsuccess = () => {
-                        console.log(`✅ GPS marker cleared for lap key: ${lapKey}`);
+                        log.debug(`✅ GPS marker cleared for lap key: ${lapKey}`);
                         resolve();
                     };
 
                     putRequest.onerror = () => {
-                        console.error('❌ Failed to clear GPS marker settings:', putRequest.error);
+                        log.error('❌ Failed to clear GPS marker settings:', putRequest.error);
                         reject(putRequest.error);
                     };
                 } else {
@@ -564,7 +565,7 @@ export class ParameterStorage {
             };
 
             getRequest.onerror = () => {
-                console.error('❌ Failed to get existing data:', getRequest.error);
+                log.error('❌ Failed to get existing data:', getRequest.error);
                 reject(getRequest.error);
             };
         });
@@ -581,7 +582,7 @@ export class ParameterStorage {
         markerSettings: OutAndBackMarkerSettings
     ): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot save Out and Back marker settings');
+            log.warn('IndexedDB not initialized, cannot save Out and Back marker settings');
             return;
         }
 
@@ -597,7 +598,7 @@ export class ParameterStorage {
                 let existingData = getRequest.result as StoredParameters | undefined;
 
                 if (!existingData) {
-                    console.warn('⚠️ No existing data found for file, creating default entry for Out and Back markers');
+                    log.warn('⚠️ No existing data found for file, creating default entry for Out and Back markers');
                     existingData = {
                         fileHash,
                         parameters: {
@@ -637,18 +638,18 @@ export class ParameterStorage {
                 const putRequest = objectStore.put(existingData);
 
                 putRequest.onsuccess = () => {
-                    console.log(`✅ Out and Back markers saved for lap key: ${lapKey}`);
+                    log.debug(`✅ Out and Back markers saved for lap key: ${lapKey}`);
                     resolve();
                 };
 
                 putRequest.onerror = () => {
-                    console.error('❌ Failed to save Out and Back marker settings:', putRequest.error);
+                    log.error('❌ Failed to save Out and Back marker settings:', putRequest.error);
                     reject(putRequest.error);
                 };
             };
 
             getRequest.onerror = () => {
-                console.error('❌ Failed to get existing data:', getRequest.error);
+                log.error('❌ Failed to get existing data:', getRequest.error);
                 reject(getRequest.error);
             };
         });
@@ -659,7 +660,7 @@ export class ParameterStorage {
      */
     async loadOutAndBackMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<OutAndBackMarkerSettings | null> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot load Out and Back marker settings');
+            log.warn('IndexedDB not initialized, cannot load Out and Back marker settings');
             return null;
         }
 
@@ -673,7 +674,7 @@ export class ParameterStorage {
             request.onsuccess = () => {
                 const result = request.result as StoredParameters | undefined;
                 if (result && result.outAndBackMarkerSettings && result.outAndBackMarkerSettings[lapKey]) {
-                    console.log(`✅ Out and Back markers loaded for lap key: ${lapKey}`);
+                    log.debug(`✅ Out and Back markers loaded for lap key: ${lapKey}`);
                     resolve(result.outAndBackMarkerSettings[lapKey]);
                 } else {
                     resolve(null);
@@ -681,7 +682,7 @@ export class ParameterStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to load Out and Back marker settings:', request.error);
+                log.error('❌ Failed to load Out and Back marker settings:', request.error);
                 reject(request.error);
             };
         });
@@ -692,7 +693,7 @@ export class ParameterStorage {
      */
     async clearOutAndBackMarkerSettings(fileHash: string, selectedLaps: number[]): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot clear Out and Back marker settings');
+            log.warn('IndexedDB not initialized, cannot clear Out and Back marker settings');
             return;
         }
 
@@ -714,12 +715,12 @@ export class ParameterStorage {
                     const putRequest = objectStore.put(existingData);
 
                     putRequest.onsuccess = () => {
-                        console.log(`✅ Out and Back markers cleared for lap key: ${lapKey}`);
+                        log.debug(`✅ Out and Back markers cleared for lap key: ${lapKey}`);
                         resolve();
                     };
 
                     putRequest.onerror = () => {
-                        console.error('❌ Failed to clear Out and Back marker settings:', putRequest.error);
+                        log.error('❌ Failed to clear Out and Back marker settings:', putRequest.error);
                         reject(putRequest.error);
                     };
                 } else {
@@ -728,7 +729,7 @@ export class ParameterStorage {
             };
 
             getRequest.onerror = () => {
-                console.error('❌ Failed to get existing data:', getRequest.error);
+                log.error('❌ Failed to get existing data:', getRequest.error);
                 reject(getRequest.error);
             };
         });

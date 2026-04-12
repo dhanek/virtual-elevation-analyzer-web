@@ -1,4 +1,5 @@
 import { DEMProcessor } from '../../pkg/virtual_elevation_analyzer';
+import { log } from './log';
 
 /**
  * Manages DEM (Digital Elevation Model) files for elevation correction
@@ -30,14 +31,14 @@ export class DEMManager {
             let worldFileContent: string | undefined = undefined;
             if (worldFile) {
                 worldFileContent = await worldFile.text();
-                console.log('World file loaded:', worldFile.name);
+                log.debug('World file loaded:', worldFile.name);
             }
 
             // Read projection file if provided
             let projFileContent: string | undefined = undefined;
             if (projFile) {
                 projFileContent = await projFile.text();
-                console.log('Projection file loaded:', projFile.name);
+                log.debug('Projection file loaded:', projFile.name);
             }
 
             // Create DEM processor from file data
@@ -49,9 +50,9 @@ export class DEMManager {
             this.demFile = file;
             this.demFileLoaded = true;
 
-            console.log('DEM file loaded successfully:', file.name);
-            console.log('DEM metadata:', this.demProcessor.get_metadata());
-            console.log('DEM bounds:', this.demProcessor.get_bounds());
+            log.debug('DEM file loaded successfully:', file.name);
+            log.debug('DEM metadata:', this.demProcessor.get_metadata());
+            log.debug('DEM bounds:', this.demProcessor.get_bounds());
         } catch (error) {
             this.demProcessor = null;
             this.demFile = null;
@@ -76,9 +77,9 @@ export class DEMManager {
             this.demName = name;
             this.demFileLoaded = true;
 
-            console.log('DEM loaded from ArrayBuffer:', name);
-            console.log('DEM metadata:', this.demProcessor.get_metadata());
-            console.log('DEM bounds:', this.demProcessor.get_bounds());
+            log.debug('DEM loaded from ArrayBuffer:', name);
+            log.debug('DEM metadata:', this.demProcessor.get_metadata());
+            log.debug('DEM bounds:', this.demProcessor.get_bounds());
         } catch (error) {
             this.demProcessor = null;
             this.demFile = null;

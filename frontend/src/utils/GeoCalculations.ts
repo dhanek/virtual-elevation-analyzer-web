@@ -1,3 +1,4 @@
+import { log } from './log';
 /**
  * Geospatial calculations for weather data retrieval
  */
@@ -148,15 +149,15 @@ export function calculateTrimRegionMetadata(
     // Convert timestamp to Date object
     const middleDate = new Date(middleTimestamp * 1000);
 
-    console.log('📊 GPS Calculation Summary:');
-    console.log('  - Total points in slice:', latSlice.length);
-    console.log('  - Valid GPS points:', validPoints.length);
-    console.log('  - Invalid/filtered points:', latSlice.length - validPoints.length);
-    console.log('  - Average latitude:', roundedLat);
-    console.log('  - Average longitude:', roundedLon);
-    console.log('  - First timestamp:', new Date(timestampSlice[0] * 1000).toISOString());
-    console.log('  - Last timestamp:', new Date(timestampSlice[timestampSlice.length - 1] * 1000).toISOString());
-    console.log('  - Middle timestamp:', middleDate.toISOString());
+    log.debug('📊 GPS Calculation Summary:');
+    log.debug('  - Total points in slice:', latSlice.length);
+    log.debug('  - Valid GPS points:', validPoints.length);
+    log.debug('  - Invalid/filtered points:', latSlice.length - validPoints.length);
+    log.debug('  - Average latitude:', roundedLat);
+    log.debug('  - Average longitude:', roundedLon);
+    log.debug('  - First timestamp:', new Date(timestampSlice[0] * 1000).toISOString());
+    log.debug('  - Last timestamp:', new Date(timestampSlice[timestampSlice.length - 1] * 1000).toISOString());
+    log.debug('  - Middle timestamp:', middleDate.toISOString());
 
     return {
         avgLat: roundedLat,

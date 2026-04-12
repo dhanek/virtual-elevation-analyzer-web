@@ -1,5 +1,6 @@
 import * as L from 'leaflet';
 import type { DetectedLap, PassingPoint, OutAndBackSection } from '../utils/GpsLapDetection';
+import { log } from '../utils/log';
 
 type NumericSeries = ArrayLike<number>;
 
@@ -135,7 +136,7 @@ export class MapVisualization {
     }
 
     public setSelectedLaps(selectedLaps: number[]): void {
-        console.log('MapVisualization.setSelectedLaps called with:', selectedLaps);
+        log.debug('MapVisualization.setSelectedLaps called with:', selectedLaps);
         this.selectedLaps = selectedLaps;
         this.updateVisualization();
 
@@ -188,7 +189,7 @@ export class MapVisualization {
     public fitBoundsToTrimRegion(trimStart: number, trimEnd: number, filteredPositionLat?: number[], filteredPositionLong?: number[]): void {
         if (!this.map || this.routePoints.length === 0) return;
 
-        console.log('fitBoundsToTrimRegion called:', {
+        log.debug('fitBoundsToTrimRegion called:', {
             trimStart,
             trimEnd,
             hasFilteredData: !!(filteredPositionLat && filteredPositionLong),
@@ -213,7 +214,7 @@ export class MapVisualization {
             }
         }
 
-        console.log('Trimmed points collected:', trimmedPoints.length);
+        log.debug('Trimmed points collected:', trimmedPoints.length);
 
         if (trimmedPoints.length > 0) {
             const bounds = L.latLngBounds(trimmedPoints);
@@ -238,7 +239,7 @@ export class MapVisualization {
         if (trimStart < posLat.length) {
             const startLat = posLat[trimStart];
             const startLng = posLong[trimStart];
-            console.log('Adding trim start marker:', { index: trimStart, lat: startLat, lng: startLng });
+            log.debug('Adding trim start marker:', { index: trimStart, lat: startLat, lng: startLng });
             if (startLat && startLng && startLat !== 0 && startLng !== 0) {
                 const startMarker = L.circleMarker([startLat, startLng], {
                     radius: 8,
@@ -257,7 +258,7 @@ export class MapVisualization {
         if (trimEnd < posLat.length) {
             const endLat = posLat[trimEnd];
             const endLng = posLong[trimEnd];
-            console.log('Adding trim end marker:', { index: trimEnd, lat: endLat, lng: endLng });
+            log.debug('Adding trim end marker:', { index: trimEnd, lat: endLat, lng: endLng });
             if (endLat && endLng && endLat !== 0 && endLng !== 0) {
                 const endMarker = L.circleMarker([endLat, endLng], {
                     radius: 8,
@@ -274,7 +275,7 @@ export class MapVisualization {
     }
 
     private updateVisualization(): void {
-        console.log('updateVisualization called:', {
+        log.debug('updateVisualization called:', {
             hasMap: !!this.map,
             hasRouteLayer: !!this.routeLayer,
             hasFitData: !!this.fitData,
@@ -283,7 +284,7 @@ export class MapVisualization {
         });
 
         if (!this.map || !this.routeLayer || !this.fitData) {
-            console.log('Missing required objects for visualization');
+            log.debug('Missing required objects for visualization');
             return;
         }
 
@@ -291,16 +292,16 @@ export class MapVisualization {
         this.routeLayer.clearLayers();
 
         if (this.routePoints.length === 0) {
-            console.log('No route points available');
+            log.debug('No route points available');
             return;
         }
 
         if (this.selectedLaps.length === 0) {
-            console.log('Drawing full route (no laps selected)');
+            log.debug('Drawing full route (no laps selected)');
             // No laps selected - show full route in solid blue
             this.drawFullRoute();
         } else {
-            console.log('Drawing selected laps:', this.selectedLaps);
+            log.debug('Drawing selected laps:', this.selectedLaps);
             // Show selected laps highlighted
             this.drawSelectedLaps();
         }
@@ -331,11 +332,11 @@ export class MapVisualization {
             const lap = this.laps[lapIndex];
 
             if (!lap) {
-                console.log(`Lap ${lapNumber} not found in laps array`);
+                log.debug(`Lap ${lapNumber} not found in laps array`);
                 continue;
             }
 
-            console.log(`Processing lap ${lapNumber}:`, {
+            log.debug(`Processing lap ${lapNumber}:`, {
                 start_time: lap.start_time,
                 end_time: lap.end_time,
                 total_elapsed_time: lap.total_elapsed_time
@@ -569,7 +570,7 @@ export class MapVisualization {
         this.container.style.position = 'relative';
         this.container.appendChild(this.windIndicator);
 
-        console.log('Wind indicator shown:', { windSpeed, windDirection, cardinal });
+        log.debug('Wind indicator shown:', { windSpeed, windDirection, cardinal });
     }
 
     public hideWindIndicator(): void {
@@ -597,7 +598,7 @@ export class MapVisualization {
         // Add click handler to place marker
         this.map.on('click', this.handleMapClick.bind(this));
 
-        console.log('GPS marker mode enabled');
+        log.debug('GPS marker mode enabled');
     }
 
     /**
@@ -615,7 +616,7 @@ export class MapVisualization {
         // Remove click handler
         this.map.off('click', this.handleMapClick.bind(this));
 
-        console.log('GPS marker mode disabled');
+        log.debug('GPS marker mode disabled');
     }
 
     /**
@@ -701,7 +702,7 @@ export class MapVisualization {
         this.gpsMarker.addTo(this.gpsMarkerLayer);
         this.gpsMarkerPosition = { lat, lon };
 
-        console.log('GPS marker set at:', { lat, lon });
+        log.debug('GPS marker set at:', { lat, lon });
     }
 
     /**
@@ -798,7 +799,7 @@ export class MapVisualization {
             }
         }
 
-        console.log(`Displayed ${laps.length} detected laps on map`);
+        log.debug(`Displayed ${laps.length} detected laps on map`);
     }
 
     /**
@@ -843,7 +844,7 @@ export class MapVisualization {
         this.boundOutAndBackClickHandler = this.handleOutAndBackClick.bind(this);
         this.map.on('click', this.boundOutAndBackClickHandler);
 
-        console.log(`Out and Back marker mode enabled - place marker ${this.activeMarker} first`);
+        log.debug(`Out and Back marker mode enabled - place marker ${this.activeMarker} first`);
     }
 
     /**
@@ -864,7 +865,7 @@ export class MapVisualization {
             this.boundOutAndBackClickHandler = null;
         }
 
-        console.log('Out and Back marker mode disabled');
+        log.debug('Out and Back marker mode disabled');
     }
 
     /**
@@ -872,7 +873,7 @@ export class MapVisualization {
      */
     public setActiveMarker(marker: 'A' | 'B'): void {
         this.activeMarker = marker;
-        console.log(`Active marker set to: ${marker}`);
+        log.debug(`Active marker set to: ${marker}`);
     }
 
     /**
@@ -944,7 +945,7 @@ export class MapVisualization {
         this.gpsMarkerA.addTo(this.gpsMarkerLayer);
         this.gpsMarkerAPosition = { lat, lon };
 
-        console.log('GPS marker A set at:', { lat, lon });
+        log.debug('GPS marker A set at:', { lat, lon });
     }
 
     /**
@@ -980,7 +981,7 @@ export class MapVisualization {
         this.gpsMarkerB.addTo(this.gpsMarkerLayer);
         this.gpsMarkerBPosition = { lat, lon };
 
-        console.log('GPS marker B set at:', { lat, lon });
+        log.debug('GPS marker B set at:', { lat, lon });
     }
 
     /**
@@ -1140,7 +1141,7 @@ export class MapVisualization {
             }
         }
 
-        console.log(`Displayed ${sections.length} out-and-back sections on map`);
+        log.debug(`Displayed ${sections.length} out-and-back sections on map`);
     }
 
     /**

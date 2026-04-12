@@ -18,11 +18,17 @@ export default tseslint.config(
             },
         },
         rules: {
-            'no-console': 'off',
+            'no-console': 'error',
             'no-empty': 'off',
             'prefer-const': 'off',
             '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/no-unused-vars': 'off',
+        },
+    },
+    {
+        files: ['src/utils/log.ts'],
+        rules: {
+            'no-console': 'off',
         },
     },
 )

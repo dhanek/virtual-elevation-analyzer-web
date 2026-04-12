@@ -5,6 +5,7 @@
 
 import { TrimRegionMetadata, roundToNearest15Min } from './GeoCalculations';
 import { WeatherAPI, WeatherResponse, WeatherAPIError } from './WeatherAPI';
+import { log } from './log';
 
 export interface WeatherCacheKey {
     lat: number;        // Rounded to 6 decimals
@@ -54,13 +55,13 @@ export class WeatherCache {
             const request = indexedDB.open(this.dbName, this.dbVersion);
 
             request.onerror = () => {
-                console.error('Failed to open IndexedDB:', request.error);
+                log.error('Failed to open IndexedDB:', request.error);
                 reject(new Error(`IndexedDB error: ${request.error?.message}`));
             };
 
             request.onsuccess = () => {
                 this.db = request.result;
-                console.log('✅ Weather cache IndexedDB initialized');
+                log.debug('✅ Weather cache IndexedDB initialized');
                 resolve();
             };
 
@@ -76,7 +77,7 @@ export class WeatherCache {
                     store.createIndex('date', 'key.date', { unique: false });
                     store.createIndex('cachedAt', 'cachedAt', { unique: false });
 
-                    console.log('📦 Created weather cache object store with indexes');
+                    log.debug('📦 Created weather cache object store with indexes');
                 }
             };
         });
@@ -104,7 +105,7 @@ export class WeatherCache {
         // Try cache first
         const cached = await this.getCached(cacheKey);
         if (cached) {
-            console.log('💾 Weather data found in cache (permanent):', {
+            log.debug('💾 Weather data found in cache (permanent):', {
                 location: `${key.lat}, ${key.lon}`,
                 date: key.date,
                 time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`,
@@ -114,7 +115,7 @@ export class WeatherCache {
         }
 
         // Not in cache - fetch from API
-        console.log('⬇️ Fetching weather data from API (not in cache)...');
+        log.debug('⬇️ Fetching weather data from API (not in cache)...');
 
         try {
             const apiData = await api.fetchWeatherData(metadata);
@@ -128,7 +129,7 @@ export class WeatherCache {
             };
 
             await this.store(cacheKey, entry);
-            console.log('💾 Weather data cached permanently:', {
+            log.debug('💾 Weather data cached permanently:', {
                 location: `${key.lat}, ${key.lon}`,
                 date: key.date,
                 time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`
@@ -194,7 +195,7 @@ export class WeatherCache {
             };
 
             request.onerror = () => {
-                console.error('Failed to retrieve from cache:', request.error);
+                log.error('Failed to retrieve from cache:', request.error);
                 reject(new Error(`Cache retrieval error: ${request.error?.message}`));
             };
         });
@@ -220,7 +221,7 @@ export class WeatherCache {
             };
 
             request.onerror = () => {
-                console.error('Failed to store in cache:', request.error);
+                log.error('Failed to store in cache:', request.error);
                 reject(new Error(`Cache storage error: ${request.error?.message}`));
             };
         });
@@ -242,7 +243,7 @@ export class WeatherCache {
         };
 
         await this.store(cacheKey, entry);
-        console.log('🔄 Updated cache entry with complete data:', {
+        log.debug('🔄 Updated cache entry with complete data:', {
             location: `${key.lat}, ${key.lon}`,
             date: key.date,
             time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`
@@ -333,12 +334,12 @@ export class WeatherCache {
             const request = store.clear();
 
             request.onsuccess = () => {
-                console.log('🗑️ Weather cache cleared');
+                log.debug('🗑️ Weather cache cleared');
                 resolve();
             };
 
             request.onerror = () => {
-                console.error('Failed to clear cache:', request.error);
+                log.error('Failed to clear cache:', request.error);
                 reject(new Error(`Cache clear error: ${request.error?.message}`));
             };
         });

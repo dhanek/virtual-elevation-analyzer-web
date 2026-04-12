@@ -3,6 +3,7 @@
  */
 
 import { DEMSourceType } from './RemoteDEMConfig';
+import { log } from './log';
 
 export interface RouteBbox {
     south: number;
@@ -149,7 +150,7 @@ export class OpenTopographyClient {
                 const arrayBuffer = await response.arrayBuffer();
                 const data = new Uint8Array(arrayBuffer);
 
-                console.log(`OpenTopography ${demtype}: received ${(data.length / 1024).toFixed(0)} KB`);
+                log.debug(`OpenTopography ${demtype}: received ${(data.length / 1024).toFixed(0)} KB`);
 
                 return {
                     source: 'opentopography',
@@ -219,7 +220,7 @@ export class AWSTerrainTilesClient {
         const maxY = Math.max(topLeft.y, bottomRight.y);
 
         const totalTiles = (maxX - minX + 1) * (maxY - minY + 1);
-        console.log(`AWS Terrain Tiles: zoom=${zoom}, tiles=${totalTiles} (${minX}-${maxX} x ${minY}-${maxY})`);
+        log.debug(`AWS Terrain Tiles: zoom=${zoom}, tiles=${totalTiles} (${minX}-${maxX} x ${minY}-${maxY})`);
 
         if (totalTiles > 50) {
             throw new Error(`Too many AWS tiles needed (${totalTiles}). Try a shorter route or lower zoom.`);
@@ -264,7 +265,7 @@ export class AWSTerrainTilesClient {
                 tiles.push({ data: result.value.data, name: result.value.name });
             } else {
                 failedCount++;
-                console.warn('AWS tile fetch failed:', result.reason);
+                log.warn('AWS tile fetch failed:', result.reason);
             }
         }
 
@@ -273,7 +274,7 @@ export class AWSTerrainTilesClient {
         }
 
         if (failedCount > 0) {
-            console.warn(`${failedCount}/${totalTiles} AWS tiles failed to load`);
+            log.warn(`${failedCount}/${totalTiles} AWS tiles failed to load`);
         }
 
         onProgress?.('aws-terrain', 'Done', 100);
@@ -311,12 +312,12 @@ export class RemoteDEMService {
 
         if (sources.includes('opentopography')) {
             if (!config.apiKey) {
-                console.warn('OpenTopography skipped: no API key');
+                log.warn('OpenTopography skipped: no API key');
             } else {
                 promises.push(
                     this.openTopoClient.fetchDEM(bbox, config.apiKey, config.dataset, onProgress)
                         .then(result => { results.set('opentopography', result); })
-                        .catch(err => { console.error('OpenTopography fetch failed:', err); })
+                        .catch(err => { log.error('OpenTopography fetch failed:', err); })
                 );
             }
         }
@@ -325,7 +326,7 @@ export class RemoteDEMService {
             promises.push(
                 this.awsClient.fetchDEM(bbox, undefined, onProgress)
                     .then(result => { results.set('aws-terrain', result); })
-                    .catch(err => { console.error('AWS Terrain Tiles fetch failed:', err); })
+                    .catch(err => { log.error('AWS Terrain Tiles fetch failed:', err); })
             );
         }
 

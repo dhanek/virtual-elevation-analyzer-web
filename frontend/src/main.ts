@@ -13,6 +13,7 @@ import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } f
 import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
 import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
 import { CsvParseError, type GibliCsvData } from './utils/CsvParser';
+import { log } from './utils/log';
 import {
     GpsLapDetector,
     OutAndBackDetector,
@@ -85,15 +86,15 @@ function waitForPlotly(): Promise<any> {
                 if (typeof (window as any).Plotly !== 'undefined') {
                     resolve((window as any).Plotly);
                 } else {
-                    console.error('Plotly script loaded but Plotly is not on window object');
+                    log.error('Plotly script loaded but Plotly is not on window object');
                     reject(new Error('Plotly loaded but not available'));
                 }
             }, 100);
         };
 
         script.onerror = (error) => {
-            console.error('Failed to load Plotly script:', error);
-            console.error('Network error or CSP blocking the script');
+            log.error('Failed to load Plotly script:', error);
+            log.error('Network error or CSP blocking the script');
             reject(new Error('Failed to load Plotly script from CDN'));
         };
 
@@ -175,7 +176,7 @@ async function initializeFitProcessor() {
         hideLoading();
         hideError();
     } catch (err) {
-        console.error('Failed to initialize:', err);
+        log.error('Failed to initialize:', err);
         hideLoading();
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         showError(`Failed to initialize: ${errorMessage}. Check browser console for details.`);
@@ -347,7 +348,7 @@ async function handleDEMFileSelection(files: FileList): Promise<void> {
         appState.elevationCorrectionEnabled = true;
 
         hideLoading();
-        console.log('DEM file loaded successfully:', displayName);
+        log.debug('DEM file loaded successfully:', displayName);
     } catch (err) {
         hideLoading();
         showError(`Failed to load DEM file: ${err}`);
@@ -419,7 +420,7 @@ analyzeButton.addEventListener('click', async () => {
         }
 
     } catch (err) {
-        console.error('Error processing file:', err);
+        log.error('Error processing file:', err);
         showError(`Failed to process file: ${err instanceof Error ? err.message : 'Unknown error'}`);
         hideLoading();
     }
@@ -465,7 +466,7 @@ async function processFitFile(file: File) {
 
                 if (lats && lons && originalAltitudes) {
                     // Debug: Log first few coordinates
-                    console.log('Sample GPS coordinates:', {
+                    log.debug('Sample GPS coordinates:', {
                         lat: lats.slice(0, 5),
                         lon: lons.slice(0, 5),
                         originalAlt: originalAltitudes.slice(0, 5)
@@ -473,16 +474,16 @@ async function processFitFile(file: File) {
 
                     const correctionResult = await demManager.correctElevation(lats, lons, originalAltitudes);
 
-                    console.log('Sample corrected elevations:', correctionResult.elevations.slice(0, 5));
+                    log.debug('Sample corrected elevations:', correctionResult.elevations.slice(0, 5));
 
                     // Replace altitudes with corrected values using setter
                     result.fit_data.set_altitude(correctionResult.elevations);
                     appState.elevationErrorRate = correctionResult.errorRate;
 
-                    console.log(`Elevation corrected. Error rate: ${(appState.elevationErrorRate * 100).toFixed(1)}%`);
+                    log.debug(`Elevation corrected. Error rate: ${(appState.elevationErrorRate * 100).toFixed(1)}%`);
 
                     if (appState.elevationErrorRate > 0.5) {
-                        console.warn('High error rate! DEM may not cover route area. DEM bounds:', demManager.getDEMBounds());
+                        log.warn('High error rate! DEM may not cover route area. DEM bounds:', demManager.getDEMBounds());
                     }
 
                     // Cache the corrected elevation profile
@@ -502,10 +503,10 @@ async function processFitFile(file: File) {
                         );
                     }
                 } else {
-                    console.warn('Missing GPS or altitude data, skipping DEM correction');
+                    log.warn('Missing GPS or altitude data, skipping DEM correction');
                 }
             } catch (demError) {
-                console.warn('DEM elevation correction failed, using GPS altitude:', demError);
+                log.warn('DEM elevation correction failed, using GPS altitude:', demError);
                 showError(`Warning: DEM correction failed: ${demError}. Using GPS altitude.`);
                 // Continue with original GPS altitude
             }
@@ -554,9 +555,9 @@ async function processFitFile(file: File) {
                         const bestDEM = appState.remoteDEMResults.get(bestSource)!;
                         if (bestDEM.errorRate < 0.5) {
                             result.fit_data.set_altitude(bestDEM.elevations);
-                            console.log(`Applied ${bestSource} DEM as actual elevation (error rate: ${(bestDEM.errorRate * 100).toFixed(1)}%)`);
+                            log.debug(`Applied ${bestSource} DEM as actual elevation (error rate: ${(bestDEM.errorRate * 100).toFixed(1)}%)`);
                         } else {
-                            console.warn(`${bestSource} DEM error rate too high (${(bestDEM.errorRate * 100).toFixed(1)}%), keeping FIT elevation`);
+                            log.warn(`${bestSource} DEM error rate too high (${(bestDEM.errorRate * 100).toFixed(1)}%), keeping FIT elevation`);
                         }
                     }
 
@@ -568,9 +569,9 @@ async function processFitFile(file: File) {
                     }
                     remoteDEMStatus.textContent = statusParts.join(' | ');
 
-                    console.log('Remote DEM results:', Object.fromEntries(appState.remoteDEMResults));
+                    log.debug('Remote DEM results:', Object.fromEntries(appState.remoteDEMResults));
                 } catch (remoteDemError) {
-                    console.warn('Remote DEM correction failed:', remoteDemError);
+                    log.warn('Remote DEM correction failed:', remoteDemError);
                     remoteDEMStatus.textContent = `Failed: ${remoteDemError}`;
                 }
             }
@@ -604,7 +605,7 @@ async function processFitFile(file: File) {
 
     } catch (err) {
         hideLoading();
-        console.error('Error processing FIT file:', err);
+        log.error('Error processing FIT file:', err);
         showError(`Error processing FIT file: ${err}`);
     }
 }
@@ -645,13 +646,13 @@ async function displayCsvResults(csvData: GibliCsvData, result: any) {
                 parametersComponent.setParameters({
                     auto_calculate_rho: false
                 });
-                console.log('📊 CSV has environmental data - weather API disabled');
+                log.debug('📊 CSV has environmental data - weather API disabled');
             } else if (stats.has_gps_data) {
                 // No environmental data but has GPS - enable weather API
                 parametersComponent.setParameters({
                     auto_calculate_rho: true
                 });
-                console.log('📍 GPS data detected - auto-rho enabled');
+                log.debug('📍 GPS data detected - auto-rho enabled');
             }
         }
     }
@@ -674,7 +675,7 @@ function calculateAvgCda(csvData: GibliCsvData): number {
 function calculateRhoArrayFromFitData(fitData: any): number[] | null {
     // Check if data has all required environmental data
     if (!fitData.temperature || !fitData.humidity || !fitData.pressure) {
-        console.log('📊 No environmental data available, using single rho parameter');
+        log.debug('📊 No environmental data available, using single rho parameter');
         return null;
     }
 
@@ -700,13 +701,13 @@ function calculateRhoArrayFromFitData(fitData: any): number[] | null {
             rhoArray.push(rho);
             successCount++;
         } catch (err) {
-            console.warn(`Failed to calculate rho at index ${i}:`, err);
+            log.warn(`Failed to calculate rho at index ${i}:`, err);
             rhoArray.push(1.225); // Use standard air density as fallback
             failureCount++;
         }
     }
 
-    console.log('📊 Per-datapoint rho calculation:', {
+    log.debug('📊 Per-datapoint rho calculation:', {
         totalPoints: fitData.timestamps.length,
         successCount,
         failureCount,
@@ -742,12 +743,12 @@ async function processCsvFile(file: File) {
         });
         const { csvData, result, loadedActivity, summary, intervals, wasInterpolated } = loadedCsv;
 
-        console.log('CSV Data Summary:');
-        console.log(summary);
-        console.log('Time interval statistics:', intervals);
+        log.debug('CSV Data Summary:');
+        log.debug(summary);
+        log.debug('Time interval statistics:', intervals);
 
         if (wasInterpolated) {
-            console.log('Non-uniform time series detected, interpolated to 1Hz');
+            log.debug('Non-uniform time series detected, interpolated to 1Hz');
         }
 
         appState.setLoadedActivity(loadedActivity);
@@ -761,17 +762,17 @@ async function processCsvFile(file: File) {
 
         // Initialize and activate section 3 if we have laps
         if (result.laps.length > 0) {
-            console.log('📍 Activating section 3 for CSV lap analysis...');
+            log.debug('📍 Activating section 3 for CSV lap analysis...');
             activateSection(3);
             setTimeout(() => {
                 initializeSection3Csv(csvData, result);
-                console.log('✅ Section 3 initialized for CSV');
+                log.debug('✅ Section 3 initialized for CSV');
             }, 100);
         }
 
     } catch (err) {
         hideLoading();
-        console.error('Error processing CSV file:', err);
+        log.error('Error processing CSV file:', err);
         if (err instanceof CsvParseError) {
             showError(`CSV parsing error:\n${err.message}`);
             return;
@@ -908,11 +909,11 @@ async function displayResults(result: any) {
             // Auto-enable auto-rho if HAS GPS data
             else if (result.parsing_statistics.has_gps_data) {
                 smartDefaults.auto_calculate_rho = true;
-                console.log('📍 GPS data detected - auto-rho enabled by default');
+                log.debug('📍 GPS data detected - auto-rho enabled by default');
             }
 
             parametersComponent.setParameters(smartDefaults);
-            console.log(`📊 Set air_speed_offset default to ${defaultAirSpeedOffset}s (hasAirSpeed: ${hasAirSpeed})`);
+            log.debug(`📊 Set air_speed_offset default to ${defaultAirSpeedOffset}s (hasAirSpeed: ${hasAirSpeed})`);
         }
     }
 
@@ -968,20 +969,20 @@ function formatPower(watts: number): string {
 async function calculateAutoRho(): Promise<number | null> {
     // Prevent infinite loops
     if (appState.isCalculatingAutoRho) {
-        console.log('⏭️  Auto-rho calculation already in progress, skipping\n');
+        log.debug('⏭️  Auto-rho calculation already in progress, skipping\n');
         return null;
     }
 
     appState.isCalculatingAutoRho = true;
 
-    console.log('\n╔═══════════════════════════════════════════════════════════════╗');
-    console.log('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
-    console.log('╚═══════════════════════════════════════════════════════════════╝\n');
+    log.debug('\n╔═══════════════════════════════════════════════════════════════╗');
+    log.debug('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
+    log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
 
     if (!appState.currentFitData || !parametersComponent) {
-        console.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
-        console.log('  - appState.currentFitData:', !!appState.currentFitData);
-        console.log('  - parametersComponent:', !!parametersComponent);
+        log.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
+        log.debug('  - appState.currentFitData:', !!appState.currentFitData);
+        log.debug('  - parametersComponent:', !!parametersComponent);
         appState.isCalculatingAutoRho = false;
         return null;
     }
@@ -990,12 +991,12 @@ async function calculateAutoRho(): Promise<number | null> {
 
     // Check if auto-calculate is enabled
     if (!params.auto_calculate_rho) {
-        console.log('⏭️  Auto-calculate disabled, skipping\n');
+        log.debug('⏭️  Auto-calculate disabled, skipping\n');
         appState.isCalculatingAutoRho = false;
         return null;
     }
 
-    console.log('✅ Auto-calculate enabled, proceeding...\n');
+    log.debug('✅ Auto-calculate enabled, proceeding...\n');
 
     try {
         // IMPORTANT: For auto-rho calculation, always use map trim sliders
@@ -1008,18 +1009,18 @@ async function calculateAutoRho(): Promise<number | null> {
         if (!trimStartSlider || !trimEndSlider) {
             trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
             trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
-            console.log('🔍 Map trim sliders not found, using section 3 sliders...');
+            log.debug('🔍 Map trim sliders not found, using section 3 sliders...');
         } else {
-            console.log('🔍 Using map trim sliders (relative to filtered lap data)...');
+            log.debug('🔍 Using map trim sliders (relative to filtered lap data)...');
         }
 
-        console.log('  - trimStartSlider exists:', !!trimStartSlider);
-        console.log('  - trimEndSlider exists:', !!trimEndSlider);
+        log.debug('  - trimStartSlider exists:', !!trimStartSlider);
+        log.debug('  - trimEndSlider exists:', !!trimEndSlider);
 
         if (!trimStartSlider || !trimEndSlider) {
-            console.warn('❌ No trim sliders found - cannot calculate auto rho');
-            console.log('  This usually means the UI is not ready yet.');
-            console.log('  Will retry when sliders are available.\n');
+            log.warn('❌ No trim sliders found - cannot calculate auto rho');
+            log.debug('  This usually means the UI is not ready yet.');
+            log.debug('  Will retry when sliders are available.\n');
             appState.isCalculatingAutoRho = false;
             return null;
         }
@@ -1027,12 +1028,12 @@ async function calculateAutoRho(): Promise<number | null> {
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
 
-        console.log('📊 Trim region values:', {
+        log.debug('📊 Trim region values:', {
             start: trimStart,
             end: trimEnd,
             dataPointsInRange: trimEnd - trimStart + 1
         });
-        console.log('');
+        log.debug('');
 
         // Show loading state
         showLoading('Fetching weather data...');
@@ -1041,15 +1042,15 @@ async function calculateAutoRho(): Promise<number | null> {
             // Calculate GPS metadata from trim region
             // Use filtered lap data (only selected laps), not the full FIT data
             if (!appState.filteredLapData) {
-                console.warn('❌ No filtered lap data available - cannot calculate auto rho');
-                console.log('  This usually means laps have not been selected yet.\n');
+                log.warn('❌ No filtered lap data available - cannot calculate auto rho');
+                log.debug('  This usually means laps have not been selected yet.\n');
                 hideLoading();
                 appState.isCalculatingAutoRho = false;
                 return null;
             }
 
-            console.log('🗺️  Calculating GPS metadata from trim region...');
-            console.log('  Using filtered lap data with', appState.filteredLapData.timestamps.length, 'data points');
+            log.debug('🗺️  Calculating GPS metadata from trim region...');
+            log.debug('  Using filtered lap data with', appState.filteredLapData.timestamps.length, 'data points');
 
             const metadata = calculateTrimRegionMetadata(
                 appState.filteredLapData,
@@ -1057,15 +1058,15 @@ async function calculateAutoRho(): Promise<number | null> {
                 trimEnd
             );
 
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('📍 TRIM REGION METADATA');
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('  Location:', formatCoordinates(metadata.avgLat, metadata.avgLon));
-            console.log('  Coordinates:', `${metadata.avgLat}, ${metadata.avgLon}`);
-            console.log('  Date/Time:', metadata.middleDate.toISOString());
-            console.log('  Valid GPS Points:', metadata.dataPointCount);
-            console.log('  Trim Range:', `${trimStart} to ${trimEnd}`);
-            console.log('═══════════════════════════════════════════════════════\n');
+            log.debug('═══════════════════════════════════════════════════════');
+            log.debug('📍 TRIM REGION METADATA');
+            log.debug('═══════════════════════════════════════════════════════');
+            log.debug('  Location:', formatCoordinates(metadata.avgLat, metadata.avgLon));
+            log.debug('  Coordinates:', `${metadata.avgLat}, ${metadata.avgLon}`);
+            log.debug('  Date/Time:', metadata.middleDate.toISOString());
+            log.debug('  Valid GPS Points:', metadata.dataPointCount);
+            log.debug('  Trim Range:', `${trimStart} to ${trimEnd}`);
+            log.debug('═══════════════════════════════════════════════════════\n');
 
             // Generate query key (rounded to nearest 15-min slot to match API granularity)
             const slot = roundToNearest15Min(metadata.middleDate);
@@ -1073,17 +1074,17 @@ async function calculateAutoRho(): Promise<number | null> {
 
             // Check if query has actually changed
             if (appState.lastWeatherQueryKey === queryKey) {
-                console.log('⏭️  Query unchanged from last calculation, using cached rho');
-                console.log('  Query key:', queryKey);
+                log.debug('⏭️  Query unchanged from last calculation, using cached rho');
+                log.debug('  Query key:', queryKey);
                 hideLoading();
                 appState.isCalculatingAutoRho = false;
                 return params.rho; // Return current rho value
             }
 
-            console.log('🔄 Query changed, fetching new weather data');
-            console.log('  Previous:', appState.lastWeatherQueryKey || 'none');
-            console.log('  Current:', queryKey);
-            console.log('');
+            log.debug('🔄 Query changed, fetching new weather data');
+            log.debug('  Previous:', appState.lastWeatherQueryKey || 'none');
+            log.debug('  Current:', queryKey);
+            log.debug('');
 
             // Update last query key
             appState.lastWeatherQueryKey = queryKey;
@@ -1093,13 +1094,13 @@ async function calculateAutoRho(): Promise<number | null> {
             const weatherAPI = new WeatherAPI();
 
             // Get weather data (from cache or API)
-            console.log('🔄 Fetching weather data (checking cache first)...\n');
+            log.debug('🔄 Fetching weather data (checking cache first)...\n');
             let weatherEntry: WeatherCacheEntry = await weatherCache.getWeatherData(metadata, weatherAPI);
 
             // Check if cached entry has wind data - if not, re-fetch from API
             if (weatherEntry.source === 'cache' &&
                 (weatherEntry.data.windSpeed === undefined || weatherEntry.data.windDirection === undefined)) {
-                console.log('⚠️  Cached entry missing wind data, re-fetching from API...');
+                log.debug('⚠️  Cached entry missing wind data, re-fetching from API...');
                 // Fetch directly from API to get complete data
                 const freshData = await weatherAPI.fetchWeatherData(metadata);
                 weatherEntry = {
@@ -1113,13 +1114,13 @@ async function calculateAutoRho(): Promise<number | null> {
             }
 
             // Calculate air density using WASM
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('🧮 CALCULATING AIR DENSITY');
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('  Input:');
-            console.log('    - Temperature:', weatherEntry.data.temperature, '°C');
-            console.log('    - Pressure:', weatherEntry.data.pressure, 'hPa');
-            console.log('    - Dew Point:', weatherEntry.data.dewPoint, '°C');
+            log.debug('═══════════════════════════════════════════════════════');
+            log.debug('🧮 CALCULATING AIR DENSITY');
+            log.debug('═══════════════════════════════════════════════════════');
+            log.debug('  Input:');
+            log.debug('    - Temperature:', weatherEntry.data.temperature, '°C');
+            log.debug('    - Pressure:', weatherEntry.data.pressure, 'hPa');
+            log.debug('    - Dew Point:', weatherEntry.data.dewPoint, '°C');
 
             const rhoRaw = AirDensityCalculator.calculate_air_density(
                 weatherEntry.data.temperature,
@@ -1130,12 +1131,12 @@ async function calculateAutoRho(): Promise<number | null> {
             // Round to 4 decimal places for practical use
             const rho = parseFloat(rhoRaw.toFixed(4));
 
-            console.log('  Output:');
-            console.log('    - Air Density (ρ):', rho, 'kg/m³');
-            console.log('    - Wind Speed:', weatherEntry.data.windSpeed, 'm/s');
-            console.log('    - Wind Direction:', weatherEntry.data.windDirection, '°');
-            console.log('    - Source:', weatherEntry.source === 'cache' ? '💾 Cache' : '⬇️ API');
-            console.log('═══════════════════════════════════════════════════════\n');
+            log.debug('  Output:');
+            log.debug('    - Air Density (ρ):', rho, 'kg/m³');
+            log.debug('    - Wind Speed:', weatherEntry.data.windSpeed, 'm/s');
+            log.debug('    - Wind Direction:', weatherEntry.data.windDirection, '°');
+            log.debug('    - Source:', weatherEntry.source === 'cache' ? '💾 Cache' : '⬇️ API');
+            log.debug('═══════════════════════════════════════════════════════\n');
 
             // Update parameters with calculated rho, wind data, and weather metadata
             const updateParams: Partial<AnalysisParameters> = {
@@ -1169,10 +1170,10 @@ async function calculateAutoRho(): Promise<number | null> {
             const sourceText = weatherEntry.source === 'cache' ? 'cached data' : 'weather API';
             showNotification(`Air density calculated: ${rho.toFixed(3)} kg/m³ (from ${sourceText})`, 'success');
 
-            console.log('╔═══════════════════════════════════════════════════════════════╗');
-            console.log('║  ✅ AUTO RHO CALCULATION COMPLETED SUCCESSFULLY              ║');
-            console.log('║  Final ρ: ' + rho.toFixed(3) + ' kg/m³                                     ║');
-            console.log('╚═══════════════════════════════════════════════════════════════╝\n');
+            log.debug('╔═══════════════════════════════════════════════════════════════╗');
+            log.debug('║  ✅ AUTO RHO CALCULATION COMPLETED SUCCESSFULLY              ║');
+            log.debug('║  Final ρ: ' + rho.toFixed(3) + ' kg/m³                                     ║');
+            log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
 
             hideLoading();
             appState.isCalculatingAutoRho = false;
@@ -1182,7 +1183,7 @@ async function calculateAutoRho(): Promise<number | null> {
             hideLoading();
 
             if (error instanceof WeatherAPIError) {
-                console.error('Weather API error:', error.message, error.code);
+                log.error('Weather API error:', error.message, error.code);
 
                 // Show user-friendly error message
                 let userMessage = 'Could not fetch weather data: ';
@@ -1198,7 +1199,7 @@ async function calculateAutoRho(): Promise<number | null> {
 
                 showNotification(userMessage, 'warning');
             } else {
-                console.error('Failed to calculate auto rho:', error);
+                log.error('Failed to calculate auto rho:', error);
                 const errorMsg = error instanceof Error ? error.message : 'Unknown error';
                 showNotification(`Auto-rho calculation failed: ${errorMsg}`, 'error');
             }
@@ -1209,7 +1210,7 @@ async function calculateAutoRho(): Promise<number | null> {
 
     } catch (error) {
         hideLoading();
-        console.error('Unexpected error in calculateAutoRho:', error);
+        log.error('Unexpected error in calculateAutoRho:', error);
         showNotification('Failed to calculate air density. Using manual value.', 'error');
         appState.isCalculatingAutoRho = false;
         return null;
@@ -1307,7 +1308,7 @@ async function initializeApplication() {
 
 // Initialize the application
 initializeApplication().catch(err => {
-    console.error('Failed to initialize application:', err);
+    log.error('Failed to initialize application:', err);
     hideLoading();
     showError(`Failed to initialize application: ${err.message}`);
 });
@@ -1345,7 +1346,7 @@ async function setupGpsLapDetection() {
     const gatePositionInfo = document.getElementById('gpsGatePositionInfo');
 
     if (!sliderControls || !gateSlider || !gateValue) {
-        console.warn('GPS lap detection slider controls not found in DOM');
+        log.warn('GPS lap detection slider controls not found in DOM');
         return;
     }
 
@@ -1356,7 +1357,7 @@ async function setupGpsLapDetection() {
     // Set slider max to duration in seconds
     const maxSeconds = Math.floor(duration);
     if (maxSeconds <= 0) {
-        console.warn('Invalid duration for GPS lap detection:', maxSeconds);
+        log.warn('Invalid duration for GPS lap detection:', maxSeconds);
         return;
     }
 
@@ -1373,10 +1374,10 @@ async function setupGpsLapDetection() {
             const savedMarker = await parameterStorage.loadGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps);
             if (savedMarker && savedMarker.gateTimeOffset !== undefined) {
                 initialOffset = savedMarker.gateTimeOffset;
-                console.log('Loading saved GPS gate time offset:', initialOffset);
+                log.debug('Loading saved GPS gate time offset:', initialOffset);
             }
         } catch (err) {
-            console.error('Failed to load saved GPS marker settings:', err);
+            log.error('Failed to load saved GPS marker settings:', err);
         }
     }
 
@@ -1412,7 +1413,7 @@ async function setupGpsLapDetection() {
                         gateTimeOffset: timeOffset
                     });
                 } catch (err) {
-                    console.error('Failed to save GPS marker settings:', err);
+                    log.error('Failed to save GPS marker settings:', err);
                 }
             }
 
@@ -1441,7 +1442,7 @@ async function setupGpsLapDetection() {
         });
 
         gpsLapHandlersInitialized = true;
-        console.log('GPS lap detection slider handlers initialized');
+        log.debug('GPS lap detection slider handlers initialized');
     }
 
     // Initial detection with loaded/default offset
@@ -1533,7 +1534,7 @@ function runGpsLapDetection(markerLat: number, markerLon: number, _markerIndex: 
         if (indicesInSelectedLaps.length > 0) {
             trimStart = indicesInSelectedLaps[0];
             trimEnd = indicesInSelectedLaps[indicesInSelectedLaps.length - 1];
-            console.log(`GPS lap detection trim region: ${trimStart} to ${trimEnd} (${indicesInSelectedLaps.length} points from ${appState.selectedLaps.length} FIT laps)`);
+            log.debug(`GPS lap detection trim region: ${trimStart} to ${trimEnd} (${indicesInSelectedLaps.length} points from ${appState.selectedLaps.length} FIT laps)`);
         }
     }
 
@@ -1563,7 +1564,7 @@ function runGpsLapDetection(markerLat: number, markerLon: number, _markerIndex: 
     appState.gpsLapDetectionResult = detector.detectLaps();
     appState.gpsDetectedLaps = appState.gpsLapDetectionResult.detectedLaps;
 
-    console.log(`Detected ${appState.gpsDetectedLaps.length} laps:`, appState.gpsDetectedLaps);
+    log.debug(`Detected ${appState.gpsDetectedLaps.length} laps:`, appState.gpsDetectedLaps);
 
     // Show detected laps on map
     if (mapVisualization && appState.gpsLapDetectionResult) {
@@ -1654,7 +1655,7 @@ function handleGpsLapSelectionChange() {
         }
     });
 
-    console.log('GPS selected laps:', appState.gpsSelectedLaps);
+    log.debug('GPS selected laps:', appState.gpsSelectedLaps);
     updateAnalyzeButton();
 }
 
@@ -1680,7 +1681,7 @@ async function setupOutAndBackDetection() {
     const gateBInfo = document.getElementById('oabGateBInfo');
 
     if (!sliderControls || !gateASlider || !gateAValue || !gateBSlider || !gateBValue) {
-        console.warn('Out and Back slider controls not found in DOM');
+        log.warn('Out and Back slider controls not found in DOM');
         return;
     }
 
@@ -1691,7 +1692,7 @@ async function setupOutAndBackDetection() {
     // Set slider max to duration in seconds
     const maxSeconds = Math.floor(duration);
     if (maxSeconds <= 0) {
-        console.warn('Invalid duration for Out and Back detection:', maxSeconds);
+        log.warn('Invalid duration for Out and Back detection:', maxSeconds);
         return;
     }
 
@@ -1712,10 +1713,10 @@ async function setupOutAndBackDetection() {
             if (savedMarkers && savedMarkers.gateATimeOffset !== undefined && savedMarkers.gateBTimeOffset !== undefined) {
                 initialOffsetA = savedMarkers.gateATimeOffset;
                 initialOffsetB = savedMarkers.gateBTimeOffset;
-                console.log('Loading saved Out and Back gate time offsets:', { A: initialOffsetA, B: initialOffsetB });
+                log.debug('Loading saved Out and Back gate time offsets:', { A: initialOffsetA, B: initialOffsetB });
             }
         } catch (err) {
-            console.error('Failed to load saved Out and Back marker settings:', err);
+            log.error('Failed to load saved Out and Back marker settings:', err);
         }
     }
 
@@ -1771,7 +1772,7 @@ async function setupOutAndBackDetection() {
                     gateBTimeOffset: offsetB
                 });
             } catch (err) {
-                console.error('Failed to save Out and Back marker settings:', err);
+                log.error('Failed to save Out and Back marker settings:', err);
             }
         }
 
@@ -1828,7 +1829,7 @@ async function setupOutAndBackDetection() {
         });
 
         outAndBackHandlersInitialized = true;
-        console.log('Out and Back slider handlers initialized');
+        log.debug('Out and Back slider handlers initialized');
     }
 
     // Initial detection with loaded/default offsets
@@ -1863,7 +1864,7 @@ function runOutAndBackDetection(markerALat: number, markerALon: number, markerBL
         if (indicesInSelectedLaps.length > 0) {
             trimStart = indicesInSelectedLaps[0];
             trimEnd = indicesInSelectedLaps[indicesInSelectedLaps.length - 1];
-            console.log(`Out and Back trim region: ${trimStart} to ${trimEnd}`);
+            log.debug(`Out and Back trim region: ${trimStart} to ${trimEnd}`);
         }
     }
 
@@ -1888,7 +1889,7 @@ function runOutAndBackDetection(markerALat: number, markerALon: number, markerBL
     appState.outAndBackResult = detector.detectSections();
     appState.outAndBackSections = appState.outAndBackResult.detectedSections;
 
-    console.log(`Detected ${appState.outAndBackSections.length} out-and-back sections:`, appState.outAndBackSections);
+    log.debug(`Detected ${appState.outAndBackSections.length} out-and-back sections:`, appState.outAndBackSections);
 
     // Show detected sections on map
     if (mapVisualization && appState.outAndBackResult) {
@@ -1980,7 +1981,7 @@ function handleOutAndBackSectionSelectionChange() {
         }
     });
 
-    console.log('Out and Back selected sections:', appState.outAndBackSelectedSections);
+    log.debug('Out and Back selected sections:', appState.outAndBackSelectedSections);
     updateAnalyzeButton();
 }
 
@@ -2159,7 +2160,7 @@ function updateSelectedLaps() {
             if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
                 setTimeout(() => {
                     calculateAutoRho().catch(err => {
-                        console.error('Auto-rho calculation error on lap selection:', err);
+                        log.error('Auto-rho calculation error on lap selection:', err);
                     });
                 }, 500); // Small delay to ensure sliders are initialized
             }
@@ -2184,7 +2185,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
     // Get data from unified structure (works for both FIT and CSV)
     const fitData = appState.currentFitData || appState.currentFitResult.fit_data;
     if (!fitData) {
-        console.error('No fit data available for map trim controls');
+        log.error('No fit data available for map trim controls');
         return;
     }
 
@@ -2259,7 +2260,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
                 appState.presetTrimEnd = dataLength - 1;
             }
         } catch (err) {
-            console.error('Failed to load lap settings:', err);
+            log.error('Failed to load lap settings:', err);
             // Fallback to defaults
             appState.presetTrimStart = 0;
             appState.presetTrimEnd = dataLength - 1;
@@ -2296,7 +2297,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
 
         // Set map markers with loaded/default trim values
         if (mapVisualization && savedSettings && appState.presetTrimStart !== null && appState.presetTrimEnd !== null) {
-            console.log('Setting map trim markers to loaded settings:', { trimStart: appState.presetTrimStart, trimEnd: appState.presetTrimEnd });
+            log.debug('Setting map trim markers to loaded settings:', { trimStart: appState.presetTrimStart, trimEnd: appState.presetTrimEnd });
             const trimStartVal = appState.presetTrimStart;
             const trimEndVal = appState.presetTrimEnd;
             setTimeout(() => {
@@ -2382,7 +2383,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
             mapAutoRhoDebounceTimer = setTimeout(() => {
                 if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
                     calculateAutoRho().catch(err => {
-                        console.error('Auto-rho calculation error on map trim change:', err);
+                        log.error('Auto-rho calculation error on map trim change:', err);
                     });
                 }
             }, 500); // Wait 500ms after last slider change
@@ -2407,7 +2408,7 @@ function initializeAnalysisParameters() {
         // Update analyze button with the default parameters
         updateAnalyzeButton();
     } catch (error) {
-        console.error('Error initializing analysis parameters:', error);
+        log.error('Error initializing analysis parameters:', error);
     }
 }
 
@@ -2427,7 +2428,7 @@ function handleParametersChange(parameters: AnalysisParameters) {
 
     // If lap detection mode changed, re-initialize Section 3 to show/hide GPS panel
     if (lapDetectionChanged && appState.currentFitData && appState.currentLaps.length > 0) {
-        console.log(`Auto lap detection changed: ${previousLapDetectionMode} -> ${parameters.auto_lap_detection}`);
+        log.debug(`Auto lap detection changed: ${previousLapDetectionMode} -> ${parameters.auto_lap_detection}`);
         // Reset GPS lap detection state when mode changes
         appState.gpsLapDetectionResult = null;
         appState.gpsDetectedLaps = [];
@@ -2439,12 +2440,12 @@ function handleParametersChange(parameters: AnalysisParameters) {
 
     // Save parameters to IndexedDB for this file
     if (!appState.currentFileHash) {
-        console.error('❌ Cannot save: appState.currentFileHash is null/undefined');
+        log.error('❌ Cannot save: appState.currentFileHash is null/undefined');
         return;
     }
 
     if (!appState.selectedFile) {
-        console.error('❌ Cannot save: appState.selectedFile is null/undefined');
+        log.error('❌ Cannot save: appState.selectedFile is null/undefined');
         return;
     }
 
@@ -2452,7 +2453,7 @@ function handleParametersChange(parameters: AnalysisParameters) {
         .then(() => {
         })
         .catch(err => {
-            console.error('❌ Failed to save parameters:', err);
+            log.error('❌ Failed to save parameters:', err);
         });
 
     // Update wind indicator on map if wind parameters are set
@@ -2476,7 +2477,7 @@ function handleParametersChange(parameters: AnalysisParameters) {
         // Small delay to ensure UI is updated
         setTimeout(() => {
             calculateAutoRho().catch(err => {
-                console.error('Auto-rho calculation error:', err);
+                log.error('Auto-rho calculation error:', err);
             });
         }, 100);
     }
@@ -2659,7 +2660,7 @@ function initializeSection3() {
                 mapVisualization = new MapVisualization('mapView');
                 await mapVisualization.initialize();
                 mapVisualization.setData(fitData, laps);
-                console.log('Map initialized with GPS data');
+                log.debug('Map initialized with GPS data');
 
                 // Setup GPS lap detection if enabled
                 if (showGpsLapDetection) {
@@ -2671,16 +2672,16 @@ function initializeSection3() {
                     setupOutAndBackDetection();
                 }
             } else {
-                console.log('No GPS data - skipping map initialization');
+                log.debug('No GPS data - skipping map initialization');
             }
 
             // Always setup lap selection handlers (FIT laps always shown)
             setupLapSelectionHandlers();
             setupAnalyzeButton();
 
-            console.log('Section 3 initialized (GPS:', hasGpsData, ', GPS Lap Detection:', showGpsLapDetection, ', Out and Back:', showOutAndBack, ')');
+            log.debug('Section 3 initialized (GPS:', hasGpsData, ', GPS Lap Detection:', showGpsLapDetection, ', Out and Back:', showOutAndBack, ')');
         } catch (error) {
-            console.error('Error initializing section 3:', error);
+            log.error('Error initializing section 3:', error);
         }
     }, 100);
 }
@@ -2768,15 +2769,15 @@ async function handleAnalyze() {
         showLoading('Preparing data for Virtual Elevation analysis...');
 
         if (selection.mode === 'outAndBack') {
-            console.log('Out and Back mode - selected sections:', selection.outAndBackSections);
+            log.debug('Out and Back mode - selected sections:', selection.outAndBackSections);
         } else if (selection.mode === 'gpsLap') {
-            console.log('GPS lap mode - selected lap index ranges:', selection.indexRanges);
+            log.debug('GPS lap mode - selected lap index ranges:', selection.indexRanges);
         } else {
-            console.log('Normal mode - selected lap data:', selection.selectedEntries);
+            log.debug('Normal mode - selected lap data:', selection.selectedEntries);
         }
 
-        console.log('appState.currentFitResult structure:', appState.currentFitResult);
-        console.log('appState.currentFitResult keys:', appState.currentFitResult ? Object.keys(appState.currentFitResult) : 'null');
+        log.debug('appState.currentFitResult structure:', appState.currentFitResult);
+        log.debug('appState.currentFitResult keys:', appState.currentFitResult ? Object.keys(appState.currentFitResult) : 'null');
 
         if (!appState.currentFitResult) {
             throw new Error('No data available for analysis');
@@ -2805,15 +2806,15 @@ async function handleAnalyze() {
         const allWindSpeed = initialWindResolution.windSpeed;
 
         if (initialWindResolution.dataSource === 'air_speed') {
-            console.log('🌬️ Found air speed data, using it as apparent wind speed');
+            log.debug('🌬️ Found air speed data, using it as apparent wind speed');
         } else if (initialWindResolution.dataSource === 'wind_speed') {
             if (hasWindYaw) {
-                console.log('🌬️ Found wind speed with yaw, triangulating for apparent wind speed');
+                log.debug('🌬️ Found wind speed with yaw, triangulating for apparent wind speed');
             } else {
-                console.log('🌬️ Found wind speed without yaw, using it as apparent wind speed');
+                log.debug('🌬️ Found wind speed without yaw, using it as apparent wind speed');
             }
         } else {
-            console.log('🌬️ No air/wind speed data found, using constant wind as source');
+            log.debug('🌬️ No air/wind speed data found, using constant wind as source');
         }
 
         const allAirDensity = normalizedArrays.airDensity;
@@ -2822,7 +2823,7 @@ async function handleAnalyze() {
         const hasRoadSpeed = normalizedArrays.roadSpeed.some((v: number) => !isNaN(v) && v !== 0);
         const hasEnhancedSpeed = allVelocity.some((v: number) => !isNaN(v) && v !== 0);
         if (hasRoadSpeed && hasEnhancedSpeed) {
-            console.log('🚴 Found enhanced speed and road speed, prefer road speed');
+            log.debug('🚴 Found enhanced speed and road speed, prefer road speed');
         }
 
         const selectedIndices = collectSelectionIndices(selection, allTimestamps);
@@ -2857,7 +2858,7 @@ async function handleAnalyze() {
 
         const powerDataPoints = filteredPower.filter(p => p > 0).length;
         if (powerDataPoints < filteredTimestamps.length * 0.5) {
-            console.warn(`Only ${powerDataPoints}/${filteredTimestamps.length} records have power data`);
+            log.warn(`Only ${powerDataPoints}/${filteredTimestamps.length} records have power data`);
         }
 
         showLoading('Running Virtual Elevation calculation...');
@@ -2867,7 +2868,7 @@ async function handleAnalyze() {
             filteredAirDensity.some(rho => !isNaN(rho) && rho > 0);
 
         if (hasAirDensityData) {
-            console.log('💨 Found air density data, using it for calculations');
+            log.debug('💨 Found air density data, using it for calculations');
             appState.currentRhoArray = filteredAirDensity;
         } else {
             const hasEnvironmentalData = fitData.temperature && fitData.humidity && fitData.pressure;
@@ -2875,10 +2876,10 @@ async function handleAnalyze() {
                 const fullRhoArray = calculateRhoArrayFromFitData(fitData);
                 if (fullRhoArray) {
                     appState.currentRhoArray = selectedIndices.map(index => fullRhoArray[index]);
-                    console.log('💨 Calculated air density from environmental data');
+                    log.debug('💨 Calculated air density from environmental data');
                 }
             } else {
-                console.log('💨 No air density found, using constant value from weather API');
+                log.debug('💨 No air density found, using constant value from weather API');
             }
         }
 
@@ -2905,7 +2906,7 @@ async function handleAnalyze() {
 
         let filteredCdaReference: number[] | null = null;
         if (normalizedArrays.cdaReference) {
-            console.log('📊 Data has CdA reference - will enable validation tab');
+            log.debug('📊 Data has CdA reference - will enable validation tab');
             filteredCdaReference = selectedIndices.map(index => normalizedArrays.cdaReference![index]);
         }
 
@@ -2961,7 +2962,7 @@ async function handleAnalyze() {
             },
         });
     } catch (err) {
-        console.error('Virtual Elevation analysis failed:', err);
+        log.error('Virtual Elevation analysis failed:', err);
         hideLoading();
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         showError(`Virtual Elevation analysis failed: ${errorMessage}`);
@@ -3030,13 +3031,13 @@ async function showGpsLapVEAnalysis(
     const windSpeedOffset = params?.air_speed_offset ?? defaultOffset;
 
     if (gpsLapWindResolution.selectedWindSource === 'constant') {
-        console.log('GPS Lap VE: Using constant wind settings');
+        log.debug('GPS Lap VE: Using constant wind settings');
     } else if (gpsLapWindResolution.dataSource === 'air_speed') {
-        console.log(`GPS Lap VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
+        log.debug(`GPS Lap VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else if (gpsLapWindResolution.dataSource === 'wind_speed') {
-        console.log(`GPS Lap VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
+        log.debug(`GPS Lap VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
-        console.log('GPS Lap VE: No wind data available');
+        log.debug('GPS Lap VE: No wind data available');
     }
 
     // Get CdA and Crr values
@@ -3070,7 +3071,7 @@ async function showGpsLapVEAnalysis(
         }
 
         if (lapTimestamps.length < 10) {
-            console.warn(`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`);
+            log.warn(`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`);
             continue;
         }
 
@@ -3127,10 +3128,10 @@ async function showGpsLapVEAnalysis(
                 totalDistance
             });
 
-            console.log(`Lap ${lapNumber}: ${totalDistance.toFixed(2)} km, ${duration.toFixed(0)}s, ${veArray.length} points`);
+            log.debug(`Lap ${lapNumber}: ${totalDistance.toFixed(2)} km, ${duration.toFixed(0)}s, ${veArray.length} points`);
 
         } catch (err) {
-            console.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
+            log.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
         }
     }
 
@@ -3258,7 +3259,7 @@ async function showGpsLapVEPlot(
 
     const veAnalysisContent = document.getElementById('veAnalysisContent') as HTMLElement;
     if (!veAnalysisContent) {
-        console.error('VE analysis content container not found');
+        log.error('VE analysis content container not found');
         return;
     }
 
@@ -3411,7 +3412,7 @@ async function showGpsLapVEPlot(
     const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
     windSourceRadios.forEach(radio => {
         radio.addEventListener('change', () => {
-            console.log('Wind source changed - triggering GPS lap VE recalculation');
+            log.debug('Wind source changed - triggering GPS lap VE recalculation');
             recalculateGpsLapVE();
         });
     });
@@ -3425,7 +3426,7 @@ async function showGpsLapVEPlot(
             const value = parseFloat(airSpeedCalibrationSlider.value);
             airSpeedCalibrationValue.value = value.toFixed(1);
             appState.airSpeedCalibrationPercent = value;
-            console.log('Air speed calibration changed - triggering GPS lap VE recalculation');
+            log.debug('Air speed calibration changed - triggering GPS lap VE recalculation');
             recalculateGpsLapVE();
         };
 
@@ -3436,7 +3437,7 @@ async function showGpsLapVEPlot(
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValue.value = clamped.toFixed(1);
             appState.airSpeedCalibrationPercent = clamped;
-            console.log('Air speed calibration changed - triggering GPS lap VE recalculation');
+            log.debug('Air speed calibration changed - triggering GPS lap VE recalculation');
             recalculateGpsLapVE();
         };
 
@@ -3449,7 +3450,7 @@ async function showGpsLapVEPlot(
             autoAdjustButton.addEventListener('click', () => {
                 // Auto-adjust logic for GPS lap mode
                 // For now, just show a message - full implementation would need lap-specific calculations
-                console.log('Auto-adjust clicked for GPS lap mode');
+                log.debug('Auto-adjust clicked for GPS lap mode');
                 alert('Auto-adjust for GPS lap mode is not yet implemented. Please adjust manually.');
             });
         }
@@ -3485,7 +3486,7 @@ async function showGpsLapVEPlot(
     // Scroll to the VE analysis section
     veSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-    console.log(`GPS Lap VE plot rendered with ${lapProfiles.length} laps`);
+    log.debug(`GPS Lap VE plot rendered with ${lapProfiles.length} laps`);
 }
 
 /**
@@ -3665,7 +3666,7 @@ function setupGpsLapTabSwitching(lapProfiles: LapVEProfile[], showWindTab: boole
  */
 async function recalculateGpsLapVE() {
     if (!appState.currentFitData || !appState.currentParameters) {
-        console.error('Cannot recalculate: missing data or parameters');
+        log.error('Cannot recalculate: missing data or parameters');
         return;
     }
 
@@ -3687,7 +3688,7 @@ async function recalculateGpsLapVE() {
     }));
 
     if (selectedLapIndexRanges.length === 0) {
-        console.error('No GPS laps selected for recalculation');
+        log.error('No GPS laps selected for recalculation');
         return;
     }
 
@@ -3705,7 +3706,7 @@ async function recalculateGpsLapVE() {
             appState.currentParameters.air_speed_offset ?? 2
         );
     } catch (err) {
-        console.error('Recalculation failed:', err);
+        log.error('Recalculation failed:', err);
         hideLoading();
     }
 }
@@ -3727,7 +3728,7 @@ async function saveGpsLapScreenshot() {
             filename: `gps-lap-ve-${timestamp}`
         });
     } catch (err) {
-        console.error('Failed to save screenshot:', err);
+        log.error('Failed to save screenshot:', err);
     }
 }
 
@@ -3995,7 +3996,7 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
     // the user enters values — this function cannot run before that.
     // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
     if (!appState.currentParameters) {
-        console.error('showVirtualElevationAnalysisInline: appState.currentParameters is null');
+        log.error('showVirtualElevationAnalysisInline: appState.currentParameters is null');
         return;
     }
 
@@ -4011,7 +4012,7 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
     const hasConstantWind = appState.currentParameters.wind_speed !== undefined && appState.currentParameters.wind_speed !== 0 &&
                             appState.currentParameters.wind_direction !== undefined;
 
-    console.log('Wind data availability:', {
+    log.debug('Wind data availability:', {
         hasWindSpeed,
         hasConstantWind,
         windSpeedLength: windSpeed.length,
@@ -4027,18 +4028,18 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
     // Show the VE analysis section
     const veSection = document.getElementById('veAnalysisSection') as HTMLElement;
     if (veSection) {
-        console.log('Found veSection, removing hidden/inactive classes');
+        log.debug('Found veSection, removing hidden/inactive classes');
         veSection.classList.remove('hidden', 'inactive');
-        console.log('veSection classes after removal:', veSection.className);
+        log.debug('veSection classes after removal:', veSection.className);
     } else {
-        console.error('veAnalysisSection element not found in DOM');
+        log.error('veAnalysisSection element not found in DOM');
         return;
     }
 
     // Get the VE analysis content container
     const veAnalysisContent = document.getElementById('veAnalysisContent') as HTMLElement;
     if (!veAnalysisContent) {
-        console.error('VE analysis content container not found');
+        log.error('VE analysis content container not found');
         return;
     }
 
@@ -4289,7 +4290,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
                 }, 100);
             }
         } catch (err) {
-            console.error('Failed to load lap settings:', err);
+            log.error('Failed to load lap settings:', err);
         }
     }
 
@@ -4336,7 +4337,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
                         Plotly.Plots.resize('vePlot');
                         Plotly.Plots.resize('veResidualsPlot');
                     } catch (error) {
-                        console.error('Failed to resize plots:', error);
+                        log.error('Failed to resize plots:', error);
                     }
                 }, 100);
             }
@@ -4350,7 +4351,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
     // Use preset trim values if they were set before clicking analyze
     const initialTrimStart = appState.presetTrimStart;
     const initialTrimEnd = appState.presetTrimEnd ?? timestamps.length - 1;
-    console.log('Using preset trim values for initial render:', {
+    log.debug('Using preset trim values for initial render:', {
         trimStart: initialTrimStart,
         trimEnd: initialTrimEnd
     });
@@ -4361,7 +4362,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
 
         // Update map markers with preset trim values after analyze
         if (mapVisualization && appState.filteredVEData) {
-            console.log('Setting map trim markers to preset values after analyze');
+            log.debug('Setting map trim markers to preset values after analyze');
             mapVisualization.fitBoundsToTrimRegion(initialTrimStart, initialTrimEnd, appState.filteredVEData.positionLat, appState.filteredVEData.positionLong);
         }
     }, 500);
@@ -4394,7 +4395,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
 // Handle Save Screenshot button click
 async function handleSaveScreenshot() {
     if (!appState.selectedFile) {
-        console.error('Cannot save: missing file');
+        log.error('Cannot save: missing file');
         alert('Cannot save screenshot: missing file data.');
         return;
     }
@@ -4417,7 +4418,7 @@ async function handleSaveScreenshot() {
             saveBtn.textContent = originalText || 'Save Screenshot';
         }, 2000);
     } catch (error) {
-        console.error('❌ Failed to save screenshot:', error);
+        log.error('❌ Failed to save screenshot:', error);
         alert('Failed to save screenshot. See console for details.');
 
         saveBtn.disabled = false;
@@ -4497,7 +4498,7 @@ function showNotesDialog(): Promise<string> {
 // Handle Store Result button click
 async function handleStoreResult() {
     if (!appState.selectedFile || !appState.currentParameters || !appState.currentVEResult) {
-        console.error('Cannot store: missing required data');
+        log.error('Cannot store: missing required data');
         alert('Cannot store result: missing analysis data. Please run analysis first.');
         return;
     }
@@ -4539,7 +4540,7 @@ async function handleStoreResult() {
             const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
 
             if (!trimStartSlider || !trimEndSlider || !cdaSlider || !crrSlider) {
-                console.error('Cannot store: UI elements not found');
+                log.error('Cannot store: UI elements not found');
                 return;
             }
 
@@ -4600,7 +4601,7 @@ async function handleStoreResult() {
             storeBtn.textContent = originalText || 'Store Result';
         }, 2000);
     } catch (error) {
-        console.error('❌ Failed to store result:', error);
+        log.error('❌ Failed to store result:', error);
         alert('Failed to store result. See console for details.');
 
         storeBtn.disabled = false;
@@ -4627,7 +4628,7 @@ async function handleExportAllResults() {
             exportBtn.textContent = originalText || 'Export all results to CSV';
         }, 2000);
     } catch (error) {
-        console.error('❌ Failed to export results:', error);
+        log.error('❌ Failed to export results:', error);
         alert('Failed to export results. See console for details.');
 
         exportBtn.disabled = false;
@@ -4657,7 +4658,7 @@ async function saveCurrentLapSettings() {
     try {
         await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
     } catch (err) {
-        console.error('Failed to save lap settings:', err);
+        log.error('Failed to save lap settings:', err);
     }
 }
 
@@ -4665,7 +4666,7 @@ async function saveCurrentLapSettings() {
 async function saveMapTrimSettings() {
 
     if (!appState.currentFileHash || !appState.selectedFile) {
-        console.warn('⚠️ Cannot save: missing fileHash or appState.selectedFile');
+        log.warn('⚠️ Cannot save: missing fileHash or appState.selectedFile');
         return;
     }
 
@@ -4679,7 +4680,7 @@ async function saveMapTrimSettings() {
     try {
         await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
     } catch (err) {
-        console.error('❌ Failed to save map trim settings:', err);
+        log.error('❌ Failed to save map trim settings:', err);
     }
 }
 
@@ -4700,7 +4701,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     // so nested slider callbacks can close over a non-null reference
     // (top-level narrowing doesn't propagate into callback scopes).
     if (!appState.currentParameters) {
-        console.error('setupVESliders: appState.currentParameters is null');
+        log.error('setupVESliders: appState.currentParameters is null');
         return;
     }
     const params = appState.currentParameters;
@@ -4722,7 +4723,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         // Ensure trim start < trim end - 30
         const trimEnd = parseInt(trimEndSlider.value);
-        console.log('Trim Start changed:', {
+        log.debug('Trim Start changed:', {
             trimStart: value,
             trimEnd: trimEnd,
             dataLength: timestamps.length,
@@ -4768,7 +4769,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         // Ensure trim end > trim start + 30
         const trimStart = parseInt(trimStartSlider.value);
-        console.log('Trim End changed:', {
+        log.debug('Trim End changed:', {
             trimStart: trimStart,
             trimEnd: value,
             dataLength: timestamps.length,
@@ -4958,7 +4959,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         autoRhoDebounceTimer = setTimeout(() => {
             if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
                 calculateAutoRho().catch(err => {
-                    console.error('Auto-rho calculation error on trim change:', err);
+                    log.error('Auto-rho calculation error on trim change:', err);
                 });
             }
         }, 500); // Wait 500ms after last slider change
@@ -4971,7 +4972,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
         setTimeout(() => {
             calculateAutoRho().catch(err => {
-                console.error('Auto-rho initial calculation error:', err);
+                log.error('Auto-rho initial calculation error:', err);
             });
         }, 1000); // Wait 1s for UI to fully render
     }
@@ -4988,7 +4989,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         radio.addEventListener('change', (e) => {
             const target = e.target as HTMLInputElement;
             const windSource = target.value;
-            console.log('Wind source changed to:', windSource);
+            log.debug('Wind source changed to:', windSource);
 
             const trimStart = parseInt(trimStartSlider.value);
             const trimEnd = parseInt(trimEndSlider.value);
@@ -5108,9 +5109,9 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                     // Save settings
                     saveCurrentLapSettings();
 
-                    console.log(`Auto-adjusted air speed calibration to ${clampedPercent.toFixed(1)}%`);
+                    log.debug(`Auto-adjusted air speed calibration to ${clampedPercent.toFixed(1)}%`);
                 } else {
-                    console.warn('Cannot auto-adjust: no air speed data available');
+                    log.warn('Cannot auto-adjust: no air speed data available');
                 }
             });
         }
@@ -5208,7 +5209,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     const mapTrimStartValue = document.getElementById('mapTrimStartValue') as HTMLInputElement;
     const mapTrimEndValue = document.getElementById('mapTrimEndValue') as HTMLInputElement;
 
-    console.log('Map trim controls lookup:', {
+    log.debug('Map trim controls lookup:', {
         mapTrimControls: !!mapTrimControls,
         mapTrimStartSlider: !!mapTrimStartSlider,
         mapTrimEndSlider: !!mapTrimEndSlider,
@@ -5217,7 +5218,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     });
 
     if (mapTrimControls && mapTrimStartSlider && mapTrimEndSlider && mapTrimStartValue && mapTrimEndValue) {
-        console.log('Showing map trim controls');
+        log.debug('Showing map trim controls');
         // Show the map trim controls
         mapTrimControls.style.display = 'flex';
 
@@ -5310,7 +5311,7 @@ function updateVEPlots(analysisInput: AnalysisInput, trimStart: number, trimEnd:
     const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
     const windSource = windSourceRadio ? windSourceRadio.value : 'fit';
 
-    console.log('updateVEPlots: Using wind source:', windSource);
+    log.debug('updateVEPlots: Using wind source:', windSource);
 
     // Use the wind source specific function
     updateVEPlotsWithWindSource(analysisInput, trimStart, trimEnd, windSource);
@@ -5321,7 +5322,7 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
 
     // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
     if (!appState.currentParameters) {
-        console.error('updateVEPlotsWithWindSource: appState.currentParameters is null');
+        log.error('updateVEPlotsWithWindSource: appState.currentParameters is null');
         return;
     }
 
@@ -5428,8 +5429,8 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
                 // Use constant wind - set wind_speed to NaN to force fallback to constant wind
                 // If no constant wind is configured, it will use 0
                 useWindSpeed = new Array(windSpeed.length).fill(NaN);
-                console.log('Using constant wind - wind_speed array filled with NaN');
-                console.log('Wind speed param:', appState.currentParameters.wind_speed ?? 0, 'Wind direction:', appState.currentParameters.wind_direction ?? 0);
+                log.debug('Using constant wind - wind_speed array filled with NaN');
+                log.debug('Wind speed param:', appState.currentParameters.wind_speed ?? 0, 'Wind direction:', appState.currentParameters.wind_direction ?? 0);
             } else {
                 // Use FIT file wind data
                 // Apply time offset first (to sync with ground speed).
@@ -5438,13 +5439,13 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
                 // which would have thrown ReferenceError at runtime.
                 const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? 2;
                 useWindSpeed = applyAirSpeedOffset(windSpeed, windSpeedOffset);
-                console.log('Using FIT wind data with offset:', windSpeedOffset, 'seconds');
-                console.log('Sample offset wind_speed values:', useWindSpeed.slice(0, 5));
-                console.log('Non-zero wind_speed count:', useWindSpeed.filter(v => !isNaN(v) && v !== 0).length);
+                log.debug('Using FIT wind data with offset:', windSpeedOffset, 'seconds');
+                log.debug('Sample offset wind_speed values:', useWindSpeed.slice(0, 5));
+                log.debug('Non-zero wind_speed count:', useWindSpeed.filter(v => !isNaN(v) && v !== 0).length);
             }
 
             // Debug altitude data AND velodrome parameter before passing to calculator
-            console.log('Altitude data being passed to calculator:', {
+            log.debug('Altitude data being passed to calculator:', {
                 length: altitude.length,
                 allZeros: altitude.every(v => v === 0),
                 allNaN: altitude.every(v => isNaN(v)),
@@ -5453,7 +5454,7 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
                 trimEndValue: altitude[trimEnd],
                 expectedDiff: altitude[trimEnd] - altitude[trimStart]
             });
-            console.log('VELODROME PARAMETER:', appState.currentParameters.velodrome, 'Type:', typeof appState.currentParameters.velodrome);
+            log.debug('VELODROME PARAMETER:', appState.currentParameters.velodrome, 'Type:', typeof appState.currentParameters.velodrome);
 
             // Apply wind speed calibration if set (after offset)
             const calibratedWindSpeed = appState.airSpeedCalibrationPercent !== 0
@@ -5480,7 +5481,7 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
 
             const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
 
-            console.log('VE calculation result:', {
+            log.debug('VE calculation result:', {
                 r2: result.r2,
                 rmse: result.rmse,
                 veGain: result.ve_elevation_diff,
@@ -5514,7 +5515,7 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
         }
 
     } catch (error) {
-        console.error('Error updating VE plots with wind source:', error);
+        log.error('Error updating VE plots with wind source:', error);
     }
 }
 
@@ -5523,7 +5524,7 @@ async function updateVEPlotsWithWindSource(analysisInput: AnalysisInput, trimSta
  */
 async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string) {
     if (!appState.currentFitData || !appState.currentGpsLapIndexRanges || !appState.currentParameters) {
-        console.error('Missing data for GPS lap VE update');
+        log.error('Missing data for GPS lap VE update');
         return;
     }
 
@@ -5587,7 +5588,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
         }
 
         if (lapTimestamps.length < 10) {
-            console.warn(`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`);
+            log.warn(`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`);
             continue;
         }
 
@@ -5645,12 +5646,12 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
             });
 
         } catch (err) {
-            console.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
+            log.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
         }
     }
 
     if (lapVEProfiles.length === 0) {
-        console.error('No valid laps to display');
+        log.error('No valid laps to display');
         return;
     }
 
@@ -5850,7 +5851,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
         renderGpsLapVdPlot(lapVEProfiles);
     }
 
-    console.log(`GPS Lap VE plots updated with ${lapVEProfiles.length} laps, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
+    log.debug(`GPS Lap VE plots updated with ${lapVEProfiles.length} laps, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
 }
 
 // ==================== Out and Back VE Analysis ====================
@@ -5913,13 +5914,13 @@ async function showOutAndBackVEAnalysis(
     const windSpeedOffset = params?.air_speed_offset ?? defaultAirSpeedOffset;
 
     if (outAndBackWindResolution.selectedWindSource === 'constant') {
-        console.log('Out and Back VE: Using constant wind settings');
+        log.debug('Out and Back VE: Using constant wind settings');
     } else if (outAndBackWindResolution.dataSource === 'air_speed') {
-        console.log(`Out and Back VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
+        log.debug(`Out and Back VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else if (outAndBackWindResolution.dataSource === 'wind_speed') {
-        console.log(`Out and Back VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
+        log.debug(`Out and Back VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
-        console.log('Out and Back VE: No wind data available');
+        log.debug('Out and Back VE: No wind data available');
     }
 
     const cda = params.cda ?? 0.3;
@@ -5993,7 +5994,7 @@ async function showOutAndBackVEAnalysis(
                     : [...outboundData.altitude];
             }
         } catch (err) {
-            console.error(`Failed to calculate outbound VE for section ${section.sectionNumber}:`, err);
+            log.error(`Failed to calculate outbound VE for section ${section.sectionNumber}:`, err);
         }
 
         // Process inbound segment (B → A)
@@ -6047,7 +6048,7 @@ async function showOutAndBackVEAnalysis(
                     : [...inboundData.altitude];
             }
         } catch (err) {
-            console.error(`Failed to calculate inbound VE for section ${section.sectionNumber}:`, err);
+            log.error(`Failed to calculate inbound VE for section ${section.sectionNumber}:`, err);
         }
 
         if (profile.outboundVE.length > 0 || profile.inboundVE.length > 0) {
@@ -6204,7 +6205,7 @@ async function showOutAndBackVEPlot(
 
     const veAnalysisContent = document.getElementById('veAnalysisContent') as HTMLElement;
     if (!veAnalysisContent) {
-        console.error('VE analysis content container not found');
+        log.error('VE analysis content container not found');
         return;
     }
 
@@ -6354,7 +6355,7 @@ async function showOutAndBackVEPlot(
     const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
     windSourceRadios.forEach(radio => {
         radio.addEventListener('change', () => {
-            console.log('Wind source changed - triggering Out and Back VE recalculation');
+            log.debug('Wind source changed - triggering Out and Back VE recalculation');
             recalculateOutAndBackVE();
         });
     });
@@ -6368,7 +6369,7 @@ async function showOutAndBackVEPlot(
             const value = parseFloat(airSpeedCalibrationSlider.value);
             airSpeedCalibrationValueEl.value = value.toFixed(1);
             appState.airSpeedCalibrationPercent = value;
-            console.log('Air speed calibration changed - triggering Out and Back VE recalculation');
+            log.debug('Air speed calibration changed - triggering Out and Back VE recalculation');
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
             updateOutAndBackVEPlots(cda, crr);
@@ -6381,7 +6382,7 @@ async function showOutAndBackVEPlot(
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValueEl.value = clamped.toFixed(1);
             appState.airSpeedCalibrationPercent = clamped;
-            console.log('Air speed calibration changed - triggering Out and Back VE recalculation');
+            log.debug('Air speed calibration changed - triggering Out and Back VE recalculation');
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
             updateOutAndBackVEPlots(cda, crr);
@@ -6395,7 +6396,7 @@ async function showOutAndBackVEPlot(
         if (autoAdjustButton) {
             autoAdjustButton.addEventListener('click', () => {
                 // Auto-adjust logic for Out and Back mode
-                console.log('Auto-adjust clicked for Out and Back mode');
+                log.debug('Auto-adjust clicked for Out and Back mode');
                 alert('Auto-adjust for Out and Back mode is not yet implemented. Please adjust manually.');
             });
         }
@@ -6434,7 +6435,7 @@ async function showOutAndBackVEPlot(
 
 async function recalculateOutAndBackVE() {
     if (!appState.currentFitData || !appState.currentParameters || !appState.currentOutAndBackSections || appState.currentOutAndBackSections.length === 0) {
-        console.error('Cannot recalculate Out and Back VE: missing data, parameters, or sections');
+        log.error('Cannot recalculate Out and Back VE: missing data, parameters, or sections');
         return;
     }
 
@@ -6452,7 +6453,7 @@ async function recalculateOutAndBackVE() {
             appState.currentParameters.air_speed_offset ?? 2,
         );
     } catch (err) {
-        console.error('Out and Back recalculation failed:', err);
+        log.error('Out and Back recalculation failed:', err);
         hideLoading();
     }
 }
@@ -6630,7 +6631,7 @@ async function saveOutAndBackScreenshot() {
             filename: `out-and-back-ve-${timestamp}`
         });
     } catch (err) {
-        console.error('Failed to save screenshot:', err);
+        log.error('Failed to save screenshot:', err);
     }
 }
 
@@ -6900,7 +6901,7 @@ function renderOutAndBackPlots(
  */
 async function updateOutAndBackVEPlots(cda: number, crr: number) {
     if (!appState.currentFitData || !appState.currentOutAndBackSections || appState.currentOutAndBackSections.length === 0 || !appState.currentParameters) {
-        console.error('Missing data for Out and Back VE update');
+        log.error('Missing data for Out and Back VE update');
         return;
     }
 
@@ -6929,13 +6930,13 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     const allWindSpeed = outAndBackUpdateWindResolution.windSpeed;
 
     if (outAndBackUpdateWindResolution.selectedWindSource === 'constant') {
-        console.log('Out and Back VE update: Using constant wind settings');
+        log.debug('Out and Back VE update: Using constant wind settings');
     } else if (outAndBackUpdateWindResolution.dataSource === 'air_speed') {
-        console.log(`Out and Back VE update: Using FIT air speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
+        log.debug(`Out and Back VE update: Using FIT air speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else if (outAndBackUpdateWindResolution.dataSource === 'wind_speed') {
-        console.log(`Out and Back VE update: Using FIT wind speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
+        log.debug(`Out and Back VE update: Using FIT wind speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
-        console.log('Out and Back VE update: No wind data available');
+        log.debug('Out and Back VE update: No wind data available');
     }
 
     for (const section of appState.currentOutAndBackSections) {
@@ -7005,7 +7006,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                     : [...outboundData.altitude];
             }
         } catch (err) {
-            console.error(`Failed to calculate outbound VE for section ${section.sectionNumber}:`, err);
+            log.error(`Failed to calculate outbound VE for section ${section.sectionNumber}:`, err);
         }
 
         // Process inbound
@@ -7059,7 +7060,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                     : [...inboundData.altitude];
             }
         } catch (err) {
-            console.error(`Failed to calculate inbound VE for section ${section.sectionNumber}:`, err);
+            log.error(`Failed to calculate inbound VE for section ${section.sectionNumber}:`, err);
         }
 
         if (profile.outboundVE.length > 0 || profile.inboundVE.length > 0) {
@@ -7068,7 +7069,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     }
 
     if (profiles.length === 0) {
-        console.error('No valid sections to display');
+        log.error('No valid sections to display');
         return;
     }
 
@@ -7108,7 +7109,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
         renderOutAndBackVdPlot(profiles);
     }
 
-    console.log(`Out and Back VE plots updated with ${profiles.length} sections, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
+    log.debug(`Out and Back VE plots updated with ${profiles.length} sections, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
 }
 
 async function createVirtualElevationPlots(
@@ -7122,7 +7123,7 @@ async function createVirtualElevationPlots(
     // which fouls the existing `.map(...)` calls that expect number[].
     const virtualElevation: number[] = Array.from(virtualElevationIn);
     const actualElevation: number[] = Array.from(actualElevationIn);
-    console.log('Creating VE plots:', {
+    log.debug('Creating VE plots:', {
         trimStart,
         trimEnd,
         dataLength: virtualElevation.length,
@@ -7136,7 +7137,7 @@ async function createVirtualElevationPlots(
     try {
         Plotly = await waitForPlotly();
     } catch (error) {
-        console.error('Failed to load Plotly:', error);
+        log.error('Failed to load Plotly:', error);
         // Show error message in plot divs
         const vePlotDiv = document.getElementById('vePlot');
         const residualsPlotDiv = document.getElementById('veResidualsPlot');
@@ -7163,8 +7164,8 @@ async function createVirtualElevationPlots(
         const vePlotDiv = document.getElementById('vePlot');
         const residualsPlotDiv = document.getElementById('veResidualsPlot');
 
-        console.log('Plot divs found:', { vePlot: !!vePlotDiv, residualsPlot: !!residualsPlotDiv });
-        console.log('Plot data:', {
+        log.debug('Plot divs found:', { vePlot: !!vePlotDiv, residualsPlot: !!residualsPlotDiv });
+        log.debug('Plot data:', {
             elevationPoints: figures.elevation.data.length,
             residualsPoints: figures.residuals.data.length,
             sampleVirtualElevation: virtualElevation.slice(trimStart, trimStart + 5),
@@ -7172,13 +7173,13 @@ async function createVirtualElevationPlots(
         });
 
         if (vePlotDiv && residualsPlotDiv) {
-            console.log('Creating elevation plot...');
+            log.debug('Creating elevation plot...');
             await Plotly.newPlot(vePlotDiv, figures.elevation.data, figures.elevation.layout, figures.elevation.config);
-            console.log('Elevation plot created');
+            log.debug('Elevation plot created');
 
-            console.log('Creating residuals plot...');
+            log.debug('Creating residuals plot...');
             await Plotly.newPlot(residualsPlotDiv, figures.residuals.data, figures.residuals.layout, figures.residuals.config);
-            console.log('Residuals plot created');
+            log.debug('Residuals plot created');
 
             // Link the x-axes so they zoom/pan together (with guards to prevent infinite loops)
             let isRelayoutInProgress = false;
@@ -7221,10 +7222,10 @@ async function createVirtualElevationPlots(
                 }
             });
         } else {
-            console.error('Plot divs not found!');
+            log.error('Plot divs not found!');
         }
     } catch (error) {
-        console.error('Error creating plots:', error);
+        log.error('Error creating plots:', error);
     }
 }
 
@@ -7275,7 +7276,7 @@ async function updateCdaValidationPlots(
 
     // Debug: Verify we're using per-datapoint CdA, not average
     const nanCount = appState.currentCdaReference.filter(c => isNaN(c)).length;
-    console.log('CdA Array Debug:', {
+    log.debug('CdA Array Debug:', {
         arrayLength: cdaRefArray.length,
         trimmedLength: trimmedCdaRef.length,
         nanCount: nanCount,
@@ -7297,8 +7298,8 @@ async function updateCdaValidationPlots(
     try {
         refResult = refCalculator.calculate_virtual_elevation_with_cda_array(cdaRefArray, crrOptimized, trimStart, trimEnd);
     } catch (error) {
-        console.error('Error calculating VE with CdA array - WASM method may not exist yet:', error);
-        console.error('Please rebuild WASM with: ./build.sh or wasm-pack build backend --target web --out-dir ../frontend/wasm');
+        log.error('Error calculating VE with CdA array - WASM method may not exist yet:', error);
+        log.error('Please rebuild WASM with: ./build.sh or wasm-pack build backend --target web --out-dir ../frontend/wasm');
         return;
     }
 
@@ -7348,7 +7349,7 @@ async function updateCdaValidationPlots(
     // Calculate elevation offset (start at actual elevation, not 0)
     const elevationOffset = actualElevation[0];
 
-    console.log('Before offset:', {
+    log.debug('Before offset:', {
         veRefCdaFirst: veRefCdaArray[0],
         veSliderCdaFirst: veSliderCdaArray[0],
         difference: veRefCdaArray[0] - veSliderCdaArray[0],
@@ -7362,7 +7363,7 @@ async function updateCdaValidationPlots(
     const residuals = offsetVeSliderCda.map((ve, i) => ve - offsetVeRefCda[i]);
 
     // Debug: Check if VE profiles are actually different
-    console.log('VE Profile Comparison:', {
+    log.debug('VE Profile Comparison:', {
         sliderCdA: cdaOptimized,
         avgRefCdA: avgCdaRef,
         cdaDiffPercent: ((cdaOptimized - avgCdaRef) / avgCdaRef * 100).toFixed(2) + '%',
@@ -7499,7 +7500,7 @@ async function createVirtualElevationPlotsComparison(
     try {
         Plotly = await waitForPlotly();
     } catch (error) {
-        console.error('Failed to load Plotly:', error);
+        log.error('Failed to load Plotly:', error);
         const vePlotDiv = document.getElementById('vePlot');
         const residualsPlotDiv = document.getElementById('veResidualsPlot');
         if (vePlotDiv) vePlotDiv.innerHTML = '<p style="text-align: center; padding: 50px; color: #e74c3c;">Plotly failed to load. Please check your internet connection.</p>';
@@ -7522,7 +7523,7 @@ async function createWindSpeedPlot(analysisInput: AnalysisInput, trimStart: numb
     const { velocity, windSpeed } = analysisInput;
 
     if (!appState.currentParameters) {
-        console.error('createWindSpeedPlot: appState.currentParameters is null');
+        log.error('createWindSpeedPlot: appState.currentParameters is null');
         return;
     }
 
@@ -7530,7 +7531,7 @@ async function createWindSpeedPlot(analysisInput: AnalysisInput, trimStart: numb
     try {
         Plotly = await waitForPlotly();
     } catch (error) {
-        console.error('Failed to load Plotly:', error);
+        log.error('Failed to load Plotly:', error);
         const windPlotDiv = document.getElementById('windSpeedPlot');
         if (windPlotDiv) windPlotDiv.innerHTML = '<p style="text-align: center; padding: 50px; color: #e74c3c;">Plotly failed to load. Please check your internet connection.</p>';
         return;
@@ -7570,7 +7571,7 @@ async function createSpeedPowerPlot(analysisInput: AnalysisInput, trimStart: num
     try {
         Plotly = await waitForPlotly();
     } catch (error) {
-        console.error('Failed to load Plotly:', error);
+        log.error('Failed to load Plotly:', error);
         const plotDiv = document.getElementById('speedPowerPlot');
         if (plotDiv) plotDiv.innerHTML = '<p style="text-align: center; padding: 50px; color: #e74c3c;">Plotly failed to load. Please check your internet connection.</p>';
         return;
@@ -7590,7 +7591,7 @@ async function createVirtualDistancePlot(analysisInput: AnalysisInput, trimStart
     try {
         Plotly = await waitForPlotly();
     } catch (error) {
-        console.error('Failed to load Plotly:', error);
+        log.error('Failed to load Plotly:', error);
         const plotDiv = document.getElementById('vdPlot');
         if (plotDiv) plotDiv.innerHTML = '<p style="text-align: center; padding: 50px; color: #e74c3c;">Plotly failed to load. Please check your internet connection.</p>';
         return;
@@ -7620,7 +7621,7 @@ clearStorageButton.addEventListener('click', async () => {
 
             alert('All saved parameters, results, and weather cache have been cleared.');
         } catch (err) {
-            console.error('Failed to clear storage:', err);
+            log.error('Failed to clear storage:', err);
             alert('Failed to clear storage. Please try again.');
         }
     }
