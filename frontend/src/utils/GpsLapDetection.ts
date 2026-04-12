@@ -7,6 +7,19 @@
 
 import { calculateDistance } from './GeoCalculations';
 
+const DEFAULT_PROXIMITY_THRESHOLD_METERS = 20;
+const DEFAULT_BEARING_WINDOW_POINTS = 5;
+const DEFAULT_SAME_DIRECTION_ANGLE_THRESHOLD_DEGREES = 30;
+const DEFAULT_OPPOSITE_DIRECTION_ANGLE_THRESHOLD_DEGREES = 90;
+const PASSING_CLUSTER_GAP_POINTS = 5;
+const METERS_PER_KILOMETER = 1000;
+const FULL_CIRCLE_DEGREES = 360;
+const HALF_CIRCLE_DEGREES = 180;
+const MIN_VALID_LATITUDE = -90;
+const MAX_VALID_LATITUDE = 90;
+const MIN_VALID_LONGITUDE = -180;
+const MAX_VALID_LONGITUDE = 180;
+
 // Detection mode types - extensible for future modes
 export type LapDetectionMode =
     | 'GPS based lap splitting'   // Same direction crossings
@@ -184,7 +197,7 @@ export class GpsLapDetector {
                     const endPassing = groupedPassings[lapEnd];
 
                     // Calculate lap distance from distance array
-                    const lapDistance = (this.distance[endPassing.index] - this.distance[startPassing.index]) / 1000;
+                    const lapDistance = (this.distance[endPassing.index] - this.distance[startPassing.index]) / METERS_PER_KILOMETER;
 
                     const lap: DetectedLap = {
                         lapNumber: lapNumber,
@@ -223,17 +236,17 @@ export class GpsLapDetector {
      * @returns Bearing in degrees (0-360, where 0 = North)
      */
     private calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const lat1Rad = lat1 * Math.PI / 180;
-        const lat2Rad = lat2 * Math.PI / 180;
-        const lon1Rad = lon1 * Math.PI / 180;
-        const lon2Rad = lon2 * Math.PI / 180;
+        const lat1Rad = lat1 * Math.PI / HALF_CIRCLE_DEGREES;
+        const lat2Rad = lat2 * Math.PI / HALF_CIRCLE_DEGREES;
+        const lon1Rad = lon1 * Math.PI / HALF_CIRCLE_DEGREES;
+        const lon2Rad = lon2 * Math.PI / HALF_CIRCLE_DEGREES;
 
         const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
         const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
                   Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
 
-        let bearing = Math.atan2(y, x) * 180 / Math.PI;
-        return (bearing + 360) % 360;
+        let bearing = Math.atan2(y, x) * HALF_CIRCLE_DEGREES / Math.PI;
+        return (bearing + FULL_CIRCLE_DEGREES) % FULL_CIRCLE_DEGREES;
     }
 
     /**
@@ -328,7 +341,7 @@ export class GpsLapDetector {
         for (const passing of passings) {
             // Group passings within 5 data points of each other
             if (currentGroup.length === 0 ||
-                passing.index - currentGroup[currentGroup.length - 1].index <= 5) {
+                passing.index - currentGroup[currentGroup.length - 1].index <= PASSING_CLUSTER_GAP_POINTS) {
                 currentGroup.push(passing);
             } else {
                 // Find closest point in the group
@@ -359,7 +372,7 @@ export class GpsLapDetector {
      */
     private circularAngleDifference(angle1: number, angle2: number): number {
         const diff = Math.abs(angle1 - angle2);
-        return Math.min(diff, 360 - diff);
+        return Math.min(diff, FULL_CIRCLE_DEGREES - diff);
     }
 
     /**
@@ -377,8 +390,8 @@ export class GpsLapDetector {
     private isValidCoordinate(lat: number, lon: number): boolean {
         if (isNaN(lat) || isNaN(lon)) return false;
         if (lat === 0 && lon === 0) return false;
-        if (lat < -90 || lat > 90) return false;
-        if (lon < -180 || lon > 180) return false;
+        if (lat < MIN_VALID_LATITUDE || lat > MAX_VALID_LATITUDE) return false;
+        if (lon < MIN_VALID_LONGITUDE || lon > MAX_VALID_LONGITUDE) return false;
         return true;
     }
 }
@@ -526,9 +539,9 @@ export class OutAndBackDetector {
 
                         // Calculate distances
                         const outboundDistance = (this.distance[currentSection.outboundEndIdx!] -
-                                                 this.distance[currentSection.outboundStartIdx!]) / 1000;
+                                                 this.distance[currentSection.outboundStartIdx!]) / METERS_PER_KILOMETER;
                         const inboundDistance = (this.distance[currentSection.inboundEndIdx!] -
-                                                this.distance[currentSection.inboundStartIdx!]) / 1000;
+                                                this.distance[currentSection.inboundStartIdx!]) / METERS_PER_KILOMETER;
 
                         const section: OutAndBackSection = {
                             sectionNumber: sectionNumber,
@@ -576,17 +589,17 @@ export class OutAndBackDetector {
      * Calculate bearing between two GPS points
      */
     private calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const lat1Rad = lat1 * Math.PI / 180;
-        const lat2Rad = lat2 * Math.PI / 180;
-        const lon1Rad = lon1 * Math.PI / 180;
-        const lon2Rad = lon2 * Math.PI / 180;
+        const lat1Rad = lat1 * Math.PI / HALF_CIRCLE_DEGREES;
+        const lat2Rad = lat2 * Math.PI / HALF_CIRCLE_DEGREES;
+        const lon1Rad = lon1 * Math.PI / HALF_CIRCLE_DEGREES;
+        const lon2Rad = lon2 * Math.PI / HALF_CIRCLE_DEGREES;
 
         const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
         const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
                   Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
 
-        let bearing = Math.atan2(y, x) * 180 / Math.PI;
-        return (bearing + 360) % 360;
+        let bearing = Math.atan2(y, x) * HALF_CIRCLE_DEGREES / Math.PI;
+        return (bearing + FULL_CIRCLE_DEGREES) % FULL_CIRCLE_DEGREES;
     }
 
     /**
@@ -674,7 +687,7 @@ export class OutAndBackDetector {
 
         for (const passing of passings) {
             if (currentGroup.length === 0 ||
-                passing.index - currentGroup[currentGroup.length - 1].index <= 5) {
+                passing.index - currentGroup[currentGroup.length - 1].index <= PASSING_CLUSTER_GAP_POINTS) {
                 currentGroup.push(passing);
             } else {
                 if (currentGroup.length > 0) {
@@ -701,7 +714,7 @@ export class OutAndBackDetector {
      */
     private circularAngleDifference(angle1: number, angle2: number): number {
         const diff = Math.abs(angle1 - angle2);
-        return Math.min(diff, 360 - diff);
+        return Math.min(diff, FULL_CIRCLE_DEGREES - diff);
     }
 
     /**
@@ -710,8 +723,8 @@ export class OutAndBackDetector {
     private isValidCoordinate(lat: number, lon: number): boolean {
         if (isNaN(lat) || isNaN(lon)) return false;
         if (lat === 0 && lon === 0) return false;
-        if (lat < -90 || lat > 90) return false;
-        if (lon < -180 || lon > 180) return false;
+        if (lat < MIN_VALID_LATITUDE || lat > MAX_VALID_LATITUDE) return false;
+        if (lon < MIN_VALID_LONGITUDE || lon > MAX_VALID_LONGITUDE) return false;
         return true;
     }
 }
@@ -720,9 +733,9 @@ export class OutAndBackDetector {
  * Default values for GPS lap detection configuration
  */
 export const DEFAULT_LAP_DETECTION_CONFIG = {
-    proximityThreshold: 20,     // 20 meters
-    bearingWindowSize: 5,       // 5 data points
-    angleThreshold: 30,         // 30 degrees
+    proximityThreshold: DEFAULT_PROXIMITY_THRESHOLD_METERS,
+    bearingWindowSize: DEFAULT_BEARING_WINDOW_POINTS,
+    angleThreshold: DEFAULT_SAME_DIRECTION_ANGLE_THRESHOLD_DEGREES,
     mode: 'GPS based lap splitting' as LapDetectionMode
 };
 
@@ -730,9 +743,9 @@ export const DEFAULT_LAP_DETECTION_CONFIG = {
  * Default values for Out and Back detection configuration
  */
 export const DEFAULT_OUT_AND_BACK_CONFIG = {
-    proximityThreshold: 20,     // 20 meters
-    bearingWindowSize: 5,       // 5 data points
-    angleThreshold: 90          // 90 degrees for opposite direction
+    proximityThreshold: DEFAULT_PROXIMITY_THRESHOLD_METERS,
+    bearingWindowSize: DEFAULT_BEARING_WINDOW_POINTS,
+    angleThreshold: DEFAULT_OPPOSITE_DIRECTION_ANGLE_THRESHOLD_DEGREES,
 };
 
 /**

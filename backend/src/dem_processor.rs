@@ -10,6 +10,8 @@ mod projection;
 mod sampler;
 mod tiff_loader;
 
+const AFFINE_DETERMINANT_EPSILON: f64 = 1e-10;
+
 #[wasm_bindgen]
 pub struct DEMProcessor {
     width: u32,
@@ -53,7 +55,7 @@ impl GeoTransform {
     /// Convert geographic coordinates to pixel coordinates
     fn geo_to_pixel(&self, x: f64, y: f64) -> (f64, f64) {
         let det = self.pixel_width * self.pixel_height - self.rotation_x * self.rotation_y;
-        if det.abs() < 1e-10 {
+        if det.abs() < AFFINE_DETERMINANT_EPSILON {
             return (0.0, 0.0);
         }
 

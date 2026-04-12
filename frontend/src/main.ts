@@ -64,6 +64,19 @@ interface PlotlyHTMLElement extends HTMLElement {
     on(event: string, callback: (data: any) => void): void;
 }
 
+const MIN_TRIM_WINDOW_SAMPLES = 30;
+const DEFAULT_AIR_SPEED_CALIBRATION_PERCENT = 0.0;
+const AIR_SPEED_CALIBRATION_MIN_PERCENT = -20.0;
+const AIR_SPEED_CALIBRATION_MAX_PERCENT = 20.0;
+const AIR_SPEED_CALIBRATION_STEP_PERCENT = 0.1;
+
+function clampAirSpeedCalibrationPercent(value: number): number {
+    return Math.max(
+        AIR_SPEED_CALIBRATION_MIN_PERCENT,
+        Math.min(value, AIR_SPEED_CALIBRATION_MAX_PERCENT)
+    );
+}
+
 // Helper function to dynamically load and wait for Plotly
 function waitForPlotly(): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -2077,17 +2090,17 @@ function initializeMapTrimControls(dataLength: number) {
 
     // Set initial ranges based on actual lap data
     mapTrimStartSlider.min = '0';
-    mapTrimStartSlider.max = (dataLength - 30).toString();
+    mapTrimStartSlider.max = (dataLength - MIN_TRIM_WINDOW_SAMPLES).toString();
     mapTrimStartSlider.value = '0';
     mapTrimStartValue.value = '0';
     mapTrimStartValue.min = '0';
-    mapTrimStartValue.max = (dataLength - 30).toString();
+    mapTrimStartValue.max = (dataLength - MIN_TRIM_WINDOW_SAMPLES).toString();
 
-    mapTrimEndSlider.min = '30';
+    mapTrimEndSlider.min = MIN_TRIM_WINDOW_SAMPLES.toString();
     mapTrimEndSlider.max = (dataLength - 1).toString();
     mapTrimEndSlider.value = (dataLength - 1).toString();
     mapTrimEndValue.value = (dataLength - 1).toString();
-    mapTrimEndValue.min = '30';
+    mapTrimEndValue.min = MIN_TRIM_WINDOW_SAMPLES.toString();
     mapTrimEndValue.max = (dataLength - 1).toString();
 
 }
@@ -2338,7 +2351,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
             const value = parseInt(newMapTrimStartValue.value);
             if (!isNaN(value)) {
                 const trimEnd = appState.presetTrimEnd ?? dataLength - 1;
-                const clamped = Math.max(0, Math.min(value, trimEnd - 30));
+                const clamped = Math.max(0, Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES));
                 newMapTrimStartSlider.value = clamped.toString();
                 newMapTrimStartValue.value = clamped.toString();
                 appState.presetTrimStart = clamped;
@@ -2356,7 +2369,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
         newMapTrimEndValue.addEventListener('change', () => {
             const value = parseInt(newMapTrimEndValue.value);
             if (!isNaN(value)) {
-                const clamped = Math.max(appState.presetTrimStart + 30, Math.min(value, dataLength - 1));
+                const clamped = Math.max(appState.presetTrimStart + MIN_TRIM_WINDOW_SAMPLES, Math.min(value, dataLength - 1));
                 newMapTrimEndSlider.value = clamped.toString();
                 newMapTrimEndValue.value = clamped.toString();
                 appState.presetTrimEnd = clamped;
@@ -3315,11 +3328,11 @@ async function showGpsLapVEPlot(
                             <div class="ve-parameter">
                                 <div class="ve-param-header">
                                     <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="0.0" step="0.1" min="-20.0" max="20.0"
+                                    <input type="number" id="airSpeedCalibrationValue" value="${DEFAULT_AIR_SPEED_CALIBRATION_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
                                            style="width: 60px; text-align: right;" />
                                     <span>%</span>
                                 </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="-20.0" max="20.0" step="0.1" value="0.0" />
+                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${DEFAULT_AIR_SPEED_CALIBRATION_PERCENT.toFixed(1)}" />
                                 <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
                             </div>
                             ` : ''}
@@ -3430,7 +3443,7 @@ async function showGpsLapVEPlot(
         const updateAirSpeedCalibrationFromInput = () => {
             const value = parseFloat(airSpeedCalibrationValue.value);
             if (isNaN(value)) return;
-            const clamped = Math.max(-20.0, Math.min(value, 20.0));
+            const clamped = clampAirSpeedCalibrationPercent(value);
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValue.value = clamped.toFixed(1);
             appState.airSpeedCalibrationPercent = clamped;
@@ -4053,14 +4066,14 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 <div class="ve-control-grid">
                     <div class="ve-control-group">
                         <label>Trim Start (seconds):</label>
-                        <input type="range" id="trimStartSlider" min="0" max="${timestamps.length - 30}" value="${appState.presetTrimStart}" class="ve-slider">
-                        <input type="number" id="trimStartValue" value="${appState.presetTrimStart}" min="0" max="${timestamps.length - 30}" class="ve-value-input">
+                        <input type="range" id="trimStartSlider" min="0" max="${timestamps.length - MIN_TRIM_WINDOW_SAMPLES}" value="${appState.presetTrimStart}" class="ve-slider">
+                        <input type="number" id="trimStartValue" value="${appState.presetTrimStart}" min="0" max="${timestamps.length - MIN_TRIM_WINDOW_SAMPLES}" class="ve-value-input">
                     </div>
 
                     <div class="ve-control-group">
                         <label>Trim End (seconds):</label>
-                        <input type="range" id="trimEndSlider" min="30" max="${timestamps.length - 1}" value="${appState.presetTrimEnd ?? timestamps.length - 1}" class="ve-slider">
-                        <input type="number" id="trimEndValue" value="${appState.presetTrimEnd ?? timestamps.length - 1}" min="30" max="${timestamps.length - 1}" class="ve-value-input">
+                        <input type="range" id="trimEndSlider" min="${MIN_TRIM_WINDOW_SAMPLES}" max="${timestamps.length - 1}" value="${appState.presetTrimEnd ?? timestamps.length - 1}" class="ve-slider">
+                        <input type="number" id="trimEndValue" value="${appState.presetTrimEnd ?? timestamps.length - 1}" min="${MIN_TRIM_WINDOW_SAMPLES}" max="${timestamps.length - 1}" class="ve-value-input">
                     </div>
 
                     <div class="ve-control-group">
@@ -4102,11 +4115,11 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 <div class="ve-parameter">
                     <div class="ve-param-header">
                         <label for="airSpeedCalibration">Air Speed Calibration</label>
-                        <input type="number" id="airSpeedCalibrationValue" value="0.0" step="0.1" min="-20.0" max="20.0"
+                        <input type="number" id="airSpeedCalibrationValue" value="${DEFAULT_AIR_SPEED_CALIBRATION_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
                                style="width: 60px; text-align: right;" />
                         <span>%</span>
                     </div>
-                    <input type="range" id="airSpeedCalibrationSlider" min="-20.0" max="20.0" step="0.1" value="0.0" />
+                    <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${DEFAULT_AIR_SPEED_CALIBRATION_PERCENT.toFixed(1)}" />
                     <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
                 </div>
                 ` : ''}
@@ -4718,7 +4731,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const value = parseInt(trimStartSlider.value);
         trimStartValue.value = value.toString();
 
-        // Ensure trim start < trim end - 30
+        // Ensure trim start leaves the minimum VE analysis window
         const trimEnd = parseInt(trimEndSlider.value);
         log.debug('Trim Start changed:', {
             trimStart: value,
@@ -4728,8 +4741,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             lastDataIndex: timestamps.length - 1
         });
 
-        if (value >= trimEnd - 30) {
-            const corrected = trimEnd - 30;
+        if (value >= trimEnd - MIN_TRIM_WINDOW_SAMPLES) {
+            const corrected = trimEnd - MIN_TRIM_WINDOW_SAMPLES;
             trimStartSlider.value = corrected.toString();
             trimStartValue.value = corrected.toString();
             return;
@@ -4764,7 +4777,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         const value = parseInt(trimEndSlider.value);
         trimEndValue.value = value.toString();
 
-        // Ensure trim end > trim start + 30
+        // Ensure trim end leaves the minimum VE analysis window
         const trimStart = parseInt(trimStartSlider.value);
         log.debug('Trim End changed:', {
             trimStart: trimStart,
@@ -4774,8 +4787,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             lastDataIndex: timestamps.length - 1
         });
 
-        if (value <= trimStart + 30) {
-            const corrected = trimStart + 30;
+        if (value <= trimStart + MIN_TRIM_WINDOW_SAMPLES) {
+            const corrected = trimStart + MIN_TRIM_WINDOW_SAMPLES;
             trimEndSlider.value = corrected.toString();
             trimEndValue.value = corrected.toString();
             return;
@@ -4836,7 +4849,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (isNaN(value)) return;
 
         const trimEnd = parseInt(trimEndSlider.value);
-        const clamped = Math.max(0, Math.min(value, trimEnd - 30));
+        const clamped = Math.max(0, Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES));
 
         trimStartSlider.value = clamped.toString();
         trimStartValue.value = clamped.toString();
@@ -4874,7 +4887,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         if (isNaN(value)) return;
 
         const trimStart = parseInt(trimStartSlider.value);
-        const clamped = Math.max(trimStart + 30, Math.min(value, timestamps.length));
+        const clamped = Math.max(trimStart + MIN_TRIM_WINDOW_SAMPLES, Math.min(value, timestamps.length));
 
         trimEndSlider.value = clamped.toString();
         trimEndValue.value = clamped.toString();
@@ -5028,7 +5041,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             const value = parseFloat(airSpeedCalibrationValue.value);
             if (isNaN(value)) return;
 
-            const clamped = Math.max(-20.0, Math.min(value, 20.0));
+            const clamped = clampAirSpeedCalibrationPercent(value);
 
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValue.value = clamped.toFixed(1);
@@ -5086,8 +5099,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                     // Convert from multiplier to percentage: (1.05 -> +5%, 0.95 -> -5%)
                     const calibrationPercent = (calibrationMultiplier - 1.0) * 100.0;
 
-                    // Clamp to ±20%
-                    const clampedPercent = Math.max(-20.0, Math.min(calibrationPercent, 20.0));
+                    // Clamp to configured air-speed calibration bounds
+                    const clampedPercent = clampAirSpeedCalibrationPercent(calibrationPercent);
 
                     // Update sliders
                     airSpeedCalibrationSlider.value = clampedPercent.toFixed(1);
@@ -5221,18 +5234,18 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
 
         // Set same ranges and initial values as main controls (preserve preset values from section 3)
         mapTrimStartSlider.min = '0';
-        mapTrimStartSlider.max = (timestamps.length - 30).toString();
+        mapTrimStartSlider.max = (timestamps.length - MIN_TRIM_WINDOW_SAMPLES).toString();
         mapTrimStartSlider.value = appState.presetTrimStart.toString();
         mapTrimStartValue.value = appState.presetTrimStart.toString();
         mapTrimStartValue.min = '0';
-        mapTrimStartValue.max = (timestamps.length - 30).toString();
+        mapTrimStartValue.max = (timestamps.length - MIN_TRIM_WINDOW_SAMPLES).toString();
 
         const initialTrimEnd = appState.presetTrimEnd ?? timestamps.length - 1;
-        mapTrimEndSlider.min = '30';
+        mapTrimEndSlider.min = MIN_TRIM_WINDOW_SAMPLES.toString();
         mapTrimEndSlider.max = (timestamps.length - 1).toString();
         mapTrimEndSlider.value = initialTrimEnd.toString();
         mapTrimEndValue.value = initialTrimEnd.toString();
-        mapTrimEndValue.min = '30';
+        mapTrimEndValue.min = MIN_TRIM_WINDOW_SAMPLES.toString();
         mapTrimEndValue.max = (timestamps.length - 1).toString();
 
         // Sync map controls to main controls
@@ -5249,7 +5262,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                 const value = parseInt(mapTrimStartValue.value);
                 if (!isNaN(value)) {
                     const trimEnd = parseInt(trimEndSlider.value);
-                    const clamped = Math.max(0, Math.min(value, trimEnd - 30));
+                    const clamped = Math.max(0, Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES));
                     mapTrimStartSlider.value = clamped.toString();
                     mapTrimStartValue.value = clamped.toString();
                     trimStartSlider.value = clamped.toString();
@@ -5260,7 +5273,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                 const value = parseInt(mapTrimEndValue.value);
                 if (!isNaN(value)) {
                     const trimStart = parseInt(trimStartSlider.value);
-                    const clamped = Math.max(trimStart + 30, Math.min(value, timestamps.length - 1));
+                    const clamped = Math.max(trimStart + MIN_TRIM_WINDOW_SAMPLES, Math.min(value, timestamps.length - 1));
                     mapTrimEndSlider.value = clamped.toString();
                     mapTrimEndValue.value = clamped.toString();
                     trimEndSlider.value = clamped.toString();
@@ -6261,11 +6274,11 @@ async function showOutAndBackVEPlot(
                             <div class="ve-parameter">
                                 <div class="ve-param-header">
                                     <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="0.0" step="0.1" min="-20.0" max="20.0"
+                                    <input type="number" id="airSpeedCalibrationValue" value="${DEFAULT_AIR_SPEED_CALIBRATION_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
                                            style="width: 60px; text-align: right;" />
                                     <span>%</span>
                                 </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="-20.0" max="20.0" step="0.1" value="0.0" />
+                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${DEFAULT_AIR_SPEED_CALIBRATION_PERCENT.toFixed(1)}" />
                                 <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
                             </div>
                             ` : ''}
@@ -6375,7 +6388,7 @@ async function showOutAndBackVEPlot(
         const updateAirSpeedCalibrationFromInput = () => {
             const value = parseFloat(airSpeedCalibrationValueEl.value);
             if (isNaN(value)) return;
-            const clamped = Math.max(-20.0, Math.min(value, 20.0));
+            const clamped = clampAirSpeedCalibrationPercent(value);
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValueEl.value = clamped.toFixed(1);
             appState.airSpeedCalibrationPercent = clamped;

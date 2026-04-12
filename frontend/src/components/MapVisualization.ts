@@ -38,6 +38,12 @@ export type GpsMarkerChangeCallback = (lat: number, lon: number, nearestIndex: n
 // Callback type for Out and Back marker changes (marker A or B)
 export type OutAndBackMarkerChangeCallback = (marker: 'A' | 'B', lat: number, lon: number, nearestIndex: number) => void;
 
+const ROUTE_BOUNDS_PADDING_PX = 20;
+const FOCUSED_BOUNDS_PADDING_PX = 30;
+const TRIM_MARKER_RADIUS_PX = 8;
+const GATE_MARKER_RADIUS_PX = 12;
+const GATE_MARKER_TOOLTIP_OFFSET_Y_PX = 8;
+
 export class MapVisualization {
     private map: L.Map | null = null;
     private routeLayer: L.LayerGroup | null = null;
@@ -152,7 +158,7 @@ export class MapVisualization {
         if (!this.map || this.routePoints.length === 0) return;
 
         const bounds = L.latLngBounds(this.routePoints);
-        this.map.fitBounds(bounds, { padding: [20, 20] });
+        this.map.fitBounds(bounds, { padding: [ROUTE_BOUNDS_PADDING_PX, ROUTE_BOUNDS_PADDING_PX] });
     }
 
     private fitBoundsToSelectedLaps(): void {
@@ -182,7 +188,7 @@ export class MapVisualization {
 
         if (selectedPoints.length > 0) {
             const bounds = L.latLngBounds(selectedPoints);
-            this.map.fitBounds(bounds, { padding: [30, 30] });
+            this.map.fitBounds(bounds, { padding: [FOCUSED_BOUNDS_PADDING_PX, FOCUSED_BOUNDS_PADDING_PX] });
         }
     }
 
@@ -218,7 +224,7 @@ export class MapVisualization {
 
         if (trimmedPoints.length > 0) {
             const bounds = L.latLngBounds(trimmedPoints);
-            this.map.fitBounds(bounds, { padding: [30, 30] });
+            this.map.fitBounds(bounds, { padding: [FOCUSED_BOUNDS_PADDING_PX, FOCUSED_BOUNDS_PADDING_PX] });
 
             // Add trim markers
             this.addTrimMarkers(trimStart, trimEnd, posLat, posLong);
@@ -242,7 +248,7 @@ export class MapVisualization {
             log.debug('Adding trim start marker:', { index: trimStart, lat: startLat, lng: startLng });
             if (startLat && startLng && startLat !== 0 && startLng !== 0) {
                 const startMarker = L.circleMarker([startLat, startLng], {
-                    radius: 8,
+                    radius: TRIM_MARKER_RADIUS_PX,
                     fillColor: 'green',
                     color: 'white',
                     weight: 2,
@@ -261,7 +267,7 @@ export class MapVisualization {
             log.debug('Adding trim end marker:', { index: trimEnd, lat: endLat, lng: endLng });
             if (endLat && endLng && endLat !== 0 && endLng !== 0) {
                 const endMarker = L.circleMarker([endLat, endLng], {
-                    radius: 8,
+                    radius: TRIM_MARKER_RADIUS_PX,
                     fillColor: 'red',
                     color: 'white',
                     weight: 2,
@@ -682,7 +688,7 @@ export class MapVisualization {
 
         // Create new marker with distinctive styling
         this.gpsMarker = L.circleMarker([lat, lon], {
-            radius: 12,
+            radius: GATE_MARKER_RADIUS_PX,
             fillColor: '#ff6b00',  // Orange
             color: '#ffffff',
             weight: 3,
@@ -925,7 +931,7 @@ export class MapVisualization {
 
         // Create marker A with green color
         this.gpsMarkerA = L.circleMarker([lat, lon], {
-            radius: 12,
+            radius: GATE_MARKER_RADIUS_PX,
             fillColor: '#00aa00',  // Green for start marker
             color: '#ffffff',
             weight: 3,
@@ -938,7 +944,7 @@ export class MapVisualization {
         this.gpsMarkerA.bindTooltip('A', {
             permanent: true,
             direction: 'top',
-            offset: [0, -8],
+            offset: [0, -GATE_MARKER_TOOLTIP_OFFSET_Y_PX],
             className: 'gate-marker-label gate-marker-label-a'
         });
 
@@ -961,7 +967,7 @@ export class MapVisualization {
 
         // Create marker B with blue color
         this.gpsMarkerB = L.circleMarker([lat, lon], {
-            radius: 12,
+            radius: GATE_MARKER_RADIUS_PX,
             fillColor: '#0066cc',  // Blue for turnaround marker
             color: '#ffffff',
             weight: 3,
@@ -974,7 +980,7 @@ export class MapVisualization {
         this.gpsMarkerB.bindTooltip('B', {
             permanent: true,
             direction: 'top',
-            offset: [0, -8],
+            offset: [0, -GATE_MARKER_TOOLTIP_OFFSET_Y_PX],
             className: 'gate-marker-label gate-marker-label-b'
         });
 
