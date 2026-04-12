@@ -11,7 +11,7 @@ Based on the revised refactoring plan validated against the current codebase.
 | 9 | ✅ Done | Cache normalized arrays and centralize VE calculator creation | Added `frontend/src/analysis/ActivityArrayCache.ts` and `frontend/src/analysis/VeCalculatorFactory.ts`; cached normalized activity arrays/Float64Array wrappers and replaced repeated calculator wiring in `frontend/src/main.ts`. |
 | 10 | ✅ Done | Collapse backend VE duplication in `backend/src/virtual_elevation.rs` | Merged duplicated scalar/array VE paths behind shared internal helpers, centralized calculator construction, and added backend regression tests for uniform CdA/rho-array equivalence. |
 | 11 | ✅ Done | Implement GPS-lap and out-and-back wind / power / VD tabs | Added segment supplementary-series helpers and multi-segment plot builders; replaced the placeholder GPS-lap/out-and-back wind, power, and VD tabs with real plots and hid VD when FIT wind data is not the active source. |
-| 12 | ⬜ Not started | Add a frontend lint + test baseline | No dedicated lint/test baseline added yet. |
+| 12 | ✅ Done | Add a frontend lint + test baseline | Added ESLint + Vitest to `frontend/`, introduced baseline scripts/config (`lint`, `test`, `eslint.config.js`, `vitest.config.ts`), added initial unit tests for wind/supplementary-series helpers, and wired lint/tests into `.github/workflows/deploy.yml`. |
 | 13 | ⬜ Not started | Introduce a leveled `log.ts` and remove raw debug spam | Frontend still uses raw `console.*`. |
 | 14 | ⬜ Not started | Simplify the misleading security layer | Validation/runtime CSP cleanup still pending. |
 | 15 | ⬜ Not started | Split `backend/src/dem_processor.rs` into focused modules | Backend refactor. |
