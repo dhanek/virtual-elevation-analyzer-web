@@ -1,33 +1,35 @@
 import * as L from 'leaflet';
 import type { DetectedLap, PassingPoint, OutAndBackSection } from '../utils/GpsLapDetection';
 
+type NumericSeries = ArrayLike<number>;
+
 interface LapData {
-    lap_number: number;
+    lap_number?: number;
     start_time: number;
     end_time: number;
     total_elapsed_time: number;
     total_distance: number;
     avg_speed: number;
-    max_speed: number;
-    avg_power: number;
-    max_power: number;
+    max_speed?: number;
+    avg_power?: number;
+    max_power?: number;
     start_position_lat?: number;
     start_position_long?: number;
 }
 
 interface FitData {
-    timestamps: number[];
-    position_lat: number[];
-    position_long: number[];
-    velocity: number[];
-    power: number[];
-    altitude: number[];
-    distance: number[];
-    air_speed: number[];
-    wind_speed: number[];
-    heart_rate: number[];
-    cadence: number[];
-    temperature: number[];
+    timestamps: NumericSeries;
+    position_lat: NumericSeries;
+    position_long: NumericSeries;
+    velocity: NumericSeries;
+    power: NumericSeries;
+    altitude: NumericSeries;
+    distance: NumericSeries;
+    air_speed: NumericSeries;
+    wind_speed: NumericSeries;
+    heart_rate: NumericSeries;
+    cadence: NumericSeries;
+    temperature: NumericSeries;
 }
 
 // Callback type for GPS marker changes
@@ -222,7 +224,7 @@ export class MapVisualization {
         }
     }
 
-    private addTrimMarkers(trimStart: number, trimEnd: number, posLat: number[], posLong: number[]): void {
+    private addTrimMarkers(trimStart: number, trimEnd: number, posLat: NumericSeries, posLong: NumericSeries): void {
         if (!this.map || !this.routeLayer) return;
 
         // Remove existing trim markers

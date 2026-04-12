@@ -4,11 +4,11 @@ import { MapVisualization } from './components/MapVisualization';
 import { AnalysisParametersComponent, AnalysisParameters } from './components/AnalysisParameters';
 import { ViewportAdapter } from './utils/ViewportAdapter';
 import { ParameterStorage, type LapSettings } from './utils/ParameterStorage';
-import { ResultsStorage, type VEAnalysisResult } from './utils/ResultsStorage';
+import { ResultsStorage } from './utils/ResultsStorage';
 import { DEMManager, ElevationProfileCache } from './utils/DEMManager';
 import { RemoteDEMConfig, type DEMSourceType } from './utils/RemoteDEMConfig';
 import { RemoteDEMService } from './utils/RemoteDEMService';
-import { MultiDEMManager, type DEMSourceResult } from './utils/MultiDEMManager';
+import { MultiDEMManager } from './utils/MultiDEMManager';
 import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } from './utils/GeoCalculations';
 import { WeatherAPI, WeatherAPIError } from './utils/WeatherAPI';
 import { WeatherCache, type WeatherCacheEntry } from './utils/WeatherCache';
@@ -18,16 +18,14 @@ import {
     GpsLapDetector,
     OutAndBackDetector,
     type GpsLapDetectionConfig,
-    type DetectedLap,
-    type GpsLapDetectionResult,
     type OutAndBackConfig,
     type OutAndBackSection,
-    type OutAndBackResult,
     getDefaultLapDetectionConfig,
     DEFAULT_OUT_AND_BACK_CONFIG,
     formatLapDuration,
     formatLapDistance
 } from './utils/GpsLapDetection';
+import { AppState, createLoadedActivity, createSelectedSlice, type ActivityData, type ActivityResult } from './state/AppState';
 import init, { create_ve_calculator, create_ve_calculator_with_rho_array, AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
 
 // Plotly.js type declaration
@@ -107,66 +105,27 @@ const remoteDEMSelector = document.getElementById('remoteDEMSelector') as HTMLSe
 const localDEMFileSection = document.getElementById('localDEMFileSection') as HTMLDivElement;
 const remoteDEMStatus = document.getElementById('remoteDEMStatus') as HTMLDivElement;
 
-let selectedFile: File | null = null;
+const appState = new AppState();
+
+// Stateful services / adapters (kept out of AppState on purpose)
 let fitProcessor: FitFileProcessor | null = null;
 let mapVisualization: MapVisualization | null = null;
 let parametersComponent: AnalysisParametersComponent | null = null;
 let viewportAdapter: ViewportAdapter;
 let parameterStorage: ParameterStorage;
-let currentFileHash: string | null = null;
-let currentFitData: any = null; // Unified data structure for both FIT and CSV
-let currentFitResult: any = null;
-let currentLaps: any[] = [];
-let currentCdaReference: number[] | null = null; // Filtered CdA reference for current analysis
-let currentRhoArray: number[] | null = null; // Per-datapoint rho array for VE calculation
-let filteredLapData: {
-    position_lat: number[];
-    position_long: number[];
-    timestamps: number[];
-} | null = null;
-let isCalculatingAutoRho = false; // Flag to prevent infinite loops
-let lastWeatherQueryKey: string | null = null; // Cache last query to avoid redundant API calls
-let selectedLaps: number[] = [];
-let currentParameters: AnalysisParameters | null = null;
-let filteredVEData: { positionLat: number[], positionLong: number[] } | null = null;
-let presetTrimStart: number = 0;
-let presetTrimEnd: number | null = null;
-let isLoadingParameters: boolean = false;
-let currentVEResult: VEAnalysisResult | null = null;
-let currentWindSource: 'constant' | 'fit' | 'compare' | 'none' = 'none';
-let currentAnalyzedLaps: number[] = [];
-let currentFilteredData: { power: number[], velocity: number[], temperature: number[], timestamps: number[] } | null = null;
-let airSpeedCalibrationPercent: number = 0; // Air speed calibration percentage (-20 to +20)
 let resultsStorage: ResultsStorage = new ResultsStorage();
 
-// DEM-related state
+// DEM-related services (kept out of AppState on purpose)
 let demManager: DEMManager = new DEMManager();
 let elevationCache: ElevationProfileCache = new ElevationProfileCache();
-let selectedDEMFile: File | null = null;
-let elevationCorrectionEnabled: boolean = false;
-let elevationErrorRate: number = 0;
 
-// Remote DEM state
+// Remote DEM services (kept out of AppState on purpose)
 let multiDEMManager: MultiDEMManager = new MultiDEMManager();
 let remoteDEMService: RemoteDEMService = new RemoteDEMService();
-let remoteDEMSources: DEMSourceType[] = [];
-let remoteDEMResults: Map<DEMSourceType, DEMSourceResult> | null = null;
 
-// GPS Lap Detection state
-let gpsLapDetectionResult: GpsLapDetectionResult | null = null;
-let gpsDetectedLaps: DetectedLap[] = [];
-let gpsSelectedLaps: number[] = [];  // Selected GPS-detected laps for VE analysis
-let isGpsLapModeActive: boolean = false;  // Flag for GPS lap mode in VE analysis
 // NOTE: A parallel `isOutAndBackModeActive` flag used to live here, but it
 // was write-only (set in handleAnalyze, never read). Out-and-back mode is
 // detected per-function via `lapDetectionMode === 'GPS based out and back'`.
-let currentGpsLapIndexRanges: Array<{ startIdx: number; endIdx: number }> | null = null;  // Current GPS lap ranges
-let previousAutoLapDetection: string = 'None';  // Track previous value to detect changes
-
-// Out and Back Detection state
-let outAndBackResult: OutAndBackResult | null = null;
-let outAndBackSections: OutAndBackSection[] = [];
-let outAndBackSelectedSections: number[] = [];  // Selected sections for VE analysis
 
 // Initialize FIT processor and parameter storage
 async function initializeFitProcessor() {
@@ -289,9 +248,9 @@ function updateDEMSourceSelection(value: string): void {
 
     // Set remote sources for AWS; clear for none/local
     if (value === 'aws-terrain') {
-        remoteDEMSources = ['aws-terrain'];
+        appState.remoteDEMSources = ['aws-terrain'];
     } else {
-        remoteDEMSources = [];
+        appState.remoteDEMSources = [];
     }
 
     RemoteDEMConfig.setPreferredSources(value === 'none' ? [] : [value as DEMSourceType]);
@@ -343,7 +302,7 @@ async function handleDEMFileSelection(files: FileList): Promise<void> {
 
         // Load DEM file with optional world and projection files
         await demManager.loadDEMFile(tifFile, worldFile ?? undefined, projFile ?? undefined);
-        selectedDEMFile = tifFile;
+        appState.selectedDEMFile = tifFile;
 
         // Update UI
         demFileInfo.classList.remove('hidden');
@@ -361,7 +320,7 @@ async function handleDEMFileSelection(files: FileList): Promise<void> {
             <p>Bounds: [${bounds![0].toFixed(2)}, ${bounds![1].toFixed(2)}, ${bounds![2].toFixed(2)}, ${bounds![3].toFixed(2)}]</p>
         `;
 
-        elevationCorrectionEnabled = true;
+        appState.elevationCorrectionEnabled = true;
 
         hideLoading();
         console.log('DEM file loaded successfully:', displayName);
@@ -374,11 +333,11 @@ async function handleDEMFileSelection(files: FileList): Promise<void> {
 
 function clearDEMFile(): void {
     demManager.clearDEM();
-    selectedDEMFile = null;
+    appState.selectedDEMFile = null;
     demFileInfo.classList.add('hidden');
-    elevationCorrectionEnabled = false;
+    appState.elevationCorrectionEnabled = false;
     demFileInput.value = '';
-    elevationErrorRate = 0;
+    appState.elevationErrorRate = 0;
 }
 
 // File validation and display
@@ -389,12 +348,12 @@ async function handleFileSelection(file: File) {
         return;
     }
 
-    selectedFile = file;
+    appState.selectedFile = file;
     displayFileInfo(file);
 
     // Calculate file hash immediately for parameter persistence
     if (parameterStorage) {
-        currentFileHash = await parameterStorage.calculateFileHash(file);
+        appState.currentFileHash = await parameterStorage.calculateFileHash(file);
     }
 
     analyzeButton.disabled = false;
@@ -416,19 +375,19 @@ function displayFileInfo(file: File) {
 
 // Analyze button handler
 analyzeButton.addEventListener('click', async () => {
-    if (!selectedFile || !fitProcessor) {
+    if (!appState.selectedFile || !fitProcessor) {
         showError('No file selected or processor not initialized');
         return;
     }
 
     try {
         // Detect file type
-        const fileType = DataProtection.getFileType(selectedFile);
+        const fileType = DataProtection.getFileType(appState.selectedFile);
 
         if (fileType === 'fit') {
-            await processFitFile(selectedFile);
+            await processFitFile(appState.selectedFile);
         } else if (fileType === 'csv') {
-            await processCsvFile(selectedFile);
+            await processCsvFile(appState.selectedFile);
         } else {
             showError('Unknown file type. Please select a .fit or .csv file.');
             hideLoading();
@@ -464,9 +423,15 @@ async function processFitFile(file: File) {
         }
 
         const result = await fitProcessor.processFitFile(file);
+        appState.setLoadedActivity(createLoadedActivity({
+            source: 'fit',
+            file,
+            fileHash: appState.currentFileHash,
+            result,
+        }));
 
         // Apply DEM elevation correction if enabled
-        if (elevationCorrectionEnabled && demManager.isDEMLoaded() && result.fit_data) {
+        if (appState.elevationCorrectionEnabled && demManager.isDEMLoaded() && result.fit_data) {
             showLoading('Correcting elevation using DEM...');
 
             try {
@@ -489,16 +454,16 @@ async function processFitFile(file: File) {
 
                     // Replace altitudes with corrected values using setter
                     result.fit_data.set_altitude(correctionResult.elevations);
-                    elevationErrorRate = correctionResult.errorRate;
+                    appState.elevationErrorRate = correctionResult.errorRate;
 
-                    console.log(`Elevation corrected. Error rate: ${(elevationErrorRate * 100).toFixed(1)}%`);
+                    console.log(`Elevation corrected. Error rate: ${(appState.elevationErrorRate * 100).toFixed(1)}%`);
 
-                    if (elevationErrorRate > 0.5) {
+                    if (appState.elevationErrorRate > 0.5) {
                         console.warn('High error rate! DEM may not cover route area. DEM bounds:', demManager.getDEMBounds());
                     }
 
                     // Cache the corrected elevation profile
-                    if (currentFileHash && elevationCache) {
+                    if (appState.currentFileHash && elevationCache) {
                         const bounds = {
                             minLat: Math.min(...lats),
                             maxLat: Math.max(...lats),
@@ -507,8 +472,8 @@ async function processFitFile(file: File) {
                         };
 
                         await elevationCache.cacheProfile(
-                            currentFileHash,
-                            selectedFile?.name ?? 'unknown',
+                            appState.currentFileHash,
+                            appState.selectedFile?.name ?? 'unknown',
                             correctionResult.elevations,
                             bounds
                         );
@@ -524,8 +489,8 @@ async function processFitFile(file: File) {
         }
 
         // Apply remote DEM elevation correction(s) if any sources selected
-        remoteDEMResults = null;
-        if (remoteDEMSources.length > 0 && result.fit_data) {
+        appState.remoteDEMResults = null;
+        if (appState.remoteDEMSources.length > 0 && result.fit_data) {
             const fitData = result.fit_data;
             const lats = fitData.position_lat;
             const lons = fitData.position_long;
@@ -540,7 +505,7 @@ async function processFitFile(file: File) {
                     multiDEMManager.clearAll();
 
                     const fetchResults = await remoteDEMService.fetchForRoute(
-                        Array.from(lats), Array.from(lons), remoteDEMSources,
+                        Array.from(lats), Array.from(lons), appState.remoteDEMSources,
                         {},
                         (_source, stage, _percent) => {
                             remoteDEMStatus.textContent = stage;
@@ -555,15 +520,15 @@ async function processFitFile(file: File) {
 
                     // Correct elevations for all sources
                     showLoading('Correcting elevation from remote DEM...');
-                    remoteDEMResults = await multiDEMManager.correctAllSources(
+                    appState.remoteDEMResults = await multiDEMManager.correctAllSources(
                         Array.from(lats), Array.from(lons), Array.from(originalAltitudes)
                     );
 
                     // Apply the best available DEM as actual elevation
                     const bestSource: DEMSourceType | undefined =
-                        remoteDEMResults.has('aws-terrain') ? 'aws-terrain' : undefined;
+                        appState.remoteDEMResults.has('aws-terrain') ? 'aws-terrain' : undefined;
                     if (bestSource) {
-                        const bestDEM = remoteDEMResults.get(bestSource)!;
+                        const bestDEM = appState.remoteDEMResults.get(bestSource)!;
                         if (bestDEM.errorRate < 0.5) {
                             result.fit_data.set_altitude(bestDEM.elevations);
                             console.log(`Applied ${bestSource} DEM as actual elevation (error rate: ${(bestDEM.errorRate * 100).toFixed(1)}%)`);
@@ -574,13 +539,13 @@ async function processFitFile(file: File) {
 
                     // Update status display
                     const statusParts: string[] = [];
-                    for (const [, demRes] of remoteDEMResults) {
+                    for (const [, demRes] of appState.remoteDEMResults) {
                         const coverage = ((1 - demRes.errorRate) * 100).toFixed(1);
                         statusParts.push(`AWS Terrain: ${coverage}% coverage`);
                     }
                     remoteDEMStatus.textContent = statusParts.join(' | ');
 
-                    console.log('Remote DEM results:', Object.fromEntries(remoteDEMResults));
+                    console.log('Remote DEM results:', Object.fromEntries(appState.remoteDEMResults));
                 } catch (remoteDemError) {
                     console.warn('Remote DEM correction failed:', remoteDemError);
                     remoteDEMStatus.textContent = `Failed: ${remoteDemError}`;
@@ -685,6 +650,50 @@ function generateLapsFromCsv(csvData: GibliCsvData): any[] {
     return laps;
 }
 
+function createCsvActivityData(csvData: GibliCsvData): ActivityData {
+    const distance = calculateDistanceArray(csvData.positionLat, csvData.positionLong);
+
+    // Convert wind angle + magnitude into rider-direction wind speed.
+    const windSpeed = csvData.windAngle.map((angleDeg, i) => {
+        const magnitude = csvData.airSpeed[i];
+        if (isNaN(angleDeg) || isNaN(magnitude)) {
+            return 0;
+        }
+        const angleRad = (angleDeg * Math.PI) / 180;
+        return Math.cos(angleRad) * magnitude;
+    });
+
+    console.log('📊 Calculated wind speed from CSV:', {
+        sampleAngles: csvData.windAngle.slice(0, 5),
+        sampleMagnitudes: csvData.airSpeed.slice(0, 5),
+        sampleWindSpeeds: windSpeed.slice(0, 5),
+        nonZeroCount: windSpeed.filter(ws => Math.abs(ws) > 0.1).length
+    });
+
+    return {
+        timestamps: csvData.timestamps,
+        position_lat: csvData.positionLat,
+        position_long: csvData.positionLong,
+        altitude: csvData.altitude,
+        velocity: csvData.velocity,
+        power: csvData.power,
+        air_speed: csvData.airSpeed,
+        distance,
+        wind_speed: windSpeed,
+        wind_yaw: csvData.windAngle || new Array(csvData.timestamps.length).fill(0),
+        air_density_data: new Array(csvData.timestamps.length).fill(0),
+        road_speed: new Array(csvData.timestamps.length).fill(0),
+        temperature: csvData.temperature || new Array(csvData.timestamps.length).fill(0),
+        battery_soc: new Array(csvData.timestamps.length).fill(0),
+        heart_rate: new Array(csvData.timestamps.length).fill(0),
+        cadence: new Array(csvData.timestamps.length).fill(0),
+        record_count: csvData.timestamps.length,
+        humidity: csvData.humidity,
+        pressure: csvData.pressure,
+        cda_reference: csvData.cdaReference,
+    };
+}
+
 // Display CSV results (similar to displayResults but for CSV)
 async function displayCsvResults(csvData: GibliCsvData, result: any) {
     const stats = result.parsing_statistics;
@@ -705,12 +714,12 @@ async function displayCsvResults(csvData: GibliCsvData, result: any) {
     fileInfo.classList.remove('hidden');
 
     // Initialize analysis parameters component (same as FIT files)
-    isLoadingParameters = true; // Prevent saving during initialization
+    appState.isLoadingParameters = true; // Prevent saving during initialization
     initializeAnalysisParameters();
 
     // Try to load saved parameters for this file
-    if (currentFileHash && parametersComponent) {
-        const savedParameters = await parameterStorage.loadParameters(currentFileHash);
+    if (appState.currentFileHash && parametersComponent) {
+        const savedParameters = await parameterStorage.loadParameters(appState.currentFileHash);
         if (savedParameters) {
             // Load saved parameters
             parametersComponent.setParameters(savedParameters);
@@ -732,10 +741,10 @@ async function displayCsvResults(csvData: GibliCsvData, result: any) {
         }
     }
 
-    isLoadingParameters = false;
+    appState.isLoadingParameters = false;
 
-    // Update previousAutoLapDetection to match loaded parameters
-    previousAutoLapDetection = currentParameters?.auto_lap_detection || 'None';
+    // Update appState.previousAutoLapDetection to match loaded parameters
+    appState.previousAutoLapDetection = appState.currentParameters?.auto_lap_detection || 'None';
 }
 
 // Calculate average CdA from CSV reference data
@@ -796,58 +805,8 @@ function calculateRhoArrayFromFitData(fitData: any): number[] | null {
 }
 
 // Initialize section 3 for CSV data
-function initializeSection3Csv(csvData: GibliCsvData, _result: any) {
-    // Calculate distance from GPS coordinates
-    const distance = calculateDistanceArray(csvData.positionLat, csvData.positionLong);
-
-    // Calculate wind speed in the direction of the rider from Wind Magnitude and Wind Angle
-    // Formula: ws_rider = cos(angle_radians) * magnitude
-    const windSpeed = csvData.windAngle.map((angleDeg, i) => {
-        const magnitude = csvData.airSpeed[i]; // airSpeed is already converted to m/s
-        if (isNaN(angleDeg) || isNaN(magnitude)) {
-            return 0;
-        }
-        const angleRad = (angleDeg * Math.PI) / 180;
-        return Math.cos(angleRad) * magnitude;
-    });
-
-    console.log('📊 Calculated wind speed from CSV:', {
-        sampleAngles: csvData.windAngle.slice(0, 5),
-        sampleMagnitudes: csvData.airSpeed.slice(0, 5),
-        sampleWindSpeeds: windSpeed.slice(0, 5),
-        nonZeroCount: windSpeed.filter(ws => Math.abs(ws) > 0.1).length
-    });
-
-    // Create a FitData-compatible structure
-    // This structure matches FitData from WASM, allowing all downstream code to work identically
-    currentFitData = {
-        // Required fields (same as FitData)
-        timestamps: csvData.timestamps,
-        position_lat: csvData.positionLat,
-        position_long: csvData.positionLong,
-        altitude: csvData.altitude,
-        velocity: csvData.velocity,
-        power: csvData.power,
-        air_speed: csvData.airSpeed,
-        distance: distance,
-        wind_speed: windSpeed,
-        wind_yaw: csvData.windAngle || new Array(csvData.timestamps.length).fill(0),
-        air_density_data: new Array(csvData.timestamps.length).fill(0), // Will be calculated from environmental data if available
-        road_speed: new Array(csvData.timestamps.length).fill(0), // Not available in CSV
-        temperature: csvData.temperature || new Array(csvData.timestamps.length).fill(0),
-        battery_soc: new Array(csvData.timestamps.length).fill(0),
-        heart_rate: new Array(csvData.timestamps.length).fill(0),
-        cadence: new Array(csvData.timestamps.length).fill(0),
-        record_count: csvData.timestamps.length,
-
-        // Extended fields (not in standard FitData, but available from CSV)
-        // These will be checked by feature detection, not file type
-        humidity: csvData.humidity,  // Optional: only present if CSV has it
-        pressure: csvData.pressure,  // Optional: only present if CSV has it
-        cda_reference: csvData.cdaReference,  // Optional: only present if CSV has it
-    };
-
-    // Call regular initializeSection3
+function initializeSection3Csv(_csvData: GibliCsvData, _result: any) {
+    // CSV data is normalized into appState.currentFitData during file loading.
     initializeSection3();
 }
 
@@ -938,8 +897,9 @@ async function processCsvFile(file: File) {
         void _windSpeed; // Reserved for future use
 
         // Create a mock result structure that mirrors FIT file result
-        const result = {
-            fit_data: null, // No FIT data for CSV files
+        const activityData = createCsvActivityData(csvData);
+        const result: ActivityResult = {
+            fit_data: activityData,
             parsing_statistics: {
                 has_power_data: csvData.power.some(p => !isNaN(p) && p > 0),
                 has_gps_data: csvData.positionLat.some(lat => !isNaN(lat)),
@@ -950,8 +910,12 @@ async function processCsvFile(file: File) {
             laps: csvData.hasLapData ? generateLapsFromCsv(csvData) : [],
         };
 
-        currentFitResult = result;
-        currentLaps = result.laps;
+        appState.setLoadedActivity(createLoadedActivity({
+            source: 'csv',
+            file,
+            fileHash: appState.currentFileHash,
+            result,
+        }));
 
         hideLoading();
         await displayCsvResults(csvData, result);
@@ -1058,16 +1022,16 @@ async function displayResults(result: any) {
         </div>
         ` : ''}
 
-        ${elevationCorrectionEnabled && selectedDEMFile ? `
+        ${appState.elevationCorrectionEnabled && appState.selectedDEMFile ? `
         <div style="margin-top: 1.5rem; padding: 1rem; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
             <h4 style="margin: 0 0 0.5rem 0; color: #2d7a52;">📊 Elevation Correction Applied</h4>
-            <p style="margin: 0 0 0.5rem 0; color: #2d7a52;"><strong>DEM file:</strong> ${selectedDEMFile.name}</p>
+            <p style="margin: 0 0 0.5rem 0; color: #2d7a52;"><strong>DEM file:</strong> ${appState.selectedDEMFile.name}</p>
             <p style="margin: 0 0 0.5rem 0; color: #2d7a52;">
-                <strong>Successfully corrected:</strong> ${(100 - elevationErrorRate * 100).toFixed(1)}%
+                <strong>Successfully corrected:</strong> ${(100 - appState.elevationErrorRate * 100).toFixed(1)}%
             </p>
-            ${elevationErrorRate > 0.01 ? `
+            ${appState.elevationErrorRate > 0.01 ? `
             <p style="margin: 0; color: #f57c00; font-weight: 500;">
-                ⚠️ ${(elevationErrorRate * 100).toFixed(1)}% of points used GPS fallback (DEM lookup failed)
+                ⚠️ ${(appState.elevationErrorRate * 100).toFixed(1)}% of points used GPS fallback (DEM lookup failed)
             </p>
             ` : ''}
         </div>
@@ -1076,18 +1040,13 @@ async function displayResults(result: any) {
 
     results.classList.remove('hidden');
 
-    // Store data for section 3
-    currentFitResult = result;
-    currentFitData = result.fit_data;
-    currentLaps = laps;
-
     // Initialize analysis parameters component immediately
-    isLoadingParameters = true; // Prevent saving during initialization
+    appState.isLoadingParameters = true; // Prevent saving during initialization
     initializeAnalysisParameters();
 
     // Try to load saved parameters for this file
-    if (currentFileHash && parametersComponent) {
-        const savedParameters = await parameterStorage.loadParameters(currentFileHash);
+    if (appState.currentFileHash && parametersComponent) {
+        const savedParameters = await parameterStorage.loadParameters(appState.currentFileHash);
         if (savedParameters) {
             // Load saved parameters (preserves user's preference for auto-rho)
             parametersComponent.setParameters(savedParameters);
@@ -1118,10 +1077,10 @@ async function displayResults(result: any) {
         }
     }
 
-    isLoadingParameters = false; // Re-enable saving after load complete
+    appState.isLoadingParameters = false; // Re-enable saving after load complete
 
-    // Update previousAutoLapDetection to match loaded parameters
-    previousAutoLapDetection = currentParameters?.auto_lap_detection || 'None';
+    // Update appState.previousAutoLapDetection to match loaded parameters
+    appState.previousAutoLapDetection = appState.currentParameters?.auto_lap_detection || 'None';
 }
 
 
@@ -1169,22 +1128,22 @@ function formatPower(watts: number): string {
  */
 async function calculateAutoRho(): Promise<number | null> {
     // Prevent infinite loops
-    if (isCalculatingAutoRho) {
+    if (appState.isCalculatingAutoRho) {
         console.log('⏭️  Auto-rho calculation already in progress, skipping\n');
         return null;
     }
 
-    isCalculatingAutoRho = true;
+    appState.isCalculatingAutoRho = true;
 
     console.log('\n╔═══════════════════════════════════════════════════════════════╗');
     console.log('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
     console.log('╚═══════════════════════════════════════════════════════════════╝\n');
 
-    if (!currentFitData || !parametersComponent) {
+    if (!appState.currentFitData || !parametersComponent) {
         console.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
-        console.log('  - currentFitData:', !!currentFitData);
+        console.log('  - appState.currentFitData:', !!appState.currentFitData);
         console.log('  - parametersComponent:', !!parametersComponent);
-        isCalculatingAutoRho = false;
+        appState.isCalculatingAutoRho = false;
         return null;
     }
 
@@ -1193,7 +1152,7 @@ async function calculateAutoRho(): Promise<number | null> {
     // Check if auto-calculate is enabled
     if (!params.auto_calculate_rho) {
         console.log('⏭️  Auto-calculate disabled, skipping\n');
-        isCalculatingAutoRho = false;
+        appState.isCalculatingAutoRho = false;
         return null;
     }
 
@@ -1222,7 +1181,7 @@ async function calculateAutoRho(): Promise<number | null> {
             console.warn('❌ No trim sliders found - cannot calculate auto rho');
             console.log('  This usually means the UI is not ready yet.');
             console.log('  Will retry when sliders are available.\n');
-            isCalculatingAutoRho = false;
+            appState.isCalculatingAutoRho = false;
             return null;
         }
 
@@ -1242,19 +1201,19 @@ async function calculateAutoRho(): Promise<number | null> {
         try {
             // Calculate GPS metadata from trim region
             // Use filtered lap data (only selected laps), not the full FIT data
-            if (!filteredLapData) {
+            if (!appState.filteredLapData) {
                 console.warn('❌ No filtered lap data available - cannot calculate auto rho');
                 console.log('  This usually means laps have not been selected yet.\n');
                 hideLoading();
-                isCalculatingAutoRho = false;
+                appState.isCalculatingAutoRho = false;
                 return null;
             }
 
             console.log('🗺️  Calculating GPS metadata from trim region...');
-            console.log('  Using filtered lap data with', filteredLapData.timestamps.length, 'data points');
+            console.log('  Using filtered lap data with', appState.filteredLapData.timestamps.length, 'data points');
 
             const metadata = calculateTrimRegionMetadata(
-                filteredLapData,
+                appState.filteredLapData,
                 trimStart,
                 trimEnd
             );
@@ -1274,21 +1233,21 @@ async function calculateAutoRho(): Promise<number | null> {
             const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, '0')}:${String(slot.slotMinute).padStart(2, '0')}`;
 
             // Check if query has actually changed
-            if (lastWeatherQueryKey === queryKey) {
+            if (appState.lastWeatherQueryKey === queryKey) {
                 console.log('⏭️  Query unchanged from last calculation, using cached rho');
                 console.log('  Query key:', queryKey);
                 hideLoading();
-                isCalculatingAutoRho = false;
+                appState.isCalculatingAutoRho = false;
                 return params.rho; // Return current rho value
             }
 
             console.log('🔄 Query changed, fetching new weather data');
-            console.log('  Previous:', lastWeatherQueryKey || 'none');
+            console.log('  Previous:', appState.lastWeatherQueryKey || 'none');
             console.log('  Current:', queryKey);
             console.log('');
 
             // Update last query key
-            lastWeatherQueryKey = queryKey;
+            appState.lastWeatherQueryKey = queryKey;
 
             // Initialize weather services
             const weatherCache = new WeatherCache();
@@ -1377,7 +1336,7 @@ async function calculateAutoRho(): Promise<number | null> {
             console.log('╚═══════════════════════════════════════════════════════════════╝\n');
 
             hideLoading();
-            isCalculatingAutoRho = false;
+            appState.isCalculatingAutoRho = false;
             return rho;
 
         } catch (error) {
@@ -1405,7 +1364,7 @@ async function calculateAutoRho(): Promise<number | null> {
                 showNotification(`Auto-rho calculation failed: ${errorMsg}`, 'error');
             }
 
-            isCalculatingAutoRho = false;
+            appState.isCalculatingAutoRho = false;
             return null;
         }
 
@@ -1413,7 +1372,7 @@ async function calculateAutoRho(): Promise<number | null> {
         hideLoading();
         console.error('Unexpected error in calculateAutoRho:', error);
         showNotification('Failed to calculate air density. Using manual value.', 'error');
-        isCalculatingAutoRho = false;
+        appState.isCalculatingAutoRho = false;
         return null;
     }
 }
@@ -1539,7 +1498,7 @@ let gpsUpdateGateHandler: ((timeOffset: number) => void) | null = null;
  * Setup GPS lap detection UI and handlers (slider-based gate positioning)
  */
 async function setupGpsLapDetection() {
-    if (!mapVisualization || !currentFitData) return;
+    if (!mapVisualization || !appState.currentFitData) return;
 
     const sliderControls = document.getElementById('gpsGateSliderControls');
     const gateSlider = document.getElementById('gpsGateSlider') as HTMLInputElement;
@@ -1570,9 +1529,9 @@ async function setupGpsLapDetection() {
 
     // Load saved gate position or use default
     let initialOffset = 5; // Default 5 seconds
-    if (currentFileHash) {
+    if (appState.currentFileHash) {
         try {
-            const savedMarker = await parameterStorage.loadGpsMarkerSettings(currentFileHash, selectedLaps);
+            const savedMarker = await parameterStorage.loadGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps);
             if (savedMarker && savedMarker.gateTimeOffset !== undefined) {
                 initialOffset = savedMarker.gateTimeOffset;
                 console.log('Loading saved GPS gate time offset:', initialOffset);
@@ -1595,8 +1554,8 @@ async function setupGpsLapDetection() {
         const gateIndex = findDataIndexAtTimeOffset(timeOffset, currentTimeRange.startTime);
         if (gateIndex === null) return;
 
-        const lat = currentFitData!.position_lat[gateIndex];
-        const lon = currentFitData!.position_long[gateIndex];
+        const lat = appState.currentFitData!.position_lat[gateIndex];
+        const lon = appState.currentFitData!.position_long[gateIndex];
 
         if (lat && lon && lat !== 0 && lon !== 0) {
             // Update position info display
@@ -1608,9 +1567,9 @@ async function setupGpsLapDetection() {
             mapVisualization?.setGpsMarker(lat, lon);
 
             // Save settings
-            if (currentFileHash) {
+            if (appState.currentFileHash) {
                 try {
-                    await parameterStorage.saveGpsMarkerSettings(currentFileHash, selectedLaps, {
+                    await parameterStorage.saveGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps, {
                         gateTimeOffset: timeOffset
                     });
                 } catch (err) {
@@ -1654,13 +1613,13 @@ async function setupGpsLapDetection() {
  * Get the time range of currently selected data (from selected FIT laps)
  */
 function getSelectedDataTimeRange(): { startTime: number; endTime: number; duration: number } {
-    if (!currentFitData) {
+    if (!appState.currentFitData) {
         return { startTime: 0, endTime: 0, duration: 0 };
     }
 
-    const timestamps = Array.from(currentFitData.timestamps) as number[];
+    const timestamps = Array.from(appState.currentFitData.timestamps) as number[];
 
-    if (selectedLaps.length === 0 || currentLaps.length === 0) {
+    if (appState.selectedLaps.length === 0 || appState.currentLaps.length === 0) {
         // No laps selected, use full data range
         const startTime = timestamps[0] || 0;
         const endTime = timestamps[timestamps.length - 1] || 0;
@@ -1668,7 +1627,7 @@ function getSelectedDataTimeRange(): { startTime: number; endTime: number; durat
     }
 
     // Get time range from selected FIT laps
-    const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]).filter(Boolean);
+    const selectedLapData = appState.selectedLaps.map(lapNumber => appState.currentLaps[lapNumber - 1]).filter(Boolean);
     if (selectedLapData.length === 0) {
         const startTime = timestamps[0] || 0;
         const endTime = timestamps[timestamps.length - 1] || 0;
@@ -1685,9 +1644,9 @@ function getSelectedDataTimeRange(): { startTime: number; endTime: number; durat
  * Find the data index at a given time offset from start
  */
 function findDataIndexAtTimeOffset(timeOffset: number, startTime: number): number | null {
-    if (!currentFitData) return null;
+    if (!appState.currentFitData) return null;
 
-    const timestamps = Array.from(currentFitData.timestamps) as number[];
+    const timestamps = Array.from(appState.currentFitData.timestamps) as number[];
     const targetTime = startTime + timeOffset;
 
     // Find the index with timestamp closest to targetTime
@@ -1709,16 +1668,16 @@ function findDataIndexAtTimeOffset(timeOffset: number, startTime: number): numbe
  * Run GPS lap detection algorithm
  */
 function runGpsLapDetection(markerLat: number, markerLon: number, _markerIndex: number) {
-    if (!currentFitData) return;
+    if (!appState.currentFitData) return;
 
     // Calculate trim indices from selected FIT laps' time ranges
     let trimStart = 0;
-    let trimEnd = currentFitData.timestamps.length - 1;
+    let trimEnd = appState.currentFitData.timestamps.length - 1;
 
-    if (selectedLaps.length > 0 && currentLaps.length > 0) {
+    if (appState.selectedLaps.length > 0 && appState.currentLaps.length > 0) {
         // Get time ranges for selected FIT laps
-        const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]);
-        const allTimestamps = Array.from(currentFitData.timestamps) as number[];
+        const selectedLapData = appState.selectedLaps.map(lapNumber => appState.currentLaps[lapNumber - 1]);
+        const allTimestamps = Array.from(appState.currentFitData.timestamps) as number[];
 
         // Find the data indices that fall within the selected FIT laps' time ranges
         const indicesInSelectedLaps: number[] = [];
@@ -1735,12 +1694,12 @@ function runGpsLapDetection(markerLat: number, markerLon: number, _markerIndex: 
         if (indicesInSelectedLaps.length > 0) {
             trimStart = indicesInSelectedLaps[0];
             trimEnd = indicesInSelectedLaps[indicesInSelectedLaps.length - 1];
-            console.log(`GPS lap detection trim region: ${trimStart} to ${trimEnd} (${indicesInSelectedLaps.length} points from ${selectedLaps.length} FIT laps)`);
+            console.log(`GPS lap detection trim region: ${trimStart} to ${trimEnd} (${indicesInSelectedLaps.length} points from ${appState.selectedLaps.length} FIT laps)`);
         }
     }
 
     // Get detection mode, defaulting to GPS based lap splitting (not None since we're running detection)
-    const detectionMode = currentParameters?.auto_lap_detection;
+    const detectionMode = appState.currentParameters?.auto_lap_detection;
     const mode = detectionMode && detectionMode !== 'None'
         ? detectionMode
         : 'GPS based lap splitting';
@@ -1755,23 +1714,23 @@ function runGpsLapDetection(markerLat: number, markerLon: number, _markerIndex: 
     };
 
     const detector = new GpsLapDetector(
-        Array.from(currentFitData.position_lat),
-        Array.from(currentFitData.position_long),
-        Array.from(currentFitData.timestamps),
-        Array.from(currentFitData.distance),
+        Array.from(appState.currentFitData.position_lat),
+        Array.from(appState.currentFitData.position_long),
+        Array.from(appState.currentFitData.timestamps),
+        Array.from(appState.currentFitData.distance),
         config
     );
 
-    gpsLapDetectionResult = detector.detectLaps();
-    gpsDetectedLaps = gpsLapDetectionResult.detectedLaps;
+    appState.gpsLapDetectionResult = detector.detectLaps();
+    appState.gpsDetectedLaps = appState.gpsLapDetectionResult.detectedLaps;
 
-    console.log(`Detected ${gpsDetectedLaps.length} laps:`, gpsDetectedLaps);
+    console.log(`Detected ${appState.gpsDetectedLaps.length} laps:`, appState.gpsDetectedLaps);
 
     // Show detected laps on map
-    if (mapVisualization && gpsLapDetectionResult) {
+    if (mapVisualization && appState.gpsLapDetectionResult) {
         mapVisualization.showDetectedLaps(
-            gpsLapDetectionResult.detectedLaps,
-            gpsLapDetectionResult.passings
+            appState.gpsLapDetectionResult.detectedLaps,
+            appState.gpsLapDetectionResult.passings
         );
     }
 
@@ -1779,7 +1738,7 @@ function runGpsLapDetection(markerLat: number, markerLon: number, _markerIndex: 
     updateGpsDetectedLapsUI();
 
     // Auto-select all laps initially
-    gpsSelectedLaps = gpsDetectedLaps.map(lap => lap.lapNumber);
+    appState.gpsSelectedLaps = appState.gpsDetectedLaps.map(lap => lap.lapNumber);
     updateAnalyzeButton();
 }
 
@@ -1793,16 +1752,16 @@ function updateGpsDetectedLapsUI() {
 
     if (!lapsInfo || !lapCountSpan || !lapList) return;
 
-    if (gpsDetectedLaps.length === 0) {
+    if (appState.gpsDetectedLaps.length === 0) {
         lapsInfo.style.display = 'none';
         return;
     }
 
     lapsInfo.style.display = 'block';
-    lapCountSpan.textContent = gpsDetectedLaps.length.toString();
+    lapCountSpan.textContent = appState.gpsDetectedLaps.length.toString();
 
     // Populate lap list
-    lapList.innerHTML = gpsDetectedLaps.map(lap => `
+    lapList.innerHTML = appState.gpsDetectedLaps.map(lap => `
         <div class="lap-checkbox-item selected" data-gps-lap="${lap.lapNumber}">
             <input type="checkbox" class="gps-lap-checkbox" id="gps-lap-${lap.lapNumber}" checked>
             <div class="lap-info">
@@ -1841,7 +1800,7 @@ function updateGpsDetectedLapsUI() {
  */
 function handleGpsLapSelectionChange() {
     const checkboxes = document.querySelectorAll('.gps-lap-checkbox:checked') as NodeListOf<HTMLInputElement>;
-    gpsSelectedLaps = Array.from(checkboxes).map(cb => {
+    appState.gpsSelectedLaps = Array.from(checkboxes).map(cb => {
         const item = cb.closest('.lap-checkbox-item');
         return item ? parseInt(item.getAttribute('data-gps-lap') || '0') : 0;
     }).filter(lap => lap > 0);
@@ -1856,7 +1815,7 @@ function handleGpsLapSelectionChange() {
         }
     });
 
-    console.log('GPS selected laps:', gpsSelectedLaps);
+    console.log('GPS selected laps:', appState.gpsSelectedLaps);
     updateAnalyzeButton();
 }
 
@@ -1871,7 +1830,7 @@ let oabUpdateGatesHandler: (() => void) | null = null;
  * Setup Out and Back detection UI and handlers (slider-based gate positioning)
  */
 async function setupOutAndBackDetection() {
-    if (!mapVisualization || !currentFitData) return;
+    if (!mapVisualization || !appState.currentFitData) return;
 
     const sliderControls = document.getElementById('oabGateSliderControls');
     const gateASlider = document.getElementById('oabGateASlider') as HTMLInputElement;
@@ -1908,9 +1867,9 @@ async function setupOutAndBackDetection() {
     // Load saved gate positions or use defaults
     let initialOffsetA = 5;  // Default 5 seconds
     let initialOffsetB = Math.min(60, maxSeconds - 5);  // Default 60 seconds or near end
-    if (currentFileHash) {
+    if (appState.currentFileHash) {
         try {
-            const savedMarkers = await parameterStorage.loadOutAndBackMarkerSettings(currentFileHash, selectedLaps);
+            const savedMarkers = await parameterStorage.loadOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps);
             if (savedMarkers && savedMarkers.gateATimeOffset !== undefined && savedMarkers.gateBTimeOffset !== undefined) {
                 initialOffsetA = savedMarkers.gateATimeOffset;
                 initialOffsetB = savedMarkers.gateBTimeOffset;
@@ -1936,8 +1895,8 @@ async function setupOutAndBackDetection() {
         const gateIndex = findDataIndexAtTimeOffset(timeOffset, currentTimeRange.startTime);
         if (gateIndex === null) return null;
 
-        const lat = currentFitData!.position_lat[gateIndex];
-        const lon = currentFitData!.position_long[gateIndex];
+        const lat = appState.currentFitData!.position_lat[gateIndex];
+        const lon = appState.currentFitData!.position_long[gateIndex];
 
         if (lat && lon && lat !== 0 && lon !== 0) {
             return { lat, lon, index: gateIndex };
@@ -1966,9 +1925,9 @@ async function setupOutAndBackDetection() {
         if (posB) mapVisualization?.setGpsMarkerB(posB.lat, posB.lon);
 
         // Save settings
-        if (currentFileHash) {
+        if (appState.currentFileHash) {
             try {
-                await parameterStorage.saveOutAndBackMarkerSettings(currentFileHash, selectedLaps, {
+                await parameterStorage.saveOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps, {
                     gateATimeOffset: offsetA,
                     gateBTimeOffset: offsetB
                 });
@@ -2041,15 +2000,15 @@ async function setupOutAndBackDetection() {
  * Run Out and Back detection algorithm
  */
 function runOutAndBackDetection(markerALat: number, markerALon: number, markerBLat: number, markerBLon: number) {
-    if (!currentFitData) return;
+    if (!appState.currentFitData) return;
 
     // Calculate trim indices from selected FIT laps' time ranges
     let trimStart = 0;
-    let trimEnd = currentFitData.timestamps.length - 1;
+    let trimEnd = appState.currentFitData.timestamps.length - 1;
 
-    if (selectedLaps.length > 0 && currentLaps.length > 0) {
-        const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]);
-        const allTimestamps = Array.from(currentFitData.timestamps) as number[];
+    if (appState.selectedLaps.length > 0 && appState.currentLaps.length > 0) {
+        const selectedLapData = appState.selectedLaps.map(lapNumber => appState.currentLaps[lapNumber - 1]);
+        const allTimestamps = Array.from(appState.currentFitData.timestamps) as number[];
 
         const indicesInSelectedLaps: number[] = [];
         for (let i = 0; i < allTimestamps.length; i++) {
@@ -2080,24 +2039,24 @@ function runOutAndBackDetection(markerALat: number, markerALon: number, markerBL
     };
 
     const detector = new OutAndBackDetector(
-        Array.from(currentFitData.position_lat),
-        Array.from(currentFitData.position_long),
-        Array.from(currentFitData.timestamps),
-        Array.from(currentFitData.distance),
+        Array.from(appState.currentFitData.position_lat),
+        Array.from(appState.currentFitData.position_long),
+        Array.from(appState.currentFitData.timestamps),
+        Array.from(appState.currentFitData.distance),
         config
     );
 
-    outAndBackResult = detector.detectSections();
-    outAndBackSections = outAndBackResult.detectedSections;
+    appState.outAndBackResult = detector.detectSections();
+    appState.outAndBackSections = appState.outAndBackResult.detectedSections;
 
-    console.log(`Detected ${outAndBackSections.length} out-and-back sections:`, outAndBackSections);
+    console.log(`Detected ${appState.outAndBackSections.length} out-and-back sections:`, appState.outAndBackSections);
 
     // Show detected sections on map
-    if (mapVisualization && outAndBackResult) {
+    if (mapVisualization && appState.outAndBackResult) {
         mapVisualization.showOutAndBackSections(
-            outAndBackResult.detectedSections,
-            outAndBackResult.passingsA,
-            outAndBackResult.passingsB
+            appState.outAndBackResult.detectedSections,
+            appState.outAndBackResult.passingsA,
+            appState.outAndBackResult.passingsB
         );
     }
 
@@ -2105,7 +2064,7 @@ function runOutAndBackDetection(markerALat: number, markerALon: number, markerBL
     updateOutAndBackSectionsUI();
 
     // Auto-select all sections initially
-    outAndBackSelectedSections = outAndBackSections.map(s => s.sectionNumber);
+    appState.outAndBackSelectedSections = appState.outAndBackSections.map(s => s.sectionNumber);
     updateAnalyzeButton();
 }
 
@@ -2119,16 +2078,16 @@ function updateOutAndBackSectionsUI() {
 
     if (!sectionsInfo || !sectionCountSpan || !sectionList) return;
 
-    if (outAndBackSections.length === 0) {
+    if (appState.outAndBackSections.length === 0) {
         sectionsInfo.style.display = 'none';
         return;
     }
 
     sectionsInfo.style.display = 'block';
-    sectionCountSpan.textContent = outAndBackSections.length.toString();
+    sectionCountSpan.textContent = appState.outAndBackSections.length.toString();
 
     // Populate section list
-    sectionList.innerHTML = outAndBackSections.map(section => `
+    sectionList.innerHTML = appState.outAndBackSections.map(section => `
         <div class="lap-checkbox-item selected" data-oab-section="${section.sectionNumber}">
             <input type="checkbox" class="oab-section-checkbox" id="oab-section-${section.sectionNumber}" checked>
             <div class="lap-info">
@@ -2167,7 +2126,7 @@ function updateOutAndBackSectionsUI() {
  */
 function handleOutAndBackSectionSelectionChange() {
     const checkboxes = document.querySelectorAll('.oab-section-checkbox:checked') as NodeListOf<HTMLInputElement>;
-    outAndBackSelectedSections = Array.from(checkboxes).map(cb => {
+    appState.outAndBackSelectedSections = Array.from(checkboxes).map(cb => {
         const item = cb.closest('.lap-checkbox-item');
         return item ? parseInt(item.getAttribute('data-oab-section') || '0') : 0;
     }).filter(s => s > 0);
@@ -2182,7 +2141,7 @@ function handleOutAndBackSectionSelectionChange() {
         }
     });
 
-    console.log('Out and Back selected sections:', outAndBackSelectedSections);
+    console.log('Out and Back selected sections:', appState.outAndBackSelectedSections);
     updateAnalyzeButton();
 }
 
@@ -2192,14 +2151,14 @@ function handleOutAndBackSectionSelectionChange() {
 function updateOutAndBackButtonState() {
     const sliderControls = document.getElementById('oabGateSliderControls');
 
-    const lapDetectionMode = currentParameters?.auto_lap_detection || 'None';
+    const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
 
     if (lapDetectionMode !== 'GPS based out and back') {
         if (sliderControls) sliderControls.style.display = 'none';
         return;
     }
 
-    if (selectedLaps.length > 0) {
+    if (appState.selectedLaps.length > 0) {
         // FIT laps are selected - setup and show slider controls
         setupOutAndBackDetection();
     } else {
@@ -2207,10 +2166,10 @@ function updateOutAndBackButtonState() {
         if (sliderControls) sliderControls.style.display = 'none';
 
         // Clear any existing detection when FIT laps are deselected
-        if (outAndBackSections.length > 0) {
-            outAndBackSections = [];
-            outAndBackSelectedSections = [];
-            outAndBackResult = null;
+        if (appState.outAndBackSections.length > 0) {
+            appState.outAndBackSections = [];
+            appState.outAndBackSelectedSections = [];
+            appState.outAndBackResult = null;
             mapVisualization?.clearDetectedLaps();
             mapVisualization?.clearOutAndBackMarkers();
             updateOutAndBackSectionsUI();
@@ -2303,7 +2262,7 @@ function initializeMapTrimControls(dataLength: number) {
 function updateGpsMarkerButtonState() {
     const sliderControls = document.getElementById('gpsGateSliderControls');
 
-    const lapDetectionMode = currentParameters?.auto_lap_detection || 'None';
+    const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
     const isGpsLapMode = lapDetectionMode === 'GPS based lap splitting';
 
     if (!isGpsLapMode) {
@@ -2312,7 +2271,7 @@ function updateGpsMarkerButtonState() {
         return;
     }
 
-    if (selectedLaps.length > 0) {
+    if (appState.selectedLaps.length > 0) {
         // FIT laps are selected - setup and show slider controls
         setupGpsLapDetection();
     } else {
@@ -2320,10 +2279,10 @@ function updateGpsMarkerButtonState() {
         if (sliderControls) sliderControls.style.display = 'none';
 
         // Clear any existing GPS lap detection when FIT laps are deselected
-        if (gpsDetectedLaps.length > 0) {
-            gpsDetectedLaps = [];
-            gpsSelectedLaps = [];
-            gpsLapDetectionResult = null;
+        if (appState.gpsDetectedLaps.length > 0) {
+            appState.gpsDetectedLaps = [];
+            appState.gpsSelectedLaps = [];
+            appState.gpsLapDetectionResult = null;
             mapVisualization?.clearDetectedLaps();
             mapVisualization?.clearGpsMarker();
             updateGpsDetectedLapsUI();
@@ -2333,14 +2292,14 @@ function updateGpsMarkerButtonState() {
 
 function updateSelectedLaps() {
     const checkboxes = document.querySelectorAll('.lap-checkbox:checked') as NodeListOf<HTMLInputElement>;
-    selectedLaps = Array.from(checkboxes).map(cb => {
+    appState.selectedLaps = Array.from(checkboxes).map(cb => {
         const item = cb.closest('.lap-checkbox-item');
         return item ? parseInt(item.getAttribute('data-lap') || '0') : 0;
     }).filter(lap => lap > 0);
 
     // Update map visualization
     if (mapVisualization) {
-        mapVisualization.setSelectedLaps(selectedLaps);
+        mapVisualization.setSelectedLaps(appState.selectedLaps);
     }
 
     // Update GPS marker button state based on FIT lap selection
@@ -2352,13 +2311,13 @@ function updateSelectedLaps() {
     // Show/hide trim controls based on lap selection
     const mapTrimControls = document.getElementById('mapTrimControls');
     if (mapTrimControls) {
-        if (selectedLaps.length > 0) {
+        if (appState.selectedLaps.length > 0) {
             mapTrimControls.style.display = 'flex';
             // Calculate total duration of selected laps
             initializeMapTrimControlsForSelectedLaps();
 
             // Trigger auto-rho calculation when laps are selected (trim sliders now available)
-            if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+            if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
                 setTimeout(() => {
                     calculateAutoRho().catch(err => {
                         console.error('Auto-rho calculation error on lap selection:', err);
@@ -2376,15 +2335,15 @@ function updateSelectedLaps() {
 
 async function initializeMapTrimControlsForSelectedLaps() {
 
-    if (!currentFitResult || !currentLaps || selectedLaps.length === 0) {
+    if (!appState.currentFitResult || !appState.currentLaps || appState.selectedLaps.length === 0) {
         return;
     }
 
     // Get selected lap data
-    const selectedLapData = selectedLaps.map(lapNumber => currentLaps[lapNumber - 1]);
+    const selectedLapData = appState.selectedLaps.map(lapNumber => appState.currentLaps[lapNumber - 1]);
 
     // Get data from unified structure (works for both FIT and CSV)
-    const fitData = currentFitData || currentFitResult.fit_data;
+    const fitData = appState.currentFitData || appState.currentFitResult.fit_data;
     if (!fitData) {
         console.error('No fit data available for map trim controls');
         return;
@@ -2394,7 +2353,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
     const allPositionLat = fitData.position_lat;
     const allPositionLong = fitData.position_long;
 
-    const hasGpsData = currentFitResult.parsing_statistics?.has_gps_data ?? false;
+    const hasGpsData = appState.currentFitResult.parsing_statistics?.has_gps_data ?? false;
 
     // Get time ranges for selected laps
     const selectedLapTimeRanges = selectedLapData.map(lap => ({
@@ -2437,7 +2396,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
     }
 
     // Store filtered lap data globally for auto-rho calculation
-    filteredLapData = {
+    appState.filteredLapData = {
         position_lat: filteredLapPositionLat,
         position_long: filteredLapPositionLong,
         timestamps: filteredLapTimestamps
@@ -2448,28 +2407,28 @@ async function initializeMapTrimControlsForSelectedLaps() {
 
     // Try to load saved lap settings for this file and lap combination
     let savedSettings: LapSettings | null = null;
-    if (currentFileHash) {
+    if (appState.currentFileHash) {
         try {
-            savedSettings = await parameterStorage.loadLapSettings(currentFileHash, selectedLaps);
+            savedSettings = await parameterStorage.loadLapSettings(appState.currentFileHash, appState.selectedLaps);
             if (savedSettings) {
                 // Use saved trim values
-                presetTrimStart = savedSettings.trimStart;
-                presetTrimEnd = savedSettings.trimEnd;
+                appState.presetTrimStart = savedSettings.trimStart;
+                appState.presetTrimEnd = savedSettings.trimEnd;
             } else {
                 // Set preset values to defaults
-                presetTrimStart = 0;
-                presetTrimEnd = dataLength - 1;
+                appState.presetTrimStart = 0;
+                appState.presetTrimEnd = dataLength - 1;
             }
         } catch (err) {
             console.error('Failed to load lap settings:', err);
             // Fallback to defaults
-            presetTrimStart = 0;
-            presetTrimEnd = dataLength - 1;
+            appState.presetTrimStart = 0;
+            appState.presetTrimEnd = dataLength - 1;
         }
     } else {
         // No file hash, use defaults
-        presetTrimStart = 0;
-        presetTrimEnd = dataLength - 1;
+        appState.presetTrimStart = 0;
+        appState.presetTrimEnd = dataLength - 1;
     }
 
     // Set up event listeners for map trim controls
@@ -2491,16 +2450,16 @@ async function initializeMapTrimControlsForSelectedLaps() {
         mapTrimEndValue.parentNode?.replaceChild(newMapTrimEndValue, mapTrimEndValue);
 
         // Set slider values to loaded settings (or defaults)
-        newMapTrimStartSlider.value = presetTrimStart.toString();
-        newMapTrimStartValue.value = presetTrimStart.toString();
-        newMapTrimEndSlider.value = presetTrimEnd.toString();
-        newMapTrimEndValue.value = presetTrimEnd.toString();
+        newMapTrimStartSlider.value = appState.presetTrimStart.toString();
+        newMapTrimStartValue.value = appState.presetTrimStart.toString();
+        newMapTrimEndSlider.value = appState.presetTrimEnd.toString();
+        newMapTrimEndValue.value = appState.presetTrimEnd.toString();
 
         // Set map markers with loaded/default trim values
-        if (mapVisualization && savedSettings && presetTrimStart !== null && presetTrimEnd !== null) {
-            console.log('Setting map trim markers to loaded settings:', { trimStart: presetTrimStart, trimEnd: presetTrimEnd });
-            const trimStartVal = presetTrimStart;
-            const trimEndVal = presetTrimEnd;
+        if (mapVisualization && savedSettings && appState.presetTrimStart !== null && appState.presetTrimEnd !== null) {
+            console.log('Setting map trim markers to loaded settings:', { trimStart: appState.presetTrimStart, trimEnd: appState.presetTrimEnd });
+            const trimStartVal = appState.presetTrimStart;
+            const trimEndVal = appState.presetTrimEnd;
             setTimeout(() => {
                 if (mapVisualization) {
                     mapVisualization.fitBoundsToTrimRegion(trimStartVal, trimEndVal, filteredLapPositionLat, filteredLapPositionLong);
@@ -2512,11 +2471,11 @@ async function initializeMapTrimControlsForSelectedLaps() {
         newMapTrimStartSlider.addEventListener('input', () => {
             const value = parseInt(newMapTrimStartSlider.value);
             newMapTrimStartValue.value = value.toString();
-            presetTrimStart = value;
+            appState.presetTrimStart = value;
 
             // Update map markers immediately (before analyze) - use filtered lap GPS data
             if (mapVisualization) {
-                const trimEnd = presetTrimEnd ?? dataLength - 1;
+                const trimEnd = appState.presetTrimEnd ?? dataLength - 1;
                 mapVisualization.fitBoundsToTrimRegion(value, trimEnd, filteredLapPositionLat, filteredLapPositionLong);
             }
 
@@ -2527,11 +2486,11 @@ async function initializeMapTrimControlsForSelectedLaps() {
         newMapTrimEndSlider.addEventListener('input', () => {
             const value = parseInt(newMapTrimEndSlider.value);
             newMapTrimEndValue.value = value.toString();
-            presetTrimEnd = value;
+            appState.presetTrimEnd = value;
 
             // Update map markers immediately (before analyze) - use filtered lap GPS data
             if (mapVisualization) {
-                mapVisualization.fitBoundsToTrimRegion(presetTrimStart, value, filteredLapPositionLat, filteredLapPositionLong);
+                mapVisualization.fitBoundsToTrimRegion(appState.presetTrimStart, value, filteredLapPositionLat, filteredLapPositionLong);
             }
 
             // Save map trim settings
@@ -2541,11 +2500,11 @@ async function initializeMapTrimControlsForSelectedLaps() {
         newMapTrimStartValue.addEventListener('change', () => {
             const value = parseInt(newMapTrimStartValue.value);
             if (!isNaN(value)) {
-                const trimEnd = presetTrimEnd ?? dataLength - 1;
+                const trimEnd = appState.presetTrimEnd ?? dataLength - 1;
                 const clamped = Math.max(0, Math.min(value, trimEnd - 30));
                 newMapTrimStartSlider.value = clamped.toString();
                 newMapTrimStartValue.value = clamped.toString();
-                presetTrimStart = clamped;
+                appState.presetTrimStart = clamped;
 
                 // Update map markers immediately (before analyze) - use filtered lap GPS data
                 if (mapVisualization) {
@@ -2560,14 +2519,14 @@ async function initializeMapTrimControlsForSelectedLaps() {
         newMapTrimEndValue.addEventListener('change', () => {
             const value = parseInt(newMapTrimEndValue.value);
             if (!isNaN(value)) {
-                const clamped = Math.max(presetTrimStart + 30, Math.min(value, dataLength - 1));
+                const clamped = Math.max(appState.presetTrimStart + 30, Math.min(value, dataLength - 1));
                 newMapTrimEndSlider.value = clamped.toString();
                 newMapTrimEndValue.value = clamped.toString();
-                presetTrimEnd = clamped;
+                appState.presetTrimEnd = clamped;
 
                 // Update map markers immediately (before analyze) - use filtered lap GPS data
                 if (mapVisualization) {
-                    mapVisualization.fitBoundsToTrimRegion(presetTrimStart, clamped, filteredLapPositionLat, filteredLapPositionLong);
+                    mapVisualization.fitBoundsToTrimRegion(appState.presetTrimStart, clamped, filteredLapPositionLat, filteredLapPositionLong);
                 }
 
                 // Save map trim settings
@@ -2582,7 +2541,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
                 clearTimeout(mapAutoRhoDebounceTimer);
             }
             mapAutoRhoDebounceTimer = setTimeout(() => {
-                if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+                if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
                     calculateAutoRho().catch(err => {
                         console.error('Auto-rho calculation error on map trim change:', err);
                     });
@@ -2603,8 +2562,8 @@ function initializeAnalysisParameters() {
     try {
         parametersComponent = new AnalysisParametersComponent('analysisParameters', handleParametersChange);
 
-        // Initialize currentParameters with the default values from the component
-        currentParameters = parametersComponent.getParameters();
+        // Initialize appState.currentParameters with the default values from the component
+        appState.currentParameters = parametersComponent.getParameters();
 
         // Update analyze button with the default parameters
         updateAnalyzeButton();
@@ -2614,43 +2573,43 @@ function initializeAnalysisParameters() {
 }
 
 function handleParametersChange(parameters: AnalysisParameters) {
-    const previousLapDetectionMode = previousAutoLapDetection;
-    currentParameters = parameters;
+    const previousLapDetectionMode = appState.previousAutoLapDetection;
+    appState.currentParameters = parameters;
 
     // Check if auto_lap_detection changed and Section 3 needs to be re-rendered
     const lapDetectionChanged = parameters.auto_lap_detection !== previousLapDetectionMode;
-    previousAutoLapDetection = parameters.auto_lap_detection;
+    appState.previousAutoLapDetection = parameters.auto_lap_detection;
 
     // Don't save if we're currently loading parameters from storage
-    if (isLoadingParameters) {
+    if (appState.isLoadingParameters) {
         // Still need to update previous value when loading
         return;
     }
 
     // If lap detection mode changed, re-initialize Section 3 to show/hide GPS panel
-    if (lapDetectionChanged && currentFitData && currentLaps.length > 0) {
+    if (lapDetectionChanged && appState.currentFitData && appState.currentLaps.length > 0) {
         console.log(`Auto lap detection changed: ${previousLapDetectionMode} -> ${parameters.auto_lap_detection}`);
         // Reset GPS lap detection state when mode changes
-        gpsLapDetectionResult = null;
-        gpsDetectedLaps = [];
-        gpsSelectedLaps = [];
+        appState.gpsLapDetectionResult = null;
+        appState.gpsDetectedLaps = [];
+        appState.gpsSelectedLaps = [];
         // Re-initialize Section 3 to show/hide GPS lap detection panel
         initializeSection3();
         // Continue to save parameters below (don't return early)
     }
 
     // Save parameters to IndexedDB for this file
-    if (!currentFileHash) {
-        console.error('❌ Cannot save: currentFileHash is null/undefined');
+    if (!appState.currentFileHash) {
+        console.error('❌ Cannot save: appState.currentFileHash is null/undefined');
         return;
     }
 
-    if (!selectedFile) {
-        console.error('❌ Cannot save: selectedFile is null/undefined');
+    if (!appState.selectedFile) {
+        console.error('❌ Cannot save: appState.selectedFile is null/undefined');
         return;
     }
 
-    parameterStorage.saveParameters(currentFileHash, parameters, selectedFile.name)
+    parameterStorage.saveParameters(appState.currentFileHash, parameters, appState.selectedFile.name)
         .then(() => {
         })
         .catch(err => {
@@ -2658,13 +2617,13 @@ function handleParametersChange(parameters: AnalysisParameters) {
         });
 
     // Update wind indicator on map if wind parameters are set
-    if (mapVisualization && currentParameters) {
-        if (currentParameters.wind_speed !== null && currentParameters.wind_speed !== undefined &&
-            currentParameters.wind_direction !== null && currentParameters.wind_direction !== undefined) {
+    if (mapVisualization && appState.currentParameters) {
+        if (appState.currentParameters.wind_speed !== null && appState.currentParameters.wind_speed !== undefined &&
+            appState.currentParameters.wind_direction !== null && appState.currentParameters.wind_direction !== undefined) {
             mapVisualization.showWindIndicator(
-                currentParameters.wind_speed,
-                currentParameters.wind_direction,
-                currentParameters.wind_speed_unit
+                appState.currentParameters.wind_speed,
+                appState.currentParameters.wind_direction,
+                appState.currentParameters.wind_speed_unit
             );
         } else {
             mapVisualization.hideWindIndicator();
@@ -2674,7 +2633,7 @@ function handleParametersChange(parameters: AnalysisParameters) {
     // Trigger auto-rho calculation if checkbox was just enabled
     // or if auto-calculate is already enabled (parameters changed)
     // BUT skip if we're already calculating (prevents infinite loop)
-    if (parameters.auto_calculate_rho && currentFitData && !isCalculatingAutoRho) {
+    if (parameters.auto_calculate_rho && appState.currentFitData && !appState.isCalculatingAutoRho) {
         // Small delay to ensure UI is updated
         setTimeout(() => {
             calculateAutoRho().catch(err => {
@@ -2710,14 +2669,16 @@ function handleParametersChange(parameters: AnalysisParameters) {
 // Initialize Section 3: Map Analysis & Lap Selection
 function initializeSection3() {
     const analysisSection = document.getElementById('analysisSection');
-    if (!analysisSection || !currentFitData || !currentLaps.length) return;
+    const fitData = appState.currentFitData;
+    const laps = appState.currentLaps;
+    if (!analysisSection || !fitData || !laps.length) return;
 
     // Reset handler initialization flags since HTML is being recreated
     gpsLapHandlersInitialized = false;
     outAndBackHandlersInitialized = false;
 
-    const hasGpsData = currentFitResult?.parsing_statistics?.has_gps_data ?? false;
-    const lapDetectionMode = currentParameters?.auto_lap_detection || 'None';
+    const hasGpsData = appState.currentFitResult?.parsing_statistics?.has_gps_data ?? false;
+    const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
     const showGpsLapDetection = hasGpsData && lapDetectionMode === 'GPS based lap splitting';
     const showOutAndBack = hasGpsData && lapDetectionMode === 'GPS based out and back';
 
@@ -2733,7 +2694,7 @@ function initializeSection3() {
                         <button class="select-all-btn" id="selectAllLaps">Select / Deselect All</button>
                     </div>
                     <div class="lap-list" id="lapList">
-                        ${currentLaps.map((lap: any, index: number) => `
+                        ${laps.map((lap: any, index: number) => `
                             <div class="lap-checkbox-item" data-lap="${index + 1}">
                                 <input type="checkbox" class="lap-checkbox" id="lap-${index + 1}">
                                 <div class="lap-info">
@@ -2858,7 +2819,7 @@ function initializeSection3() {
             if (hasGpsData) {
                 mapVisualization = new MapVisualization('mapView');
                 await mapVisualization.initialize();
-                mapVisualization.setData(currentFitData, currentLaps);
+                mapVisualization.setData(fitData, laps);
                 console.log('Map initialized with GPS data');
 
                 // Setup GPS lap detection if enabled
@@ -2896,7 +2857,7 @@ function setupAnalyzeButton() {
 function updateAnalyzeButton() {
     const analyzeBtn = document.getElementById('analyzeBtn') as HTMLButtonElement;
     if (analyzeBtn) {
-        const lapDetectionMode = currentParameters?.auto_lap_detection || 'None';
+        const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
         const isGpsLapMode = lapDetectionMode === 'GPS based lap splitting';
         const isOutAndBackMode = lapDetectionMode === 'GPS based out and back';
 
@@ -2906,16 +2867,16 @@ function updateAnalyzeButton() {
         let hasDetectedItems: boolean;
 
         if (isOutAndBackMode) {
-            hasSelectedLaps = outAndBackSelectedSections.length > 0;
-            lapCount = outAndBackSelectedSections.length;
-            hasDetectedItems = outAndBackSections.length > 0;
+            hasSelectedLaps = appState.outAndBackSelectedSections.length > 0;
+            lapCount = appState.outAndBackSelectedSections.length;
+            hasDetectedItems = appState.outAndBackSections.length > 0;
         } else if (isGpsLapMode) {
-            hasSelectedLaps = gpsSelectedLaps.length > 0;
-            lapCount = gpsSelectedLaps.length;
-            hasDetectedItems = gpsDetectedLaps.length > 0;
+            hasSelectedLaps = appState.gpsSelectedLaps.length > 0;
+            lapCount = appState.gpsSelectedLaps.length;
+            hasDetectedItems = appState.gpsDetectedLaps.length > 0;
         } else {
-            hasSelectedLaps = selectedLaps.length > 0;
-            lapCount = selectedLaps.length;
+            hasSelectedLaps = appState.selectedLaps.length > 0;
+            lapCount = appState.selectedLaps.length;
             hasDetectedItems = true;
         }
 
@@ -2923,9 +2884,9 @@ function updateAnalyzeButton() {
 
         analyzeBtn.disabled = !hasSelectedLaps || !hasValidParameters || !hasDetectedItems;
 
-        if (isOutAndBackMode && outAndBackSections.length === 0) {
+        if (isOutAndBackMode && appState.outAndBackSections.length === 0) {
             analyzeBtn.textContent = 'Set GPS Gates to Detect Sections';
-        } else if (isGpsLapMode && gpsDetectedLaps.length === 0) {
+        } else if (isGpsLapMode && appState.gpsDetectedLaps.length === 0) {
             analyzeBtn.textContent = 'Set GPS Gate to Detect Laps';
         } else if (!hasSelectedLaps) {
             analyzeBtn.textContent = isOutAndBackMode ? 'Select Sections to Analyze' : 'Select Laps to Analyze';
@@ -2942,38 +2903,38 @@ function updateAnalyzeButton() {
 }
 
 async function handleAnalyze() {
-    const lapDetectionMode = currentParameters?.auto_lap_detection || 'None';
+    const lapDetectionMode = appState.currentParameters?.auto_lap_detection || 'None';
     const isGpsLapMode = lapDetectionMode === 'GPS based lap splitting';
     const isOutAndBackMode = lapDetectionMode === 'GPS based out and back';
 
     // Check which lap/section selection to use
     let effectiveSelectedItems: number[];
     if (isOutAndBackMode) {
-        effectiveSelectedItems = outAndBackSelectedSections;
+        effectiveSelectedItems = appState.outAndBackSelectedSections;
     } else if (isGpsLapMode) {
-        effectiveSelectedItems = gpsSelectedLaps;
+        effectiveSelectedItems = appState.gpsSelectedLaps;
     } else {
-        effectiveSelectedItems = selectedLaps;
+        effectiveSelectedItems = appState.selectedLaps;
     }
 
-    if (!currentParameters || effectiveSelectedItems.length === 0) {
+    if (!appState.currentParameters || effectiveSelectedItems.length === 0) {
         alert(isOutAndBackMode ? 'Please select sections and set parameters first.' : 'Please select laps and set parameters first.');
         return;
     }
 
-    if (!currentFitData) {
+    if (!appState.currentFitData) {
         alert('No FIT data available for analysis.');
         return;
     }
 
     // For GPS lap mode, validate we have detected laps
-    if (isGpsLapMode && gpsDetectedLaps.length === 0) {
+    if (isGpsLapMode && appState.gpsDetectedLaps.length === 0) {
         alert('Please set a GPS gate to detect laps first.');
         return;
     }
 
     // For Out and Back mode, validate we have detected sections
-    if (isOutAndBackMode && outAndBackSections.length === 0) {
+    if (isOutAndBackMode && appState.outAndBackSections.length === 0) {
         alert('Please set both GPS gates to detect sections first.');
         return;
     }
@@ -2991,8 +2952,8 @@ async function handleAnalyze() {
 
         if (isOutAndBackMode) {
             // Out and Back mode: use detected section index ranges
-            selectedOutAndBackSections = outAndBackSections.filter(section =>
-                outAndBackSelectedSections.includes(section.sectionNumber)
+            selectedOutAndBackSections = appState.outAndBackSections.filter(section =>
+                appState.outAndBackSelectedSections.includes(section.sectionNumber)
             );
             // For VE analysis, we'll process outbound and inbound separately
             // Create ranges for combined outbound+inbound data
@@ -3011,8 +2972,8 @@ async function handleAnalyze() {
             console.log('Out and Back mode - selected sections:', selectedOutAndBackSections);
         } else if (isGpsLapMode) {
             // GPS lap mode: use detected lap index ranges
-            const selectedGpsLaps = gpsDetectedLaps.filter(lap =>
-                gpsSelectedLaps.includes(lap.lapNumber)
+            const selectedGpsLaps = appState.gpsDetectedLaps.filter(lap =>
+                appState.gpsSelectedLaps.includes(lap.lapNumber)
             );
             selectedLapIndexRanges = selectedGpsLaps.map(lap => ({
                 startIdx: lap.startIdx,
@@ -3023,23 +2984,23 @@ async function handleAnalyze() {
             console.log('GPS lap mode - selected lap index ranges:', selectedLapIndexRanges);
         } else {
             // Normal mode: use FIT lap time ranges
-            selectedLapData = effectiveSelectedItems.map(lapNumber => currentLaps[lapNumber - 1]);
+            selectedLapData = effectiveSelectedItems.map(lapNumber => appState.currentLaps[lapNumber - 1]);
             console.log('Normal mode - selected lap data:', selectedLapData);
         }
 
         // Debug: Check the full result structure
-        console.log('currentFitResult structure:', currentFitResult);
-        console.log('currentFitResult keys:', currentFitResult ? Object.keys(currentFitResult) : 'null');
+        console.log('appState.currentFitResult structure:', appState.currentFitResult);
+        console.log('appState.currentFitResult keys:', appState.currentFitResult ? Object.keys(appState.currentFitResult) : 'null');
 
         // Get unified data structure (works for both FIT and CSV)
-        if (!currentFitResult) {
+        if (!appState.currentFitResult) {
             throw new Error('No data available for analysis');
         }
 
-        // Use currentFitData which is either:
+        // Use appState.currentFitData which is either:
         // - WASM FitData object (from FIT file)
         // - JavaScript object with same structure (from CSV file)
-        const fitData = currentFitData || currentFitResult.fit_data;
+        const fitData = appState.currentFitData || appState.currentFitResult.fit_data;
         if (!fitData) {
             throw new Error('No analysis data available');
         }
@@ -3166,7 +3127,7 @@ async function handleAnalyze() {
         showLoading('Running Virtual Elevation calculation...');
 
         // Check for per-datapoint air density (priority: FIT file column > environmental calculation > Weather API)
-        currentRhoArray = null; // Reset global rho array
+        appState.currentRhoArray = null; // Reset global rho array
 
         // PRIORITY 1: Use air_density from FIT file if available
         const hasAirDensityData = filteredAirDensity.length > 0 &&
@@ -3174,7 +3135,7 @@ async function handleAnalyze() {
 
         if (hasAirDensityData) {
             console.log('💨 Found air density data, using it for calculations');
-            currentRhoArray = filteredAirDensity;
+            appState.currentRhoArray = filteredAirDensity;
         }
         // PRIORITY 2: Calculate from environmental data if available
         else {
@@ -3184,7 +3145,7 @@ async function handleAnalyze() {
 
                 if (fullRhoArray) {
                     // Filter rho array to match selected laps (using same logic as main filter)
-                    currentRhoArray = [];
+                    appState.currentRhoArray = [];
                     for (let i = 0; i < allTimestamps.length; i++) {
                         let isInSelectedLap: boolean;
                         if (isGpsLapMode && selectedLapIndexRanges) {
@@ -3200,7 +3161,7 @@ async function handleAnalyze() {
                             isInSelectedLap = false;
                         }
                         if (isInSelectedLap) {
-                            currentRhoArray.push(fullRhoArray[i]);
+                            appState.currentRhoArray.push(fullRhoArray[i]);
                         }
                     }
                     console.log('💨 Calculated air density from environmental data');
@@ -3212,7 +3173,7 @@ async function handleAnalyze() {
 
         // Create Virtual Elevation calculator with filtered data
         // Use the rho array version if we have per-datapoint rho from CSV
-        const calculator = currentRhoArray
+        const calculator = appState.currentRhoArray
             ? create_ve_calculator_with_rho_array(
                 new Float64Array(filteredTimestamps),
                 new Float64Array(filteredPower),
@@ -3222,20 +3183,20 @@ async function handleAnalyze() {
                 new Float64Array(filteredAltitude),
                 new Float64Array(filteredDistance),
                 new Float64Array(filteredWindSpeed),
-                new Float64Array(currentRhoArray),
+                new Float64Array(appState.currentRhoArray),
                 // Parameters
-                currentParameters!.system_mass,
-                currentParameters!.rho,
-                currentParameters!.eta,
-                currentParameters!.cda,
-                currentParameters!.crr,
-                currentParameters!.cda_min,
-                currentParameters!.cda_max,
-                currentParameters!.crr_min,
-                currentParameters!.crr_max,
-                currentParameters!.wind_speed,
-                currentParameters!.wind_direction,
-                currentParameters!.velodrome
+                appState.currentParameters!.system_mass,
+                appState.currentParameters!.rho,
+                appState.currentParameters!.eta,
+                appState.currentParameters!.cda,
+                appState.currentParameters!.crr,
+                appState.currentParameters!.cda_min,
+                appState.currentParameters!.cda_max,
+                appState.currentParameters!.crr_min,
+                appState.currentParameters!.crr_max,
+                appState.currentParameters!.wind_speed,
+                appState.currentParameters!.wind_direction,
+                appState.currentParameters!.velodrome
             )
             : create_ve_calculator(
                 new Float64Array(filteredTimestamps),
@@ -3247,23 +3208,23 @@ async function handleAnalyze() {
                 new Float64Array(filteredDistance),
                 new Float64Array(filteredWindSpeed),
                 // Parameters
-                currentParameters!.system_mass,
-                currentParameters!.rho,
-                currentParameters!.eta,
-                currentParameters!.cda,
-                currentParameters!.crr,
-                currentParameters!.cda_min,
-                currentParameters!.cda_max,
-                currentParameters!.crr_min,
-                currentParameters!.crr_max,
-                currentParameters!.wind_speed,
-                currentParameters!.wind_direction,
-                currentParameters!.velodrome
+                appState.currentParameters!.system_mass,
+                appState.currentParameters!.rho,
+                appState.currentParameters!.eta,
+                appState.currentParameters!.cda,
+                appState.currentParameters!.crr,
+                appState.currentParameters!.cda_min,
+                appState.currentParameters!.cda_max,
+                appState.currentParameters!.crr_min,
+                appState.currentParameters!.crr_max,
+                appState.currentParameters!.wind_speed,
+                appState.currentParameters!.wind_direction,
+                appState.currentParameters!.velodrome
             );
 
         // Use provided CdA and Crr values, or defaults for optimization
-        const cda = currentParameters!.cda ?? 0.3; // Use middle of range if optimizing
-        const crr = currentParameters!.crr ?? 0.008; // Use middle of range if optimizing
+        const cda = appState.currentParameters!.cda ?? 0.3; // Use middle of range if optimizing
+        const crr = appState.currentParameters!.crr ?? 0.008; // Use middle of range if optimizing
 
         // Initial trim values - full dataset
         const trimStart = 0;
@@ -3303,30 +3264,30 @@ async function handleAnalyze() {
         hideLoading();
 
         // Store filtered position data for map trimming
-        filteredVEData = {
+        appState.filteredVEData = {
             positionLat: filteredPositionLat,
             positionLong: filteredPositionLong
         };
 
         // Store GPS lap mode state globally for use in VE analysis
-        isGpsLapModeActive = isGpsLapMode && selectedLapIndexRanges !== null;
-        currentGpsLapIndexRanges = selectedLapIndexRanges;
+        appState.isGpsLapModeActive = isGpsLapMode && selectedLapIndexRanges !== null;
+        appState.currentGpsLapIndexRanges = selectedLapIndexRanges;
 
         // Show VE analysis based on mode
         if (isOutAndBackMode && selectedOutAndBackSections) {
             // Out and Back mode: use special visualization with mirrored inbound
             showOutAndBackVEAnalysis(
                 selectedOutAndBackSections,
-                currentFitData,
-                currentParameters,
+                appState.currentFitData,
+                appState.currentParameters,
                 defaultAirSpeedOffset
             );
         } else if (isGpsLapMode && selectedLapIndexRanges) {
             // GPS lap mode: use stacked lap visualization
             showGpsLapVEAnalysis(
                 selectedLapIndexRanges,
-                currentFitData,
-                currentParameters,
+                appState.currentFitData,
+                appState.currentParameters,
                 defaultAirSpeedOffset
             );
         } else {
@@ -3414,10 +3375,10 @@ async function showGpsLapVEAnalysis(
         const windSpeedOffset = params?.air_speed_offset ?? defaultOffset;
         baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
         // Apply calibration if set
-        allWindSpeed = airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
+            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
             : baseWindSpeed;
-        console.log(`GPS Lap VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${airSpeedCalibrationPercent}%)`);
+        console.log(`GPS Lap VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else if (hasWindSpeed) {
         const rawYaw = fitData.wind_yaw || new Array(fitData.wind_speed.length).fill(0);
         let baseWindSpeed = (Array.from(fitData.wind_speed) as number[]).map((magnitude: number, i: number) => {
@@ -3428,10 +3389,10 @@ async function showGpsLapVEAnalysis(
         const windSpeedOffset = params?.air_speed_offset ?? defaultOffset;
         baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
         // Apply calibration if set
-        allWindSpeed = airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
+            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
             : baseWindSpeed;
-        console.log(`GPS Lap VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${airSpeedCalibrationPercent}%)`);
+        console.log(`GPS Lap VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
         allWindSpeed = new Array(allTimestamps.length).fill(0);
         console.log('GPS Lap VE: No wind data available');
@@ -3444,7 +3405,7 @@ async function showGpsLapVEAnalysis(
     // Calculate VE for each lap
     for (let lapIdx = 0; lapIdx < lapIndexRanges.length; lapIdx++) {
         const range = lapIndexRanges[lapIdx];
-        const lapNumber = gpsDetectedLaps[lapIdx]?.lapNumber ?? (lapIdx + 1);
+        const lapNumber = appState.gpsDetectedLaps[lapIdx]?.lapNumber ?? (lapIdx + 1);
 
         // Extract data for this lap
         const lapTimestamps: number[] = [];
@@ -3820,7 +3781,7 @@ async function showGpsLapVEPlot(
         const updateAirSpeedCalibration = () => {
             const value = parseFloat(airSpeedCalibrationSlider.value);
             airSpeedCalibrationValue.value = value.toFixed(1);
-            airSpeedCalibrationPercent = value;
+            appState.airSpeedCalibrationPercent = value;
             console.log('Air speed calibration changed - triggering GPS lap VE recalculation');
             recalculateGpsLapVE();
         };
@@ -3831,7 +3792,7 @@ async function showGpsLapVEPlot(
             const clamped = Math.max(-20.0, Math.min(value, 20.0));
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValue.value = clamped.toFixed(1);
-            airSpeedCalibrationPercent = clamped;
+            appState.airSpeedCalibrationPercent = clamped;
             console.log('Air speed calibration changed - triggering GPS lap VE recalculation');
             recalculateGpsLapVE();
         };
@@ -4060,7 +4021,7 @@ function setupGpsLapTabSwitching(lapProfiles: LapVEProfile[], hasWindSpeed: bool
  * Recalculate GPS lap VE with updated CdA/Crr values
  */
 async function recalculateGpsLapVE() {
-    if (!currentFitData || !currentParameters) {
+    if (!appState.currentFitData || !appState.currentParameters) {
         console.error('Cannot recalculate: missing data or parameters');
         return;
     }
@@ -4074,8 +4035,8 @@ async function recalculateGpsLapVE() {
     const newCrr = parseFloat(crrValueEl.value);
 
     // Get the selected GPS lap index ranges
-    const selectedGpsLaps = gpsDetectedLaps.filter(lap =>
-        gpsSelectedLaps.includes(lap.lapNumber)
+    const selectedGpsLaps = appState.gpsDetectedLaps.filter(lap =>
+        appState.gpsSelectedLaps.includes(lap.lapNumber)
     );
     const selectedLapIndexRanges = selectedGpsLaps.map(lap => ({
         startIdx: lap.startIdx,
@@ -4088,7 +4049,7 @@ async function recalculateGpsLapVE() {
     }
 
     // Update parameters with new values
-    const updatedParams = { ...currentParameters, cda: newCda, crr: newCrr };
+    const updatedParams = { ...appState.currentParameters, cda: newCda, crr: newCrr };
 
     // Recalculate
     showLoading('Recalculating VE with new parameters...');
@@ -4096,9 +4057,9 @@ async function recalculateGpsLapVE() {
     try {
         await showGpsLapVEAnalysis(
             selectedLapIndexRanges,
-            currentFitData,
+            appState.currentFitData,
             updatedParams,
-            currentParameters.air_speed_offset ?? 2
+            appState.currentParameters.air_speed_offset ?? 2
         );
     } catch (err) {
         console.error('Recalculation failed:', err);
@@ -4386,25 +4347,25 @@ function renderGpsLapVEPlots(
 }
 
 async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLaps: number[], timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], temperature: number[] = [], cdaReference: number[] | null = null, defaultAirSpeedOffset: number = 0) {
-    // currentParameters is set by the AnalysisParameters component when
+    // appState.currentParameters is set by the AnalysisParameters component when
     // the user enters values — this function cannot run before that.
-    // Narrow `currentParameters` from '... | null' for the rest of the body.
-    if (!currentParameters) {
-        console.error('showVirtualElevationAnalysisInline: currentParameters is null');
+    // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
+    if (!appState.currentParameters) {
+        console.error('showVirtualElevationAnalysisInline: appState.currentParameters is null');
         return;
     }
 
     // Store analyzed laps globally for save functionality
-    currentAnalyzedLaps = analyzedLaps;
+    appState.currentAnalyzedLaps = analyzedLaps;
     // Store filtered data globally for save functionality
-    currentFilteredData = { power, velocity, temperature, timestamps };
+    appState.currentFilteredData = { power, velocity, temperature, timestamps };
     // Store CdA reference data globally (will be used for dynamic validation)
-    currentCdaReference = cdaReference;
+    appState.currentCdaReference = cdaReference;
 
     // Check if wind_speed data is available (not all zeros/NaN)
     const hasWindSpeed = windSpeed.some(val => !isNaN(val) && val !== 0);
-    const hasConstantWind = currentParameters.wind_speed !== undefined && currentParameters.wind_speed !== 0 &&
-                            currentParameters.wind_direction !== undefined;
+    const hasConstantWind = appState.currentParameters.wind_speed !== undefined && appState.currentParameters.wind_speed !== 0 &&
+                            appState.currentParameters.wind_direction !== undefined;
 
     console.log('Wind data availability:', {
         hasWindSpeed,
@@ -4450,26 +4411,26 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                 <div class="ve-control-grid">
                     <div class="ve-control-group">
                         <label>Trim Start (seconds):</label>
-                        <input type="range" id="trimStartSlider" min="0" max="${timestamps.length - 30}" value="${presetTrimStart}" class="ve-slider">
-                        <input type="number" id="trimStartValue" value="${presetTrimStart}" min="0" max="${timestamps.length - 30}" class="ve-value-input">
+                        <input type="range" id="trimStartSlider" min="0" max="${timestamps.length - 30}" value="${appState.presetTrimStart}" class="ve-slider">
+                        <input type="number" id="trimStartValue" value="${appState.presetTrimStart}" min="0" max="${timestamps.length - 30}" class="ve-value-input">
                     </div>
 
                     <div class="ve-control-group">
                         <label>Trim End (seconds):</label>
-                        <input type="range" id="trimEndSlider" min="30" max="${timestamps.length - 1}" value="${presetTrimEnd ?? timestamps.length - 1}" class="ve-slider">
-                        <input type="number" id="trimEndValue" value="${presetTrimEnd ?? timestamps.length - 1}" min="30" max="${timestamps.length - 1}" class="ve-value-input">
+                        <input type="range" id="trimEndSlider" min="30" max="${timestamps.length - 1}" value="${appState.presetTrimEnd ?? timestamps.length - 1}" class="ve-slider">
+                        <input type="number" id="trimEndValue" value="${appState.presetTrimEnd ?? timestamps.length - 1}" min="30" max="${timestamps.length - 1}" class="ve-value-input">
                     </div>
 
                     <div class="ve-control-group">
                         <label>CdA (Drag Coefficient × Area):</label>
-                        <input type="range" id="cdaSlider" min="${currentParameters.cda_min}" max="${currentParameters.cda_max}" value="${currentParameters.cda || 0.3}" step="0.001" class="ve-slider">
-                        <input type="number" id="cdaValue" value="${(currentParameters.cda || 0.3).toFixed(3)}" min="${currentParameters.cda_min}" max="${currentParameters.cda_max}" step="0.001" class="ve-value-input">
+                        <input type="range" id="cdaSlider" min="${appState.currentParameters.cda_min}" max="${appState.currentParameters.cda_max}" value="${appState.currentParameters.cda || 0.3}" step="0.001" class="ve-slider">
+                        <input type="number" id="cdaValue" value="${(appState.currentParameters.cda || 0.3).toFixed(3)}" min="${appState.currentParameters.cda_min}" max="${appState.currentParameters.cda_max}" step="0.001" class="ve-value-input">
                     </div>
 
                     <div class="ve-control-group">
                         <label>Crr (Rolling Resistance):</label>
-                        <input type="range" id="crrSlider" min="${currentParameters.crr_min}" max="${currentParameters.crr_max}" value="${currentParameters.crr || 0.008}" step="0.0001" class="ve-slider">
-                        <input type="number" id="crrValue" value="${(currentParameters.crr || 0.008).toFixed(4)}" min="${currentParameters.crr_min}" max="${currentParameters.crr_max}" step="0.0001" class="ve-value-input">
+                        <input type="range" id="crrSlider" min="${appState.currentParameters.crr_min}" max="${appState.currentParameters.crr_max}" value="${appState.currentParameters.crr || 0.008}" step="0.0001" class="ve-slider">
+                        <input type="number" id="crrValue" value="${(appState.currentParameters.crr || 0.008).toFixed(4)}" min="${appState.currentParameters.crr_min}" max="${appState.currentParameters.crr_max}" step="0.0001" class="ve-value-input">
                     </div>
                 </div>
 
@@ -4582,9 +4543,9 @@ async function showVirtualElevationAnalysisInline(initialResult: any, analyzedLa
                     <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
                         <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
                         <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
-                            <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${currentParameters?.air_speed_offset ?? defaultAirSpeedOffset}"
+                            <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset}"
                                    style="width: 100%;" />
-                            <input type="number" id="airSpeedOffsetValue" value="${currentParameters?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
+                            <input type="number" id="airSpeedOffsetValue" value="${appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
                                    style="width: 60px; text-align: right;" />
                             <span style="font-weight: 500;">seconds</span>
                         </div>
@@ -4634,13 +4595,13 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
 
     // Try to load saved lap settings for this file and lap combination
     let savedSettings: LapSettings | null = null;
-    if (currentFileHash) {
+    if (appState.currentFileHash) {
         try {
-            savedSettings = await parameterStorage.loadLapSettings(currentFileHash, analyzedLaps);
+            savedSettings = await parameterStorage.loadLapSettings(appState.currentFileHash, analyzedLaps);
             if (savedSettings) {
                 // Update preset values that will be used when rendering
-                presetTrimStart = savedSettings.trimStart;
-                presetTrimEnd = savedSettings.trimEnd;
+                appState.presetTrimStart = savedSettings.trimStart;
+                appState.presetTrimEnd = savedSettings.trimEnd;
 
                 // Apply saved CdA, Crr, and airSpeedCalibration values to sliders after they're created
                 const savedCda = savedSettings.cda;
@@ -4666,7 +4627,7 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
                         airSpeedCalibrationSlider.value = savedAirSpeedCalibration.toString();
                         if (airSpeedCalibrationValue) airSpeedCalibrationValue.value = savedAirSpeedCalibration.toFixed(1);
                         // Update global variable
-                        airSpeedCalibrationPercent = savedAirSpeedCalibration;
+                        appState.airSpeedCalibrationPercent = savedAirSpeedCalibration;
                     }
 
                     // Trigger an update to re-render with saved values
@@ -4733,8 +4694,8 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
 
     // Initial plot rendering (with delay to ensure Plotly is loaded)
     // Use preset trim values if they were set before clicking analyze
-    const initialTrimStart = presetTrimStart;
-    const initialTrimEnd = presetTrimEnd ?? timestamps.length - 1;
+    const initialTrimStart = appState.presetTrimStart;
+    const initialTrimEnd = appState.presetTrimEnd ?? timestamps.length - 1;
     console.log('Using preset trim values for initial render:', {
         trimStart: initialTrimStart,
         trimEnd: initialTrimEnd
@@ -4745,9 +4706,9 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
         // CdA validation plots will be rendered dynamically by updateVEPlots if CdA reference exists
 
         // Update map markers with preset trim values after analyze
-        if (mapVisualization && filteredVEData) {
+        if (mapVisualization && appState.filteredVEData) {
             console.log('Setting map trim markers to preset values after analyze');
-            mapVisualization.fitBoundsToTrimRegion(initialTrimStart, initialTrimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
+            mapVisualization.fitBoundsToTrimRegion(initialTrimStart, initialTrimEnd, appState.filteredVEData.positionLat, appState.filteredVEData.positionLong);
         }
     }, 500);
 
@@ -4778,13 +4739,13 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
 
 // Handle Save Screenshot button click
 async function handleSaveScreenshot() {
-    if (!selectedFile) {
+    if (!appState.selectedFile) {
         console.error('Cannot save: missing file');
         alert('Cannot save screenshot: missing file data.');
         return;
     }
 
-    const lapCombo = currentAnalyzedLaps.length === 0 ? 'all' : currentAnalyzedLaps.join('-');
+    const lapCombo = appState.currentAnalyzedLaps.length === 0 ? 'all' : appState.currentAnalyzedLaps.join('-');
     const saveBtn = document.getElementById('saveScreenshot') as HTMLButtonElement;
     if (!saveBtn) return;
 
@@ -4794,7 +4755,7 @@ async function handleSaveScreenshot() {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving...';
 
-        await resultsStorage.saveScreenshot(selectedFile.name, lapCombo);
+        await resultsStorage.saveScreenshot(appState.selectedFile.name, lapCombo);
 
         saveBtn.textContent = '✓ Saved';
         setTimeout(() => {
@@ -4881,14 +4842,14 @@ function showNotesDialog(): Promise<string> {
 
 // Handle Store Result button click
 async function handleStoreResult() {
-    if (!selectedFile || !currentParameters || !currentVEResult) {
+    if (!appState.selectedFile || !appState.currentParameters || !appState.currentVEResult) {
         console.error('Cannot store: missing required data');
         alert('Cannot store result: missing analysis data. Please run analysis first.');
         return;
     }
 
     // Get filtered data arrays (already filtered by selected laps)
-    if (!currentFilteredData) {
+    if (!appState.currentFilteredData) {
         alert('Cannot store result: filtered data not available. Please run analysis first.');
         return;
     }
@@ -4908,14 +4869,14 @@ async function handleStoreResult() {
         let cda: number;
         let crr: number;
 
-        if (isGpsLapModeActive) {
+        if (appState.isGpsLapModeActive) {
             // GPS lap mode - use full data range and get CdA/Crr from sliders
             trimStart = 0;
-            trimEnd = currentFilteredData.power.length - 1;
+            trimEnd = appState.currentFilteredData.power.length - 1;
             const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
             const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
-            cda = cdaSlider ? parseFloat(cdaSlider.value) : currentParameters.cda ?? 0.3;
-            crr = crrSlider ? parseFloat(crrSlider.value) : currentParameters.crr ?? 0.005;
+            cda = cdaSlider ? parseFloat(cdaSlider.value) : appState.currentParameters.cda ?? 0.3;
+            crr = crrSlider ? parseFloat(crrSlider.value) : appState.currentParameters.crr ?? 0.005;
         } else {
             // Normal mode - get trim values from sliders
             const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
@@ -4934,10 +4895,10 @@ async function handleStoreResult() {
             crr = parseFloat(crrSlider.value);
         }
 
-        const filteredPower = currentFilteredData.power;
-        const filteredVelocity = currentFilteredData.velocity;
-        const filteredTemperature = currentFilteredData.temperature;
-        const filteredTimestamps = currentFilteredData.timestamps;
+        const filteredPower = appState.currentFilteredData.power;
+        const filteredVelocity = appState.currentFilteredData.velocity;
+        const filteredTemperature = appState.currentFilteredData.temperature;
+        const filteredTimestamps = appState.currentFilteredData.timestamps;
 
         // Calculate averages from trimmed data (trimStart and trimEnd are indices into the filtered arrays)
         const trimmedPower = filteredPower.slice(trimStart, trimEnd + 1);
@@ -4955,23 +4916,23 @@ async function handleStoreResult() {
 
         // Prepare save data
         const saveData = {
-            fileName: selectedFile.name,
-            laps: currentAnalyzedLaps,
+            fileName: appState.selectedFile.name,
+            laps: appState.currentAnalyzedLaps,
             trimStart: trimStart,
             trimEnd: trimEnd,
             cda: cda,
             crr: crr,
-            airSpeedCalibration: airSpeedCalibrationPercent !== 0 ? airSpeedCalibrationPercent : undefined,
-            windSource: currentWindSource,
-            parameters: currentParameters,
-            result: currentVEResult,
+            airSpeedCalibration: appState.airSpeedCalibrationPercent !== 0 ? appState.airSpeedCalibrationPercent : undefined,
+            windSource: appState.currentWindSource,
+            parameters: appState.currentParameters,
+            result: appState.currentVEResult,
             timestamp: new Date(),
             recordingDate: recordingDate,
             avgPower: avgPower,
             avgSpeed: avgSpeed,
             avgTemperature: avgTemperature,
             notes: notes,
-            isGpsLapMode: isGpsLapModeActive  // Track if this was GPS lap mode
+            isGpsLapMode: appState.isGpsLapModeActive  // Track if this was GPS lap mode
         };
 
         storeBtn.disabled = true;
@@ -5022,7 +4983,7 @@ async function handleExportAllResults() {
 
 // Helper function to save current lap settings to IndexedDB
 async function saveCurrentLapSettings() {
-    if (!currentFileHash || !selectedFile) return;
+    if (!appState.currentFileHash || !appState.selectedFile) return;
 
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
@@ -5036,11 +4997,11 @@ async function saveCurrentLapSettings() {
         trimEnd: parseInt(trimEndSlider.value),
         cda: parseFloat(cdaSlider.value) || null,
         crr: parseFloat(crrSlider.value) || null,
-        airSpeedCalibration: airSpeedCalibrationPercent !== 0 ? airSpeedCalibrationPercent : undefined
+        airSpeedCalibration: appState.airSpeedCalibrationPercent !== 0 ? appState.airSpeedCalibrationPercent : undefined
     };
 
     try {
-        await parameterStorage.saveLapSettings(currentFileHash, selectedLaps, settings);
+        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
     } catch (err) {
         console.error('Failed to save lap settings:', err);
     }
@@ -5049,35 +5010,35 @@ async function saveCurrentLapSettings() {
 // Helper function to save map trim settings (before VE analysis is opened)
 async function saveMapTrimSettings() {
 
-    if (!currentFileHash || !selectedFile) {
-        console.warn('⚠️ Cannot save: missing fileHash or selectedFile');
+    if (!appState.currentFileHash || !appState.selectedFile) {
+        console.warn('⚠️ Cannot save: missing fileHash or appState.selectedFile');
         return;
     }
 
     const settings: LapSettings = {
-        trimStart: presetTrimStart,
-        trimEnd: presetTrimEnd ?? 0,
+        trimStart: appState.presetTrimStart,
+        trimEnd: appState.presetTrimEnd ?? 0,
         cda: null, // CdA/Crr not set yet
         crr: null
     };
 
     try {
-        await parameterStorage.saveLapSettings(currentFileHash, selectedLaps, settings);
+        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
     } catch (err) {
         console.error('❌ Failed to save map trim settings:', err);
     }
 }
 
 function setupVESliders(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], defaultAirSpeedOffset: number) {
-    // setupVESliders is only called after currentParameters has been set
+    // setupVESliders is only called after appState.currentParameters has been set
     // in showVirtualElevationAnalysisInline. Capture into a const local
     // so nested slider callbacks can close over a non-null reference
     // (top-level narrowing doesn't propagate into callback scopes).
-    if (!currentParameters) {
-        console.error('setupVESliders: currentParameters is null');
+    if (!appState.currentParameters) {
+        console.error('setupVESliders: appState.currentParameters is null');
         return;
     }
-    const params = currentParameters;
+    const params = appState.currentParameters;
 
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
@@ -5128,8 +5089,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         }
 
         // Auto-zoom map to trim region
-        if (mapVisualization && filteredVEData) {
-            mapVisualization.fitBoundsToTrimRegion(value, trimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
+        if (mapVisualization && appState.filteredVEData) {
+            mapVisualization.fitBoundsToTrimRegion(value, trimEnd, appState.filteredVEData.positionLat, appState.filteredVEData.positionLong);
         }
 
         // Save lap settings
@@ -5174,8 +5135,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         }
 
         // Auto-zoom map to trim region
-        if (mapVisualization && filteredVEData) {
-            mapVisualization.fitBoundsToTrimRegion(trimStart, value, filteredVEData.positionLat, filteredVEData.positionLong);
+        if (mapVisualization && appState.filteredVEData) {
+            mapVisualization.fitBoundsToTrimRegion(trimStart, value, appState.filteredVEData.positionLat, appState.filteredVEData.positionLong);
         }
 
         // Save lap settings
@@ -5237,8 +5198,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,clamped, trimEnd);
         }
 
-        if (mapVisualization && filteredVEData) {
-            mapVisualization.fitBoundsToTrimRegion(clamped, trimEnd, filteredVEData.positionLat, filteredVEData.positionLong);
+        if (mapVisualization && appState.filteredVEData) {
+            mapVisualization.fitBoundsToTrimRegion(clamped, trimEnd, appState.filteredVEData.positionLat, appState.filteredVEData.positionLong);
         }
 
         // Save lap settings
@@ -5275,8 +5236,8 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             createVirtualDistancePlot(timestamps, velocity, windSpeed, distance,trimStart, clamped);
         }
 
-        if (mapVisualization && filteredVEData) {
-            mapVisualization.fitBoundsToTrimRegion(trimStart, clamped, filteredVEData.positionLat, filteredVEData.positionLong);
+        if (mapVisualization && appState.filteredVEData) {
+            mapVisualization.fitBoundsToTrimRegion(trimStart, clamped, appState.filteredVEData.positionLat, appState.filteredVEData.positionLong);
         }
 
         // Save lap settings
@@ -5330,7 +5291,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             clearTimeout(autoRhoDebounceTimer);
         }
         autoRhoDebounceTimer = setTimeout(() => {
-            if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+            if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
                 calculateAutoRho().catch(err => {
                     console.error('Auto-rho calculation error on trim change:', err);
                 });
@@ -5342,7 +5303,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     trimEndSlider.addEventListener('input', triggerAutoRhoOnTrimChange);
 
     // Also trigger auto-rho immediately after VE analysis completes (if enabled)
-    if (currentParameters?.auto_calculate_rho && !isCalculatingAutoRho) {
+    if (appState.currentParameters?.auto_calculate_rho && !appState.isCalculatingAutoRho) {
         setTimeout(() => {
             calculateAutoRho().catch(err => {
                 console.error('Auto-rho initial calculation error:', err);
@@ -5382,7 +5343,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             airSpeedCalibrationValue.value = value.toFixed(1);
 
             // Store calibration percentage globally
-            airSpeedCalibrationPercent = value;
+            appState.airSpeedCalibrationPercent = value;
 
             const trimStart = parseInt(trimStartSlider.value);
             const trimEnd = parseInt(trimEndSlider.value);
@@ -5410,7 +5371,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             airSpeedCalibrationValue.value = clamped.toFixed(1);
 
             // Store calibration percentage globally
-            airSpeedCalibrationPercent = clamped;
+            appState.airSpeedCalibrationPercent = clamped;
 
             const trimStart = parseInt(trimStartSlider.value);
             const trimEnd = parseInt(trimEndSlider.value);
@@ -5468,7 +5429,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
                     // Update sliders
                     airSpeedCalibrationSlider.value = clampedPercent.toFixed(1);
                     airSpeedCalibrationValue.value = clampedPercent.toFixed(1);
-                    airSpeedCalibrationPercent = clampedPercent;
+                    appState.airSpeedCalibrationPercent = clampedPercent;
 
                     // Trigger recalculation
                     updateVEPlots(timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed,trimStart, trimEnd);
@@ -5501,7 +5462,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             airSpeedOffsetValue.value = value.toString();
 
             // Update parameters
-            if (parametersComponent && currentParameters) {
+            if (parametersComponent && appState.currentParameters) {
                 parametersComponent.setParameters({ air_speed_offset: value });
             }
 
@@ -5536,7 +5497,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
             airSpeedOffsetValue.value = clamped.toString();
 
             // Update parameters
-            if (parametersComponent && currentParameters) {
+            if (parametersComponent && appState.currentParameters) {
                 parametersComponent.setParameters({ air_speed_offset: clamped });
             }
 
@@ -5568,7 +5529,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         // Calculate initial error metric
         const trimStart = parseInt(trimStartSlider.value);
         const trimEnd = parseInt(trimEndSlider.value);
-        const initialOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+        const initialOffset = appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
         const initialError = calculateAirSpeedSyncError(velocity, windSpeed, initialOffset, trimStart, trimEnd);
         if (airSpeedOffsetErrorMetric && !isNaN(initialError)) {
             airSpeedOffsetErrorMetric.textContent = initialError.toFixed(2);
@@ -5598,12 +5559,12 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
         // Set same ranges and initial values as main controls (preserve preset values from section 3)
         mapTrimStartSlider.min = '0';
         mapTrimStartSlider.max = (timestamps.length - 30).toString();
-        mapTrimStartSlider.value = presetTrimStart.toString();
-        mapTrimStartValue.value = presetTrimStart.toString();
+        mapTrimStartSlider.value = appState.presetTrimStart.toString();
+        mapTrimStartValue.value = appState.presetTrimStart.toString();
         mapTrimStartValue.min = '0';
         mapTrimStartValue.max = (timestamps.length - 30).toString();
 
-        const initialTrimEnd = presetTrimEnd ?? timestamps.length - 1;
+        const initialTrimEnd = appState.presetTrimEnd ?? timestamps.length - 1;
         mapTrimEndSlider.min = '30';
         mapTrimEndSlider.max = (timestamps.length - 1).toString();
         mapTrimEndSlider.value = initialTrimEnd.toString();
@@ -5743,9 +5704,9 @@ function updateVEPlots(timestamps: number[], power: number[], velocity: number[]
 }
 
 async function updateVEPlotsWithWindSource(timestamps: number[], power: number[], velocity: number[], positionLat: number[], positionLong: number[], altitude: number[], distance: number[], windSpeed: number[], trimStart: number, trimEnd: number, windSource: string) {
-    // Narrow `currentParameters` from '... | null' for the rest of the body.
-    if (!currentParameters) {
-        console.error('updateVEPlotsWithWindSource: currentParameters is null');
+    // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
+    if (!appState.currentParameters) {
+        console.error('updateVEPlotsWithWindSource: appState.currentParameters is null');
         return;
     }
 
@@ -5757,14 +5718,14 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
 
     try {
         // GPS Lap Mode: Calculate VE for each lap separately and show stacked plot
-        if (isGpsLapModeActive && currentGpsLapIndexRanges && currentFitData) {
+        if (appState.isGpsLapModeActive && appState.currentGpsLapIndexRanges && appState.currentFitData) {
             await updateGpsLapVEPlots(cda, crr, windSource);
             return;
         }
 
         if (windSource === 'compare') {
             // Compare both methods - create two calculators
-            if (!currentParameters) return;
+            if (!appState.currentParameters) return;
 
             // Calculator 1: Use constant wind
             const constantWindSpeed = new Array(windSpeed.length).fill(NaN);
@@ -5777,29 +5738,29 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 new Float64Array(altitude),
                 new Float64Array(distance),
                 new Float64Array(constantWindSpeed),
-                currentParameters.system_mass,
-                currentParameters.rho,
-                currentParameters.eta,
+                appState.currentParameters.system_mass,
+                appState.currentParameters.rho,
+                appState.currentParameters.eta,
                 cda,
                 crr,
-                currentParameters.cda_min,
-                currentParameters.cda_max,
-                currentParameters.crr_min,
-                currentParameters.crr_max,
-                currentParameters.wind_speed,
-                currentParameters.wind_direction,
-                currentParameters.velodrome
+                appState.currentParameters.cda_min,
+                appState.currentParameters.cda_max,
+                appState.currentParameters.crr_min,
+                appState.currentParameters.crr_max,
+                appState.currentParameters.wind_speed,
+                appState.currentParameters.wind_direction,
+                appState.currentParameters.velodrome
             );
 
             // Calculator 2: Use FIT file wind data
             // Apply time offset first (to sync with ground speed)
             const defaultOffset = 2;
-            const windSpeedOffset = currentParameters?.air_speed_offset ?? defaultOffset;
+            const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? defaultOffset;
             const offsetWindSpeed = applyAirSpeedOffset(windSpeed, windSpeedOffset);
 
             // Then apply calibration if set
-            const calibratedWindSpeed = airSpeedCalibrationPercent !== 0
-                ? offsetWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+            const calibratedWindSpeed = appState.airSpeedCalibrationPercent !== 0
+                ? offsetWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
                 : offsetWindSpeed;
 
             const calculator2 = create_ve_calculator(
@@ -5811,18 +5772,18 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 new Float64Array(altitude),
                 new Float64Array(distance),
                 new Float64Array(calibratedWindSpeed),
-                currentParameters.system_mass,
-                currentParameters.rho,
-                currentParameters.eta,
+                appState.currentParameters.system_mass,
+                appState.currentParameters.rho,
+                appState.currentParameters.eta,
                 cda,
                 crr,
-                currentParameters.cda_min,
-                currentParameters.cda_max,
-                currentParameters.crr_min,
-                currentParameters.crr_max,
-                currentParameters.wind_speed,
-                currentParameters.wind_direction,
-                currentParameters.velodrome
+                appState.currentParameters.cda_min,
+                appState.currentParameters.cda_max,
+                appState.currentParameters.crr_min,
+                appState.currentParameters.crr_max,
+                appState.currentParameters.wind_speed,
+                appState.currentParameters.wind_direction,
+                appState.currentParameters.velodrome
             );
 
             // NOTE: calculator2 used to be stored in a `_veCalculator` global
@@ -5835,7 +5796,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             // VEResult's Float64Array fields are passed through directly — no
             // need to copy to number[] since VEAnalysisResult now mirrors the
             // WASM shape exactly.
-            currentVEResult = {
+            appState.currentVEResult = {
                 virtual_elevation: result1.virtual_elevation,
                 virtual_slope: result1.virtual_slope,
                 acceleration: result1.acceleration,
@@ -5849,13 +5810,13 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 virtual_distance_ground: result1.virtual_distance_ground,
                 vd_difference_percent: result1.vd_difference_percent,
             };
-            currentWindSource = 'compare';
+            appState.currentWindSource = 'compare';
 
             // Update metrics to show both
             updateVEMetricsComparison(result1, result2);
 
             // Use zero altitude for plotting if velodrome mode is enabled
-            const plotAltitude = currentParameters.velodrome
+            const plotAltitude = appState.currentParameters.velodrome
                 ? new Array(altitude.length).fill(0)
                 : altitude;
 
@@ -5871,14 +5832,14 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 // If no constant wind is configured, it will use 0
                 useWindSpeed = new Array(windSpeed.length).fill(NaN);
                 console.log('Using constant wind - wind_speed array filled with NaN');
-                console.log('Wind speed param:', currentParameters.wind_speed ?? 0, 'Wind direction:', currentParameters.wind_direction ?? 0);
+                console.log('Wind speed param:', appState.currentParameters.wind_speed ?? 0, 'Wind direction:', appState.currentParameters.wind_direction ?? 0);
             } else {
                 // Use FIT file wind data
                 // Apply time offset first (to sync with ground speed).
                 // Default of 2s matches the sibling branch above (line 5764)
                 // — the old code referenced an undefined `defaultAirSpeedOffset`
                 // which would have thrown ReferenceError at runtime.
-                const windSpeedOffset = currentParameters?.air_speed_offset ?? 2;
+                const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? 2;
                 useWindSpeed = applyAirSpeedOffset(windSpeed, windSpeedOffset);
                 console.log('Using FIT wind data with offset:', windSpeedOffset, 'seconds');
                 console.log('Sample offset wind_speed values:', useWindSpeed.slice(0, 5));
@@ -5895,15 +5856,15 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                 trimEndValue: altitude[trimEnd],
                 expectedDiff: altitude[trimEnd] - altitude[trimStart]
             });
-            console.log('VELODROME PARAMETER:', currentParameters.velodrome, 'Type:', typeof currentParameters.velodrome);
+            console.log('VELODROME PARAMETER:', appState.currentParameters.velodrome, 'Type:', typeof appState.currentParameters.velodrome);
 
             // Apply wind speed calibration if set (after offset)
-            const calibratedWindSpeed = airSpeedCalibrationPercent !== 0
-                ? useWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+            const calibratedWindSpeed = appState.airSpeedCalibrationPercent !== 0
+                ? useWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
                 : useWindSpeed;
 
             // Use rho array version if we have per-datapoint rho
-            const calculator = currentRhoArray
+            const calculator = appState.currentRhoArray
                 ? create_ve_calculator_with_rho_array(
                     new Float64Array(timestamps),
                     new Float64Array(power),
@@ -5913,19 +5874,19 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                     new Float64Array(altitude),
                     new Float64Array(distance),
                     new Float64Array(calibratedWindSpeed),
-                    new Float64Array(currentRhoArray),
-                    currentParameters!.system_mass,
-                    currentParameters!.rho,
-                    currentParameters!.eta,
+                    new Float64Array(appState.currentRhoArray),
+                    appState.currentParameters!.system_mass,
+                    appState.currentParameters!.rho,
+                    appState.currentParameters!.eta,
                     cda,
                     crr,
-                    currentParameters!.cda_min,
-                    currentParameters!.cda_max,
-                    currentParameters!.crr_min,
-                    currentParameters!.crr_max,
-                    currentParameters!.wind_speed,
-                    currentParameters!.wind_direction,
-                    currentParameters!.velodrome
+                    appState.currentParameters!.cda_min,
+                    appState.currentParameters!.cda_max,
+                    appState.currentParameters!.crr_min,
+                    appState.currentParameters!.crr_max,
+                    appState.currentParameters!.wind_speed,
+                    appState.currentParameters!.wind_direction,
+                    appState.currentParameters!.velodrome
                 )
                 : create_ve_calculator(
                     new Float64Array(timestamps),
@@ -5936,18 +5897,18 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
                     new Float64Array(altitude),
                     new Float64Array(distance),
                     new Float64Array(calibratedWindSpeed),
-                    currentParameters!.system_mass,
-                    currentParameters!.rho,
-                    currentParameters!.eta,
+                    appState.currentParameters!.system_mass,
+                    appState.currentParameters!.rho,
+                    appState.currentParameters!.eta,
                     cda,
                     crr,
-                    currentParameters!.cda_min,
-                    currentParameters!.cda_max,
-                    currentParameters!.crr_min,
-                    currentParameters!.crr_max,
-                    currentParameters!.wind_speed,
-                    currentParameters!.wind_direction,
-                    currentParameters!.velodrome
+                    appState.currentParameters!.cda_min,
+                    appState.currentParameters!.cda_max,
+                    appState.currentParameters!.crr_min,
+                    appState.currentParameters!.crr_max,
+                    appState.currentParameters!.wind_speed,
+                    appState.currentParameters!.wind_direction,
+                    appState.currentParameters!.velodrome
                 );
 
             // NOTE: calculator used to be stored in a `_veCalculator` global
@@ -5964,14 +5925,14 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             });
 
             // Store result globally for save functionality
-            currentVEResult = result;
-            currentWindSource = windSource as 'constant' | 'fit' | 'compare' | 'none';
+            appState.currentVEResult = result;
+            appState.currentWindSource = windSource as 'constant' | 'fit' | 'compare' | 'none';
 
             // Update metrics
             updateVEMetrics(result);
 
             // Use zero altitude for plotting if velodrome mode is enabled
-            const plotAltitude = currentParameters.velodrome
+            const plotAltitude = appState.currentParameters.velodrome
                 ? new Array(altitude.length).fill(0)
                 : altitude;
 
@@ -5979,7 +5940,7 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
             createVirtualElevationPlots(trimStart, trimEnd, result.virtual_elevation, plotAltitude);
 
             // Update CdA validation plots if CdA reference data is available
-            if (currentCdaReference) {
+            if (appState.currentCdaReference) {
                 await updateCdaValidationPlots(
                     timestamps, power, velocity, positionLat, positionLong, altitude, distance,
                     calibratedWindSpeed,
@@ -5997,40 +5958,40 @@ async function updateVEPlotsWithWindSource(timestamps: number[], power: number[]
  * Update VE plots for GPS lap mode - calculates VE for each lap and shows stacked plot
  */
 async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string) {
-    if (!currentFitData || !currentGpsLapIndexRanges || !currentParameters) {
+    if (!appState.currentFitData || !appState.currentGpsLapIndexRanges || !appState.currentParameters) {
         console.error('Missing data for GPS lap VE update');
         return;
     }
 
     const Plotly = await waitForPlotly();
 
-    // Extract arrays from currentFitData as typed locals. The `as number[]`
+    // Extract arrays from appState.currentFitData as typed locals. The `as number[]`
     // casts are required because Array.from(Float64Array) infers unknown[]
     // in TS 6.x due to how typed-array iterators are declared.
-    const allTimestamps = Array.from(currentFitData.timestamps) as number[];
-    const allPower = Array.from(currentFitData.power) as number[];
-    const allVelocity = Array.from(currentFitData.velocity) as number[];
-    const allPositionLat = Array.from(currentFitData.position_lat) as number[];
-    const allPositionLong = Array.from(currentFitData.position_long) as number[];
-    const allAltitude = Array.from(currentFitData.altitude) as number[];
-    const allDistance = Array.from(currentFitData.distance) as number[];
+    const allTimestamps = Array.from(appState.currentFitData.timestamps) as number[];
+    const allPower = Array.from(appState.currentFitData.power) as number[];
+    const allVelocity = Array.from(appState.currentFitData.velocity) as number[];
+    const allPositionLat = Array.from(appState.currentFitData.position_lat) as number[];
+    const allPositionLong = Array.from(appState.currentFitData.position_long) as number[];
+    const allAltitude = Array.from(appState.currentFitData.altitude) as number[];
+    const allDistance = Array.from(appState.currentFitData.distance) as number[];
 
     // Handle wind/air speed. Copy to typed locals up front so .some/.map
     // don't trip over the Array.from inference issue.
-    const airSpeedArr: number[] = currentFitData.air_speed ? Array.from(currentFitData.air_speed) as number[] : [];
-    const windSpeedArr: number[] = currentFitData.wind_speed ? Array.from(currentFitData.wind_speed) as number[] : [];
+    const airSpeedArr: number[] = appState.currentFitData.air_speed ? Array.from(appState.currentFitData.air_speed) as number[] : [];
+    const windSpeedArr: number[] = appState.currentFitData.wind_speed ? Array.from(appState.currentFitData.wind_speed) as number[] : [];
     const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
     const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
     let allWindSpeed: number[];
 
     if (hasAirSpeed) {
-        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
+        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
         allWindSpeed = airSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
     } else if (hasWindSpeed) {
-        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
+        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
         allWindSpeed = windSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
@@ -6054,9 +6015,9 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
     const lapVEProfiles: LapVEProfile[] = [];
 
     // Calculate VE for each selected GPS lap
-    for (let lapIdx = 0; lapIdx < currentGpsLapIndexRanges.length; lapIdx++) {
-        const range = currentGpsLapIndexRanges[lapIdx];
-        const lapNumber = gpsDetectedLaps[lapIdx]?.lapNumber ?? (lapIdx + 1);
+    for (let lapIdx = 0; lapIdx < appState.currentGpsLapIndexRanges.length; lapIdx++) {
+        const range = appState.currentGpsLapIndexRanges[lapIdx];
+        const lapNumber = appState.gpsDetectedLaps[lapIdx]?.lapNumber ?? (lapIdx + 1);
 
         // Extract data for this lap
         const lapTimestamps: number[] = [];
@@ -6105,18 +6066,18 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
                 new Float64Array(lapAltitude),
                 new Float64Array(lapDistance),
                 new Float64Array(lapWindSpeed),
-                currentParameters.system_mass,
-                currentParameters.rho,
-                currentParameters.eta,
+                appState.currentParameters.system_mass,
+                appState.currentParameters.rho,
+                appState.currentParameters.eta,
                 cda,
                 crr,
-                currentParameters.cda_min,
-                currentParameters.cda_max,
-                currentParameters.crr_min,
-                currentParameters.crr_max,
-                currentParameters.wind_speed,
-                currentParameters.wind_direction,
-                currentParameters.velodrome
+                appState.currentParameters.cda_min,
+                appState.currentParameters.cda_max,
+                appState.currentParameters.crr_min,
+                appState.currentParameters.crr_max,
+                appState.currentParameters.wind_speed,
+                appState.currentParameters.wind_direction,
+                appState.currentParameters.velodrome
             );
 
             // Calculate VE for full lap
@@ -6126,7 +6087,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
             const veArray = Array.from(result.virtual_elevation as Float64Array);
 
             // Get actual elevation (use zeros for velodrome mode)
-            const actualElevation = currentParameters.velodrome
+            const actualElevation = appState.currentParameters.velodrome
                 ? new Array(lapAltitude.length).fill(0)
                 : lapAltitude;
 
@@ -6163,7 +6124,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
     }
 
     // Store combined result globally for save functionality
-    currentVEResult = {
+    appState.currentVEResult = {
         r2: stats.meanR2,
         rmse: stats.meanRMSE,
         ve_elevation_diff: stats.avgVeGain,
@@ -6173,7 +6134,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
         virtual_distance_ground: 0,
         vd_difference_percent: 0
     };
-    currentWindSource = 'none';  // GPS lap mode doesn't use wind tabs
+    appState.currentWindSource = 'none';  // GPS lap mode doesn't use wind tabs
 
     // Store filtered data globally for save functionality (combine all lap data)
     const combinedPower: number[] = [];
@@ -6181,18 +6142,18 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
     const combinedTimestamps: number[] = [];
     const combinedTemperature: number[] = [];
 
-    for (const range of currentGpsLapIndexRanges!) {
+    for (const range of appState.currentGpsLapIndexRanges!) {
         for (let i = range.startIdx; i <= range.endIdx && i < allTimestamps.length; i++) {
             combinedPower.push(allPower[i]);
             combinedVelocity.push(allVelocity[i]);
             combinedTimestamps.push(allTimestamps[i]);
             // Temperature may not exist
-            if (currentFitData.temperature) {
-                combinedTemperature.push(currentFitData.temperature[i] || 0);
+            if (appState.currentFitData.temperature) {
+                combinedTemperature.push(appState.currentFitData.temperature[i] || 0);
             }
         }
     }
-    currentFilteredData = {
+    appState.currentFilteredData = {
         power: combinedPower,
         velocity: combinedVelocity,
         timestamps: combinedTimestamps,
@@ -6200,7 +6161,7 @@ async function updateGpsLapVEPlots(cda: number, crr: number, _windSource: string
     };
 
     // Store analyzed laps (GPS lap numbers)
-    currentAnalyzedLaps = lapVEProfiles.map(lap => lap.lapNumber);
+    appState.currentAnalyzedLaps = lapVEProfiles.map(lap => lap.lapNumber);
 
     updateVEMetrics({
         r2: stats.meanR2,
@@ -6350,10 +6311,9 @@ interface OutAndBackVEProfile {
     totalDistance: number;
 }
 
-// Store Out and Back sections globally for recalculation.
+// Store Out and Back sections in appState for recalculation.
 // NOTE: A parallel `currentOutAndBackProfiles` used to live here but was
 // write-only (assigned in two places, never read).
-let currentOutAndBackSections: OutAndBackSection[] = [];
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -6366,7 +6326,7 @@ async function showOutAndBackVEAnalysis(
 ) {
     showLoading('Calculating VE for out-and-back sections...');
 
-    currentOutAndBackSections = sections;
+    appState.currentOutAndBackSections = sections;
     const profiles: OutAndBackVEProfile[] = [];
 
     // Extract arrays from fitData as typed locals (see note in the sibling
@@ -6405,10 +6365,10 @@ async function showOutAndBackVEAnalysis(
         const windSpeedOffset = params?.air_speed_offset ?? defaultAirSpeedOffset;
         baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
         // Apply calibration if set
-        allWindSpeed = airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
+            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
             : baseWindSpeed;
-        console.log(`Out and Back VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${airSpeedCalibrationPercent}%)`);
+        console.log(`Out and Back VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else if (hasWindSpeed) {
         const rawYaw: number[] = fitData.wind_yaw ? Array.from(fitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
         let baseWindSpeed = windSpeedArr.map((magnitude, i) => {
@@ -6419,10 +6379,10 @@ async function showOutAndBackVEAnalysis(
         const windSpeedOffset = params?.air_speed_offset ?? defaultAirSpeedOffset;
         baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
         // Apply calibration if set
-        allWindSpeed = airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
+            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
             : baseWindSpeed;
-        console.log(`Out and Back VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${airSpeedCalibrationPercent}%)`);
+        console.log(`Out and Back VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
         allWindSpeed = new Array(allTimestamps.length).fill(0);
         console.log('Out and Back VE: No wind data available');
@@ -6562,27 +6522,29 @@ function extractSegmentData(
     positionLat: number[]; positionLong: number[];
     altitude: number[]; distance: number[]; windSpeed: number[];
 } {
-    const timestamps: number[] = [];
-    const power: number[] = [];
-    const velocity: number[] = [];
-    const positionLat: number[] = [];
-    const positionLong: number[] = [];
-    const altitude: number[] = [];
-    const distance: number[] = [];
-    const windSpeed: number[] = [];
+    const selectedSlice = createSelectedSlice({
+        startIdx,
+        endIdx,
+        allTimestamps,
+        allPower,
+        allVelocity,
+        allPositionLat,
+        allPositionLong,
+        allAltitude,
+        allDistance,
+        allWindSpeed,
+    });
 
-    for (let i = startIdx; i <= endIdx && i < allTimestamps.length; i++) {
-        timestamps.push(allTimestamps[i]);
-        power.push(allPower[i]);
-        velocity.push(allVelocity[i]);
-        positionLat.push(allPositionLat[i]);
-        positionLong.push(allPositionLong[i]);
-        altitude.push(allAltitude[i]);
-        distance.push(allDistance[i]);
-        windSpeed.push(allWindSpeed[i]);
-    }
-
-    return { timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed };
+    return {
+        timestamps: selectedSlice.timestamps,
+        power: selectedSlice.power,
+        velocity: selectedSlice.velocity,
+        positionLat: selectedSlice.positionLat,
+        positionLong: selectedSlice.positionLong,
+        altitude: selectedSlice.altitude,
+        distance: selectedSlice.distance,
+        windSpeed: selectedSlice.windSpeed,
+    };
 }
 
 /**
@@ -6870,7 +6832,7 @@ async function showOutAndBackVEPlot(
         const updateAirSpeedCalibration = () => {
             const value = parseFloat(airSpeedCalibrationSlider.value);
             airSpeedCalibrationValueEl.value = value.toFixed(1);
-            airSpeedCalibrationPercent = value;
+            appState.airSpeedCalibrationPercent = value;
             console.log('Air speed calibration changed - triggering Out and Back VE recalculation');
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
@@ -6883,7 +6845,7 @@ async function showOutAndBackVEPlot(
             const clamped = Math.max(-20.0, Math.min(value, 20.0));
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValueEl.value = clamped.toFixed(1);
-            airSpeedCalibrationPercent = clamped;
+            appState.airSpeedCalibrationPercent = clamped;
             console.log('Air speed calibration changed - triggering Out and Back VE recalculation');
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
@@ -7358,7 +7320,7 @@ function renderOutAndBackPlots(
  * Update Out and Back VE plots with new CdA/Crr values
  */
 async function updateOutAndBackVEPlots(cda: number, crr: number) {
-    if (!currentFitData || !currentOutAndBackSections || currentOutAndBackSections.length === 0 || !currentParameters) {
+    if (!appState.currentFitData || !appState.currentOutAndBackSections || appState.currentOutAndBackSections.length === 0 || !appState.currentParameters) {
         console.error('Missing data for Out and Back VE update');
         return;
     }
@@ -7368,18 +7330,18 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     // Recalculate VE for all sections
     const profiles: OutAndBackVEProfile[] = [];
 
-    // Extract arrays from currentFitData as typed locals (see note above).
-    const allTimestamps = Array.from(currentFitData.timestamps) as number[];
-    const allPower = Array.from(currentFitData.power) as number[];
-    const allVelocity = Array.from(currentFitData.velocity) as number[];
-    const allPositionLat = Array.from(currentFitData.position_lat) as number[];
-    const allPositionLong = Array.from(currentFitData.position_long) as number[];
-    const allAltitude = Array.from(currentFitData.altitude) as number[];
-    const allDistance = Array.from(currentFitData.distance) as number[];
+    // Extract arrays from appState.currentFitData as typed locals (see note above).
+    const allTimestamps = Array.from(appState.currentFitData.timestamps) as number[];
+    const allPower = Array.from(appState.currentFitData.power) as number[];
+    const allVelocity = Array.from(appState.currentFitData.velocity) as number[];
+    const allPositionLat = Array.from(appState.currentFitData.position_lat) as number[];
+    const allPositionLong = Array.from(appState.currentFitData.position_long) as number[];
+    const allAltitude = Array.from(appState.currentFitData.altitude) as number[];
+    const allDistance = Array.from(appState.currentFitData.distance) as number[];
 
     // Handle wind/air speed via typed locals - check wind source selection
-    const airSpeedArr: number[] = currentFitData.air_speed ? Array.from(currentFitData.air_speed) as number[] : [];
-    const windSpeedArr: number[] = currentFitData.wind_speed ? Array.from(currentFitData.wind_speed) as number[] : [];
+    const airSpeedArr: number[] = appState.currentFitData.air_speed ? Array.from(appState.currentFitData.air_speed) as number[] : [];
+    const windSpeedArr: number[] = appState.currentFitData.wind_speed ? Array.from(appState.currentFitData.wind_speed) as number[] : [];
     const hasAirSpeed = airSpeedArr.some(v => !isNaN(v) && v !== 0);
     const hasWindSpeed = windSpeedArr.some(v => !isNaN(v) && v !== 0);
 
@@ -7394,39 +7356,39 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
         allWindSpeed = new Array(allTimestamps.length).fill(NaN);
         console.log('Out and Back VE update: Using constant wind settings');
     } else if (hasAirSpeed) {
-        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
+        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(airSpeedArr.length).fill(0);
         let baseWindSpeed = airSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
         // Apply time offset
-        const windSpeedOffset = currentParameters?.air_speed_offset ?? 2;
+        const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? 2;
         baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
         // Apply calibration if set
-        allWindSpeed = airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
+            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
             : baseWindSpeed;
-        console.log(`Out and Back VE update: Using FIT air speed data (calibration: ${airSpeedCalibrationPercent}%)`);
+        console.log(`Out and Back VE update: Using FIT air speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else if (hasWindSpeed) {
-        const rawYaw: number[] = currentFitData.wind_yaw ? Array.from(currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
+        const rawYaw: number[] = appState.currentFitData.wind_yaw ? Array.from(appState.currentFitData.wind_yaw) as number[] : new Array(windSpeedArr.length).fill(0);
         let baseWindSpeed = windSpeedArr.map((magnitude, i) => {
             const yaw = rawYaw[i] || 0;
             return Math.cos(yaw * Math.PI / 180) * magnitude;
         });
         // Apply time offset
-        const windSpeedOffset = currentParameters?.air_speed_offset ?? 2;
+        const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? 2;
         baseWindSpeed = applyAirSpeedOffset(baseWindSpeed, windSpeedOffset);
         // Apply calibration if set
-        allWindSpeed = airSpeedCalibrationPercent !== 0
-            ? baseWindSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+        allWindSpeed = appState.airSpeedCalibrationPercent !== 0
+            ? baseWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
             : baseWindSpeed;
-        console.log(`Out and Back VE update: Using FIT wind speed data (calibration: ${airSpeedCalibrationPercent}%)`);
+        console.log(`Out and Back VE update: Using FIT wind speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`);
     } else {
         allWindSpeed = new Array(allTimestamps.length).fill(0);
         console.log('Out and Back VE update: No wind data available');
     }
 
-    for (const section of currentOutAndBackSections) {
+    for (const section of appState.currentOutAndBackSections) {
         const profile: OutAndBackVEProfile = {
             sectionNumber: section.sectionNumber,
             outboundDistances: [],
@@ -7453,10 +7415,10 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                     new Float64Array(outboundData.timestamps), new Float64Array(outboundData.power), new Float64Array(outboundData.velocity),
                     new Float64Array(outboundData.positionLat), new Float64Array(outboundData.positionLong), new Float64Array(outboundData.altitude),
                     new Float64Array(outboundData.distance), new Float64Array(outboundData.windSpeed),
-                    currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
-                    cda, crr, currentParameters.cda_min, currentParameters.cda_max,
-                    currentParameters.crr_min, currentParameters.crr_max,
-                    currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
+                    appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
+                    cda, crr, appState.currentParameters.cda_min, appState.currentParameters.cda_max,
+                    appState.currentParameters.crr_min, appState.currentParameters.crr_max,
+                    appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
                 );
 
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, outboundData.timestamps.length - 1);
@@ -7465,7 +7427,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                 const startDist = outboundData.distance[0];
                 profile.outboundDistances = outboundData.distance.map(d => (d - startDist) / 1000);
                 profile.outboundVE = veArray;
-                profile.outboundActualElevation = currentParameters.velodrome
+                profile.outboundActualElevation = appState.currentParameters.velodrome
                     ? new Array(outboundData.altitude.length).fill(0)
                     : [...outboundData.altitude];
             }
@@ -7486,10 +7448,10 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                     new Float64Array(inboundData.timestamps), new Float64Array(inboundData.power), new Float64Array(inboundData.velocity),
                     new Float64Array(inboundData.positionLat), new Float64Array(inboundData.positionLong), new Float64Array(inboundData.altitude),
                     new Float64Array(inboundData.distance), new Float64Array(inboundData.windSpeed),
-                    currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
-                    cda, crr, currentParameters.cda_min, currentParameters.cda_max,
-                    currentParameters.crr_min, currentParameters.crr_max,
-                    currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
+                    appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
+                    cda, crr, appState.currentParameters.cda_min, appState.currentParameters.cda_max,
+                    appState.currentParameters.crr_min, appState.currentParameters.crr_max,
+                    appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
                 );
 
                 const result = calculator.calculate_virtual_elevation(cda, crr, 0, inboundData.timestamps.length - 1);
@@ -7498,7 +7460,7 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
                 const startDist = inboundData.distance[0];
                 profile.inboundDistances = inboundData.distance.map(d => (d - startDist) / 1000);
                 profile.inboundVE = veArray;
-                profile.inboundActualElevation = currentParameters.velodrome
+                profile.inboundActualElevation = appState.currentParameters.velodrome
                     ? new Array(inboundData.altitude.length).fill(0)
                     : [...inboundData.altitude];
             }
@@ -8037,10 +7999,10 @@ async function updateCdaValidationPlots(
     trimEnd: number,
     veOptimizedResult: any
 ) {
-    if (!currentCdaReference || !currentParameters) return;
+    if (!appState.currentCdaReference || !appState.currentParameters) return;
 
     // Calculate average CdA from reference data for the TRIMMED region (for metrics display)
-    const trimmedCdaRef = currentCdaReference.slice(trimStart, trimEnd + 1);
+    const trimmedCdaRef = appState.currentCdaReference.slice(trimStart, trimEnd + 1);
     const validCda = trimmedCdaRef.filter(c => !isNaN(c));
     if (validCda.length === 0) return;
 
@@ -8058,34 +8020,34 @@ async function updateCdaValidationPlots(
     const f64Altitude = new Float64Array(altitude);
     const f64Distance = new Float64Array(distance);
     const f64WindSpeed = new Float64Array(windSpeed);
-    const refCalculator = currentRhoArray
+    const refCalculator = appState.currentRhoArray
         ? create_ve_calculator_with_rho_array(
             f64Timestamps, f64Power, f64Velocity, f64PositionLat, f64PositionLong, f64Altitude, f64Distance,
             f64WindSpeed,
-            new Float64Array(currentRhoArray),
-            currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
-            currentParameters.cda, crrOptimized,
-            currentParameters.cda_min, currentParameters.cda_max,
-            currentParameters.crr_min, currentParameters.crr_max,
-            currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
+            new Float64Array(appState.currentRhoArray),
+            appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
+            appState.currentParameters.cda, crrOptimized,
+            appState.currentParameters.cda_min, appState.currentParameters.cda_max,
+            appState.currentParameters.crr_min, appState.currentParameters.crr_max,
+            appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
         )
         : create_ve_calculator(
             f64Timestamps, f64Power, f64Velocity, f64PositionLat, f64PositionLong, f64Altitude, f64Distance,
             f64WindSpeed,
-            currentParameters.system_mass, currentParameters.rho, currentParameters.eta,
-            currentParameters.cda, crrOptimized,
-            currentParameters.cda_min, currentParameters.cda_max,
-            currentParameters.crr_min, currentParameters.crr_max,
-            currentParameters.wind_speed, currentParameters.wind_direction, currentParameters.velodrome
+            appState.currentParameters.system_mass, appState.currentParameters.rho, appState.currentParameters.eta,
+            appState.currentParameters.cda, crrOptimized,
+            appState.currentParameters.cda_min, appState.currentParameters.cda_max,
+            appState.currentParameters.crr_min, appState.currentParameters.crr_max,
+            appState.currentParameters.wind_speed, appState.currentParameters.wind_direction, appState.currentParameters.velodrome
         );
 
     // Calculate VE with per-datapoint CdA reference array
     // Pre-process: Replace any NaN values with the average to avoid using default 0.3
-    const cleanedCdaRef = currentCdaReference.map(cda => isNaN(cda) ? avgCdaRef : cda);
+    const cleanedCdaRef = appState.currentCdaReference.map(cda => isNaN(cda) ? avgCdaRef : cda);
     const cdaRefArray = new Float64Array(cleanedCdaRef);
 
     // Debug: Verify we're using per-datapoint CdA, not average
-    const nanCount = currentCdaReference.filter(c => isNaN(c)).length;
+    const nanCount = appState.currentCdaReference.filter(c => isNaN(c)).length;
     console.log('CdA Array Debug:', {
         arrayLength: cdaRefArray.length,
         trimmedLength: trimmedCdaRef.length,
@@ -8416,9 +8378,9 @@ async function createVirtualElevationPlotsComparison(
 }
 
 async function createWindSpeedPlot(_timestamps: number[], velocity: number[], windSpeed: number[], _distance: number[], trimStart: number, trimEnd: number, defaultAirSpeedOffset: number = 0) {
-    // Narrow `currentParameters` from '... | null' for the rest of the body.
-    if (!currentParameters) {
-        console.error('createWindSpeedPlot: currentParameters is null');
+    // Narrow `appState.currentParameters` from '... | null' for the rest of the body.
+    if (!appState.currentParameters) {
+        console.error('createWindSpeedPlot: appState.currentParameters is null');
         return;
     }
 
@@ -8435,8 +8397,8 @@ async function createWindSpeedPlot(_timestamps: number[], velocity: number[], wi
 
     // Calculate effective wind from constant wind parameters
     const hasWindSpeed = windSpeed.some(val => !isNaN(val) && val !== 0);
-    const hasConstantWind = currentParameters.wind_speed !== undefined && currentParameters.wind_speed !== 0 &&
-                            currentParameters.wind_direction !== undefined;
+    const hasConstantWind = appState.currentParameters.wind_speed !== undefined && appState.currentParameters.wind_speed !== 0 &&
+                            appState.currentParameters.wind_direction !== undefined;
 
     // Calculate context range (+/- 5s, but limited by actual trim)
     const contextBefore = Math.min(trimStart, 5);
@@ -8452,20 +8414,20 @@ async function createWindSpeedPlot(_timestamps: number[], velocity: number[], wi
     // Calculate constant wind apparent speed if configured
     let constantWindApparent: number[] = [];
     if (hasConstantWind) {
-        const windSpeedMs = currentParameters.wind_speed || 0;
-        const windDirection = currentParameters.wind_direction || 0;
+        const windSpeedMs = appState.currentParameters.wind_speed || 0;
+        const windDirection = appState.currentParameters.wind_direction || 0;
 
         // Get rider bearings from filtered VE data (matches the Rust calculation)
         let riderBearings: number[] = [];
-        if (filteredVEData && filteredVEData.positionLat.length > 0) {
+        if (appState.filteredVEData && appState.filteredVEData.positionLat.length > 0) {
             // Calculate bearing for each point based on GPS movement
-            riderBearings = new Array(filteredVEData.positionLat.length).fill(0);
+            riderBearings = new Array(appState.filteredVEData.positionLat.length).fill(0);
 
-            for (let i = 1; i < filteredVEData.positionLat.length; i++) {
-                const lat1 = filteredVEData.positionLat[i - 1] * Math.PI / 180;
-                const lat2 = filteredVEData.positionLat[i] * Math.PI / 180;
-                const lon1 = filteredVEData.positionLong[i - 1] * Math.PI / 180;
-                const lon2 = filteredVEData.positionLong[i] * Math.PI / 180;
+            for (let i = 1; i < appState.filteredVEData.positionLat.length; i++) {
+                const lat1 = appState.filteredVEData.positionLat[i - 1] * Math.PI / 180;
+                const lat2 = appState.filteredVEData.positionLat[i] * Math.PI / 180;
+                const lon1 = appState.filteredVEData.positionLong[i - 1] * Math.PI / 180;
+                const lon2 = appState.filteredVEData.positionLong[i] * Math.PI / 180;
 
                 const dLon = lon2 - lon1;
                 const y = Math.sin(dLon) * Math.cos(lat2);
@@ -8506,7 +8468,7 @@ async function createWindSpeedPlot(_timestamps: number[], velocity: number[], wi
     }
 
     // Calculate FIT wind speed in km/h (with offset applied)
-    const windSpeedOffset = currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+    const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
     const offsetWindSpeed = hasWindSpeed ? applyAirSpeedOffset(windSpeed, windSpeedOffset) : windSpeed;
     const windSpeedKmh = hasWindSpeed ? offsetWindSpeed.map(v => isNaN(v) ? null : v * 3.6) : [];
 
@@ -8905,8 +8867,8 @@ async function createVirtualDistancePlot(timestamps: number[], velocity: number[
     const extendedEnd = trimEnd + 1 + contextAfter;
 
     // Apply wind speed calibration
-    const calibratedWindSpeed = airSpeedCalibrationPercent !== 0
-        ? windSpeed.map(speed => speed * (1.0 + airSpeedCalibrationPercent / 100.0))
+    const calibratedWindSpeed = appState.airSpeedCalibrationPercent !== 0
+        ? windSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
         : windSpeed;
 
     // Calculate cumulative virtual distances starting from trimStart (both start at 0)
