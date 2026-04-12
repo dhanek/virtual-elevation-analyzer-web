@@ -594,6 +594,7 @@ async function processFitFile(file: File) {
 
         // Activate section 2 (parameters) and 3 (lap selection) after successful file analysis
         activateSection(2);
+        scrollToSection('parametersSection');
 
         // Trigger auto-rho calculation if enabled and we have GPS data
         if (parametersComponent?.getParameters().auto_calculate_rho && result.parsing_statistics.has_gps_data) {
@@ -769,6 +770,7 @@ async function processCsvFile(file: File) {
         // Activate section 2 (parameters) and section 3 (map/laps)
         // CSV files work just like FIT files - both sections are active after loading
         activateSection(2);
+        scrollToSection('parametersSection');
 
         // Initialize and activate section 3 if we have laps
         if (result.laps.length > 0) {
@@ -792,6 +794,13 @@ async function processCsvFile(file: File) {
 }
 
 // Workflow management
+function scrollToSection(sectionId: string) {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function activateSection(sectionNumber: number) {
     // Mark previous sections as completed
     for (let i = 1; i < sectionNumber; i++) {
