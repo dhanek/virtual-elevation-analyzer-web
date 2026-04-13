@@ -12,6 +12,7 @@ const ANALYSIS_MODES: Record<AnalysisModeId, AnalysisModeHandler> = {
 export function getAnalysisModeId(lapDetectionMode: string | null | undefined): AnalysisModeId {
     switch (lapDetectionMode) {
         case 'GPS based lap splitting':
+        case 'GPS gate one way':
             return 'gpsLap';
         case 'GPS based out and back':
             return 'outAndBack';
