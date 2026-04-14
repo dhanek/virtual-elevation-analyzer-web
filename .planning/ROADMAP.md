@@ -31,7 +31,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: Capture regression-sensitive UI-shell invariants and verification checklist
+- [x] 01-01: Capture regression-sensitive UI-shell invariants and verification checklist
 - [ ] 01-02: Decide and wire the practical regression verification path for fragile browser flows
 - [ ] 01-03: Prepare the first `main.ts` delegation seams and extraction inventory
 
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Guardrails and Regression Protection | 0/3 | Not started | - |
+| 1. Guardrails and Regression Protection | 1/3 | In Progress|  |
 | 2. Shell Infrastructure and Delegation | 0/3 | Not started | - |
 | 3. Section 3 and Standard VE Shell Extraction | 0/3 | Not started | - |
 | 4. GPS and Out-and-Back Shell Extraction | 0/3 | Not started | - |
