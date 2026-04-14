@@ -49,7 +49,7 @@ Plans:
 
 Plans:
 - [x] 02-01: Extract shared DOM, event, and template helper seams for shell code
-- [ ] 02-02: Define shell module interfaces and dependency wiring from `main.ts`
+- [x] 02-02: Define shell module interfaces and dependency wiring from `main.ts`
 - [ ] 02-03: Move top-level workflow orchestration toward delegated shell modules
 
 ### Phase 3: Section 3 and Standard VE Shell Extraction
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Guardrails and Regression Protection | 3/3 | Complete    | 2026-04-14 |
-| 2. Shell Infrastructure and Delegation | 1/3 | In progress | - |
+| 2. Shell Infrastructure and Delegation | 2/3 | In progress | - |
 | 3. Section 3 and Standard VE Shell Extraction | 0/3 | Not started | - |
 | 4. GPS and Out-and-Back Shell Extraction | 0/3 | Not started | - |
 | 5. Closeout, Secondary Cleanup, and Roadmap Sync | 0/2 | Not started | - |
