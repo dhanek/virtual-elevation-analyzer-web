@@ -1,0 +1,74 @@
+---
+gsd_state_version: "1.0"
+milestone: "v1.0"
+milestone_name: "Frontend UI Shell Stabilization"
+current_phase: "1"
+current_phase_name: "Guardrails and Regression Protection"
+current_plan: "1 of 3"
+total_phases: 5
+total_plans_in_phase: 3
+status: "planning"
+last_updated: "2026-04-12T00:00:00Z"
+last_activity: "2026-04-12 - Project initialized; requirements and roadmap created"
+progress: "0%"
+progress_detail:
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 14
+  completed_plans: 0
+  percent: 0
+---
+
+# Project State
+
+## Project Reference
+
+See: .planning/PROJECT.md (updated 2026-04-12)
+
+**Core value:** Make trustworthy virtual elevation analysis of local ride data work well in the browser, without sacrificing correctness or forcing users through a fragile UI shell.
+**Current focus:** Phase 1 - Guardrails and Regression Protection
+
+## Current Position
+
+**Status:** Ready to plan
+**Current Phase:** 1
+**Current Phase Name:** Guardrails and Regression Protection
+**Total Phases:** 5
+**Current Plan:** 1 of 3
+**Total Plans in Phase:** 3
+**Last Activity:** 2026-04-12
+**Last Activity Description:** Project initialized; requirements and roadmap created
+**Progress:** [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 0
+- Average duration: -
+- Total execution time: -
+
+## Accumulated Context
+
+### Decisions
+
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- Initialization: treat the codebase map and live code as the source of truth
+- Current milestone: target frontend UI-shell stabilization before the next UI-heavy feature wave
+- Scope guard: keep `AppState` state-only and keep `MapVisualization.ts` secondary unless it clearly supports the main shell extraction
+
+### Pending Todos
+
+Pending todo files already exist under `.planning/todos/pending/` and should be revisited after this stabilization milestone unless execution pulls one forward.
+
+### Blockers/Concerns
+
+No active blockers yet.
+Primary concern: preserve auto-scroll, GPS in-place update UX, and GPS calibration correctness while extracting shell code.
+
+## Session Continuity
+
+**Last Date:** 2026-04-12 00:00
+**Stopped At:** Initialization complete; Phase 1 ready to plan
+**Resume File:** None
