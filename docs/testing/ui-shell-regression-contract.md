@@ -67,7 +67,16 @@ Regression rule:
 
 ## CI checkpoint baseline
 
-The automated checkpoint contract mirrors `.github/workflows/deploy.yml`.
+The automated checkpoint contract mirrors `.github/workflows/deploy.yml`, which remains the source of truth for the automated command chain.
+
+Default repo entry point:
+
+```bash
+bash scripts/validate-ui-shell-guardrails.sh
+bash scripts/validate-ui-shell-guardrails.sh --ci-only
+```
+
+The script above mirrors `.github/workflows/deploy.yml` for automated validation and then routes maintainers to `docs/testing/ui-shell-manual-checklist.md` for the browser-only checks.
 
 Current CI parity command chain:
 

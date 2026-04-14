@@ -2,6 +2,15 @@
 
 Use this checklist for the browser-only flows that are not fully covered by node-only tests. Keep this file aligned with `docs/testing/ui-shell-regression-contract.md`.
 
+Default entry point before manual browser checks:
+
+```bash
+bash scripts/validate-ui-shell-guardrails.sh
+bash scripts/validate-ui-shell-guardrails.sh --ci-only
+```
+
+Run `bash scripts/validate-ui-shell-guardrails.sh` first so the automated checks finish before you perform the browser-only steps below.
+
 ## Prerequisites
 
 - Start from a clean page load before each run.
@@ -10,6 +19,8 @@ Use this checklist for the browser-only flows that are not fully covered by node
 - Read the matching contract sections in `docs/testing/ui-shell-regression-contract.md` before validating changes.
 
 ## FIT and CSV file-load navigation
+
+Before running this section, complete the automated step with `bash scripts/validate-ui-shell-guardrails.sh` unless you already ran `bash scripts/validate-ui-shell-guardrails.sh --ci-only` intentionally.
 
 Reference contract section: `docs/testing/ui-shell-regression-contract.md` → `## File-load navigation`
 
