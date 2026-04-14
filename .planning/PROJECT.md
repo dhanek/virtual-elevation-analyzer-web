@@ -19,6 +19,7 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 - ✓ User can visualize ride data through plots and an interactive map workflow - existing
 - ✓ User can use DEM and weather-assisted analysis inputs with browser-local persistence and caching - existing
 - ✓ Project changes can be validated through backend tests, wasm build, frontend typecheck, lint, tests, and production build - existing
+- ✓ Phase 1 established a committed UI-shell regression contract, manual browser checklist, CI-parity guardrail script, and hotspot inventory - validated in Phase 1
 
 ### Active
 
@@ -49,6 +50,8 @@ Recent work also surfaced regression-sensitive behavior that must remain intact 
 
 This phase exists to make subsequent UI/workflow work safer, clearer, and less likely to break existing analysis behavior.
 
+Phase 1 is now complete. The project has committed guardrail docs/scripts plus a hotspot inventory, and the next planned focus is Phase 2: Shell Infrastructure and Delegation.
+
 ## Constraints
 
 - **Tech stack**: Keep the current browser-first TypeScript + Vite frontend and Rust/WASM backend - the product already works on this stack and the phase is structural, not a platform rewrite
@@ -64,8 +67,8 @@ This phase exists to make subsequent UI/workflow work safer, clearer, and less l
 | Decision | Rationale | Outcome |
 | -------- | --------- | ------- |
 | Use the codebase map and live code as the source of truth for initialization | The repo is brownfield and older planning docs contain historical or stale material | ✓ Good |
-| Center the next phase on targeted frontend UI-shell stabilization | The largest remaining risk is concentrated in `frontend/src/main.ts`, not in missing infrastructure | - Pending |
-| Keep `MapVisualization.ts` secondary rather than making it a co-equal refactor target | The highest-value reduction is still in `main.ts`; map changes should only happen when they clearly support that work | - Pending |
+| Center the next phase on targeted frontend UI-shell stabilization | The largest remaining risk is concentrated in `frontend/src/main.ts`, not in missing infrastructure | ✓ Good |
+| Keep `MapVisualization.ts` secondary rather than making it a co-equal refactor target | The highest-value reduction is still in `main.ts`; map changes should only happen when they clearly support that work | ✓ Good |
 | Allow occasional small behavior/feature adjustments only when they directly enable the refactor | A strict purity rule would make some necessary seams or lifecycle fixes harder, but broad feature work would dilute the phase | - Pending |
 | Preserve regression-sensitive behaviors explicitly during the stabilization phase | Recent fixes around auto-scroll and GPS calibration are easy to accidentally break during UI-shell extraction | ✓ Good |
 | Keep `AppState` state-only and avoid a new god-object rewrite | The project already established a healthier state boundary and should not regress during the next phase | ✓ Good |
@@ -88,4 +91,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-12 after initialization*
+*Last updated: 2026-04-14 after Phase 1 completion*

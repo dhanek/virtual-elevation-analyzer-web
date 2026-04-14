@@ -1,10 +1,11 @@
 ---
 phase: 1
 slug: guardrails-and-regression-protection
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-04-12
+updated: 2026-04-14
 ---
 
 # Phase 1 - Validation Strategy
@@ -38,12 +39,12 @@ created: 2026-04-12
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 | --------- | ---- | ---- | ----------- | --------- | ----------------- | ----------- | --------- |
-| 01-01-01 | 01 | 1 | STAB-01 | docs | `rg "## File-load navigation|## GPS calibration behavior" docs/testing/ui-shell-regression-contract.md` | ❌ pre-plan | ⬜ pending |
-| 01-01-02 | 01 | 1 | STAB-01 | docs | `rg "active tab remains unchanged|Analysis Parameters section becomes visible" docs/testing/ui-shell-manual-checklist.md` | ❌ pre-plan | ⬜ pending |
-| 01-03-01 | 03 | 1 | STAB-01 | script | `bash -n scripts/report-ui-shell-hotspots.sh && bash scripts/report-ui-shell-hotspots.sh` | ❌ pre-plan | ⬜ pending |
-| 01-03-02 | 03 | 1 | STAB-01 | docs | `rg "Section 3 shell|GPS-lap shell|MapVisualization.ts" docs/architecture/frontend-ui-shell-extraction-inventory.md` | ❌ pre-plan | ⬜ pending |
-| 01-02-01 | 02 | 2 | STAB-02 | integration/script | `bash -n scripts/validate-ui-shell-guardrails.sh && bash scripts/validate-ui-shell-guardrails.sh --help` | ❌ pre-plan | ⬜ pending |
-| 01-02-02 | 02 | 2 | STAB-01 | docs | `rg "bash scripts/validate-ui-shell-guardrails.sh|.github/workflows/deploy.yml" docs/testing/ui-shell-manual-checklist.md docs/testing/ui-shell-regression-contract.md` | ❌ pre-plan | ⬜ pending |
+| 01-01-01 | 01 | 1 | STAB-01 | docs | `rg "## File-load navigation|## GPS calibration behavior" docs/testing/ui-shell-regression-contract.md` | ✅ yes | ✅ green |
+| 01-01-02 | 01 | 1 | STAB-01 | docs | `rg "active tab remains unchanged|Analysis Parameters section becomes visible" docs/testing/ui-shell-manual-checklist.md` | ✅ yes | ✅ green |
+| 01-03-01 | 03 | 1 | STAB-01 | script | `bash -n scripts/report-ui-shell-hotspots.sh && bash scripts/report-ui-shell-hotspots.sh` | ✅ yes | ✅ green |
+| 01-03-02 | 03 | 1 | STAB-01 | docs | `rg "Section 3 shell|GPS-lap shell|MapVisualization.ts" docs/architecture/frontend-ui-shell-extraction-inventory.md` | ✅ yes | ✅ green |
+| 01-02-01 | 02 | 2 | STAB-02 | integration/script | `bash -n scripts/validate-ui-shell-guardrails.sh && bash scripts/validate-ui-shell-guardrails.sh --help` | ✅ yes | ✅ green |
+| 01-02-02 | 02 | 2 | STAB-01 | docs | `rg "bash scripts/validate-ui-shell-guardrails.sh|.github/workflows/deploy.yml" docs/testing/ui-shell-manual-checklist.md docs/testing/ui-shell-regression-contract.md` | ✅ yes | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -51,11 +52,11 @@ created: 2026-04-12
 
 ## Wave 0 Requirements
 
-- [ ] `docs/testing/ui-shell-regression-contract.md` - explicit regression contract for the fragile UI-shell behaviors
-- [ ] `docs/testing/ui-shell-manual-checklist.md` - committed browser checklist with exact expectations
-- [ ] `scripts/report-ui-shell-hotspots.sh` - regeneratable hotspot baseline script
-- [ ] `docs/architecture/frontend-ui-shell-extraction-inventory.md` - committed extraction target inventory
-- [ ] `scripts/validate-ui-shell-guardrails.sh` - repo-level validation entry point that mirrors CI parity
+- [x] `docs/testing/ui-shell-regression-contract.md` - explicit regression contract for the fragile UI-shell behaviors
+- [x] `docs/testing/ui-shell-manual-checklist.md` - committed browser checklist with exact expectations
+- [x] `scripts/report-ui-shell-hotspots.sh` - regeneratable hotspot baseline script
+- [x] `docs/architecture/frontend-ui-shell-extraction-inventory.md` - committed extraction target inventory
+- [x] `scripts/validate-ui-shell-guardrails.sh` - repo-level validation entry point that mirrors CI parity
 
 ---
 
@@ -73,11 +74,11 @@ created: 2026-04-12
 
 ## Validation Sign-Off
 
-- [ ] All tasks have automated verify commands or committed manual-only verification references
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 artifacts cover the phase guardrail path
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 180s for automated checks
-- [ ] `nyquist_compliant: true` set in frontmatter after phase planning is approved and artifacts exist
+- [x] All tasks have automated verify commands or committed manual-only verification references
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 artifacts cover the phase guardrail path
+- [x] No watch-mode flags
+- [x] Feedback latency < 180s for automated checks
+- [x] `nyquist_compliant: true` set in frontmatter after phase planning is approved and artifacts exist
 
-**Approval:** pending
+**Approval:** passed

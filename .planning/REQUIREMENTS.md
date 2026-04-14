@@ -9,8 +9,8 @@ Requirements for this stabilization initiative. Each maps to exactly one roadmap
 
 ### Stabilization Safety
 
-- [ ] **STAB-01**: Maintainer can verify regression-sensitive UI-shell behavior through a repeatable verification path instead of relying on memory alone
-- [ ] **STAB-02**: Project continues to pass backend tests, wasm build, frontend typecheck, lint, unit tests, and production build at stabilization checkpoints
+- [x] **STAB-01**: Maintainer can verify regression-sensitive UI-shell behavior through a repeatable verification path instead of relying on memory alone
+- [x] **STAB-02**: Project continues to pass backend tests, wasm build, frontend typecheck, lint, unit tests, and production build at stabilization checkpoints
 
 ### Shell Architecture
 
@@ -68,8 +68,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| STAB-01 | Phase 1 | Pending |
-| STAB-02 | Phase 1 | Pending |
+| STAB-01 | Phase 1 | Complete |
+| STAB-02 | Phase 1 | Complete |
 | SHEL-01 | Phase 2 | Pending |
 | SHEL-02 | Phase 2 | Pending |
 | SHEL-03 | Phase 3 | Pending |
@@ -90,4 +90,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-04-12*
-*Last updated: 2026-04-12 after initial definition*
+*Last updated: 2026-04-14 after Phase 1 completion*
