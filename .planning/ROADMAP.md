@@ -10,7 +10,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions if needed during execution
 
-- [ ] **Phase 1: Guardrails and Regression Protection** - Lock in invariants, validation, and extraction seams before moving high-risk shell code
+- [x] **Phase 1: Guardrails and Regression Protection** - Lock in invariants, validation, and extraction seams before moving high-risk shell code (completed 2026-04-14)
 - [ ] **Phase 2: Shell Infrastructure and Delegation** - Introduce shared shell helpers and move top-level orchestration toward explicit module seams
 - [ ] **Phase 3: Section 3 and Standard VE Shell Extraction** - Extract Section 3 and standard VE shell behavior while preserving current standard-mode behavior
 - [ ] **Phase 4: GPS and Out-and-Back Shell Extraction** - Extract GPS-based shell behavior while preserving in-place updates and calibration correctness
@@ -32,7 +32,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 
 Plans:
 - [x] 01-01: Capture regression-sensitive UI-shell invariants and verification checklist
-- [ ] 01-02: Decide and wire the practical regression verification path for fragile browser flows
+- [x] 01-02: Decide and wire the practical regression verification path for fragile browser flows
 - [x] 01-03: Prepare the first `main.ts` delegation seams and extraction inventory
 
 ### Phase 2: Shell Infrastructure and Delegation
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Guardrails and Regression Protection | 2/3 | In Progress|  |
+| 1. Guardrails and Regression Protection | 3/3 | Complete   | 2026-04-14 |
 | 2. Shell Infrastructure and Delegation | 0/3 | Not started | - |
 | 3. Section 3 and Standard VE Shell Extraction | 0/3 | Not started | - |
 | 4. GPS and Out-and-Back Shell Extraction | 0/3 | Not started | - |
