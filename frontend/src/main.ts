@@ -62,6 +62,10 @@ import {
 } from './plots/MultiSegmentPlotBuilders';
 import { collectSelectionIndices, getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
 import init, { AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
+// @ts-expect-error Plan 02-03 will use these shell helpers
+import { getElement, getRequiredElement } from './shell/dom/elements'
+// @ts-expect-error Plan 02-03 will use these shell helpers
+import { getSelectedWindSource, bindWindSourceRadios } from './shell/dom/windSource'
 
 // Plotly.js type declaration
 declare const Plotly: any;
