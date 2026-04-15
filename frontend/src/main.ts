@@ -60,14 +60,15 @@ import {
     buildMultiSegmentVirtualDistanceFigure,
     buildMultiSegmentWindFigure,
 } from './plots/MultiSegmentPlotBuilders';
-import { collectSelectionIndices, getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
+import { getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
 import init, { AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
-// @ts-expect-error Task 2 will use these shell helpers
-import { getElement, getRequiredElement } from './shell/dom/elements'
-// @ts-expect-error Task 2 will use these shell helpers
 import { getSelectedWindSource, bindWindSourceRadios } from './shell/dom/windSource'
+import { setupTabSwitching } from './shell/dom/tabs'
+import { bindActionFooter } from './shell/dom/actionFooter'
 import { renderSection3Template } from './shell/section3'
 import { bindLapSelection, bindSelectAllButton } from './shell/section3'
+import { prepareAnalysisPayload } from './shell/analysis/prepareAnalysisPayload'
+import { createModeRenderCallbacks } from './shell/analysis/renderDelegates'
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -2647,21 +2648,12 @@ async function handleAnalyze() {
         }
 
         const normalizedArrays = getNormalizedActivityArrays(fitData);
-        const allTimestamps = normalizedArrays.timestamps;
-        const allPower = normalizedArrays.power;
-        const allVelocity = normalizedArrays.velocity;
-        const allPositionLat = normalizedArrays.positionLat;
-        const allPositionLong = normalizedArrays.positionLong;
-        const allAltitude = normalizedArrays.altitude;
-        const allDistance = normalizedArrays.distance;
         const hasWindYaw = normalizedArrays.windYaw.some((yaw: number) => !isNaN(yaw) && yaw !== 0);
         const initialWindResolution = resolveWindSeries({
             fitData,
             windSource: 'fit',
             applyOffset: false,
         });
-        const { defaultAirSpeedOffset } = initialWindResolution;
-        const allWindSpeed = initialWindResolution.windSpeed;
 
         if (initialWindResolution.dataSource === 'air_speed') {
             log.debug('🌬️ Found air speed data, using it as apparent wind speed');
@@ -2675,149 +2667,91 @@ async function handleAnalyze() {
             log.debug('🌬️ No air/wind speed data found, using constant wind as source');
         }
 
-        const allAirDensity = normalizedArrays.airDensity;
-        const allTemperature = normalizedArrays.temperature;
-
         const hasRoadSpeed = normalizedArrays.roadSpeed.some((v: number) => !isNaN(v) && v !== 0);
-        const hasEnhancedSpeed = allVelocity.some((v: number) => !isNaN(v) && v !== 0);
+        const hasEnhancedSpeed = normalizedArrays.velocity.some((v: number) => !isNaN(v) && v !== 0);
         if (hasRoadSpeed && hasEnhancedSpeed) {
             log.debug('🚴 Found enhanced speed and road speed, prefer road speed');
         }
 
-        const selectedIndices = collectSelectionIndices(selection, allTimestamps);
-
-        const filteredTimestamps: number[] = [];
-        const filteredPower: number[] = [];
-        const filteredVelocity: number[] = [];
-        const filteredPositionLat: number[] = [];
-        const filteredPositionLong: number[] = [];
-        const filteredAltitude: number[] = [];
-        const filteredDistance: number[] = [];
-        const filteredWindSpeed: number[] = [];
-        const filteredAirDensity: number[] = [];
-        const filteredTemperature: number[] = [];
-
-        for (const index of selectedIndices) {
-            filteredTimestamps.push(allTimestamps[index]);
-            filteredPower.push(allPower[index]);
-            filteredVelocity.push(allVelocity[index]);
-            filteredPositionLat.push(allPositionLat[index]);
-            filteredPositionLong.push(allPositionLong[index]);
-            filteredAltitude.push(allAltitude[index]);
-            filteredDistance.push(allDistance[index]);
-            filteredWindSpeed.push(allWindSpeed[index]);
-            filteredAirDensity.push(allAirDensity[index] || 0);
-            filteredTemperature.push(allTemperature[index] || 0);
-        }
-
-        if (filteredTimestamps.length === 0) {
-            throw new Error('No valid data points found in selected laps');
-        }
-
-        const powerDataPoints = filteredPower.filter(p => p > 0).length;
-        if (powerDataPoints < filteredTimestamps.length * 0.5) {
-            log.warn(`Only ${powerDataPoints}/${filteredTimestamps.length} records have power data`);
-        }
-
         showLoading('Running Virtual Elevation calculation...');
 
-        appState.currentRhoArray = null;
-        const hasAirDensityData = filteredAirDensity.length > 0 &&
-            filteredAirDensity.some(rho => !isNaN(rho) && rho > 0);
-
-        if (hasAirDensityData) {
-            log.debug('💨 Found air density data, using it for calculations');
-            appState.currentRhoArray = filteredAirDensity;
-        } else {
-            const hasEnvironmentalData = fitData.temperature && fitData.humidity && fitData.pressure;
-            if (hasEnvironmentalData) {
-                const fullRhoArray = calculateRhoArrayFromFitData(fitData);
-                if (fullRhoArray) {
-                    appState.currentRhoArray = selectedIndices.map(index => fullRhoArray[index]);
-                    log.debug('💨 Calculated air density from environmental data');
-                }
-            } else {
-                log.debug('💨 No air density found, using constant value from weather API');
-            }
-        }
-
-        const calculator = createVeCalculator({
-            timestamps: filteredTimestamps,
-            power: filteredPower,
-            velocity: filteredVelocity,
-            positionLat: filteredPositionLat,
-            positionLong: filteredPositionLong,
-            altitude: filteredAltitude,
-            distance: filteredDistance,
-            windSpeed: filteredWindSpeed,
-            rhoArray: appState.currentRhoArray,
+        const hasEnvironmentalData = !!(fitData.temperature && fitData.humidity && fitData.pressure);
+        const payload = prepareAnalysisPayload({
+            fitData,
+            selection,
             params: appState.currentParameters,
             cda: appState.currentParameters.cda,
             crr: appState.currentParameters.crr,
+            getNormalizedActivityArrays,
+            calculateRhoArray: (fd) => {
+                const currentNormalized = getNormalizedActivityArrays(fd);
+                const hasAirDensityData = currentNormalized.airDensity.some(rho => !isNaN(rho) && rho > 0);
+                if (hasAirDensityData) {
+                    log.debug('💨 Found air density data, using it for calculations');
+                    return currentNormalized.airDensity;
+                }
+
+                if (hasEnvironmentalData) {
+                    const calculated = calculateRhoArrayFromFitData(fd);
+                    if (calculated) {
+                        log.debug('💨 Calculated air density from environmental data');
+                    }
+                    return calculated;
+                }
+
+                log.debug('💨 No air density found, using constant value from weather API');
+                return null;
+            },
         });
 
-        const cda = appState.currentParameters.cda ?? 0.3;
-        const crr = appState.currentParameters.crr ?? 0.008;
-        const trimStart = 0;
-        const trimEnd = filteredTimestamps.length - 1;
-        const result = calculator.calculate_virtual_elevation(cda, crr, trimStart, trimEnd);
-
-        let filteredCdaReference: number[] | null = null;
-        if (normalizedArrays.cdaReference) {
-            log.debug('📊 Data has CdA reference - will enable validation tab');
-            filteredCdaReference = selectedIndices.map(index => normalizedArrays.cdaReference![index]);
+        const powerDataPoints = payload.filteredData.power.filter((p) => p > 0).length;
+        if (powerDataPoints < payload.filteredData.timestamps.length * 0.5) {
+            log.warn(`Only ${powerDataPoints}/${payload.filteredData.timestamps.length} records have power data`);
         }
 
         hideLoading();
 
+        appState.currentRhoArray = payload.rhoArray;
+        appState.currentVEResult = payload.initialResult;
         appState.filteredVEData = {
-            positionLat: filteredPositionLat,
-            positionLong: filteredPositionLong,
+            positionLat: payload.filteredData.positionLat,
+            positionLong: payload.filteredData.positionLong,
         };
 
         modeHandler.syncState(appState, selection);
+
+        const callbacks = createModeRenderCallbacks({
+            standard: ({ initialResult, analyzedLaps, timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, temperature, cdaReference, defaultAirSpeedOffset }) =>
+                showVirtualElevationAnalysisInline(
+                    initialResult,
+                    analyzedLaps,
+                    timestamps,
+                    power,
+                    velocity,
+                    positionLat,
+                    positionLong,
+                    altitude,
+                    distance,
+                    windSpeed,
+                    temperature,
+                    cdaReference,
+                    defaultAirSpeedOffset,
+                ),
+            gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
+                showGpsLapVEAnalysis(lapIndexRanges, fitData, params, defaultAirSpeedOffset),
+            outAndBack: ({ sections, fitData, params, defaultAirSpeedOffset }) =>
+                showOutAndBackVEAnalysis(sections, fitData, params, defaultAirSpeedOffset),
+        });
 
         await modeHandler.render({
             appState,
             selection,
             fitData,
             params: appState.currentParameters,
-            defaultAirSpeedOffset,
-            initialResult: result,
-            filteredData: {
-                timestamps: filteredTimestamps,
-                power: filteredPower,
-                velocity: filteredVelocity,
-                positionLat: filteredPositionLat,
-                positionLong: filteredPositionLong,
-                altitude: filteredAltitude,
-                distance: filteredDistance,
-                windSpeed: filteredWindSpeed,
-                temperature: filteredTemperature,
-                cdaReference: filteredCdaReference,
-            },
-            callbacks: {
-                standard: ({ initialResult, analyzedLaps, timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed, temperature, cdaReference, defaultAirSpeedOffset }) =>
-                    showVirtualElevationAnalysisInline(
-                        initialResult,
-                        analyzedLaps,
-                        timestamps,
-                        power,
-                        velocity,
-                        positionLat,
-                        positionLong,
-                        altitude,
-                        distance,
-                        windSpeed,
-                        temperature,
-                        cdaReference,
-                        defaultAirSpeedOffset,
-                    ),
-                gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
-                    showGpsLapVEAnalysis(lapIndexRanges, fitData, params, defaultAirSpeedOffset),
-                outAndBack: ({ sections, fitData, params, defaultAirSpeedOffset }) =>
-                    showOutAndBackVEAnalysis(sections, fitData, params, defaultAirSpeedOffset),
-            },
+            defaultAirSpeedOffset: payload.defaultAirSpeedOffset,
+            initialResult: payload.initialResult,
+            filteredData: payload.filteredData,
+            callbacks,
         });
     } catch (err) {
         log.error('Virtual Elevation analysis failed:', err);
@@ -2882,10 +2816,9 @@ async function showGpsLapVEAnalysis(
     const allDistance = normalizedArrays.distance;
 
     // Handle wind/air speed
-    const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
     const gpsLapWindResolution = resolveWindSeries({
         fitData,
-        windSource: windSourceRadio ? windSourceRadio.value : null,
+        windSource: getSelectedWindSource(),
         params: resolvedParams,
         airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
     });
@@ -3017,8 +2950,7 @@ async function showGpsLapVEAnalysis(
                             resolvedParams.wind_direction !== undefined;
 
     // Preserve current wind source selection if UI exists (for recalculations)
-    const currentWindSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
-    const preservedWindSource = currentWindSourceRadio ? currentWindSourceRadio.value : null;
+    const preservedWindSource = getSelectedWindSource();
 
     // Show the GPS lap VE analysis interface with wind data info
     showGpsLapVEPlot(lapVEProfiles, meanElevationProfile, resolvedParams, hasAirSpeed || hasWindSpeed, hasConstantWind, defaultAirSpeedOffset, preservedWindSource);
@@ -3270,15 +3202,16 @@ async function showGpsLapVEPlot(
     setupGpsLapSliderHandlers(params);
 
     // Setup tab switching
-    setupGpsLapTabSwitching(lapProfiles);
+    setupTabSwitching({
+        wind: () => renderGpsLapWindPlot(lapProfiles),
+        power: () => renderGpsLapPowerPlot(lapProfiles),
+        vd: () => renderGpsLapVdPlot(lapProfiles),
+    });
 
     // Setup wind source radio button listeners
-    const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
-    windSourceRadios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            log.debug('Wind source changed - triggering GPS lap VE recalculation');
-            recalculateGpsLapVE();
-        });
+    bindWindSourceRadios(() => {
+        log.debug('Wind source changed - triggering GPS lap VE recalculation');
+        recalculateGpsLapVE();
     });
 
     // Setup air speed calibration listeners
@@ -3292,8 +3225,7 @@ async function showGpsLapVEPlot(
             appState.airSpeedCalibrationPercent = value;
             void saveCurrentMultiSegmentSettings();
             log.debug('Air speed calibration changed - updating GPS lap VE plots');
-            const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null;
-            const windSource = windSourceRadio?.value ?? 'fit';
+            const windSource = getSelectedWindSource();
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
             void updateGpsLapVEPlots(cda, crr, windSource);
@@ -3308,8 +3240,7 @@ async function showGpsLapVEPlot(
             appState.airSpeedCalibrationPercent = clamped;
             void saveCurrentMultiSegmentSettings();
             log.debug('Air speed calibration changed - updating GPS lap VE plots');
-            const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null;
-            const windSource = windSourceRadio?.value ?? 'fit';
+            const windSource = getSelectedWindSource();
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
             void updateGpsLapVEPlots(cda, crr, windSource);
@@ -3335,8 +3266,7 @@ async function showGpsLapVEPlot(
                 appState.airSpeedCalibrationPercent = calibrationPercent;
                 void saveCurrentMultiSegmentSettings();
                 log.debug(`Auto-adjusted GPS lap air speed calibration to ${calibrationPercent.toFixed(1)}%`);
-                const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null;
-                const windSource = windSourceRadio?.value ?? 'fit';
+                const windSource = getSelectedWindSource();
                 const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
                 const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
                 void updateGpsLapVEPlots(cda, crr, windSource);
@@ -3344,29 +3274,12 @@ async function showGpsLapVEPlot(
         }
     }
 
-    // Setup screenshot button
-    const screenshotBtn = document.getElementById('saveScreenshot');
-    if (screenshotBtn) {
-        screenshotBtn.addEventListener('click', () => {
-            saveGpsLapScreenshot();
-        });
-    }
-
-    // Setup store result button
-    const storeBtn = document.getElementById('storeResult');
-    if (storeBtn) {
-        storeBtn.addEventListener('click', () => {
-            handleStoreResult();
-        });
-    }
-
-    // Setup export button
-    const exportBtn = document.getElementById('exportAllResults');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', () => {
-            handleExportAllResults();
-        });
-    }
+    // Setup action footer buttons
+    bindActionFooter({
+        onSaveScreenshot: () => { void saveGpsLapScreenshot(); },
+        onStoreResult: () => handleStoreResult(),
+        onExportAll: () => handleExportAllResults(),
+    });
 
     // Render the plots using the shared function
     renderGpsLapVEPlots(lapProfiles, meanElevation);
@@ -3490,8 +3403,7 @@ function setupGpsLapSliderHandlers(_params: AnalysisParameters) {
     const crrValue = document.getElementById('crrValue') as HTMLInputElement;
 
     const triggerRecalculation = () => {
-        const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null;
-        const windSource = windSourceRadio?.value ?? 'fit';
+        const windSource = getSelectedWindSource();
         const cda = parseFloat(cdaValue?.value || '0.3');
         const crr = parseFloat(crrValue?.value || '0.008');
         void updateGpsLapVEPlots(cda, crr, windSource);
@@ -3522,41 +3434,6 @@ function setupGpsLapSliderHandlers(_params: AnalysisParameters) {
             triggerRecalculation();
         });
     }
-}
-
-/**
- * Setup tab switching for GPS lap mode
- */
-function setupGpsLapTabSwitching(lapProfiles: LapVEProfile[]) {
-    const tabButtons = document.querySelectorAll('.ve-tab-button');
-    const showWindTab = !!document.getElementById('wind-tab');
-    const showVirtualDistanceTab = !!document.getElementById('vd-tab');
-
-    tabButtons.forEach(button => {
-        (button as HTMLButtonElement).onclick = (e) => {
-            const target = e.currentTarget as HTMLElement;
-            const tabName = target.getAttribute('data-tab');
-
-            // Update button states
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            target.classList.add('active');
-
-            // Update tab content
-            document.querySelectorAll('.ve-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(`${tabName}-tab`)?.classList.add('active');
-
-            // Render tab-specific content when switched to
-            if (tabName === 'wind' && showWindTab) {
-                renderGpsLapWindPlot(lapProfiles);
-            } else if (tabName === 'power') {
-                renderGpsLapPowerPlot(lapProfiles);
-            } else if (tabName === 'vd' && showVirtualDistanceTab) {
-                renderGpsLapVdPlot(lapProfiles);
-            }
-        };
-    });
 }
 
 /**
@@ -4194,53 +4071,39 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
     }
 
     // Set up tab switching
-    const tabButtons = document.querySelectorAll('.ve-tab-button');
-    tabButtons.forEach(button => {
-        button.addEventListener('click', (e) => {
-            const target = e.target as HTMLElement;
-            const tabName = target.getAttribute('data-tab');
-
-            // Update button states
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            target.classList.add('active');
-
-            // Update tab content
-            document.querySelectorAll('.ve-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(`${tabName}-tab`)?.classList.add('active');
-
+    setupTabSwitching({
+        wind: () => {
             const trimStart = parseInt((document.getElementById('trimStartSlider') as HTMLInputElement).value);
             const trimEnd = parseInt((document.getElementById('trimEndSlider') as HTMLInputElement).value);
-
-            // If switching to wind tab, create the wind plot
-            if (tabName === 'wind') {
-                setTimeout(() => {
-                    createWindSpeedPlot(analysisInput,trimStart, trimEnd, defaultAirSpeedOffset);
-                }, 100);
-            } else if (tabName === 'power') {
-                // Create speed & power plot
-                setTimeout(() => {
-                    createSpeedPowerPlot(analysisInput, trimStart, trimEnd);
-                }, 100);
-            } else if (tabName === 'vd') {
-                // Create virtual distance plot
-                setTimeout(() => {
-                    createVirtualDistancePlot(analysisInput,trimStart, trimEnd);
-                }, 100);
-            } else if (tabName === 've') {
-                // Resize VE plots when switching back
-                setTimeout(async () => {
-                    try {
-                        const Plotly = await waitForPlotly();
-                        Plotly.Plots.resize('vePlot');
-                        Plotly.Plots.resize('veResidualsPlot');
-                    } catch (error) {
-                        log.error('Failed to resize plots:', error);
-                    }
-                }, 100);
-            }
-        });
+            setTimeout(() => {
+                createWindSpeedPlot(analysisInput, trimStart, trimEnd, defaultAirSpeedOffset);
+            }, 100);
+        },
+        power: () => {
+            const trimStart = parseInt((document.getElementById('trimStartSlider') as HTMLInputElement).value);
+            const trimEnd = parseInt((document.getElementById('trimEndSlider') as HTMLInputElement).value);
+            setTimeout(() => {
+                createSpeedPowerPlot(analysisInput, trimStart, trimEnd);
+            }, 100);
+        },
+        vd: () => {
+            const trimStart = parseInt((document.getElementById('trimStartSlider') as HTMLInputElement).value);
+            const trimEnd = parseInt((document.getElementById('trimEndSlider') as HTMLInputElement).value);
+            setTimeout(() => {
+                createVirtualDistancePlot(analysisInput, trimStart, trimEnd);
+            }, 100);
+        },
+        ve: () => {
+            setTimeout(async () => {
+                try {
+                    const Plotly = await waitForPlotly();
+                    Plotly.Plots.resize('vePlot');
+                    Plotly.Plots.resize('veResidualsPlot');
+                } catch (error) {
+                    log.error('Failed to resize plots:', error);
+                }
+            }, 100);
+        },
     });
 
     // Set up sliders with real-time updates
@@ -4266,29 +4129,12 @@ async function initializeVEAnalysis(timestamps: number[], power: number[], veloc
         }
     }, 500);
 
-    // Set up Save Screenshot button
-    const saveScreenshotBtn = document.getElementById('saveScreenshot') as HTMLButtonElement;
-    if (saveScreenshotBtn) {
-        saveScreenshotBtn.addEventListener('click', async () => {
-            await handleSaveScreenshot();
-        });
-    }
-
-    // Set up Store Result button
-    const storeResultBtn = document.getElementById('storeResult') as HTMLButtonElement;
-    if (storeResultBtn) {
-        storeResultBtn.addEventListener('click', async () => {
-            await handleStoreResult();
-        });
-    }
-
-    // Set up Export All Results button
-    const exportAllBtn = document.getElementById('exportAllResults') as HTMLButtonElement;
-    if (exportAllBtn) {
-        exportAllBtn.addEventListener('click', async () => {
-            await handleExportAllResults();
-        });
-    }
+    // Set up action footer buttons
+    bindActionFooter({
+        onSaveScreenshot: () => { void handleSaveScreenshot(); },
+        onStoreResult: () => { void handleStoreResult(); },
+        onExportAll: () => { void handleExportAllResults(); },
+    });
 }
 
 // Handle Save Screenshot button click
@@ -4942,19 +4788,15 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
     crrValue.addEventListener('change', updateCrrFromInput);
 
     // Add wind source radio button listeners
-    const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
-    windSourceRadios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            const target = e.target as HTMLInputElement;
-            const windSource = target.value;
-            log.debug('Wind source changed to:', windSource);
+    bindWindSourceRadios(() => {
+        const windSource = getSelectedWindSource();
+        log.debug('Wind source changed to:', windSource);
 
-            const trimStart = parseInt(trimStartSlider.value);
-            const trimEnd = parseInt(trimEndSlider.value);
+        const trimStart = parseInt(trimStartSlider.value);
+        const trimEnd = parseInt(trimEndSlider.value);
 
-            // Update VE calculation with new wind source
-            updateVEPlotsWithWindSource(analysisInput, trimStart, trimEnd, windSource);
-        });
+        // Update VE calculation with new wind source
+        updateVEPlotsWithWindSource(analysisInput, trimStart, trimEnd, windSource);
     });
 
     // Add air speed calibration slider listeners (if available)
@@ -5251,8 +5093,7 @@ function setupVESliders(timestamps: number[], power: number[], velocity: number[
  */
 function updateVEPlots(analysisInput: AnalysisInput, trimStart: number, trimEnd: number) {
     // Check which wind source is currently selected
-    const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
-    const windSource = windSourceRadio ? windSourceRadio.value : 'fit';
+    const windSource = getSelectedWindSource();
 
     log.debug('updateVEPlots: Using wind source:', windSource);
 
@@ -5642,7 +5483,11 @@ async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string)
     appState.currentAnalyzedLaps = lapVEProfiles.map(lap => lap.lapNumber);
 
     renderGpsLapVEPlots(lapVEProfiles, meanElevation);
-    setupGpsLapTabSwitching(lapVEProfiles);
+    setupTabSwitching({
+        wind: () => renderGpsLapWindPlot(lapVEProfiles),
+        power: () => renderGpsLapPowerPlot(lapVEProfiles),
+        vd: () => renderGpsLapVdPlot(lapVEProfiles),
+    });
 
     const windTab = document.getElementById('wind-tab');
     if (windTab?.classList.contains('active')) {
@@ -5712,10 +5557,9 @@ async function showOutAndBackVEAnalysis(
     const allDistance = normalizedArrays.distance;
 
     // Handle wind/air speed via typed locals.
-    const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
     const outAndBackWindResolution = resolveWindSeries({
         fitData,
-        windSource: windSourceRadio ? windSourceRadio.value : null,
+        windSource: getSelectedWindSource(),
         params: resolvedParams,
         airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
     });
@@ -5884,8 +5728,7 @@ async function showOutAndBackVEAnalysis(
                             resolvedParams.wind_direction !== undefined;
 
     // Preserve current wind source selection if UI exists (for recalculations)
-    const currentWindSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
-    const preservedWindSource = currentWindSourceRadio ? currentWindSourceRadio.value : null;
+    const preservedWindSource = getSelectedWindSource();
 
     // Show the Out and Back VE analysis interface with wind data info
     showOutAndBackVEPlot(profiles, meanElevation, resolvedParams, hasAirSpeed || hasWindSpeed, hasConstantWind, defaultAirSpeedOffset, preservedWindSource);
@@ -6159,15 +6002,16 @@ async function showOutAndBackVEPlot(
     setupOutAndBackSliderSync();
 
     // Setup tab switching
-    setupOutAndBackTabSwitching(profiles, showWindTab, showVirtualDistanceTab);
+    setupTabSwitching({
+        wind: () => renderOutAndBackWindPlot(profiles),
+        power: () => renderOutAndBackPowerPlot(profiles),
+        vd: () => renderOutAndBackVdPlot(profiles),
+    });
 
     // Setup wind source radio button listeners
-    const windSourceRadios = document.querySelectorAll('input[name="windSource"]');
-    windSourceRadios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            log.debug('Wind source changed - triggering Out and Back VE recalculation');
-            recalculateOutAndBackVE();
-        });
+    bindWindSourceRadios(() => {
+        log.debug('Wind source changed - triggering Out and Back VE recalculation');
+        recalculateOutAndBackVE();
     });
 
     // Setup air speed calibration listeners
@@ -6231,29 +6075,12 @@ async function showOutAndBackVEPlot(
         }
     }
 
-    // Setup screenshot button
-    const screenshotBtn = document.getElementById('saveScreenshot');
-    if (screenshotBtn) {
-        screenshotBtn.addEventListener('click', () => {
-            saveOutAndBackScreenshot();
-        });
-    }
-
-    // Setup store result button
-    const storeBtn = document.getElementById('storeResult');
-    if (storeBtn) {
-        storeBtn.addEventListener('click', () => {
-            handleStoreResult();
-        });
-    }
-
-    // Setup export button
-    const exportBtn = document.getElementById('exportAllResults');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', () => {
-            handleExportAllResults();
-        });
-    }
+    // Setup action footer buttons
+    bindActionFooter({
+        onSaveScreenshot: () => { void saveOutAndBackScreenshot(); },
+        onStoreResult: () => handleStoreResult(),
+        onExportAll: () => handleExportAllResults(),
+    });
 
     // Initial plot render
     renderOutAndBackPlots(Plotly, profiles, meanElevation);
@@ -6329,38 +6156,6 @@ function setupOutAndBackSliderSync() {
             triggerRecalculation();
         });
     }
-}
-
-/**
- * Setup tab switching for Out and Back mode
- */
-function setupOutAndBackTabSwitching(profiles: OutAndBackVEProfile[], showWindTab: boolean, showVirtualDistanceTab: boolean) {
-    const tabButtons = document.querySelectorAll('.ve-tab-button');
-    tabButtons.forEach(button => {
-        button.addEventListener('click', (e) => {
-            const target = e.target as HTMLElement;
-            const tabName = target.getAttribute('data-tab');
-
-            // Update button states
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            target.classList.add('active');
-
-            // Update tab content
-            document.querySelectorAll('.ve-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(`${tabName}-tab`)?.classList.add('active');
-
-            // Render tab-specific content when switched to
-            if (tabName === 'wind' && showWindTab) {
-                renderOutAndBackWindPlot(profiles);
-            } else if (tabName === 'power') {
-                renderOutAndBackPowerPlot(profiles);
-            } else if (tabName === 'vd' && showVirtualDistanceTab) {
-                renderOutAndBackVdPlot(profiles);
-            }
-        });
-    });
 }
 
 function buildOutAndBackMultiSegmentSeries(profiles: OutAndBackVEProfile[]) {
@@ -6754,10 +6549,9 @@ async function updateOutAndBackVEPlots(cda: number, crr: number) {
     const allDistance = normalizedArrays.distance;
 
     // Handle wind/air speed via typed locals - check wind source selection
-    const windSourceRadio = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement;
     const outAndBackUpdateWindResolution = resolveWindSeries({
         fitData: appState.currentFitData,
-        windSource: windSourceRadio ? windSourceRadio.value : null,
+        windSource: getSelectedWindSource(),
         params: appState.currentParameters,
         airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
     });
