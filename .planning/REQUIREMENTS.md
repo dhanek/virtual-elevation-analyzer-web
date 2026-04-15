@@ -14,7 +14,7 @@ Requirements for this stabilization initiative. Each maps to exactly one roadmap
 
 ### Shell Architecture
 
-- [ ] **SHEL-01**: Maintainer can delegate top-level UI-shell orchestration through explicit shell modules instead of embedding those responsibilities throughout `frontend/src/main.ts`
+- [x] **SHEL-01**: Maintainer can delegate top-level UI-shell orchestration through explicit shell modules instead of embedding those responsibilities throughout `frontend/src/main.ts`
 - [x] **SHEL-02**: Maintainer has shared DOM, event, and template helpers for repeated dynamic shell patterns instead of re-implementing the same wiring per panel
 - [ ] **SHEL-03**: Maintainer can change Section 3 lap-selection and GPS-detection UI behavior without editing unrelated analysis-panel code in `frontend/src/main.ts`
 - [ ] **SHEL-04**: Maintainer can change standard VE panel shell behavior without editing unrelated GPS-lap or out-and-back shell code in `frontend/src/main.ts`
@@ -70,7 +70,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ----------- | ----- | ------ |
 | STAB-01 | Phase 1 | Complete |
 | STAB-02 | Phase 1 | Complete |
-| SHEL-01 | Phase 2 | Pending |
+| SHEL-01 | Phase 2 | Complete |
 | SHEL-02 | Phase 2 | Complete |
 | SHEL-03 | Phase 3 | Pending |
 | SHEL-04 | Phase 3 | Pending |
