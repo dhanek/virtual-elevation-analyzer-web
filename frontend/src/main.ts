@@ -62,10 +62,12 @@ import {
 } from './plots/MultiSegmentPlotBuilders';
 import { collectSelectionIndices, getAnalysisModeHandler } from './modes/analysis/AnalysisModes';
 import init, { AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js';
-// @ts-expect-error Plan 02-03 will use these shell helpers
+// @ts-expect-error Task 2 will use these shell helpers
 import { getElement, getRequiredElement } from './shell/dom/elements'
-// @ts-expect-error Plan 02-03 will use these shell helpers
+// @ts-expect-error Task 2 will use these shell helpers
 import { getSelectedWindSource, bindWindSourceRadios } from './shell/dom/windSource'
+import { renderSection3Template } from './shell/section3'
+import { bindLapSelection, bindSelectAllButton } from './shell/section3'
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -1375,20 +1377,6 @@ initializeApplication().catch(err => {
     showError(`Failed to initialize application: ${err.message}`);
 });
 
-function setupLapSelectionHandlers() {
-    const selectAllBtn = document.getElementById('selectAllLaps');
-    const lapList = document.getElementById('lapList');
-
-    if (selectAllBtn) {
-        selectAllBtn.addEventListener('click', toggleAllLaps);
-    }
-
-    if (lapList) {
-        lapList.addEventListener('change', handleLapSelection);
-        lapList.addEventListener('click', handleLapItemClick);
-    }
-}
-
 // ==================== GPS Lap Detection Functions ====================
 
 /**
@@ -2048,59 +2036,6 @@ function updateOutAndBackButtonState() {
     }
 }
 
-function toggleAllLaps() {
-    const checkboxes = document.querySelectorAll('.lap-checkbox') as NodeListOf<HTMLInputElement>;
-    const anySelected = Array.from(checkboxes).some(cb => cb.checked);
-
-    // If any are selected, deselect all; otherwise select all
-    checkboxes.forEach(cb => {
-        cb.checked = !anySelected;
-        const item = cb.closest('.lap-checkbox-item');
-        if (item) {
-            if (cb.checked) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
-            }
-        }
-    });
-
-    updateSelectedLaps();
-}
-
-function handleLapSelection(event: Event) {
-    if (event.target instanceof HTMLInputElement && event.target.classList.contains('lap-checkbox')) {
-        const item = event.target.closest('.lap-checkbox-item');
-        if (item) {
-            if (event.target.checked) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
-            }
-        }
-        updateSelectedLaps();
-    }
-}
-
-function handleLapItemClick(event: Event) {
-    if (!event.target) return;
-
-    const target = event.target as Element;
-    const item = target.closest('.lap-checkbox-item');
-    if (item && !target.classList.contains('lap-checkbox')) {
-        const checkbox = item.querySelector('.lap-checkbox') as HTMLInputElement;
-        if (checkbox) {
-            checkbox.checked = !checkbox.checked;
-            if (checkbox.checked) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
-            }
-            updateSelectedLaps();
-        }
-    }
-}
-
 function initializeMapTrimControls(dataLength: number) {
     const mapTrimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
     const mapTrimEndSlider = document.getElementById('mapTrimEndSlider') as HTMLInputElement;
@@ -2555,132 +2490,16 @@ function initializeSection3() {
     const showGpsLapDetection = hasGpsData && isGpsLapSelectionMode(lapDetectionMode);
     const showOutAndBack = hasGpsData && lapDetectionMode === 'GPS based out and back';
 
-    // Update the analysis section with map and lap selection (map only if GPS available)
-    // ALWAYS show FIT lap selection first, then GPS detection panel below if enabled
-    const analysisHtml = `
-        <div class="analysis-layout">
-            <div class="analysis-sidebar">
-                <!-- FIT Lap Selection (always shown) -->
-                <div class="lap-selection">
-                    <h4>Lap Selection</h4>
-                    <div class="lap-controls">
-                        <button class="select-all-btn" id="selectAllLaps">Select / Deselect All</button>
-                    </div>
-                    <div class="lap-list" id="lapList">
-                        ${laps.map((lap: any, index: number) => `
-                            <div class="lap-checkbox-item" data-lap="${index + 1}">
-                                <input type="checkbox" class="lap-checkbox" id="lap-${index + 1}">
-                                <div class="lap-info">
-                                    <div class="lap-number">Lap ${index + 1}</div>
-                                    <div class="lap-details">
-                                        ${formatDuration(lap.total_elapsed_time)} •
-                                        ${formatDistance(lap.total_distance)} •
-                                        ${lap.avg_power > 0 ? formatPower(lap.avg_power) : 'N/A'}
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-                ${showGpsLapDetection ? `
-                <!-- GPS Lap Detection Panel (shown below lap selection when enabled) -->
-                <div class="gps-lap-detection-panel" id="gpsLapDetectionPanel" style="margin-top: 0.5rem;">
-                    <h4>GPS Virtual Lap Detection</h4>
-                    <p style="font-size: 0.75rem; color: #666; margin-bottom: 0.5rem;">
-                        Select FIT laps above, then set gate position to detect virtual laps.
-                    </p>
-                    <div class="gps-gate-slider-controls" id="gpsGateSliderControls" style="display: none;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                            <label style="font-size: 0.85rem; white-space: nowrap;">Gate Position:</label>
-                            <input type="range" id="gpsGateSlider" min="0" max="100" value="5" step="1" style="flex: 1;">
-                            <input type="number" id="gpsGateValue" value="5" min="0" step="1" style="width: 50px; text-align: right;">
-                            <span style="font-size: 0.85rem;">s</span>
-                        </div>
-                        <div id="gpsGatePositionInfo" style="font-size: 0.75rem; color: #666;"></div>
-                    </div>
-                    <div id="gpsDetectedLapsInfo" style="margin-top: 1rem; display: none;">
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">
-                            Detected <span id="gpsLapCount">0</span> virtual laps
-                        </div>
-                        <div class="lap-list" id="gpsLapList" style="max-height: 200px; overflow-y: auto;">
-                            <!-- GPS detected laps will be populated here -->
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
-                ${showOutAndBack ? `
-                <!-- Out and Back Detection Panel -->
-                <div class="gps-lap-detection-panel" id="outAndBackPanel" style="margin-top: 0.5rem;">
-                    <h4>Out & Back Detection</h4>
-                    <p style="font-size: 0.75rem; color: #666; margin-bottom: 0.5rem;">
-                        Set two gates: A (start/end) and B (turnaround). B must be after A.
-                    </p>
-                    <div class="oab-gate-slider-controls" id="oabGateSliderControls" style="display: none;">
-                        <div style="margin-bottom: 0.75rem;">
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                                <label style="font-size: 0.85rem; white-space: nowrap; color: #00aa00; font-weight: 500;">Gate A:</label>
-                                <input type="range" id="oabGateASlider" min="0" max="100" value="5" step="1" style="flex: 1;">
-                                <input type="number" id="oabGateAValue" value="5" min="0" step="1" style="width: 50px; text-align: right;">
-                                <span style="font-size: 0.85rem;">s</span>
-                            </div>
-                            <div id="oabGateAInfo" style="font-size: 0.75rem; color: #666; margin-left: 3.5rem;"></div>
-                        </div>
-                        <div>
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                                <label style="font-size: 0.85rem; white-space: nowrap; color: #0066cc; font-weight: 500;">Gate B:</label>
-                                <input type="range" id="oabGateBSlider" min="0" max="100" value="60" step="1" style="flex: 1;">
-                                <input type="number" id="oabGateBValue" value="60" min="0" step="1" style="width: 50px; text-align: right;">
-                                <span style="font-size: 0.85rem;">s</span>
-                            </div>
-                            <div id="oabGateBInfo" style="font-size: 0.75rem; color: #666; margin-left: 3.5rem;"></div>
-                        </div>
-                    </div>
-                    <div id="outAndBackSectionsInfo" style="margin-top: 1rem; display: none;">
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">
-                            Detected <span id="outAndBackSectionCount">0</span> out-and-back sections
-                        </div>
-                        <div class="lap-list" id="outAndBackSectionList" style="max-height: 200px; overflow-y: auto;">
-                            <!-- Out and Back sections will be populated here -->
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
-                ${!showGpsLapDetection && !showOutAndBack ? `
-                <div class="map-trim-controls" id="mapTrimControls" style="display: none;">
-                    <div class="map-trim-group">
-                        <label>Trim Start:</label>
-                        <input type="range" id="mapTrimStartSlider" class="ve-slider-compact">
-                        <input type="number" id="mapTrimStartValue" class="ve-value-input-compact">
-                    </div>
-                    <div class="map-trim-group">
-                        <label>Trim End:</label>
-                        <input type="range" id="mapTrimEndSlider" class="ve-slider-compact">
-                        <input type="number" id="mapTrimEndValue" class="ve-value-input-compact">
-                    </div>
-                </div>
-                ` : ''}
-            </div>
-            ${hasGpsData ? `
-            <div class="analysis-main">
-                <div class="map-container">
-                    <div id="mapView"></div>
-                </div>
-            </div>
-            ` : `
-            <div class="analysis-main">
-                <div style="padding: 2rem; text-align: center; background: #f7fafc; border: 2px dashed #cbd5e0; border-radius: 8px;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">📍</div>
-                    <h3 style="margin-bottom: 0.5rem;">No GPS Data Available</h3>
-                    <p style="color: #718096; margin-bottom: 1rem;">This file contains power and speed data but no GPS coordinates.</p>
-                    <p style="color: #718096; margin: 0;">Velodrome mode has been automatically enabled (zero altitude reference).</p>
-                </div>
-            </div>
-            `}
-        </div>
-        <div class="analysis-actions" style="margin-top: 2rem;">
-            <button id="analyzeBtn" class="primary-btn" disabled>Select Laps to Analyze</button>
-        </div>
-    `;
+    // Generate Section 3 HTML using the shell template helper
+    const analysisHtml = renderSection3Template({
+        laps,
+        hasGpsData,
+        showGpsLapDetection,
+        showOutAndBack,
+        formatDuration,
+        formatDistance,
+        formatPower,
+    });
 
     const resultsDiv = analysisSection.querySelector('#results');
     if (resultsDiv) {
@@ -2710,8 +2529,12 @@ function initializeSection3() {
                 log.debug('No GPS data - skipping map initialization');
             }
 
-            // Always setup lap selection handlers (FIT laps always shown)
-            setupLapSelectionHandlers();
+            // Setup lap selection handlers using shell helpers
+            const lapListEl = document.getElementById('lapList');
+            if (lapListEl) {
+                bindLapSelection(lapListEl, () => updateSelectedLaps());
+                bindSelectAllButton('selectAllLaps', 'lapList', () => updateSelectedLaps());
+            }
             setupAnalyzeButton();
 
             log.debug('Section 3 initialized (GPS:', hasGpsData, ', GPS Lap Detection:', showGpsLapDetection, ', Out and Back:', showOutAndBack, ')');
