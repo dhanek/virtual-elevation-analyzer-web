@@ -12,7 +12,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 
 - [x] **Phase 1: Guardrails and Regression Protection** - Lock in invariants, validation, and extraction seams before moving high-risk shell code (completed 2026-04-14)
 - [x] **Phase 2: Shell Infrastructure and Delegation** - Introduce shared shell helpers and move top-level orchestration toward explicit module seams (completed 2026-04-15)
-- [ ] **Phase 3: Section 3 and Standard VE Shell Extraction** - Extract Section 3 and standard VE shell behavior while preserving current standard-mode behavior
+- [x] **Phase 3: Section 3 and Standard VE Shell Extraction** - Extract Section 3 and standard VE shell behavior while preserving current standard-mode behavior (completed 2026-04-16)
 - [ ] **Phase 4: GPS and Out-and-Back Shell Extraction** - Extract GPS-based shell behavior while preserving in-place updates and calibration correctness
 - [ ] **Phase 5: Closeout, Secondary Cleanup, and Roadmap Sync** - Finish the `main.ts` reduction, apply only justified secondary cleanup, and sync planning/docs
 
@@ -66,8 +66,8 @@ Plans:
 
 Plans:
 - [x] 03-01: Extract Section 3 lap-selection and GPS-detection shell behavior (completed 2026-04-15)
-- [ ] 03-02: Extract standard VE panel render, bind, and update shell behavior
-- [ ] 03-03: Re-integrate preserved standard-mode behaviors and checkpoint validation
+- [x] 03-02: Extract standard VE panel render, bind, and update shell behavior (completed 2026-04-16)
+- [x] 03-03: Re-integrate preserved standard-mode behaviors and checkpoint validation (completed 2026-04-16)
 
 ### Phase 4: GPS and Out-and-Back Shell Extraction
 **Goal**: Extract GPS-lap and out-and-back shell behavior into dedicated modules while preserving in-place updates, tab/scroll retention, and GPS calibration correctness
@@ -111,6 +111,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Guardrails and Regression Protection | 3/3 | Complete    | 2026-04-14 |
 | 2. Shell Infrastructure and Delegation | 3/3 | Complete   | 2026-04-15 |
-| 3. Section 3 and Standard VE Shell Extraction | 0/3 | Not started | - |
+| 3. Section 3 and Standard VE Shell Extraction | 3/3 | Complete    | 2026-04-16 |
 | 4. GPS and Out-and-Back Shell Extraction | 0/3 | Not started | - |
 | 5. Closeout, Secondary Cleanup, and Roadmap Sync | 0/2 | Not started | - |
