@@ -3,3 +3,5 @@
  */
 export * from './renderSection3Template';
 export * from './bindLapSelection';
+export * from './bindGpsDetection';
+export * from './bindOutAndBackDetection';

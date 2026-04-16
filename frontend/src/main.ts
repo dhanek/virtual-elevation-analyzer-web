@@ -65,8 +65,13 @@ import init, { AirDensityCalculator } from '../pkg/virtual_elevation_analyzer.js
 import { getSelectedWindSource, bindWindSourceRadios } from './shell/dom/windSource'
 import { setupTabSwitching } from './shell/dom/tabs'
 import { bindActionFooter } from './shell/dom/actionFooter'
-import { renderSection3Template } from './shell/section3'
-import { bindLapSelection, bindSelectAllButton } from './shell/section3'
+import {
+    renderSection3Template,
+    bindLapSelection,
+    bindSelectAllButton,
+    bindGpsDetection,
+    bindOutAndBackDetection
+} from './shell/section3'
 import { prepareAnalysisPayload } from './shell/analysis/prepareAnalysisPayload'
 import { createModeRenderCallbacks } from './shell/analysis/renderDelegates'
 
@@ -1378,112 +1383,6 @@ initializeApplication().catch(err => {
     showError(`Failed to initialize application: ${err.message}`);
 });
 
-// ==================== GPS Lap Detection Functions ====================
-
-/**
- * Setup GPS lap detection UI and handlers (slider-based gate positioning)
- */
-async function setupGpsLapDetection() {
-    if (!mapVisualization || !appState.currentFitData) return;
-
-    const sliderControls = document.getElementById('gpsGateSliderControls');
-    const gateSlider = document.getElementById('gpsGateSlider') as HTMLInputElement;
-    const gateValue = document.getElementById('gpsGateValue') as HTMLInputElement;
-    const gatePositionInfo = document.getElementById('gpsGatePositionInfo');
-
-    if (!sliderControls || !gateSlider || !gateValue) {
-        log.warn('GPS lap detection slider controls not found in DOM');
-        return;
-    }
-
-    // Calculate the duration of selected data
-    const timeRange = getSelectedDataTimeRange();
-    const { duration } = timeRange;
-
-    // Set slider max to duration in seconds
-    const maxSeconds = Math.floor(duration);
-    if (maxSeconds <= 0) {
-        log.warn('Invalid duration for GPS lap detection:', maxSeconds);
-        return;
-    }
-
-    gateSlider.max = String(maxSeconds);
-    gateValue.max = String(maxSeconds);
-
-    // Show slider controls
-    sliderControls.style.display = 'block';
-
-    // Load saved gate position or use default
-    let initialOffset = 5; // Default 5 seconds
-    if (appState.currentFileHash) {
-        try {
-            const savedMarker = await parameterStorage.loadGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps);
-            if (savedMarker && savedMarker.gateTimeOffset !== undefined) {
-                initialOffset = savedMarker.gateTimeOffset;
-                log.debug('Loading saved GPS gate time offset:', initialOffset);
-            }
-        } catch (err) {
-            log.error('Failed to load saved GPS marker settings:', err);
-        }
-    }
-
-    // Clamp to valid range
-    initialOffset = Math.max(0, Math.min(initialOffset, maxSeconds));
-    gateSlider.value = String(initialOffset);
-    gateValue.value = String(initialOffset);
-
-    // Helper to update gate position and run detection
-    const updateGatePosition = async (timeOffset: number) => {
-        // Re-fetch current time range to handle lap selection changes
-        const currentTimeRange = getSelectedDataTimeRange();
-        // Find the data index for this time offset
-        const gateIndex = findDataIndexAtTimeOffset(timeOffset, currentTimeRange.startTime);
-        if (gateIndex === null) return;
-
-        const lat = appState.currentFitData!.position_lat[gateIndex];
-        const lon = appState.currentFitData!.position_long[gateIndex];
-
-        if (lat && lon && lat !== 0 && lon !== 0) {
-            // Update position info display
-            if (gatePositionInfo) {
-                gatePositionInfo.textContent = `Position: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-            }
-
-            // Show marker on map
-            mapVisualization?.setGpsMarker(lat, lon);
-
-            // Save settings
-            if (appState.currentFileHash) {
-                try {
-                    await parameterStorage.saveGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps, {
-                        gateTimeOffset: timeOffset
-                    });
-                } catch (err) {
-                    log.error('Failed to save GPS marker settings:', err);
-                }
-            }
-
-            // Run lap detection
-            runGpsLapDetection(lat, lon, gateIndex);
-        }
-    };
-
-    gateSlider.oninput = () => {
-        gateValue.value = gateSlider.value;
-        void updateGatePosition(parseInt(gateSlider.value));
-    };
-
-    gateValue.onchange = () => {
-        const maxSecondsNow = parseInt(gateSlider.max);
-        const val = Math.max(0, Math.min(parseInt(gateValue.value) || 0, maxSecondsNow));
-        gateValue.value = String(val);
-        gateSlider.value = String(val);
-        void updateGatePosition(val);
-    };
-
-    // Initial detection with loaded/default offset
-    void updateGatePosition(initialOffset);
-}
 
 /**
  * Get the time range of currently selected data (from selected FIT laps)
@@ -1695,166 +1594,6 @@ function handleGpsLapSelectionChange() {
     updateAnalyzeButton();
 }
 
-// ==================== Out and Back Detection Functions ====================
-
-/**
- * Setup Out and Back detection UI and handlers (slider-based gate positioning)
- */
-async function setupOutAndBackDetection() {
-    if (!mapVisualization || !appState.currentFitData) return;
-
-    const sliderControls = document.getElementById('oabGateSliderControls');
-    const gateASlider = document.getElementById('oabGateASlider') as HTMLInputElement;
-    const gateAValue = document.getElementById('oabGateAValue') as HTMLInputElement;
-    const gateAInfo = document.getElementById('oabGateAInfo');
-    const gateBSlider = document.getElementById('oabGateBSlider') as HTMLInputElement;
-    const gateBValue = document.getElementById('oabGateBValue') as HTMLInputElement;
-    const gateBInfo = document.getElementById('oabGateBInfo');
-
-    if (!sliderControls || !gateASlider || !gateAValue || !gateBSlider || !gateBValue) {
-        log.warn('Out and Back slider controls not found in DOM');
-        return;
-    }
-
-    // Calculate the duration of selected data
-    const timeRange = getSelectedDataTimeRange();
-    const { duration } = timeRange;
-
-    // Set slider max to duration in seconds
-    const maxSeconds = Math.floor(duration);
-    if (maxSeconds <= 0) {
-        log.warn('Invalid duration for Out and Back detection:', maxSeconds);
-        return;
-    }
-
-    gateASlider.max = String(maxSeconds);
-    gateAValue.max = String(maxSeconds);
-    gateBSlider.max = String(maxSeconds);
-    gateBValue.max = String(maxSeconds);
-
-    // Show slider controls
-    sliderControls.style.display = 'block';
-
-    // Load saved gate positions or use defaults
-    let initialOffsetA = 5;  // Default 5 seconds
-    let initialOffsetB = Math.min(60, maxSeconds - 5);  // Default 60 seconds or near end
-    if (appState.currentFileHash) {
-        try {
-            const savedMarkers = await parameterStorage.loadOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps);
-            if (savedMarkers && savedMarkers.gateATimeOffset !== undefined && savedMarkers.gateBTimeOffset !== undefined) {
-                initialOffsetA = savedMarkers.gateATimeOffset;
-                initialOffsetB = savedMarkers.gateBTimeOffset;
-                log.debug('Loading saved Out and Back gate time offsets:', { A: initialOffsetA, B: initialOffsetB });
-            }
-        } catch (err) {
-            log.error('Failed to load saved Out and Back marker settings:', err);
-        }
-    }
-
-    // Clamp to valid range
-    initialOffsetA = Math.max(0, Math.min(initialOffsetA, maxSeconds - 1));
-    initialOffsetB = Math.max(initialOffsetA + 1, Math.min(initialOffsetB, maxSeconds));
-    gateASlider.value = String(initialOffsetA);
-    gateAValue.value = String(initialOffsetA);
-    gateBSlider.value = String(initialOffsetB);
-    gateBValue.value = String(initialOffsetB);
-
-    // Helper to get gate position info from time offset (uses current startTime from closure)
-    const getGatePosition = (timeOffset: number) => {
-        // Re-fetch current time range to handle lap selection changes
-        const currentTimeRange = getSelectedDataTimeRange();
-        const gateIndex = findDataIndexAtTimeOffset(timeOffset, currentTimeRange.startTime);
-        if (gateIndex === null) return null;
-
-        const lat = appState.currentFitData!.position_lat[gateIndex];
-        const lon = appState.currentFitData!.position_long[gateIndex];
-
-        if (lat && lon && lat !== 0 && lon !== 0) {
-            return { lat, lon, index: gateIndex };
-        }
-        return null;
-    };
-
-    // Helper to update gates and run detection
-    const updateGates = async () => {
-        const offsetA = parseInt(gateASlider.value);
-        const offsetB = parseInt(gateBSlider.value);
-
-        const posA = getGatePosition(offsetA);
-        const posB = getGatePosition(offsetB);
-
-        // Update info displays
-        if (gateAInfo && posA) {
-            gateAInfo.textContent = `Position: ${posA.lat.toFixed(5)}, ${posA.lon.toFixed(5)}`;
-        }
-        if (gateBInfo && posB) {
-            gateBInfo.textContent = `Position: ${posB.lat.toFixed(5)}, ${posB.lon.toFixed(5)}`;
-        }
-
-        // Update markers on map
-        if (posA) mapVisualization?.setGpsMarkerA(posA.lat, posA.lon);
-        if (posB) mapVisualization?.setGpsMarkerB(posB.lat, posB.lon);
-
-        // Save settings
-        if (appState.currentFileHash) {
-            try {
-                await parameterStorage.saveOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps, {
-                    gateATimeOffset: offsetA,
-                    gateBTimeOffset: offsetB
-                });
-            } catch (err) {
-                log.error('Failed to save Out and Back marker settings:', err);
-            }
-        }
-
-        // Run detection if both positions are valid
-        if (posA && posB) {
-            runOutAndBackDetection(posA.lat, posA.lon, posB.lat, posB.lon);
-        }
-    };
-
-    gateASlider.oninput = () => {
-        let val = parseInt(gateASlider.value);
-        const maxA = parseInt(gateBSlider.value) - 1;
-        if (val >= maxA) {
-            val = maxA;
-            gateASlider.value = String(val);
-        }
-        gateAValue.value = String(val);
-        void updateGates();
-    };
-
-    gateAValue.onchange = () => {
-        const maxA = parseInt(gateBSlider.value) - 1;
-        const val = Math.max(0, Math.min(parseInt(gateAValue.value) || 0, maxA));
-        gateAValue.value = String(val);
-        gateASlider.value = String(val);
-        void updateGates();
-    };
-
-    gateBSlider.oninput = () => {
-        let val = parseInt(gateBSlider.value);
-        const minB = parseInt(gateASlider.value) + 1;
-        if (val <= minB) {
-            val = minB;
-            gateBSlider.value = String(val);
-        }
-        gateBValue.value = String(val);
-        void updateGates();
-    };
-
-    gateBValue.onchange = () => {
-        const maxSecondsNow = parseInt(gateBSlider.max);
-        const minB = parseInt(gateASlider.value) + 1;
-        const val = Math.max(minB, Math.min(parseInt(gateBValue.value) || 0, maxSecondsNow));
-        gateBValue.value = String(val);
-        gateBSlider.value = String(val);
-        void updateGates();
-    };
-
-    // Initial detection with loaded/default offsets
-    void updateGates();
-}
 
 /**
  * Run Out and Back detection algorithm
@@ -2020,7 +1759,11 @@ function updateOutAndBackButtonState() {
 
     if (appState.selectedLaps.length > 0) {
         // FIT laps are selected - setup and show slider controls
-        setupOutAndBackDetection();
+        void bindOutAndBackDetection(appState, parameterStorage, mapVisualization, {
+            getSelectedDataTimeRange,
+            findDataIndexAtTimeOffset,
+            runOutAndBackDetection
+        });
     } else {
         // No FIT laps selected - hide slider controls
         if (sliderControls) sliderControls.style.display = 'none';
@@ -2080,7 +1823,11 @@ function updateGpsMarkerButtonState() {
 
     if (appState.selectedLaps.length > 0) {
         // FIT laps are selected - setup and show slider controls
-        setupGpsLapDetection();
+        void bindGpsDetection(appState, parameterStorage, mapVisualization, {
+            getSelectedDataTimeRange,
+            findDataIndexAtTimeOffset,
+            runGpsLapDetection
+        });
     } else {
         // No FIT laps selected - hide slider controls
         if (sliderControls) sliderControls.style.display = 'none';
@@ -2519,12 +2266,20 @@ function initializeSection3() {
 
                 // Setup GPS lap detection if enabled
                 if (showGpsLapDetection) {
-                    setupGpsLapDetection();
+                    void bindGpsDetection(appState, parameterStorage, mapVisualization, {
+                        getSelectedDataTimeRange,
+                        findDataIndexAtTimeOffset,
+                        runGpsLapDetection
+                    });
                 }
 
                 // Setup Out and Back detection if enabled
                 if (showOutAndBack) {
-                    setupOutAndBackDetection();
+                    void bindOutAndBackDetection(appState, parameterStorage, mapVisualization, {
+                        getSelectedDataTimeRange,
+                        findDataIndexAtTimeOffset,
+                        runOutAndBackDetection
+                    });
                 }
             } else {
                 log.debug('No GPS data - skipping map initialization');

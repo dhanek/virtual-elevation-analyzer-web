@@ -65,7 +65,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: Extract Section 3 lap-selection and GPS-detection shell behavior
+- [x] 03-01: Extract Section 3 lap-selection and GPS-detection shell behavior (completed 2026-04-15)
 - [ ] 03-02: Extract standard VE panel render, bind, and update shell behavior
 - [ ] 03-03: Re-integrate preserved standard-mode behaviors and checkpoint validation
 
