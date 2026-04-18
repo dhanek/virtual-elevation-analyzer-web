@@ -541,7 +541,7 @@ export async function showOutAndBackVEPlot(
     renderOutAndBackPlots(Plotly, profiles, meanElevation);
 
     // Scroll to the VE analysis section
-    veSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    veSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /**
