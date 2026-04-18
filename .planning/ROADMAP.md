@@ -82,7 +82,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: Extract GPS-lap shell render, tab, and update behavior
+- [x] 04-01: Extract GPS-lap shell render, tab, and update behavior
 - [ ] 04-02: Extract out-and-back shell render and update behavior
 - [ ] 04-03: Validate preserved GPS in-place update and calibration behavior at checkpoint depth
 
