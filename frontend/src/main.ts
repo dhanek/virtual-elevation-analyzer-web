@@ -38,8 +38,18 @@ import {
     buildSegmentSupplementarySeries,
     type SegmentSupplementarySeries,
 } from './analysis/SegmentSupplementarySeries';
-import { resolveMultiSegmentSettings } from './analysis/MultiSegmentSettings';
+import {
+    resolveMultiSegmentAnalysisParams,
+    saveCurrentMultiSegmentSettings,
+    saveMapTrimSettings,
+    buildAutoCalibrationSegmentsFromRanges,
+} from './analysis/MultiSegmentSettings';
 import { extractSegmentData } from './analysis/SegmentExtractor';
+import {
+    getMultiSegmentColor,
+    interpolateElevation,
+} from './shell/multiSegment/shared';
+import { showGpsLapVEAnalysis } from './shell/gpsLap';
 import { createVeCalculator } from './analysis/VeCalculatorFactory';
 import { resolveWindSeries } from './analysis/WindSourceResolver';
 import {
@@ -79,42 +89,6 @@ const MIN_TRIM_WINDOW_SAMPLES = 30;
 
 function isGpsLapSelectionMode(lapDetectionMode: string | null | undefined): boolean {
     return lapDetectionMode === 'GPS based lap splitting' || lapDetectionMode === 'GPS gate one way';
-}
-
-function buildAutoCalibrationSegmentsFromRanges(
-    indexRanges: Array<{ startIdx: number; endIdx: number }>,
-) {
-    if (!appState.currentFitData) {
-        return [];
-    }
-
-    const normalizedArrays = getNormalizedActivityArrays(appState.currentFitData);
-    const uncalibratedWindSpeed = resolveWindSeries({
-        fitData: appState.currentFitData,
-        windSource: 'fit',
-        applyOffset: false,
-        airSpeedCalibrationPercent: 0,
-    }).windSpeed;
-
-    return indexRanges
-        .map(range => extractSegmentData({
-            startIdx: range.startIdx,
-            endIdx: range.endIdx,
-            allTimestamps: normalizedArrays.timestamps,
-            allPower: normalizedArrays.power,
-            allVelocity: normalizedArrays.velocity,
-            allPositionLat: normalizedArrays.positionLat,
-            allPositionLong: normalizedArrays.positionLong,
-            allAltitude: normalizedArrays.altitude,
-            allDistance: normalizedArrays.distance,
-            allWindSpeed: uncalibratedWindSpeed,
-        }))
-        .filter(segment => segment.timestamps.length > 1)
-        .map(segment => ({
-            timestamps: segment.timestamps,
-            groundSpeed: segment.velocity,
-            apparentSpeed: segment.windSpeed,
-        }));
 }
 
 // Helper function to dynamically load and wait for Plotly
@@ -1734,7 +1708,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
             }
 
             // Save map trim settings
-            saveMapTrimSettings();
+            saveMapTrimSettings(appState, parameterStorage);
         });
 
         newMapTrimEndSlider.addEventListener('input', () => {
@@ -1748,7 +1722,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
             }
 
             // Save map trim settings
-            saveMapTrimSettings();
+            saveMapTrimSettings(appState, parameterStorage);
         });
 
         newMapTrimStartValue.addEventListener('change', () => {
@@ -1766,7 +1740,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
                 }
 
                 // Save map trim settings
-                saveMapTrimSettings();
+                saveMapTrimSettings(appState, parameterStorage);
             }
         });
 
@@ -1784,7 +1758,7 @@ async function initializeMapTrimControlsForSelectedLaps() {
                 }
 
                 // Save map trim settings
-                saveMapTrimSettings();
+                saveMapTrimSettings(appState, parameterStorage);
             }
         });
 
@@ -2198,7 +2172,16 @@ async function handleAnalyze() {
                     args.defaultAirSpeedOffset,
                 ),
             gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
-                showGpsLapVEAnalysis(lapIndexRanges, fitData, params, defaultAirSpeedOffset),
+                showGpsLapVEAnalysis(
+                    { appState, showLoading, hideLoading, showError },
+                    parameterStorage,
+                    resultsStorage,
+                    waitForPlotly,
+                    lapIndexRanges,
+                    fitData,
+                    params,
+                    defaultAirSpeedOffset,
+                ),
             outAndBack: ({ sections, fitData, params, defaultAirSpeedOffset }) =>
                 showOutAndBackVEAnalysis(sections, fitData, params, defaultAirSpeedOffset),
         });
@@ -2219,1299 +2202,6 @@ async function handleAnalyze() {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         showError(`Virtual Elevation analysis failed: ${errorMessage}`);
     }
-}
-
-// ==================== GPS Lap VE Analysis ====================
-
-const MULTI_SEGMENT_COLORS = [
-    '#4363d8',
-    '#e6194b',
-    '#3cb44b',
-    '#f58231',
-    '#911eb4',
-    '#46f0f0',
-    '#f032e6',
-    '#bcf60c',
-];
-
-interface LapVEProfile {
-    lapNumber: number;
-    distances: number[];      // km, relative to gate crossing (starting at 0)
-    virtualElevation: number[];
-    actualElevation: number[];
-    supplementarySeries: SegmentSupplementarySeries;
-    duration: number;         // seconds
-    totalDistance: number;    // km
-}
-
-/**
- * Calculate VE for each GPS-detected lap and show stacked plot
- */
-async function showGpsLapVEAnalysis(
-    lapIndexRanges: Array<{ startIdx: number; endIdx: number }>,
-    fitData: any,
-    params: AnalysisParameters,
-    defaultAirSpeedOffset: number,
-    reuseCurrentSettings: boolean = false,
-) {
-    showLoading('Calculating VE for each lap...');
-
-    const analyzedLapNumbers = lapIndexRanges.map((range, index) =>
-        getGpsLapNumberForRange(range, index + 1),
-    );
-    const resolvedParams = await resolveMultiSegmentAnalysisParams(
-        analyzedLapNumbers,
-        params,
-        reuseCurrentSettings,
-    );
-    const lapVEProfiles: LapVEProfile[] = [];
-
-    const normalizedArrays = getNormalizedActivityArrays(fitData);
-    const allTimestamps = normalizedArrays.timestamps;
-    const allPower = normalizedArrays.power;
-    const allVelocity = normalizedArrays.velocity;
-    const allPositionLat = normalizedArrays.positionLat;
-    const allPositionLong = normalizedArrays.positionLong;
-    const allAltitude = normalizedArrays.altitude;
-    const allDistance = normalizedArrays.distance;
-
-    // Handle wind/air speed
-    const gpsLapWindResolution = resolveWindSeries({
-        fitData,
-        windSource: getSelectedWindSource(),
-        params: resolvedParams,
-        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
-    });
-    const {
-        hasAirSpeed,
-        hasWindSpeed,
-        defaultAirSpeedOffset: defaultOffset,
-        windSpeed: allWindSpeed,
-    } = gpsLapWindResolution;
-    const windSpeedOffset = resolvedParams.air_speed_offset ?? defaultOffset;
-
-    if (gpsLapWindResolution.selectedWindSource === 'constant') {
-        log.debug('GPS Lap VE: Using constant wind settings');
-    } else if (gpsLapWindResolution.dataSource === 'air_speed') {
-        log.debug(`GPS Lap VE: Using FIT air speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
-    } else if (gpsLapWindResolution.dataSource === 'wind_speed') {
-        log.debug(`GPS Lap VE: Using FIT wind speed data (offset: ${windSpeedOffset}s, calibration: ${appState.airSpeedCalibrationPercent}%)`);
-    } else {
-        log.debug('GPS Lap VE: No wind data available');
-    }
-
-    // Get CdA and Crr values
-    const cda = resolvedParams.cda ?? 0.3;
-    const crr = resolvedParams.crr ?? 0.008;
-
-    // Calculate VE for each lap
-    for (let lapIdx = 0; lapIdx < lapIndexRanges.length; lapIdx++) {
-        const range = lapIndexRanges[lapIdx];
-        const lapNumber = analyzedLapNumbers[lapIdx] ?? (lapIdx + 1);
-
-        // Extract data for this lap
-        const lapTimestamps: number[] = [];
-        const lapPower: number[] = [];
-        const lapVelocity: number[] = [];
-        const lapPositionLat: number[] = [];
-        const lapPositionLong: number[] = [];
-        const lapAltitude: number[] = [];
-        const lapDistance: number[] = [];
-        const lapWindSpeed: number[] = [];
-
-        for (let i = range.startIdx; i <= range.endIdx && i < allTimestamps.length; i++) {
-            lapTimestamps.push(allTimestamps[i]);
-            lapPower.push(allPower[i]);
-            lapVelocity.push(allVelocity[i]);
-            lapPositionLat.push(allPositionLat[i]);
-            lapPositionLong.push(allPositionLong[i]);
-            lapAltitude.push(allAltitude[i]);
-            lapDistance.push(allDistance[i]);
-            lapWindSpeed.push(allWindSpeed[i]);
-        }
-
-        if (lapTimestamps.length < 10) {
-            log.warn(`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`);
-            continue;
-        }
-
-        const supplementarySeries = buildSegmentSupplementarySeries({
-            timestamps: lapTimestamps,
-            power: lapPower,
-            velocity: lapVelocity,
-            positionLat: lapPositionLat,
-            positionLong: lapPositionLong,
-            distance: lapDistance,
-            windSpeed: lapWindSpeed,
-            params: resolvedParams,
-            selectedWindSource: gpsLapWindResolution.selectedWindSource,
-        });
-        const relativeDistances = supplementarySeries.distancesKm;
-
-        // Calculate duration
-        const duration = lapTimestamps[lapTimestamps.length - 1] - lapTimestamps[0];
-        const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
-
-        try {
-            const calculator = createVeCalculator({
-                timestamps: lapTimestamps,
-                power: lapPower,
-                velocity: lapVelocity,
-                positionLat: lapPositionLat,
-                positionLong: lapPositionLong,
-                altitude: lapAltitude,
-                distance: lapDistance,
-                windSpeed: lapWindSpeed,
-                params: resolvedParams,
-                cda,
-                crr,
-            });
-
-            // Calculate VE for full lap
-            const result = calculator.calculate_virtual_elevation(cda, crr, 0, lapTimestamps.length - 1);
-
-            // Extract VE values
-            const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-            // Get actual elevation (use zeros for velodrome mode)
-            const actualElevation = resolvedParams.velodrome
-                ? new Array(lapAltitude.length).fill(0)
-                : lapAltitude;
-
-            lapVEProfiles.push({
-                lapNumber,
-                distances: relativeDistances,
-                virtualElevation: veArray,
-                actualElevation: actualElevation,
-                supplementarySeries,
-                duration,
-                totalDistance
-            });
-
-            log.debug(`Lap ${lapNumber}: ${totalDistance.toFixed(2)} km, ${duration.toFixed(0)}s, ${veArray.length} points`);
-
-        } catch (err) {
-            log.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
-        }
-    }
-
-    hideLoading();
-
-    if (lapVEProfiles.length === 0) {
-        showError('No valid laps to analyze');
-        return;
-    }
-
-    // Calculate mean actual elevation profile
-    const meanElevationProfile = calculateMeanElevationProfile(lapVEProfiles);
-
-    // Check for constant wind settings
-    const hasConstantWind = resolvedParams.wind_speed !== undefined && resolvedParams.wind_speed !== 0 &&
-                            resolvedParams.wind_direction !== undefined;
-
-    // Preserve current wind source selection if UI exists (for recalculations)
-    const preservedWindSource = getSelectedWindSource();
-
-    // Show the GPS lap VE analysis interface with wind data info
-    showGpsLapVEPlot(lapVEProfiles, meanElevationProfile, resolvedParams, hasAirSpeed || hasWindSpeed, hasConstantWind, defaultAirSpeedOffset, preservedWindSource);
-}
-
-/**
- * Calculate mean actual elevation profile across all laps
- */
-function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): { distances: number[]; elevation: number[] } {
-    if (lapProfiles.length === 0) {
-        return { distances: [], elevation: [] };
-    }
-
-    // Find maximum lap distance
-    let maxDistance = 0;
-    for (const lap of lapProfiles) {
-        const lapMax = lap.distances[lap.distances.length - 1];
-        if (lapMax > maxDistance) maxDistance = lapMax;
-    }
-
-    // Create reference distance array with ~10m intervals
-    const numPoints = Math.max(100, Math.floor(maxDistance * 100)); // 10m resolution
-    const referenceDistances: number[] = [];
-    for (let i = 0; i <= numPoints; i++) {
-        referenceDistances.push((i / numPoints) * maxDistance);
-    }
-
-    // Accumulate elevation values
-    const elevationSum = new Array(referenceDistances.length).fill(0);
-    const elevationCount = new Array(referenceDistances.length).fill(0);
-
-    for (const lap of lapProfiles) {
-        // Interpolate this lap's elevation onto the reference distances
-        for (let i = 0; i < referenceDistances.length; i++) {
-            const targetDist = referenceDistances[i];
-
-            // Only interpolate within this lap's range
-            if (targetDist > lap.distances[lap.distances.length - 1]) continue;
-
-            // Find bracketing points
-            let lowIdx = 0;
-            for (let j = 0; j < lap.distances.length - 1; j++) {
-                if (lap.distances[j] <= targetDist && lap.distances[j + 1] >= targetDist) {
-                    lowIdx = j;
-                    break;
-                }
-            }
-
-            // Linear interpolation
-            const d0 = lap.distances[lowIdx];
-            const d1 = lap.distances[lowIdx + 1] || d0;
-            const e0 = lap.actualElevation[lowIdx];
-            const e1 = lap.actualElevation[lowIdx + 1] || e0;
-
-            const t = (d1 !== d0) ? (targetDist - d0) / (d1 - d0) : 0;
-            const interpolatedElevation = e0 + t * (e1 - e0);
-
-            if (!isNaN(interpolatedElevation)) {
-                elevationSum[i] += interpolatedElevation;
-                elevationCount[i]++;
-            }
-        }
-    }
-
-    // Calculate mean
-    const meanElevation: number[] = [];
-    for (let i = 0; i < referenceDistances.length; i++) {
-        if (elevationCount[i] > 0) {
-            meanElevation.push(elevationSum[i] / elevationCount[i]);
-        } else {
-            // Use previous value or 0
-            meanElevation.push(meanElevation.length > 0 ? meanElevation[meanElevation.length - 1] : 0);
-        }
-    }
-
-    return { distances: referenceDistances, elevation: meanElevation };
-}
-
-/**
- * Show the GPS lap VE stacked plot with full controls (matching normal mode)
- */
-async function showGpsLapVEPlot(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] },
-    params: AnalysisParameters,
-    hasWindSpeed: boolean,
-    hasConstantWind: boolean,
-    defaultAirSpeedOffset: number,
-    preservedWindSource: string | null = null
-) {
-    const selectedWindSource = preservedWindSource || (hasWindSpeed ? 'fit' : 'constant');
-    const effectiveWindSource = selectedWindSource === 'compare' ? 'fit' : selectedWindSource;
-    const showWindTab = hasWindSpeed || hasConstantWind;
-    const showFitWindControls = hasWindSpeed && effectiveWindSource === 'fit';
-    const showVirtualDistanceTab = showFitWindControls;
-    // Ensure Plotly is loaded (side effect only; Plotly is accessed via the
-    // global in downstream helpers).
-    await waitForPlotly();
-
-    // Show the VE analysis section
-    const veSection = document.getElementById('veAnalysisSection') as HTMLElement;
-    if (veSection) {
-        veSection.classList.remove('hidden', 'inactive');
-    }
-
-    const veAnalysisContent = document.getElementById('veAnalysisContent') as HTMLElement;
-    if (!veAnalysisContent) {
-        log.error('VE analysis content container not found');
-        return;
-    }
-
-    // Calculate initial statistics
-    const initialStats = calculateGpsLapStats(lapProfiles, meanElevation);
-    const currentAirSpeedCalibrationValue = formatAirSpeedCalibrationPercent(appState.airSpeedCalibrationPercent);
-
-    // Create full interface with controls sidebar for GPS lap mode (matching normal mode)
-    veAnalysisContent.innerHTML = `
-        <div class="ve-inline-container">
-            <div class="ve-layout">
-                <!-- Controls Sidebar -->
-                <div class="ve-controls-sidebar">
-                    <div class="ve-controls-scrollable">
-                        <div class="ve-controls">
-                            <h4>Analysis Parameters</h4>
-                            <div class="ve-control-grid">
-                                <div class="ve-control-group">
-                                    <label>CdA (Drag Coefficient × Area):</label>
-                                    <input type="range" id="cdaSlider" min="${params.cda_min}" max="${params.cda_max}" value="${params.cda || 0.3}" step="0.001" class="ve-slider">
-                                    <input type="number" id="cdaValue" value="${(params.cda || 0.3).toFixed(3)}" min="${params.cda_min}" max="${params.cda_max}" step="0.001" class="ve-value-input">
-                                </div>
-                                <div class="ve-control-group">
-                                    <label>Crr (Rolling Resistance):</label>
-                                    <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
-                                    <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
-                                </div>
-                            </div>
-
-                            ${(hasWindSpeed || hasConstantWind) ? `
-                            <div class="ve-wind-source">
-                                <h4>Wind Source</h4>
-                                <div class="ve-radio-group">
-                                    <label class="ve-radio-label">
-                                        <input type="radio" name="windSource" value="constant" ${selectedWindSource === 'constant' ? 'checked' : ''}>
-                                        <span>Use constant wind settings</span>
-                                    </label>
-                                    ${hasWindSpeed ? `
-                                    <label class="ve-radio-label">
-                                        <input type="radio" name="windSource" value="fit" ${selectedWindSource === 'fit' ? 'checked' : ''}>
-                                        <span>Use FIT file wind data</span>
-                                    </label>
-                                    <label class="ve-radio-label">
-                                        <input type="radio" name="windSource" value="compare" ${selectedWindSource === 'compare' ? 'checked' : ''}>
-                                        <span>Compare both methods</span>
-                                    </label>
-                                    ` : ''}
-                                </div>
-                            </div>
-                            ` : ''}
-
-                            ${hasWindSpeed ? `
-                            <div class="ve-parameter">
-                                <div class="ve-param-header">
-                                    <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="${currentAirSpeedCalibrationValue}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           style="width: 60px; text-align: right;" />
-                                    <span>%</span>
-                                </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${currentAirSpeedCalibrationValue}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
-                            </div>
-                            ` : ''}
-                        </div>
-                    </div>
-
-                    <div class="ve-sidebar-footer">
-                        <button id="saveScreenshot" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Save Screenshot</button>
-                        <button id="storeResult" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Store Result</button>
-                        <button id="exportAllResults" class="secondary-btn" style="width: 100%; font-size: 0.9rem;">Export All Results to CSV</button>
-                    </div>
-                </div>
-
-                <!-- Plots Main Area -->
-                <div class="ve-plots-main">
-                    <div class="ve-plots">
-                        <div class="ve-tabs">
-                            <button class="ve-tab-button active" data-tab="ve">VE</button>
-                            ${showWindTab ? `
-                            <button class="ve-tab-button" data-tab="wind">Wind</button>
-                            ` : ''}
-                            <button class="ve-tab-button" data-tab="power">Power</button>
-                            ${showVirtualDistanceTab ? `
-                            <button class="ve-tab-button" data-tab="vd">VD</button>
-                            ` : ''}
-                        </div>
-
-                        <div class="ve-tab-content active" id="ve-tab">
-                            <div class="ve-metrics-compact">
-                                Mean R²:<span id="gpsLapR2Value">${initialStats.meanR2.toFixed(4)}</span> |
-                                Mean RMSE:<span id="gpsLapRmseValue">${initialStats.meanRMSE.toFixed(2)}m</span> |
-                                Closing Error:<span id="gpsLapClosingErrorValue">${initialStats.closingError.toFixed(2)}m</span> |
-                                Laps:<span id="gpsLapCountValue">${lapProfiles.length}</span>
-                            </div>
-                            <div class="ve-plot-container">
-                                <div id="gpsLapVePlot" style="width: 100%; height: 380px;"></div>
-                            </div>
-                            <div class="ve-plot-container">
-                                <div id="gpsLapResidualPlot" style="width: 100%; height: 200px;"></div>
-                            </div>
-                            <div class="ve-lap-summary" style="margin-top: 1rem; padding: 1rem; background: #f7fafc; border-radius: 4px;">
-                                <h4 style="margin-bottom: 0.5rem;">Detected Laps Summary</h4>
-                                <div id="gpsLapSummaryTable"></div>
-                            </div>
-                        </div>
-
-                        ${showWindTab ? `
-                        <div class="ve-tab-content" id="wind-tab">
-                            <div id="gpsLapWindPlot" class="ve-plot" style="height: 600px;"></div>
-                            ${showFitWindControls ? `
-                            <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
-                                <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
-                                <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
-                                    <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}"
-                                           style="width: 100%;" />
-                                    <input type="number" id="airSpeedOffsetValue" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
-                                           style="width: 60px; text-align: right;" />
-                                    <span style="font-weight: 500;">seconds</span>
-                                </div>
-                            </div>
-                            ` : ''}
-                        </div>
-                        ` : ''}
-
-                        <div class="ve-tab-content" id="power-tab">
-                            <div id="gpsLapPowerPlot" class="ve-plot" style="height: 600px;"></div>
-                        </div>
-
-                        ${showVirtualDistanceTab ? `
-                        <div class="ve-tab-content" id="vd-tab">
-                            <div id="gpsLapVdPlot" class="ve-plot" style="height: 600px;"></div>
-                        </div>
-                        ` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Setup slider event handlers for CdA/Crr with recalculation
-    setupGpsLapSliderHandlers(params);
-
-    // Setup tab switching
-    setupTabSwitching({
-        wind: () => renderGpsLapWindPlot(lapProfiles),
-        power: () => renderGpsLapPowerPlot(lapProfiles),
-        vd: () => renderGpsLapVdPlot(lapProfiles),
-    });
-
-    // Setup wind source radio button listeners
-    bindWindSourceRadios(() => {
-        log.debug('Wind source changed - triggering GPS lap VE recalculation');
-        recalculateGpsLapVE();
-    });
-
-    // Setup air speed calibration listeners
-    const airSpeedCalibrationSlider = document.getElementById('airSpeedCalibrationSlider') as HTMLInputElement;
-    const airSpeedCalibrationValue = document.getElementById('airSpeedCalibrationValue') as HTMLInputElement;
-
-    if (airSpeedCalibrationSlider && airSpeedCalibrationValue) {
-        const updateAirSpeedCalibration = () => {
-            const value = parseFloat(airSpeedCalibrationSlider.value);
-            airSpeedCalibrationValue.value = value.toFixed(1);
-            appState.airSpeedCalibrationPercent = value;
-            void saveCurrentMultiSegmentSettings();
-            log.debug('Air speed calibration changed - updating GPS lap VE plots');
-            const windSource = getSelectedWindSource();
-            const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
-            const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
-            void updateGpsLapVEPlots(cda, crr, windSource);
-        };
-
-        const updateAirSpeedCalibrationFromInput = () => {
-            const value = parseFloat(airSpeedCalibrationValue.value);
-            if (isNaN(value)) return;
-            const clamped = clampAirSpeedCalibrationPercent(value);
-            airSpeedCalibrationSlider.value = clamped.toString();
-            airSpeedCalibrationValue.value = clamped.toFixed(1);
-            appState.airSpeedCalibrationPercent = clamped;
-            void saveCurrentMultiSegmentSettings();
-            log.debug('Air speed calibration changed - updating GPS lap VE plots');
-            const windSource = getSelectedWindSource();
-            const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
-            const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
-            void updateGpsLapVEPlots(cda, crr, windSource);
-        };
-
-        airSpeedCalibrationSlider.addEventListener('input', updateAirSpeedCalibration);
-        airSpeedCalibrationValue.addEventListener('change', updateAirSpeedCalibrationFromInput);
-
-        const autoAdjustButton = document.getElementById('autoAdjustCalibration') as HTMLButtonElement;
-        if (autoAdjustButton) {
-            autoAdjustButton.addEventListener('click', () => {
-                const calibrationPercent = calculateAutoAirSpeedCalibrationPercent(
-                    buildAutoCalibrationSegmentsFromRanges(appState.currentGpsLapIndexRanges ?? []),
-                );
-
-                if (calibrationPercent === null) {
-                    log.warn('Cannot auto-adjust GPS lap calibration: no usable FIT air speed data available');
-                    return;
-                }
-
-                airSpeedCalibrationSlider.value = calibrationPercent.toFixed(1);
-                airSpeedCalibrationValue.value = calibrationPercent.toFixed(1);
-                appState.airSpeedCalibrationPercent = calibrationPercent;
-                void saveCurrentMultiSegmentSettings();
-                log.debug(`Auto-adjusted GPS lap air speed calibration to ${calibrationPercent.toFixed(1)}%`);
-                const windSource = getSelectedWindSource();
-                const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
-                const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
-                void updateGpsLapVEPlots(cda, crr, windSource);
-            });
-        }
-    }
-
-    // Setup action footer buttons
-    bindActionFooter({
-        onSaveScreenshot: () => { void saveGpsLapScreenshot(); },
-        onStoreResult: () => { void handleStoreResult(appState, resultsStorage); },
-        onExportAll: () => { void handleExportAllResults(resultsStorage); },
-    });
-
-    // Render the plots using the shared function
-    renderGpsLapVEPlots(lapProfiles, meanElevation);
-
-    // Scroll to the VE analysis section
-    veSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    log.debug(`GPS Lap VE plot rendered with ${lapProfiles.length} laps`);
-}
-
-/**
- * Calculate statistics for GPS lap VE analysis
- */
-function calculateGpsLapStats(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
-): { meanR2: number; meanRMSE: number; avgVeGain: number; avgActualGain: number; closingError: number; lapClosingErrors: number[] } {
-    if (lapProfiles.length === 0) {
-        return { meanR2: 0, meanRMSE: 0, avgVeGain: 0, avgActualGain: 0, closingError: 0, lapClosingErrors: [] };
-    }
-
-    let totalR2 = 0;
-    let totalRMSE = 0;
-    let totalVeGain = 0;
-    let totalActualGain = 0;
-    const lapClosingErrors: number[] = [];  // Per-lap closing errors
-
-    for (const lap of lapProfiles) {
-        // Calculate R² and RMSE for this lap against mean elevation
-        let sumSquaredResiduals = 0;
-        let sumSquaredTotal = 0;
-        const startElevation = meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
-        const veOffset = lap.virtualElevation[0] - startElevation;
-        const calibratedVE = lap.virtualElevation.map(v => v - veOffset);
-
-        // Calculate VE gain for this lap (end - start of calibrated VE)
-        // For GPS laps, this should be ~0 since we return to the same point
-        let lapVeChange = 0;
-        if (calibratedVE.length > 1) {
-            lapVeChange = calibratedVE[calibratedVE.length - 1] - calibratedVE[0];
-            totalVeGain += lapVeChange;
-        }
-        lapClosingErrors.push(lapVeChange);
-
-        // Calculate actual elevation gain for this lap
-        if (lap.actualElevation.length > 1) {
-            totalActualGain += lap.actualElevation[lap.actualElevation.length - 1] - lap.actualElevation[0];
-        }
-
-        // Interpolate mean elevation at each lap distance point
-        let meanElevSum = 0;
-        let count = 0;
-        for (let i = 0; i < lap.distances.length; i++) {
-            const dist = lap.distances[i];
-            let interpMeanElev = 0;
-            for (let k = 0; k < meanElevation.distances.length - 1; k++) {
-                if (meanElevation.distances[k] <= dist && meanElevation.distances[k + 1] >= dist) {
-                    const t = (dist - meanElevation.distances[k]) /
-                              (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-                    interpMeanElev = meanElevation.elevation[k] + t *
-                                     (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-                    break;
-                }
-            }
-            const residual = calibratedVE[i] - interpMeanElev;
-            sumSquaredResiduals += residual * residual;
-            meanElevSum += interpMeanElev;
-            count++;
-        }
-
-        const meanMeanElev = count > 0 ? meanElevSum / count : 0;
-        for (let i = 0; i < lap.distances.length; i++) {
-            const dist = lap.distances[i];
-            let interpMeanElev = 0;
-            for (let k = 0; k < meanElevation.distances.length - 1; k++) {
-                if (meanElevation.distances[k] <= dist && meanElevation.distances[k + 1] >= dist) {
-                    const t = (dist - meanElevation.distances[k]) /
-                              (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-                    interpMeanElev = meanElevation.elevation[k] + t *
-                                     (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-                    break;
-                }
-            }
-            sumSquaredTotal += Math.pow(interpMeanElev - meanMeanElev, 2);
-        }
-
-        const r2 = sumSquaredTotal > 0 ? 1 - (sumSquaredResiduals / sumSquaredTotal) : 0;
-        const rmse = count > 0 ? Math.sqrt(sumSquaredResiduals / count) : 0;
-
-        totalR2 += Math.max(0, r2); // Clamp negative R² to 0
-        totalRMSE += rmse;
-    }
-
-    // Also calculate mean elevation gain from the mean profile
-    let meanProfileGain = 0;
-    if (meanElevation.elevation.length > 1) {
-        meanProfileGain = meanElevation.elevation[meanElevation.elevation.length - 1] - meanElevation.elevation[0];
-    }
-
-    // Calculate closing error as sum of absolute VE changes per lap
-    // For GPS laps, each lap should return to 0, so any deviation is an error
-    const closingError = lapClosingErrors.reduce((sum, err) => sum + Math.abs(err), 0);
-
-    return {
-        meanR2: totalR2 / lapProfiles.length,
-        meanRMSE: totalRMSE / lapProfiles.length,
-        avgVeGain: totalVeGain / lapProfiles.length,
-        avgActualGain: meanProfileGain,  // Use mean profile gain as the reference
-        closingError: closingError,
-        lapClosingErrors: lapClosingErrors
-    };
-}
-
-/**
- * Setup slider event handlers for GPS lap mode (uses standard slider IDs)
- */
-function setupGpsLapSliderHandlers(_params: AnalysisParameters) {
-    const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
-    const cdaValue = document.getElementById('cdaValue') as HTMLInputElement;
-    const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
-    const crrValue = document.getElementById('crrValue') as HTMLInputElement;
-
-    const triggerRecalculation = () => {
-        const windSource = getSelectedWindSource();
-        const cda = parseFloat(cdaValue?.value || '0.3');
-        const crr = parseFloat(crrValue?.value || '0.008');
-        void updateGpsLapVEPlots(cda, crr, windSource);
-    };
-
-    if (cdaSlider && cdaValue) {
-        cdaSlider.addEventListener('input', () => {
-            cdaValue.value = parseFloat(cdaSlider.value).toFixed(3);
-            void saveCurrentMultiSegmentSettings();
-            triggerRecalculation();
-        });
-        cdaValue.addEventListener('change', () => {
-            cdaSlider.value = cdaValue.value;
-            void saveCurrentMultiSegmentSettings();
-            triggerRecalculation();
-        });
-    }
-
-    if (crrSlider && crrValue) {
-        crrSlider.addEventListener('input', () => {
-            crrValue.value = parseFloat(crrSlider.value).toFixed(4);
-            void saveCurrentMultiSegmentSettings();
-            triggerRecalculation();
-        });
-        crrValue.addEventListener('change', () => {
-            crrSlider.value = crrValue.value;
-            void saveCurrentMultiSegmentSettings();
-            triggerRecalculation();
-        });
-    }
-}
-
-/**
- * Recalculate GPS lap VE with updated CdA/Crr values
- */
-async function recalculateGpsLapVE() {
-    if (!appState.currentFitData || !appState.currentParameters) {
-        log.error('Cannot recalculate: missing data or parameters');
-        return;
-    }
-
-    const cdaValueEl = document.getElementById('cdaValue') as HTMLInputElement;
-    const crrValueEl = document.getElementById('crrValue') as HTMLInputElement;
-
-    if (!cdaValueEl || !crrValueEl) return;
-
-    const newCda = parseFloat(cdaValueEl.value);
-    const newCrr = parseFloat(crrValueEl.value);
-
-    // Get the selected GPS lap index ranges
-    const selectedGpsLaps = appState.gpsDetectedLaps.filter(lap =>
-        appState.gpsSelectedLaps.includes(lap.lapNumber)
-    );
-    const selectedLapIndexRanges = selectedGpsLaps.map(lap => ({
-        startIdx: lap.startIdx,
-        endIdx: lap.endIdx
-    }));
-
-    if (selectedLapIndexRanges.length === 0) {
-        log.error('No GPS laps selected for recalculation');
-        return;
-    }
-
-    // Update parameters with new values
-    const updatedParams = { ...appState.currentParameters, cda: newCda, crr: newCrr };
-
-    // Recalculate
-    showLoading('Recalculating VE with new parameters...');
-
-    try {
-        await showGpsLapVEAnalysis(
-            selectedLapIndexRanges,
-            appState.currentFitData,
-            updatedParams,
-            appState.currentParameters.air_speed_offset ?? 2,
-            true,
-        );
-    } catch (err) {
-        log.error('Recalculation failed:', err);
-        hideLoading();
-    }
-}
-
-/**
- * Save GPS lap VE plot as screenshot
- */
-async function saveGpsLapScreenshot() {
-    const plotElement = document.getElementById('gpsLapVePlot');
-    if (!plotElement) return;
-
-    try {
-        const Plotly = await waitForPlotly();
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        await Plotly.downloadImage('gpsLapVePlot', {
-            format: 'png',
-            width: 1200,
-            height: 600,
-            filename: `gps-lap-ve-${timestamp}`
-        });
-    } catch (err) {
-        log.error('Failed to save screenshot:', err);
-    }
-}
-
-function getMultiSegmentColor(index: number): string {
-    return MULTI_SEGMENT_COLORS[index % MULTI_SEGMENT_COLORS.length];
-}
-
-/**
- * Render stacked Wind plot for GPS lap mode
- */
-function renderGpsLapWindPlot(lapProfiles: LapVEProfile[]) {
-    const Plotly = (window as any).Plotly;
-    if (!Plotly) return;
-
-    const plotDiv = document.getElementById('gpsLapWindPlot');
-    if (!plotDiv) return;
-
-    const figure = buildMultiSegmentWindFigure({
-        title: 'Apparent Wind Speed by Lap',
-        series: lapProfiles.map((lap, index) => ({
-            label: `Lap ${lap.lapNumber}`,
-            color: getMultiSegmentColor(index),
-            metrics: lap.supplementarySeries,
-        })),
-    });
-
-    Plotly.newPlot('gpsLapWindPlot', figure.data, figure.layout, figure.config);
-}
-
-/**
- * Render stacked Power plot for GPS lap mode
- */
-function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
-    const Plotly = (window as any).Plotly;
-    if (!Plotly) return;
-
-    const plotDiv = document.getElementById('gpsLapPowerPlot');
-    if (!plotDiv) return;
-
-    const figure = buildMultiSegmentPowerFigure({
-        title: 'Power by Lap',
-        series: lapProfiles.map((lap, index) => ({
-            label: `Lap ${lap.lapNumber}`,
-            color: getMultiSegmentColor(index),
-            metrics: lap.supplementarySeries,
-        })),
-    });
-
-    Plotly.newPlot('gpsLapPowerPlot', figure.data, figure.layout, figure.config);
-}
-
-/**
- * Render stacked VD plot for GPS lap mode
- */
-function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
-    const Plotly = (window as any).Plotly;
-    if (!Plotly) return;
-
-    const plotDiv = document.getElementById('gpsLapVdPlot');
-    if (!plotDiv) return;
-
-    const figure = buildMultiSegmentVirtualDistanceFigure({
-        title: 'Virtual Distance Difference by Lap',
-        series: lapProfiles.map((lap, index) => ({
-            label: `Lap ${lap.lapNumber}`,
-            color: getMultiSegmentColor(index),
-            metrics: lap.supplementarySeries,
-        })),
-    });
-
-    Plotly.newPlot('gpsLapVdPlot', figure.data, figure.layout, figure.config);
-}
-
-/**
- * Render GPS lap VE plots (extracted for reuse during recalculation)
- */
-function renderGpsLapVEPlots(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
-) {
-    const Plotly = (window as any).Plotly;
-    if (!Plotly) return;
-
-    // Color palette for laps
-    const lapColors = [
-        '#4363d8',  // Blue
-        '#e6194b',  // Red
-        '#3cb44b',  // Green
-        '#f58231',  // Orange
-        '#911eb4',  // Purple
-        '#46f0f0',  // Cyan
-        '#f032e6',  // Magenta
-        '#bcf60c',  // Lime
-    ];
-
-    // Find maximum distance for axis
-    let maxDist = 0;
-    for (const lap of lapProfiles) {
-        const lapMax = lap.distances[lap.distances.length - 1];
-        if (lapMax > maxDist) maxDist = lapMax;
-    }
-
-    // Build plot traces
-    const veTraces: any[] = [];
-    const residualTraces: any[] = [];
-
-    // Add mean elevation trace (dashed black line)
-    if (meanElevation.distances.length > 0) {
-        veTraces.push({
-            x: meanElevation.distances,
-            y: meanElevation.elevation,
-            mode: 'lines',
-            name: 'Mean Elevation',
-            line: { color: 'black', dash: 'dash', width: 2 }
-        });
-    }
-
-    // Add VE traces for each lap
-    for (let i = 0; i < lapProfiles.length; i++) {
-        const lap = lapProfiles[i];
-        const color = lapColors[i % lapColors.length];
-
-        // Calibrate VE to match mean elevation at start
-        const startElevation = meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
-        const veOffset = lap.virtualElevation[0] - startElevation;
-        const calibratedVE = lap.virtualElevation.map(v => v - veOffset);
-
-        // VE trace
-        veTraces.push({
-            x: lap.distances,
-            y: calibratedVE,
-            mode: 'lines',
-            name: `Lap ${lap.lapNumber}`,
-            line: { color: color, width: 3 }
-        });
-
-        // Calculate residuals (VE - interpolated mean elevation)
-        const residuals: number[] = [];
-        const residualDistances: number[] = [];
-
-        for (let j = 0; j < lap.distances.length; j++) {
-            const dist = lap.distances[j];
-            // Interpolate mean elevation at this distance
-            let meanElev = 0;
-            if (meanElevation.distances.length > 0) {
-                for (let k = 0; k < meanElevation.distances.length - 1; k++) {
-                    if (meanElevation.distances[k] <= dist && meanElevation.distances[k + 1] >= dist) {
-                        const t = (dist - meanElevation.distances[k]) /
-                                  (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-                        meanElev = meanElevation.elevation[k] + t *
-                                   (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-                        break;
-                    }
-                }
-            }
-            residuals.push(calibratedVE[j] - meanElev);
-            residualDistances.push(dist);
-        }
-
-        // Residual trace
-        residualTraces.push({
-            x: residualDistances,
-            y: residuals,
-            mode: 'lines',
-            name: `Lap ${lap.lapNumber}`,
-            line: { color: color, width: 2 },
-            showlegend: false
-        });
-    }
-
-    // Main VE plot layout
-    const veLayout = {
-        title: 'Virtual Elevation by Lap',
-        xaxis: {
-            title: 'Distance from Gate (km)',
-            range: [0, maxDist]
-        },
-        yaxis: {
-            title: 'Elevation (m)'
-        },
-        legend: {
-            orientation: 'h',
-            y: -0.2
-        },
-        margin: { t: 40, b: 80, l: 60, r: 20 },
-        hovermode: 'closest'
-    };
-
-    // Residual plot layout
-    const residualLayout = {
-        title: 'VE Residuals (VE - Mean Elevation)',
-        xaxis: {
-            title: 'Distance from Gate (km)',
-            range: [0, maxDist]
-        },
-        yaxis: {
-            title: 'Residual (m)'
-        },
-        margin: { t: 40, b: 60, l: 60, r: 20 },
-        hovermode: 'closest',
-        shapes: [{
-            type: 'line',
-            x0: 0,
-            x1: maxDist,
-            y0: 0,
-            y1: 0,
-            line: { color: 'black', width: 1 }
-        }]
-    };
-
-    // Render plots
-    Plotly.newPlot('gpsLapVePlot', veTraces, veLayout, { responsive: true });
-    Plotly.newPlot('gpsLapResidualPlot', residualTraces, residualLayout, { responsive: true });
-
-    // Update statistics
-    const stats = calculateGpsLapStats(lapProfiles, meanElevation);
-    const r2Span = document.getElementById('gpsLapR2Value');
-    const rmseSpan = document.getElementById('gpsLapRmseValue');
-    const closingErrorSpan = document.getElementById('gpsLapClosingErrorValue');
-    if (r2Span) r2Span.textContent = stats.meanR2.toFixed(4);
-    if (rmseSpan) rmseSpan.textContent = stats.meanRMSE.toFixed(2) + 'm';
-    if (closingErrorSpan) closingErrorSpan.textContent = stats.closingError.toFixed(2) + 'm';
-
-    // Populate lap summary table
-    const summaryTable = document.getElementById('gpsLapSummaryTable');
-    if (summaryTable) {
-        let tableHtml = `
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-                <thead>
-                    <tr style="border-bottom: 2px solid #e2e8f0;">
-                        <th style="text-align: left; padding: 0.5rem;">Lap</th>
-                        <th style="text-align: right; padding: 0.5rem;">Duration</th>
-                        <th style="text-align: right; padding: 0.5rem;">Distance</th>
-                        <th style="text-align: right; padding: 0.5rem;">Avg Speed</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-
-        for (let i = 0; i < lapProfiles.length; i++) {
-            const lap = lapProfiles[i];
-            const color = lapColors[i % lapColors.length];
-            const avgSpeed = lap.totalDistance / (lap.duration / 3600); // km/h
-
-            tableHtml += `
-                <tr style="border-bottom: 1px solid #e2e8f0;">
-                    <td style="padding: 0.5rem;">
-                        <span style="display: inline-block; width: 12px; height: 12px; background: ${color}; border-radius: 2px; margin-right: 0.5rem;"></span>
-                        Lap ${lap.lapNumber}
-                    </td>
-                    <td style="text-align: right; padding: 0.5rem;">${formatLapDuration(lap.duration)}</td>
-                    <td style="text-align: right; padding: 0.5rem;">${lap.totalDistance.toFixed(2)} km</td>
-                    <td style="text-align: right; padding: 0.5rem;">${avgSpeed.toFixed(1)} km/h</td>
-                </tr>
-            `;
-        }
-
-        tableHtml += '</tbody></table>';
-        summaryTable.innerHTML = tableHtml;
-    }
-}
-
-
-
-
-function getGpsLapNumberForRange(range: { startIdx: number; endIdx: number }, fallbackLapNumber: number): number {
-    const matchingLap = appState.gpsDetectedLaps.find(lap =>
-        lap.startIdx === range.startIdx && lap.endIdx === range.endIdx,
-    );
-    return matchingLap?.lapNumber ?? fallbackLapNumber;
-}
-
-async function resolveMultiSegmentAnalysisParams(
-    analyzedItems: number[],
-    params: AnalysisParameters,
-    reuseCurrentSettings: boolean = false,
-): Promise<AnalysisParameters> {
-    const savedSettings = appState.currentFileHash
-        ? await parameterStorage.loadLapSettings(appState.currentFileHash, analyzedItems)
-        : null;
-    const resolved = resolveMultiSegmentSettings({
-        currentAnalyzedItems: reuseCurrentSettings ? appState.currentAnalyzedLaps : [],
-        nextAnalyzedItems: analyzedItems,
-        params,
-        currentAirSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
-        savedSettings,
-    });
-
-    appState.currentAnalyzedLaps = analyzedItems;
-    appState.airSpeedCalibrationPercent = resolved.airSpeedCalibrationPercent;
-    return resolved.params;
-}
-
-async function saveCurrentMultiSegmentSettings() {
-    if (!appState.currentFileHash || !appState.selectedFile || appState.currentAnalyzedLaps.length === 0) {
-        return;
-    }
-
-    const cdaValueEl = document.getElementById('cdaValue') as HTMLInputElement | null;
-    const crrValueEl = document.getElementById('crrValue') as HTMLInputElement | null;
-    if (!cdaValueEl || !crrValueEl) {
-        return;
-    }
-
-    const parsedCda = parseFloat(cdaValueEl.value);
-    const parsedCrr = parseFloat(crrValueEl.value);
-    const settings: LapSettings = {
-        trimStart: 0,
-        trimEnd: 0,
-        cda: Number.isFinite(parsedCda) ? parsedCda : null,
-        crr: Number.isFinite(parsedCrr) ? parsedCrr : null,
-        airSpeedCalibration:
-            appState.airSpeedCalibrationPercent !== 0
-                ? appState.airSpeedCalibrationPercent
-                : undefined,
-    };
-
-    try {
-        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.currentAnalyzedLaps, settings);
-    } catch (err) {
-        log.error('Failed to save multi-segment settings:', err);
-    }
-}
-
-// Helper function to save map trim settings (before VE analysis is opened)
-async function saveMapTrimSettings() {
-
-    if (!appState.currentFileHash || !appState.selectedFile) {
-        log.warn('⚠️ Cannot save: missing fileHash or appState.selectedFile');
-        return;
-    }
-
-    const settings: LapSettings = {
-        trimStart: appState.presetTrimStart,
-        trimEnd: appState.presetTrimEnd ?? 0,
-        cda: null, // CdA/Crr not set yet
-        crr: null
-    };
-
-    try {
-        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
-    } catch (err) {
-        log.error('❌ Failed to save map trim settings:', err);
-    }
-}
-
-
-/**
- * Update VE plots for GPS lap mode - calculates VE for each lap and shows stacked plot
- */
-async function updateGpsLapVEPlots(cda: number, crr: number, windSource: string) {
-    if (!appState.currentFitData || !appState.currentGpsLapIndexRanges || !appState.currentParameters) {
-        log.error('Missing data for GPS lap VE update');
-        return;
-    }
-
-    await waitForPlotly();
-
-    const normalizedArrays = getNormalizedActivityArrays(appState.currentFitData);
-    const allTimestamps = normalizedArrays.timestamps;
-    const allPower = normalizedArrays.power;
-    const allVelocity = normalizedArrays.velocity;
-    const allPositionLat = normalizedArrays.positionLat;
-    const allPositionLong = normalizedArrays.positionLong;
-    const allAltitude = normalizedArrays.altitude;
-    const allDistance = normalizedArrays.distance;
-
-    const gpsLapUpdateWindResolution = resolveWindSeries({
-        fitData: appState.currentFitData,
-        windSource,
-        params: appState.currentParameters,
-        airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
-    });
-    const allWindSpeed = gpsLapUpdateWindResolution.windSpeed;
-
-    const lapVEProfiles: LapVEProfile[] = [];
-
-    // Calculate VE for each selected GPS lap
-    for (let lapIdx = 0; lapIdx < appState.currentGpsLapIndexRanges.length; lapIdx++) {
-        const range = appState.currentGpsLapIndexRanges[lapIdx];
-        const lapNumber = getGpsLapNumberForRange(range, lapIdx + 1);
-
-        // Extract data for this lap
-        const lapTimestamps: number[] = [];
-        const lapPower: number[] = [];
-        const lapVelocity: number[] = [];
-        const lapPositionLat: number[] = [];
-        const lapPositionLong: number[] = [];
-        const lapAltitude: number[] = [];
-        const lapDistance: number[] = [];
-        const lapWindSpeed: number[] = [];
-
-        for (let i = range.startIdx; i <= range.endIdx && i < allTimestamps.length; i++) {
-            lapTimestamps.push(allTimestamps[i]);
-            lapPower.push(allPower[i]);
-            lapVelocity.push(allVelocity[i]);
-            lapPositionLat.push(allPositionLat[i]);
-            lapPositionLong.push(allPositionLong[i]);
-            lapAltitude.push(allAltitude[i]);
-            lapDistance.push(allDistance[i]);
-            lapWindSpeed.push(allWindSpeed[i]);
-        }
-
-        if (lapTimestamps.length < 10) {
-            log.warn(`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`);
-            continue;
-        }
-
-        const supplementarySeries = buildSegmentSupplementarySeries({
-            timestamps: lapTimestamps,
-            power: lapPower,
-            velocity: lapVelocity,
-            positionLat: lapPositionLat,
-            positionLong: lapPositionLong,
-            distance: lapDistance,
-            windSpeed: lapWindSpeed,
-            params: appState.currentParameters,
-            selectedWindSource: gpsLapUpdateWindResolution.selectedWindSource,
-        });
-        const relativeDistances = supplementarySeries.distancesKm;
-
-        // Calculate duration
-        const duration = lapTimestamps[lapTimestamps.length - 1] - lapTimestamps[0];
-        const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
-
-        try {
-            const calculator = createVeCalculator({
-                timestamps: lapTimestamps,
-                power: lapPower,
-                velocity: lapVelocity,
-                positionLat: lapPositionLat,
-                positionLong: lapPositionLong,
-                altitude: lapAltitude,
-                distance: lapDistance,
-                windSpeed: lapWindSpeed,
-                params: appState.currentParameters,
-                cda,
-                crr,
-            });
-
-            // Calculate VE for full lap
-            const result = calculator.calculate_virtual_elevation(cda, crr, 0, lapTimestamps.length - 1);
-
-            // Extract VE values
-            const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-            // Get actual elevation (use zeros for velodrome mode)
-            const actualElevation = appState.currentParameters.velodrome
-                ? new Array(lapAltitude.length).fill(0)
-                : lapAltitude;
-
-            lapVEProfiles.push({
-                lapNumber,
-                distances: relativeDistances,
-                virtualElevation: veArray,
-                actualElevation: actualElevation,
-                supplementarySeries,
-                duration,
-                totalDistance
-            });
-
-        } catch (err) {
-            log.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
-        }
-    }
-
-    if (lapVEProfiles.length === 0) {
-        log.error('No valid laps to display');
-        return;
-    }
-
-    // Calculate mean actual elevation profile
-    const meanElevation = calculateMeanElevationProfile(lapVEProfiles);
-
-    // Calculate and update statistics
-    const stats = calculateGpsLapStats(lapVEProfiles, meanElevation);
-
-    // Create a combined VE result for store functionality
-    // Concatenate all lap VE profiles into a single array
-    const combinedVE: number[] = [];
-    for (const lap of lapVEProfiles) {
-        combinedVE.push(...lap.virtualElevation);
-    }
-
-    // Store combined result globally for save functionality
-    appState.currentVEResult = {
-        r2: stats.meanR2,
-        rmse: stats.meanRMSE,
-        ve_elevation_diff: stats.avgVeGain,
-        actual_elevation_diff: stats.avgActualGain,
-        virtual_elevation: new Float64Array(combinedVE),
-        virtual_distance_air: 0,
-        virtual_distance_ground: 0,
-        vd_difference_percent: 0
-    };
-    appState.currentWindSource = (windSource === 'compare'
-        ? 'compare'
-        : gpsLapUpdateWindResolution.selectedWindSource) as 'constant' | 'fit' | 'compare' | 'none';
-
-    // Store filtered data globally for save functionality (combine all lap data)
-    const combinedPower: number[] = [];
-    const combinedVelocity: number[] = [];
-    const combinedTimestamps: number[] = [];
-    const combinedTemperature: number[] = [];
-
-    for (const range of appState.currentGpsLapIndexRanges!) {
-        for (let i = range.startIdx; i <= range.endIdx && i < allTimestamps.length; i++) {
-            combinedPower.push(allPower[i]);
-            combinedVelocity.push(allVelocity[i]);
-            combinedTimestamps.push(allTimestamps[i]);
-            // Temperature may not exist
-            if (appState.currentFitData.temperature) {
-                combinedTemperature.push(appState.currentFitData.temperature[i] || 0);
-            }
-        }
-    }
-    appState.currentFilteredData = {
-        power: combinedPower,
-        velocity: combinedVelocity,
-        timestamps: combinedTimestamps,
-        temperature: combinedTemperature
-    };
-
-    // Store analyzed laps (GPS lap numbers)
-    appState.currentAnalyzedLaps = lapVEProfiles.map(lap => lap.lapNumber);
-
-    renderGpsLapVEPlots(lapVEProfiles, meanElevation);
-    setupTabSwitching({
-        wind: () => renderGpsLapWindPlot(lapVEProfiles),
-        power: () => renderGpsLapPowerPlot(lapVEProfiles),
-        vd: () => renderGpsLapVdPlot(lapVEProfiles),
-    });
-
-    const windTab = document.getElementById('wind-tab');
-    if (windTab?.classList.contains('active')) {
-        renderGpsLapWindPlot(lapVEProfiles);
-    }
-    const powerTab = document.getElementById('power-tab');
-    if (powerTab?.classList.contains('active')) {
-        renderGpsLapPowerPlot(lapVEProfiles);
-    }
-    const vdTab = document.getElementById('vd-tab');
-    if (vdTab?.classList.contains('active')) {
-        renderGpsLapVdPlot(lapVEProfiles);
-    }
-
-    log.debug(`GPS Lap VE plots updated with ${lapVEProfiles.length} laps, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`);
 }
 
 // ==================== Out and Back VE Analysis ====================
@@ -3549,6 +2239,8 @@ async function showOutAndBackVEAnalysis(
 
     const analyzedSectionNumbers = sections.map(section => section.sectionNumber);
     const resolvedParams = await resolveMultiSegmentAnalysisParams(
+        appState,
+        parameterStorage,
         analyzedSectionNumbers,
         params,
         reuseCurrentSettings,
@@ -3825,23 +2517,6 @@ function calculateOutAndBackMeanElevation(profiles: OutAndBackVEProfile[]): { di
 }
 
 /**
- * Linear interpolation helper
- */
-function interpolateElevation(targetDist: number, distances: number[], elevations: number[]): number {
-    if (distances.length === 0) return NaN;
-    if (targetDist <= distances[0]) return elevations[0];
-    if (targetDist >= distances[distances.length - 1]) return elevations[elevations.length - 1];
-
-    for (let j = 0; j < distances.length - 1; j++) {
-        if (distances[j] <= targetDist && distances[j + 1] >= targetDist) {
-            const t = (targetDist - distances[j]) / (distances[j + 1] - distances[j]);
-            return elevations[j] + t * (elevations[j + 1] - elevations[j]);
-        }
-    }
-    return NaN;
-}
-
-/**
  * Show the Out and Back VE stacked plot with full controls (matching normal mode)
  */
 async function showOutAndBackVEPlot(
@@ -4032,7 +2707,7 @@ async function showOutAndBackVEPlot(
             const value = parseFloat(airSpeedCalibrationSlider.value);
             airSpeedCalibrationValueEl.value = value.toFixed(1);
             appState.airSpeedCalibrationPercent = value;
-            void saveCurrentMultiSegmentSettings();
+            void saveCurrentMultiSegmentSettings(appState, parameterStorage);
             log.debug('Air speed calibration changed - triggering Out and Back VE recalculation');
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
@@ -4046,7 +2721,7 @@ async function showOutAndBackVEPlot(
             airSpeedCalibrationSlider.value = clamped.toString();
             airSpeedCalibrationValueEl.value = clamped.toFixed(1);
             appState.airSpeedCalibrationPercent = clamped;
-            void saveCurrentMultiSegmentSettings();
+            void saveCurrentMultiSegmentSettings(appState, parameterStorage);
             log.debug('Air speed calibration changed - triggering Out and Back VE recalculation');
             const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
             const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
@@ -4064,7 +2739,13 @@ async function showOutAndBackVEPlot(
                     { startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
                 ]));
                 const calibrationPercent = calculateAutoAirSpeedCalibrationPercent(
-                    buildAutoCalibrationSegmentsFromRanges(calibrationRanges),
+                    buildAutoCalibrationSegmentsFromRanges(
+                        appState,
+                        calibrationRanges,
+                        getNormalizedActivityArrays,
+                        (opts) => resolveWindSeries(opts as any),
+                        extractSegmentData,
+                    ),
                 );
 
                 if (calibrationPercent === null) {
@@ -4075,7 +2756,7 @@ async function showOutAndBackVEPlot(
                 airSpeedCalibrationSlider.value = calibrationPercent.toFixed(1);
                 airSpeedCalibrationValueEl.value = calibrationPercent.toFixed(1);
                 appState.airSpeedCalibrationPercent = calibrationPercent;
-                void saveCurrentMultiSegmentSettings();
+                void saveCurrentMultiSegmentSettings(appState, parameterStorage);
                 log.debug(`Auto-adjusted out-and-back air speed calibration to ${calibrationPercent.toFixed(1)}%`);
                 const cda = parseFloat((document.getElementById('cdaValue') as HTMLInputElement)?.value || '0.3');
                 const crr = parseFloat((document.getElementById('crrValue') as HTMLInputElement)?.value || '0.008');
@@ -4143,12 +2824,12 @@ function setupOutAndBackSliderSync() {
     if (cdaSlider && cdaValueEl) {
         cdaSlider.addEventListener('input', () => {
             cdaValueEl.value = parseFloat(cdaSlider.value).toFixed(3);
-            void saveCurrentMultiSegmentSettings();
+            void saveCurrentMultiSegmentSettings(appState, parameterStorage);
             triggerRecalculation();
         });
         cdaValueEl.addEventListener('change', () => {
             cdaSlider.value = cdaValueEl.value;
-            void saveCurrentMultiSegmentSettings();
+            void saveCurrentMultiSegmentSettings(appState, parameterStorage);
             triggerRecalculation();
         });
     }
@@ -4156,12 +2837,12 @@ function setupOutAndBackSliderSync() {
     if (crrSlider && crrValueEl) {
         crrSlider.addEventListener('input', () => {
             crrValueEl.value = parseFloat(crrSlider.value).toFixed(4);
-            void saveCurrentMultiSegmentSettings();
+            void saveCurrentMultiSegmentSettings(appState, parameterStorage);
             triggerRecalculation();
         });
         crrValueEl.addEventListener('change', () => {
             crrSlider.value = crrValueEl.value;
-            void saveCurrentMultiSegmentSettings();
+            void saveCurrentMultiSegmentSettings(appState, parameterStorage);
             triggerRecalculation();
         });
     }
