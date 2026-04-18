@@ -212,19 +212,24 @@ export async function updateOutAndBackVEPlots(
 
     // Update statistics display
     const stats = calculateOutAndBackStats(profiles, meanElevation);
-    const metricsDiv = document.getElementById('oabVeMetrics');
-    if (metricsDiv) {
-        metricsDiv.textContent = `RMSE: ${stats.rmse.toFixed(2)} m | VE: ${stats.avgVeGain.toFixed(2)} m | Actual: ${stats.avgActualGain.toFixed(2)} m | Diff: ${stats.avgDiff.toFixed(2)} m`;
-    }
 
-    // Update header values
+    // Update header values (the template renders ve-metrics-compact with these four spans;
+    // there is no #oabVeMetrics element, so refresh all four values here instead).
+    const rmseSpan = document.getElementById('oabRmseValue');
     const veGainValueSpan = document.getElementById('oabVeGainValue');
     const actualGainValueSpan = document.getElementById('oabActualGainValue');
+    const sectionCountSpan = document.getElementById('oabSectionCountValue');
+    if (rmseSpan) {
+        rmseSpan.textContent = `${stats.rmse.toFixed(2)}m`;
+    }
     if (veGainValueSpan) {
         veGainValueSpan.textContent = `${stats.avgVeGain.toFixed(2)}m`;
     }
     if (actualGainValueSpan) {
         actualGainValueSpan.textContent = `${stats.avgActualGain.toFixed(2)}m`;
+    }
+    if (sectionCountSpan) {
+        sectionCountSpan.textContent = profiles.length.toString();
     }
 
     // Re-render plots
