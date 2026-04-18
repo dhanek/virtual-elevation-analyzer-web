@@ -23,6 +23,7 @@ import {
     renderOutAndBackPowerPlot,
     renderOutAndBackVdPlot,
 } from './outAndBackPlots';
+import { showOutAndBackVEAnalysis } from './renderOutAndBack';
 import { log } from '../../utils/log';
 
 /**
@@ -265,9 +266,6 @@ export async function recalculateOutAndBackVE(
     const updatedParams = { ...appState.currentParameters, cda, crr };
 
     services.showLoading('Recalculating VE with new parameters...');
-
-    // Lazy import to avoid circular
-    const { showOutAndBackVEAnalysis } = await import('./renderOutAndBack');
 
     try {
         await showOutAndBackVEAnalysis(
