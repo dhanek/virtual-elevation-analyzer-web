@@ -363,7 +363,7 @@ export async function showGpsLapVEPlot(
                         appState,
                         appState.currentGpsLapIndexRanges ?? [],
                         getNormalizedActivityArrays,
-                        (opts) => resolveWindSeries(opts as any),
+                        resolveWindSeries,
                         extractSegmentData,
                     ),
                 );

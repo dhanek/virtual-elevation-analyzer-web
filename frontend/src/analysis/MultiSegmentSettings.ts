@@ -1,9 +1,16 @@
 import type { AnalysisParameters } from '../components/AnalysisParameters'
 import type { LapSettings, ParameterStorage } from '../utils/ParameterStorage'
 import type { AppState } from '../state/AppState'
+import type { getNormalizedActivityArrays } from './ActivityArrayCache'
+import type { resolveWindSeries } from './WindSourceResolver'
+import type { extractSegmentData } from './SegmentExtractor'
 
 import { DEFAULT_AIR_SPEED_CALIBRATION_PERCENT } from './AirSpeedCalibration'
 import { log } from '../utils/log'
+
+type GetNormalizedActivityArraysFn = typeof getNormalizedActivityArrays;
+type ResolveWindSeriesFn = typeof resolveWindSeries;
+type ExtractSegmentDataFn = typeof extractSegmentData;
 
 export interface ResolvedMultiSegmentSettings {
     params: AnalysisParameters
@@ -133,37 +140,9 @@ interface AutoCalibrationSegment {
 export function buildAutoCalibrationSegmentsFromRanges(
     appState: AppState,
     indexRanges: Array<{ startIdx: number; endIdx: number }>,
-    getNormalizedActivityArraysFn: (fitData: any) => {
-        timestamps: number[];
-        power: number[];
-        velocity: number[];
-        positionLat: number[];
-        positionLong: number[];
-        altitude: number[];
-        distance: number[];
-    },
-    resolveWindSeriesFn: (opts: {
-        fitData: any;
-        windSource: string;
-        applyOffset: boolean;
-        airSpeedCalibrationPercent: number;
-    }) => { windSpeed: number[] },
-    extractSegmentDataFn: (opts: {
-        startIdx: number;
-        endIdx: number;
-        allTimestamps: number[];
-        allPower: number[];
-        allVelocity: number[];
-        allPositionLat: number[];
-        allPositionLong: number[];
-        allAltitude: number[];
-        allDistance: number[];
-        allWindSpeed: number[];
-    }) => {
-        timestamps: number[];
-        velocity: number[];
-        windSpeed: number[];
-    },
+    getNormalizedActivityArraysFn: GetNormalizedActivityArraysFn,
+    resolveWindSeriesFn: ResolveWindSeriesFn,
+    extractSegmentDataFn: ExtractSegmentDataFn,
 ): AutoCalibrationSegment[] {
     if (!appState.currentFitData) {
         return [];

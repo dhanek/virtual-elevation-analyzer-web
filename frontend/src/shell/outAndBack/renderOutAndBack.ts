@@ -508,7 +508,7 @@ export async function showOutAndBackVEPlot(
                         appState,
                         calibrationRanges,
                         getNormalizedActivityArrays,
-                        (opts) => resolveWindSeries(opts as any),
+                        resolveWindSeries,
                         extractSegmentData,
                     ),
                 );
