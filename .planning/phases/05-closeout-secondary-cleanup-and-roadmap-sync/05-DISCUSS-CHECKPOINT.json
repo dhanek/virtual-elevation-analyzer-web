@@ -1,0 +1,106 @@
+{
+	"phase": "05",
+	"phase_name": "closeout-secondary-cleanup-and-roadmap-sync",
+	"timestamp": "2026-04-19T10:57:55Z",
+	"areas_completed": [
+		"Residual extraction scope",
+		"MapVisualization.ts posture"
+	],
+	"areas_remaining": [],
+	"decisions": {
+		"Residual extraction scope": [
+			{
+				"question": "How aggressive should 05-01's extraction be?",
+				"answer": "Aggressive — full composition root",
+				"options_presented": [
+					"Aggressive — full composition root",
+					"Targeted — pull obvious buckets",
+					"Minimal — stop after Section 3 residuals"
+				]
+			},
+			{
+				"question": "Which residuals are explicitly in-scope vs. left for v2?",
+				"answer": "Section 3 detection/trim/lap-selection residuals; File load orchestration; DEM + results display; Formatters + small UI helpers",
+				"options_presented": [
+					"Section 3 residuals",
+					"File load",
+					"DEM + results display",
+					"Formatters + small UI helpers"
+				]
+			},
+			{
+				"question": "Small behavior adjustments allowed in 05-01?",
+				"answer": "Structural only — no behavior changes",
+				"options_presented": [
+					"Structural only",
+					"Small fixes allowed",
+					"Document drift candidates now"
+				]
+			},
+			{
+				"question": "How to prove main.ts reduction at checkpoint?",
+				"answer": "Refreshed hotspot report + guardrail script + manual checklist",
+				"options_presented": [
+					"Refreshed hotspot report + guardrail + checklist",
+					"Concrete size target in guardrail",
+					"Structural assertion only"
+				]
+			}
+		],
+		"MapVisualization.ts posture": [
+			{
+				"question": "Allowed change scope in Phase 5?",
+				"answer": "Limited internal cleanup allowed",
+				"options_presented": [
+					"No touches at all",
+					"Interface narrowing only",
+					"Limited internal cleanup allowed"
+				]
+			},
+			{
+				"question": "What kind of limited internal cleanup is allowed?",
+				"answer": "Only cleanup directly required by a Phase 5 extraction seam",
+				"options_presented": [
+					"Any small refactor under a size limit",
+					"Only cleanup directly required by a Phase 5 extraction seam",
+					"Allow one targeted internal extraction"
+				]
+			},
+			{
+				"question": "How should this be enforced during execution?",
+				"answer": "Mandatory traceability in 05-01-SUMMARY.md: seam + no-behavior-change evidence",
+				"options_presented": [
+					"Executor discretion only",
+					"Mandatory traceability",
+					"Checkpoint required before each internal map touch"
+				]
+			}
+		]
+	},
+	"deferred_ideas": [
+		"Move GPS mode selection to section 3 lap selection",
+		"Check elevation smoothing strategy",
+		"Consider worker offload for multi-lap VE",
+		"Evaluate continuous weather sampling"
+	],
+	"canonical_refs": [
+		".planning/PROJECT.md",
+		".planning/REQUIREMENTS.md",
+		".planning/ROADMAP.md",
+		".planning/STATE.md",
+		".planning/research/SUMMARY.md",
+		".planning/phases/01-guardrails-and-regression-protection/01-CONTEXT.md",
+		".planning/phases/02-shell-infrastructure-and-delegation/02-CONTEXT.md",
+		".planning/phases/03-section-3-and-standard-ve-shell-extraction/03-CONTEXT.md",
+		".planning/phases/04-gps-and-out-and-back-shell-extraction/04-CONTEXT.md",
+		"docs/testing/ui-shell-regression-contract.md",
+		"docs/testing/ui-shell-manual-checklist.md",
+		"docs/architecture/frontend-ui-shell-extraction-inventory.md",
+		"scripts/validate-ui-shell-guardrails.sh",
+		"scripts/report-ui-shell-hotspots.sh",
+		"ARCHITECTURE.md",
+		"frontend/src/main.ts",
+		"frontend/src/components/MapVisualization.ts",
+		"frontend/src/shell/"
+	]
+}

@@ -14,7 +14,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 - [x] **Phase 2: Shell Infrastructure and Delegation** - Introduce shared shell helpers and move top-level orchestration toward explicit module seams (completed 2026-04-15)
 - [x] **Phase 3: Section 3 and Standard VE Shell Extraction** - Extract Section 3 and standard VE shell behavior while preserving current standard-mode behavior (completed 2026-04-16)
 - [x] **Phase 4: GPS and Out-and-Back Shell Extraction** - Extract GPS-based shell behavior while preserving in-place updates and calibration correctness (completed 2026-04-19)
-- [ ] **Phase 5: Closeout, Secondary Cleanup, and Roadmap Sync** - Finish the `main.ts` reduction, apply only justified secondary cleanup, and sync planning/docs
+- [x] **Phase 5: Closeout, Secondary Cleanup, and Roadmap Sync** - Finish the `main.ts` reduction, apply only justified secondary cleanup, and sync planning/docs (completed 2026-04-19)
 
 ## Phase Details
 
@@ -99,8 +99,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: Finish residual `main.ts` cleanup and only justified secondary UI-shell touch-ups
-- [ ] 05-02: Sync roadmap/project documentation and remaining hotspot guidance
+- [x] 05-01: Finish residual `main.ts` cleanup and only justified secondary UI-shell touch-ups
+- [x] 05-02: Sync roadmap/project documentation and remaining hotspot guidance
 
 ## Progress
 
@@ -113,4 +113,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Shell Infrastructure and Delegation | 3/3 | Complete   | 2026-04-15 |
 | 3. Section 3 and Standard VE Shell Extraction | 3/3 | Complete    | 2026-04-16 |
 | 4. GPS and Out-and-Back Shell Extraction | 3/3 | Complete    | 2026-04-19 |
-| 5. Closeout, Secondary Cleanup, and Roadmap Sync | 0/2 | Not started | - |
+| 5. Closeout, Secondary Cleanup, and Roadmap Sync | 2/2 | Complete | 2026-04-19 |

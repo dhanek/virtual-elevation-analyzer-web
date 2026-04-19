@@ -20,14 +20,15 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 - ✓ User can use DEM and weather-assisted analysis inputs with browser-local persistence and caching - existing
 - ✓ Project changes can be validated through backend tests, wasm build, frontend typecheck, lint, tests, and production build - existing
 - ✓ Phase 1 established a committed UI-shell regression contract, manual browser checklist, CI-parity guardrail script, and hotspot inventory - validated in Phase 1
+- ✓ Phase 2 introduced shared shell infrastructure and delegation seams away from `frontend/src/main.ts`
+- ✓ Phase 3 extracted Section 3 and standard VE shell behavior while preserving auto-scroll and standard analysis behavior
+- ✓ Phase 4 extracted GPS-lap and out-and-back shell behavior while preserving tab/scroll retention and calibration correctness
+- ✓ Phase 5 reduced `frontend/src/main.ts` to composition-root wiring and synchronized planning/docs with the stabilized shell boundaries
 
 ### Active
 
-- [ ] Reduce the size and responsibility concentration of `frontend/src/main.ts` by extracting UI-shell logic into narrower modules
-- [ ] Preserve current user-visible behavior while refactoring, including regression-sensitive scrolling, GPS auto-adjust, calibration, and in-place update flows
-- [ ] Extract or simplify Section 3, VE panel, GPS-lap, out-and-back, and shared DOM/event/template glue so future UI-heavy work is safer
-- [ ] Touch `frontend/src/components/MapVisualization.ts` only when it cleanly supports the main UI-shell stabilization work
-- [ ] Keep room for the occasional small feature or behavior adjustment only when it directly enables or de-risks the structural refactor
+- [ ] Evaluate v2 follow-up priorities (MAP-01, TEST-01, CSS-01, PERF-01) based on the stabilized shell baseline
+- [ ] Reassess whether remaining `MapVisualization.ts` complexity is the next highest-value extraction target for the next milestone
 
 ### Out of Scope
 
@@ -38,19 +39,17 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 
 ## Context
 
-This is a brownfield TypeScript + Rust/WASM repository with a completed codebase map in `.planning/codebase/`. The app is already functional and deployable, with FIT/CSV ingestion, VE analysis, DEM/weather integration, multi-mode analysis, persistence, and CI validation already in place.
+This is a brownfield TypeScript + Rust/WASM repository with a completed codebase map in `.planning/codebase/`. The app remains functional and deployable, with FIT/CSV ingestion, VE analysis, DEM/weather integration, multi-mode analysis, persistence, and CI validation in place.
 
-The main remaining architectural pressure point is concentrated frontend orchestration. `frontend/src/main.ts` is still very large and event-heavy, and `frontend/src/components/MapVisualization.ts` remains a secondary hotspot. Earlier refactoring work already extracted typed state, activity loading, analysis helpers, plot builders, mode handlers, logging, tests, and CSS, so the next leverage point is the remaining UI shell rather than another broad foundational rewrite.
+The UI-shell stabilization milestone is now complete. `frontend/src/main.ts` has been reduced to composition-root responsibilities (DOM capture + service construction + shell bootstrap dispatch), while the previous orchestration hotspots now live in dedicated shell modules under `frontend/src/shell/` (`app`, `analysis`, `fileLoad`, `section3`, `dem`, plus prior `ve`, `gpsLap`, and `outAndBack`).
 
-Recent work also surfaced regression-sensitive behavior that must remain intact during this phase:
+Regression-sensitive behavior remained the closeout guardrail throughout execution:
 
 - auto-scroll to Analysis Parameters after successful file load
 - in-place GPS auto-adjust and slider updates preserving active tab and scroll position
 - correct GPS-based air-speed calibration behavior across GPS-based modes
 
-This phase exists to make subsequent UI/workflow work safer, clearer, and less likely to break existing analysis behavior.
-
-Phase 1 is now complete. The project has committed guardrail docs/scripts plus a hotspot inventory, and the next planned focus is Phase 2: Shell Infrastructure and Delegation.
+`frontend/src/components/MapVisualization.ts` remains a secondary hotspot and was not expanded into full lifecycle decomposition during this milestone; MAP-01 remains deferred to v2.
 
 ## Constraints
 
@@ -69,7 +68,7 @@ Phase 1 is now complete. The project has committed guardrail docs/scripts plus a
 | Use the codebase map and live code as the source of truth for initialization | The repo is brownfield and older planning docs contain historical or stale material | ✓ Good |
 | Center the next phase on targeted frontend UI-shell stabilization | The largest remaining risk is concentrated in `frontend/src/main.ts`, not in missing infrastructure | ✓ Good |
 | Keep `MapVisualization.ts` secondary rather than making it a co-equal refactor target | The highest-value reduction is still in `main.ts`; map changes should only happen when they clearly support that work | ✓ Good |
-| Allow occasional small behavior/feature adjustments only when they directly enable the refactor | A strict purity rule would make some necessary seams or lifecycle fixes harder, but broad feature work would dilute the phase | - Pending |
+| Keep closeout extraction structural-only (no behavior drift) | Regression-sensitive shell behavior had to remain stable while ownership moved across modules | ✓ Good |
 | Preserve regression-sensitive behaviors explicitly during the stabilization phase | Recent fixes around auto-scroll and GPS calibration are easy to accidentally break during UI-shell extraction | ✓ Good |
 | Keep `AppState` state-only and avoid a new god-object rewrite | The project already established a healthier state boundary and should not regress during the next phase | ✓ Good |
 
@@ -91,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 after Phase 1 completion*
+*Last updated: 2026-04-19 after Phase 5 completion*

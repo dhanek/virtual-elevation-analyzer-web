@@ -4,75 +4,54 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05 of 5 (closeout secondary cleanup and roadmap sync)
 current_phase_name: closeout secondary cleanup and roadmap sync
-current_plan: 1 of 2
-status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-04-19T14:29:13.790Z"
+current_plan: 2 of 2
+status: complete
+stopped_at: Phase 5 closeout synced
+last_updated: "2026-04-19T18:10:00Z"
 last_activity: 2026-04-19
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 14
-  completed_plans: 12
-  percent: 86
+  completed_plans: 14
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-14)
+See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Make trustworthy virtual elevation analysis of local ride data work well in the browser, without sacrificing correctness or forcing users through a fragile UI shell.
-**Current focus:** Phase 05 — closeout-secondary-cleanup-and-roadmap-sync
+**Current focus:** Milestone closeout / next-milestone planning
 
 ## Current Position
 
-Phase: 05 (closeout-secondary-cleanup-and-roadmap-sync) — DISCUSSION COMPLETE
-Plan: 1 of 2
-**Status:** Executing Phase 05
-**Current Phase:** 05 of 5 (closeout secondary cleanup and roadmap sync)
-**Current Phase Name:** closeout secondary cleanup and roadmap sync
-**Total Phases:** 5
-**Current Plan:** 1 of 2
-**Total Plans in Phase:** 2
-**Last Activity:** 2026-04-19
-**Last Activity Description:** Phase 5 context updated; MapVisualization posture resolved for planning
-**Progress:** [█████████░] 86%
-
-## Performance Metrics
-
-**Velocity:**
-
-- Total plans completed: 12
-- Average duration: -
-- Total execution time: -
+Phase: 05 (closeout-secondary-cleanup-and-roadmap-sync) — COMPLETE  
+Plan: 2 of 2 — COMPLETE  
+**Status:** Phase execution complete; roadmap/docs synchronized.
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- Initialization: treat the codebase map and live code as the source of truth
-- Current milestone: target frontend UI-shell stabilization before the next UI-heavy feature wave
-- Scope guard: keep `AppState` state-only and keep `MapVisualization.ts` secondary unless it clearly supports the main shell extraction
-- Phase 1 outcome: guardrail docs, validation script, and hotspot inventory are now in place before shell extraction begins
+- `frontend/src/main.ts` is now composition-root-only and no longer the primary shell hotspot.
+- Shell ownership for file load, analysis orchestration, Section 3, DEM, standard VE, GPS-lap, and out-and-back is delegated under `frontend/src/shell/`.
+- `MapVisualization.ts` remains secondary; MAP-01 stays deferred to v2.
 
 ### Pending Todos
 
-Pending todo files already exist under `.planning/todos/pending/` and should be revisited after this stabilization milestone unless execution pulls one forward.
+Pending todo files remain under `.planning/todos/pending/` for post-milestone follow-up, including:
 
-- 2026-04-19-unify-mode-calculation-and-plot-update-pipeline: audit whether Standard/GPS-lap/Out-and-back should share one plot+calc pipeline (Standard-VE calibration bug surfaced this divergence).
-
-### Blockers/Concerns
-
-No active blockers.
-Primary concern: keep Phase 5 structural-only while preserving BEHV-01/02/03/04 and enforcing seam-traceability for any `MapVisualization.ts` touch.
+- 2026-04-19-unify-mode-calculation-and-plot-update-pipeline
+- 2026-04-13-check-elevation-smoothing-strategy
+- 2026-04-13-consider-worker-offload-for-multi-lap-ve
+- 2026-04-13-evaluate-continuous-weather-sampling
+- 2026-04-13-move-gps-mode-selection-to-section-3-lap-selection
 
 ## Session Continuity
 
-**Last Date:** 2026-04-19T10:57:55Z
-**Stopped At:** Phase 5 context gathered
-**Resume File:** .planning/phases/05-closeout-secondary-cleanup-and-roadmap-sync/05-CONTEXT.md
+**Last Date:** 2026-04-19  
+**Stopped At:** Phase 5 closeout synced  
+**Resume File:** .planning/ROADMAP.md

@@ -16,22 +16,22 @@ Requirements for this stabilization initiative. Each maps to exactly one roadmap
 
 - [x] **SHEL-01**: Maintainer can delegate top-level UI-shell orchestration through explicit shell modules instead of embedding those responsibilities throughout `frontend/src/main.ts`
 - [x] **SHEL-02**: Maintainer has shared DOM, event, and template helpers for repeated dynamic shell patterns instead of re-implementing the same wiring per panel
-- [ ] **SHEL-03**: Maintainer can change Section 3 lap-selection and GPS-detection UI behavior without editing unrelated analysis-panel code in `frontend/src/main.ts`
-- [ ] **SHEL-04**: Maintainer can change standard VE panel shell behavior without editing unrelated GPS-lap or out-and-back shell code in `frontend/src/main.ts`
-- [ ] **SHEL-05**: Maintainer can change GPS-lap shell behavior without editing unrelated standard VE or out-and-back shell code in `frontend/src/main.ts`
-- [ ] **SHEL-06**: Maintainer can change out-and-back shell behavior without editing unrelated standard VE or GPS-lap shell code in `frontend/src/main.ts`
+- [x] **SHEL-03**: Maintainer can change Section 3 lap-selection and GPS-detection UI behavior without editing unrelated analysis-panel code in `frontend/src/main.ts`
+- [x] **SHEL-04**: Maintainer can change standard VE panel shell behavior without editing unrelated GPS-lap or out-and-back shell code in `frontend/src/main.ts`
+- [x] **SHEL-05**: Maintainer can change GPS-lap shell behavior without editing unrelated standard VE or out-and-back shell code in `frontend/src/main.ts`
+- [x] **SHEL-06**: Maintainer can change out-and-back shell behavior without editing unrelated standard VE or GPS-lap shell code in `frontend/src/main.ts`
 
 ### Behavior Preservation
 
-- [ ] **BEHV-01**: User still auto-scrolls to Analysis Parameters after a successful FIT or CSV file load
-- [ ] **BEHV-02**: User can run standard virtual elevation analysis after shell extraction with unchanged visible behavior and analysis outputs
-- [ ] **BEHV-03**: User keeps active tab and scroll position during in-place GPS auto-adjust and slider updates after shell extraction
-- [ ] **BEHV-04**: User gets correct GPS-based air-speed calibration behavior across GPS lap, GPS gate one-way, and out-and-back modes after shell extraction
+- [x] **BEHV-01**: User still auto-scrolls to Analysis Parameters after a successful FIT or CSV file load
+- [x] **BEHV-02**: User can run standard virtual elevation analysis after shell extraction with unchanged visible behavior and analysis outputs
+- [x] **BEHV-03**: User keeps active tab and scroll position during in-place GPS auto-adjust and slider updates after shell extraction
+- [x] **BEHV-04**: User gets correct GPS-based air-speed calibration behavior across GPS lap, GPS gate one-way, and out-and-back modes after shell extraction
 
 ### Closeout
 
-- [ ] **CLOS-01**: Maintainer ends the phase with `frontend/src/main.ts` functioning primarily as a composition root and materially smaller than the pre-phase baseline
-- [ ] **CLOS-02**: Maintainer can understand the stabilized shell boundaries and remaining hotspots from updated planning/project documentation at phase close
+- [x] **CLOS-01**: Maintainer ends the phase with `frontend/src/main.ts` functioning primarily as a composition root and materially smaller than the pre-phase baseline
+- [x] **CLOS-02**: Maintainer can understand the stabilized shell boundaries and remaining hotspots from updated planning/project documentation at phase close
 
 ## v2 Requirements
 
@@ -72,16 +72,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STAB-02 | Phase 1 | Complete |
 | SHEL-01 | Phase 2 | Complete |
 | SHEL-02 | Phase 2 | Complete |
-| SHEL-03 | Phase 3 | Pending |
-| SHEL-04 | Phase 3 | Pending |
-| BEHV-01 | Phase 3 | Pending |
-| BEHV-02 | Phase 3 | Pending |
-| SHEL-05 | Phase 4 | Pending |
-| SHEL-06 | Phase 4 | Pending |
-| BEHV-03 | Phase 4 | Pending |
-| BEHV-04 | Phase 4 | Pending |
-| CLOS-01 | Phase 5 | Pending |
-| CLOS-02 | Phase 5 | Pending |
+| SHEL-03 | Phase 3 | Complete |
+| SHEL-04 | Phase 3 | Complete |
+| BEHV-01 | Phase 3 | Complete |
+| BEHV-02 | Phase 3 | Complete |
+| SHEL-05 | Phase 4 | Complete |
+| SHEL-06 | Phase 4 | Complete |
+| BEHV-03 | Phase 4 | Complete |
+| BEHV-04 | Phase 4 | Complete |
+| CLOS-01 | Phase 5 | Complete |
+| CLOS-02 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 14 total
@@ -90,4 +90,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-04-12*
-*Last updated: 2026-04-14 after Phase 1 completion*
+*Last updated: 2026-04-19 after Phase 5 completion*
