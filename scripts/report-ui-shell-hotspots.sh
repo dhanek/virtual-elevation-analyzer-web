@@ -11,7 +11,7 @@ fi
 count_matches() {
   local pattern="$1"
   local file="$2"
-  rg -F -c "$pattern" "$file"
+  rg -F -c "$pattern" "$file" || echo 0
 }
 
 printf 'UI shell hotspot report\n'
@@ -33,4 +33,10 @@ printf '  style=" : %s\n' "$inline_style_count"
 printf '  : any: %s\n\n' "$any_annotation_count"
 
 printf 'Hotspot function anchors\n'
-rg -n '^async function showGpsLapVEPlot\b|^async function updateGpsLapVEPlots\b|^async function showOutAndBackVEPlot\b|^async function updateOutAndBackVEPlots\b|^async function handleAnalyze\b|^function initializeSection3\b|^async function showVirtualElevationAnalysisInline\b|^function setupVESliders\b|^async function calculateAutoRho\b' "$TARGET"
+anchor_matches=$(rg -n '^async function showGpsLapVEPlot\b|^async function updateGpsLapVEPlots\b|^async function showOutAndBackVEPlot\b|^async function updateOutAndBackVEPlots\b|^async function handleAnalyze\b|^function initializeSection3\b|^async function showVirtualElevationAnalysisInline\b|^function setupVESliders\b|^async function calculateAutoRho\b' "$TARGET" || true)
+
+if [[ -n "$anchor_matches" ]]; then
+  printf '%s\n' "$anchor_matches"
+else
+  printf '  (no legacy hotspot anchors remain in main.ts)\n'
+fi
