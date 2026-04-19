@@ -65,7 +65,10 @@ The in-place-update (BEHV-03) and calibration (BEHV-04) parity surfaces are anch
   bash scripts/validate-ui-shell-guardrails.sh --ci-only
   cd frontend && npm run build
   ```
-  Plan 04-02 reports `npm run check`, `npm run lint`, `npm run test` (43/43), and `npm run build` all PASSED, plus `bash scripts/validate-ui-shell-guardrails.sh` PASSED end-of-plan. Plan 04-03 reports `bash scripts/validate-ui-shell-guardrails.sh` PASSED end-of-phase and user approval of the manual browser checklist.
+  Expected outcomes per command:
+  - `bash scripts/validate-ui-shell-guardrails.sh --ci-only` → exit 0 (full CI parity chain: `cargo test --lib`, `wasm-pack build`, `npm run check`, `npm run lint`, `npm run test`, `npm run build`). Proof: Plan 04-03 `Task 1 — Automated validation` records this script PASSED end-of-phase; Plan 04-02 also records full-chain PASSED end-of-plan.
+  - `cd frontend && npm run build` → exit 0 (Vite production build succeeds post-extraction, confirming GPS-lap and out-and-back shell modules compile and bundle correctly). Proof: Plan 04-01 and Plan 04-02 both record `npm run build` PASSED; `npm run check` PASSED; `npm run test` PASSED 43/43.
+  - Manual approval evidence: Plan 04-03 `Task 2 — Manual browser verification` records the 16-step checklist (covering both BEHV-03 tab/scroll preservation and BEHV-04 Auto Adjust / manual calibration / per-mode persistence) and the user response "APPROVED" in `.planning/phases/04-gps-and-out-and-back-shell-extraction/04-03-SUMMARY.md`. Checklist coverage anchor: `docs/testing/ui-shell-manual-checklist.md`.
 - **Behavioral preservation evidence:** `updateGpsLapVEPlots` and `updateOutAndBackVEPlots` were lifted from `main.ts` verbatim — tab/scroll save-restore logic is byte-identical to the pre-extraction implementation. The calibration chain (`buildAutoCalibrationSegmentsFromRanges` → `calculateAutoAirSpeedCalibrationPercent`) was consolidated in `analysis/MultiSegmentSettings.ts` and is reachable from both `shell/gpsLap/renderGpsLap.ts` and `shell/outAndBack/renderOutAndBack.ts`, so GPS-lap, GPS gate one-way, and out-and-back continue to share the same calibration math.
 
 **Wiring:** 7/7 connections verified (plus BEHV-03/BEHV-04 parity-depth chain above)
