@@ -15,6 +15,9 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 - [x] **Phase 3: Section 3 and Standard VE Shell Extraction** - Extract Section 3 and standard VE shell behavior while preserving current standard-mode behavior (completed 2026-04-16)
 - [x] **Phase 4: GPS and Out-and-Back Shell Extraction** - Extract GPS-based shell behavior while preserving in-place updates and calibration correctness (completed 2026-04-19)
 - [x] **Phase 5: Closeout, Secondary Cleanup, and Roadmap Sync** - Finish the `main.ts` reduction, apply only justified secondary cleanup, and sync planning/docs (completed 2026-04-19)
+- [ ] **Phase 6: Verification Artifact Backfill (Phases 03-05)** - Backfill missing phase verification artifacts and parity evidence so requirement closure is machine-verifiable
+- [ ] **Phase 7: Phase-02 Summary Frontmatter Repair** - Backfill `requirements_completed` metadata for phase-02 summaries to resolve partial requirement closure state
+- [ ] **Phase 8: Regression Contract Anchor Sync** - Re-anchor regression-contract documentation to current shell ownership paths
 
 ## Phase Details
 
@@ -102,15 +105,72 @@ Plans:
 - [x] 05-01: Finish residual `main.ts` cleanup and only justified secondary UI-shell touch-ups
 - [x] 05-02: Sync roadmap/project documentation and remaining hotspot guidance
 
+### Phase 6: Verification Artifact Backfill (Phases 03-05)
+**Goal**: Close milestone-blocking orphaned requirement gaps by creating missing phase verification artifacts and strengthening parity evidence where audit depth was partial
+**Depends on**: Phase 5
+**Requirements**: [SHEL-03, SHEL-04, BEHV-01, BEHV-02, SHEL-05, SHEL-06, BEHV-03, BEHV-04, CLOS-01, CLOS-02]
+**Gap Closure**: Closes requirement and flow gaps from `.planning/v1.0-v1.0-MILESTONE-AUDIT.md` tied to missing `03/04/05-VERIFICATION.md` and BEHV-02 parity-evidence depth
+**UI hint**: yes
+**Canonical refs**: [.planning/REQUIREMENTS.md, .planning/v1.0-v1.0-MILESTONE-AUDIT.md, .planning/phases/03-section-3-and-standard-ve-shell-extraction, .planning/phases/04-gps-and-out-and-back-shell-extraction, .planning/phases/05-closeout-secondary-cleanup-and-roadmap-sync, docs/testing/ui-shell-regression-contract.md]
+**Success Criteria** (what must be TRUE):
+  1. `03-VERIFICATION.md`, `04-VERIFICATION.md`, and `05-VERIFICATION.md` exist with explicit requirement coverage and evidence.
+  2. BEHV-02 standard VE parity evidence is elevated to the same artifact quality as other preserved-behavior flows.
+  3. Previously orphaned requirements mapped to phases 03-05 are no longer orphaned in the 3-source requirement matrix.
+**Plans**: 0 plans
+
+Plans:
+- [ ] 06-01: Create Phase 03 verification artifact with requirement-evidence matrix
+- [ ] 06-02: Create Phase 04 verification artifact with in-place update and calibration evidence matrix
+- [ ] 06-03: Create Phase 05 verification artifact with closeout requirement evidence matrix
+- [ ] 06-04: Strengthen BEHV-02 parity artifact depth and re-check matrix consistency
+
+### Phase 7: Phase-02 Summary Frontmatter Repair
+**Goal**: Resolve partial requirement closure for Phase 2 by backfilling summary frontmatter metadata needed by the 3-source audit matrix
+**Depends on**: Phase 6
+**Requirements**: [SHEL-01, SHEL-02]
+**Gap Closure**: Closes requirement gaps from `.planning/v1.0-v1.0-MILESTONE-AUDIT.md` where `02-VERIFICATION.md` passed but summary `requirements_completed` metadata is missing
+**UI hint**: no
+**Canonical refs**: [.planning/REQUIREMENTS.md, .planning/v1.0-v1.0-MILESTONE-AUDIT.md, .planning/phases/02-shell-infrastructure-and-delegation/02-01-SUMMARY.md, .planning/phases/02-shell-infrastructure-and-delegation/02-02-SUMMARY.md, .planning/phases/02-shell-infrastructure-and-delegation/02-03-SUMMARY.md, .planning/phases/02-shell-infrastructure-and-delegation/02-VERIFICATION.md]
+**Success Criteria** (what must be TRUE):
+  1. Every Phase-02 summary includes accurate `requirements_completed` frontmatter.
+  2. SHEL-01 and SHEL-02 no longer appear partial in the 3-source requirement matrix.
+  3. Phase-02 requirement evidence remains consistent across plan, summary, and verification artifacts.
+**Plans**: 0 plans
+
+Plans:
+- [ ] 07-01: Backfill `requirements_completed` in 02-01 summary frontmatter
+- [ ] 07-02: Backfill `requirements_completed` in 02-02 and 02-03 summary frontmatter
+- [ ] 07-03: Re-run requirement-matrix sanity check for SHEL-01 and SHEL-02
+
+### Phase 8: Regression Contract Anchor Sync
+**Goal**: Restore regression-contract documentation linkage quality by updating contract anchors to the current post-extraction shell ownership paths
+**Depends on**: Phase 7
+**Requirements**: [STAB-01]
+**Gap Closure**: Closes integration gap from `.planning/v1.0-v1.0-MILESTONE-AUDIT.md` for regression-contract anchor drift
+**UI hint**: no
+**Canonical refs**: [.planning/REQUIREMENTS.md, .planning/v1.0-v1.0-MILESTONE-AUDIT.md, docs/testing/ui-shell-regression-contract.md, frontend/src/shell]
+**Success Criteria** (what must be TRUE):
+  1. Regression-contract anchors resolve to current shell modules instead of legacy `main.ts` anchors.
+  2. STAB-01 regression verification path remains explicit and actionable after re-anchoring.
+  3. Audit no longer flags docs-to-shell anchor drift for this milestone.
+**Plans**: 0 plans
+
+Plans:
+- [ ] 08-01: Update regression-contract anchors to current shell ownership files
+- [ ] 08-02: Validate and document anchor integrity against current shell module structure
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Guardrails and Regression Protection | 3/3 | Complete    | 2026-04-14 |
-| 2. Shell Infrastructure and Delegation | 3/3 | Complete   | 2026-04-15 |
-| 3. Section 3 and Standard VE Shell Extraction | 3/3 | Complete    | 2026-04-16 |
-| 4. GPS and Out-and-Back Shell Extraction | 3/3 | Complete    | 2026-04-19 |
+| 1. Guardrails and Regression Protection | 3/3 | Complete | 2026-04-14 |
+| 2. Shell Infrastructure and Delegation | 3/3 | Complete | 2026-04-15 |
+| 3. Section 3 and Standard VE Shell Extraction | 3/3 | Complete | 2026-04-16 |
+| 4. GPS and Out-and-Back Shell Extraction | 3/3 | Complete | 2026-04-19 |
 | 5. Closeout, Secondary Cleanup, and Roadmap Sync | 2/2 | Complete | 2026-04-19 |
+| 6. Verification Artifact Backfill (Phases 03-05) | 0/4 | Planned | - |
+| 7. Phase-02 Summary Frontmatter Repair | 0/3 | Planned | - |
+| 8. Regression Contract Anchor Sync | 0/2 | Planned | - |
