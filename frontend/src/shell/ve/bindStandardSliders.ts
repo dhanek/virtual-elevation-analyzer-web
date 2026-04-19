@@ -113,6 +113,17 @@ export async function updateVEPlotsWithWindSource(
         Plotly.react('vePlot', figures.elevation.data, figures.elevation.layout, figures.elevation.config);
         Plotly.react('veResidualsPlot', figures.residuals.data, figures.residuals.layout, figures.residuals.config);
     } else {
+        let fitWindSpeed: number[];
+        if (windSource === 'fit') {
+            const windSpeedOffset = appState.currentParameters.air_speed_offset || 0;
+            const offsetWindSpeed = applyAirSpeedOffset(analysisInput.windSpeed, windSpeedOffset);
+            fitWindSpeed = appState.airSpeedCalibrationPercent !== 0
+                ? offsetWindSpeed.map(speed => speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0))
+                : offsetWindSpeed;
+        } else {
+            fitWindSpeed = new Array(analysisInput.windSpeed.length).fill(NaN);
+        }
+
         const calculator = createVeCalculator({
             timestamps: analysisInput.timestamps,
             power: analysisInput.power,
@@ -121,7 +132,7 @@ export async function updateVEPlotsWithWindSource(
             positionLong: analysisInput.positionLong,
             altitude: analysisInput.altitude,
             distance: analysisInput.distance,
-            windSpeed: windSource === 'fit' ? analysisInput.windSpeed : new Array(analysisInput.windSpeed.length).fill(NaN),
+            windSpeed: fitWindSpeed,
             params: appState.currentParameters,
             cda,
             crr,
@@ -203,8 +214,14 @@ export function setupVESliders(
         if (windTab && windTab.classList.contains('active')) {
             const hasWindSpeed = windSpeed.some(value => !isNaN(value) && value !== 0);
             const windSpeedOffset = appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
+            const calibrationPercent = appState.airSpeedCalibrationPercent;
+            const calibrationMultiplier = 1 + calibrationPercent / 100;
             const fitWindSpeedKmh = hasWindSpeed
-                ? applyAirSpeedOffset(windSpeed, windSpeedOffset).map(value => isNaN(value) ? null : value * 3.6)
+                ? applyAirSpeedOffset(windSpeed, windSpeedOffset).map(value => {
+                    if (isNaN(value)) return null;
+                    const calibrated = calibrationPercent !== 0 ? value * calibrationMultiplier : value;
+                    return calibrated * 3.6;
+                })
                 : new Array<number | null>(velocity.length).fill(null);
 
             const fig = buildWindSpeedFigure({
@@ -395,6 +412,7 @@ export function setupVESliders(
             const trimStart = parseInt(trimStartSlider.value);
             const trimEnd = parseInt(trimEndSlider.value);
             updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+            updateSecondaryPlots(trimStart, trimEnd);
             saveCurrentLapSettings();
         };
 
@@ -408,6 +426,7 @@ export function setupVESliders(
             const trimStart = parseInt(trimStartSlider.value);
             const trimEnd = parseInt(trimEndSlider.value);
             updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+            updateSecondaryPlots(trimStart, trimEnd);
             saveCurrentLapSettings();
         };
 
@@ -433,6 +452,7 @@ export function setupVESliders(
                 airSpeedCalibrationValue.value = calibrationPercent.toFixed(1);
                 appState.airSpeedCalibrationPercent = calibrationPercent;
                 updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+                updateSecondaryPlots(trimStart, trimEnd);
                 saveCurrentLapSettings();
             };
         }
