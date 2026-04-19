@@ -2,19 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 05 of 5 (closeout secondary cleanup and roadmap sync)
-current_phase_name: closeout secondary cleanup and roadmap sync
-current_plan: 2 of 2
-status: complete
-stopped_at: Phase 5 closeout synced
-last_updated: "2026-04-19T18:10:00Z"
-last_activity: 2026-04-19
+status: executing
+stopped_at: Completed 06-01-PLAN.md (Phase 03 verification artifact backfill)
+last_updated: "2026-04-19T19:25:00Z"
 progress:
-  total_phases: 5
+  total_phases: 8
   completed_phases: 5
-  total_plans: 14
-  completed_plans: 14
-  percent: 100
+  total_plans: 18
+  completed_plans: 15
+  percent: 83
 ---
 
 # Project State
@@ -24,13 +20,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Make trustworthy virtual elevation analysis of local ride data work well in the browser, without sacrificing correctness or forcing users through a fragile UI shell.
-**Current focus:** Milestone closeout / next-milestone planning
+**Current focus:** Phase 06 — verification-artifact-backfill-phases-03-05
 
 ## Current Position
 
-Phase: 05 (closeout-secondary-cleanup-and-roadmap-sync) — COMPLETE  
-Plan: 2 of 2 — COMPLETE  
-**Status:** Phase execution complete; roadmap/docs synchronized.
+Phase: 06 (verification-artifact-backfill-phases-03-05) — EXECUTING
+Plan: 2 of 4
+**Status:** Executing Phase 06 (Plan 06-01 complete)
 
 ## Accumulated Context
 
@@ -39,6 +35,9 @@ Plan: 2 of 2 — COMPLETE
 - `frontend/src/main.ts` is now composition-root-only and no longer the primary shell hotspot.
 - Shell ownership for file load, analysis orchestration, Section 3, DEM, standard VE, GPS-lap, and out-and-back is delegated under `frontend/src/shell/`.
 - `MapVisualization.ts` remains secondary; MAP-01 stays deferred to v2.
+- Phase 03 verification artifact reuses the Phase 01/02 verification template grammar so milestone-audit re-parsing succeeds without bespoke handling.
+- BEHV-02 parity claims must always cite the regression-contract anchors (`docs/testing/ui-shell-regression-contract.md`), the manual checklist (`docs/testing/ui-shell-manual-checklist.md`), and the project parity validation chain (`bash scripts/validate-ui-shell-guardrails.sh --ci-only` + `cd frontend && npm run build`).
+- Verification Requirements Coverage tables use a dedicated `ID` column so audit regexes matching `\|\s*ID\s*\|` succeed reliably.
 
 ### Pending Todos
 
@@ -53,5 +52,5 @@ Pending todo files remain under `.planning/todos/pending/` for post-milestone fo
 ## Session Continuity
 
 **Last Date:** 2026-04-19  
-**Stopped At:** Phase 5 closeout synced  
-**Resume File:** .planning/ROADMAP.md
+**Stopped At:** Completed 06-01-PLAN.md (Phase 03 verification artifact backfill)  
+**Resume File:** .planning/phases/06-verification-artifact-backfill-phases-03-05/06-02-PLAN.md
