@@ -120,7 +120,7 @@ Plans:
 
 Plans:
 - [x] 06-01: Create Phase 03 verification artifact with requirement-evidence matrix (completed 2026-04-19)
-- [ ] 06-02: Create Phase 04 verification artifact with in-place update and calibration evidence matrix
+- [x] 06-02: Create Phase 04 verification artifact with in-place update and calibration evidence matrix (completed 2026-04-19)
 - [ ] 06-03: Create Phase 05 verification artifact with closeout requirement evidence matrix
 - [ ] 06-04: Strengthen BEHV-02 parity artifact depth and re-check matrix consistency
 
@@ -171,6 +171,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. Section 3 and Standard VE Shell Extraction | 3/3 | Complete | 2026-04-16 |
 | 4. GPS and Out-and-Back Shell Extraction | 3/3 | Complete | 2026-04-19 |
 | 5. Closeout, Secondary Cleanup, and Roadmap Sync | 2/2 | Complete | 2026-04-19 |
-| 6. Verification Artifact Backfill (Phases 03-05) | 1/4 | In Progress | - |
+| 6. Verification Artifact Backfill (Phases 03-05) | 2/4 | In Progress | - |
 | 7. Phase-02 Summary Frontmatter Repair | 0/3 | Planned | - |
 | 8. Regression Contract Anchor Sync | 0/2 | Planned | - |
