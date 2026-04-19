@@ -1,0 +1,545 @@
+import {
+	AnalysisParametersComponent,
+	AnalysisParameters,
+} from "../../components/AnalysisParameters";
+import { MapVisualization } from "../../components/MapVisualization";
+import { AppState } from "../../state/AppState";
+import { ParameterStorage } from "../../utils/ParameterStorage";
+import { ResultsStorage } from "../../utils/ResultsStorage";
+import { log } from "../../utils/log";
+import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import { resolveWindSeries } from "../../analysis/WindSourceResolver";
+import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
+import { prepareAnalysisPayload } from "./prepareAnalysisPayload";
+import { createModeRenderCallbacks } from "./renderDelegates";
+import { showGpsLapVEAnalysis } from "../gpsLap";
+import { showOutAndBackVEAnalysis } from "../outAndBack";
+import { calculateAutoRho, showVirtualElevationAnalysisInline } from "../ve";
+import {
+	handleSaveScreenshot,
+	handleStoreResult,
+	handleExportAllResults,
+	saveCurrentLapSettings,
+} from "./storageHandlers";
+import { isGpsLapSelectionMode } from "../section3/section3Orchestration";
+import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
+
+interface AnalyzeOrchestratorDependencies {
+	appState: AppState;
+	parameterStorage: ParameterStorage;
+	resultsStorage: ResultsStorage;
+	getMapVisualization: () => MapVisualization | null;
+	getParametersComponent: () => AnalysisParametersComponent | null;
+	setParametersComponent: (
+		component: AnalysisParametersComponent | null,
+	) => void;
+	initializeSection3: () => void;
+	showLoading: (message: string) => void;
+	hideLoading: () => void;
+	showError: (message: string) => void;
+}
+
+let dependencies: AnalyzeOrchestratorDependencies | null = null;
+
+function getDependencies(): AnalyzeOrchestratorDependencies {
+	if (!dependencies) {
+		throw new Error("Analyze orchestrator is not configured");
+	}
+	return dependencies;
+}
+
+function getServices(deps: AnalyzeOrchestratorDependencies) {
+	return {
+		appState: deps.appState,
+		showLoading: deps.showLoading,
+		hideLoading: deps.hideLoading,
+		showError: deps.showError,
+	};
+}
+
+// Helper function to dynamically load and wait for Plotly
+function waitForPlotly(): Promise<any> {
+	return new Promise((resolve, reject) => {
+		// Check if already loaded
+		if (typeof (window as any).Plotly !== "undefined") {
+			resolve((window as any).Plotly);
+			return;
+		}
+
+		// Load Plotly script dynamically
+		const script = document.createElement("script");
+		script.src = "https://cdn.plot.ly/plotly-basic-2.27.0.min.js"; // Use basic bundle (no eval required)
+		script.async = false;
+		script.crossOrigin = "anonymous";
+
+		script.onload = () => {
+			// Give it a moment to initialize
+			setTimeout(() => {
+				if (typeof (window as any).Plotly !== "undefined") {
+					resolve((window as any).Plotly);
+				} else {
+					log.error("Plotly script loaded but Plotly is not on window object");
+					reject(new Error("Plotly loaded but not available"));
+				}
+			}, 100);
+		};
+
+		script.onerror = (error) => {
+			log.error("Failed to load Plotly script:", error);
+			log.error("Network error or CSP blocking the script");
+			reject(new Error("Failed to load Plotly script from CDN"));
+		};
+
+		document.head.appendChild(script);
+	});
+}
+
+export function configureAnalyzeOrchestrator(
+	nextDependencies: AnalyzeOrchestratorDependencies,
+): void {
+	dependencies = nextDependencies;
+}
+
+// Analysis parameters initialization
+export function initializeAnalysisParameters(): void {
+	const deps = getDependencies();
+
+	try {
+		const parametersComponent = new AnalysisParametersComponent(
+			"analysisParameters",
+			handleParametersChange,
+		);
+		deps.setParametersComponent(parametersComponent);
+
+		// Initialize appState.currentParameters with the default values from the component
+		deps.appState.currentParameters = parametersComponent.getParameters();
+
+		// Update analyze button with the default parameters
+		updateAnalyzeButton();
+	} catch (error) {
+		log.error("Error initializing analysis parameters:", error);
+	}
+}
+
+export function handleParametersChange(parameters: AnalysisParameters): void {
+	const deps = getDependencies();
+
+	const previousLapDetectionMode = deps.appState.previousAutoLapDetection;
+	deps.appState.currentParameters = parameters;
+
+	// Check if auto_lap_detection changed and Section 3 needs to be re-rendered
+	const lapDetectionChanged =
+		parameters.auto_lap_detection !== previousLapDetectionMode;
+	deps.appState.previousAutoLapDetection = parameters.auto_lap_detection;
+
+	// Don't save if we're currently loading parameters from storage
+	if (deps.appState.isLoadingParameters) {
+		// Still need to update previous value when loading
+		return;
+	}
+
+	// If lap detection mode changed, re-initialize Section 3 to show/hide GPS panel
+	if (
+		lapDetectionChanged &&
+		deps.appState.currentFitData &&
+		deps.appState.currentLaps.length > 0
+	) {
+		log.debug(
+			`Auto lap detection changed: ${previousLapDetectionMode} -> ${parameters.auto_lap_detection}`,
+		);
+		// Reset GPS lap detection state when mode changes
+		deps.appState.gpsLapDetectionResult = null;
+		deps.appState.gpsDetectedLaps = [];
+		deps.appState.gpsSelectedLaps = [];
+		// Re-initialize Section 3 to show/hide GPS lap detection panel
+		deps.initializeSection3();
+		// Continue to save parameters below (don't return early)
+	}
+
+	// Save parameters to IndexedDB for this file
+	if (!deps.appState.currentFileHash) {
+		log.error("❌ Cannot save: appState.currentFileHash is null/undefined");
+		return;
+	}
+
+	if (!deps.appState.selectedFile) {
+		log.error("❌ Cannot save: appState.selectedFile is null/undefined");
+		return;
+	}
+
+	deps.parameterStorage
+		.saveParameters(
+			deps.appState.currentFileHash,
+			parameters,
+			deps.appState.selectedFile.name,
+		)
+		.then(() => {})
+		.catch((err) => {
+			log.error("❌ Failed to save parameters:", err);
+		});
+
+	// Update wind indicator on map if wind parameters are set
+	const mapVisualization = deps.getMapVisualization();
+	if (mapVisualization && deps.appState.currentParameters) {
+		if (
+			deps.appState.currentParameters.wind_speed !== null &&
+			deps.appState.currentParameters.wind_speed !== undefined &&
+			deps.appState.currentParameters.wind_direction !== null &&
+			deps.appState.currentParameters.wind_direction !== undefined
+		) {
+			mapVisualization.showWindIndicator(
+				deps.appState.currentParameters.wind_speed,
+				deps.appState.currentParameters.wind_direction,
+				deps.appState.currentParameters.wind_speed_unit,
+			);
+		} else {
+			mapVisualization.hideWindIndicator();
+		}
+	}
+
+	// Trigger auto-rho calculation if checkbox was just enabled
+	// or if auto-calculate is already enabled (parameters changed)
+	// BUT skip if we're already calculating (prevents infinite loop)
+	const parametersComponent = deps.getParametersComponent();
+	if (
+		parameters.auto_calculate_rho &&
+		deps.appState.currentFitData &&
+		!deps.appState.isCalculatingAutoRho
+	) {
+		// Small delay to ensure UI is updated
+		setTimeout(() => {
+			calculateAutoRho(
+				deps.appState,
+				parametersComponent,
+				getServices(deps),
+			).catch((err) => {
+				log.error("Auto-rho calculation error:", err);
+			});
+		}, 100);
+	}
+
+	// If VE analysis is already visible, recalculate when parameters change
+	const veSection = document.getElementById("veSection");
+	if (veSection && !veSection.classList.contains("hidden")) {
+		// Get the current sliders and data for recalculation
+		const trimStartSlider = document.getElementById(
+			"trimStartSlider",
+		) as HTMLInputElement;
+
+		if (trimStartSlider) {
+			// trimStart and trimEnd are read from sliders but dispatch triggers recalc
+			trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
+		}
+	}
+
+	// Update analyze button state
+	updateAnalyzeButton();
+}
+
+// Setup analyze button functionality
+export function setupAnalyzeButton(): void {
+	const analyzeBtn = document.getElementById("analyzeBtn");
+	if (analyzeBtn) {
+		analyzeBtn.addEventListener("click", handleAnalyze);
+	}
+}
+
+export function updateAnalyzeButton(): void {
+	const deps = getDependencies();
+
+	const analyzeBtn = document.getElementById("analyzeBtn") as HTMLButtonElement;
+	if (analyzeBtn) {
+		const lapDetectionMode =
+			deps.appState.currentParameters?.auto_lap_detection || "None";
+		const isGpsLapMode = isGpsLapSelectionMode(lapDetectionMode);
+		const isOutAndBackMode = lapDetectionMode === "GPS based out and back";
+
+		// Check which lap/section selection to use
+		let hasSelectedLaps: boolean;
+		let lapCount: number;
+		let hasDetectedItems: boolean;
+
+		if (isOutAndBackMode) {
+			hasSelectedLaps = deps.appState.outAndBackSelectedSections.length > 0;
+			lapCount = deps.appState.outAndBackSelectedSections.length;
+			hasDetectedItems = deps.appState.outAndBackSections.length > 0;
+		} else if (isGpsLapMode) {
+			hasSelectedLaps = deps.appState.gpsSelectedLaps.length > 0;
+			lapCount = deps.appState.gpsSelectedLaps.length;
+			hasDetectedItems = deps.appState.gpsDetectedLaps.length > 0;
+		} else {
+			hasSelectedLaps = deps.appState.selectedLaps.length > 0;
+			lapCount = deps.appState.selectedLaps.length;
+			hasDetectedItems = true;
+		}
+
+		const hasValidParameters =
+			deps.getParametersComponent()?.isValid() ?? false;
+
+		analyzeBtn.disabled =
+			!hasSelectedLaps || !hasValidParameters || !hasDetectedItems;
+
+		if (isOutAndBackMode && deps.appState.outAndBackSections.length === 0) {
+			analyzeBtn.textContent = "Set GPS Gates to Detect Sections";
+		} else if (isGpsLapMode && deps.appState.gpsDetectedLaps.length === 0) {
+			analyzeBtn.textContent = "Set GPS Gate to Detect Laps";
+		} else if (!hasSelectedLaps) {
+			analyzeBtn.textContent = isOutAndBackMode
+				? "Select Sections to Analyze"
+				: "Select Laps to Analyze";
+		} else if (!hasValidParameters) {
+			analyzeBtn.textContent = "Check Parameters Above";
+		} else {
+			if (isOutAndBackMode) {
+				analyzeBtn.textContent = `Analyze ${lapCount} Selected Section${lapCount > 1 ? "s" : ""}`;
+			} else {
+				analyzeBtn.textContent = `Analyze ${lapCount} Selected Lap${lapCount > 1 ? "s" : ""}`;
+			}
+		}
+	}
+}
+
+export async function handleAnalyze(): Promise<void> {
+	const deps = getDependencies();
+
+	const lapDetectionMode =
+		deps.appState.currentParameters?.auto_lap_detection || "None";
+	const modeHandler = getAnalysisModeHandler(lapDetectionMode);
+	const selection = modeHandler.prepareSelection(deps.appState);
+
+	if (
+		!deps.appState.currentParameters ||
+		selection.selectedItems.length === 0
+	) {
+		alert(selection.emptySelectionMessage);
+		return;
+	}
+
+	if (!deps.appState.currentFitData) {
+		alert("No FIT data available for analysis.");
+		return;
+	}
+
+	const validationMessage = modeHandler.validate(deps.appState);
+	if (validationMessage) {
+		alert(validationMessage);
+		return;
+	}
+
+	// Note: Auto-rho will be triggered AFTER VE analysis when trim sliders are created
+	// (trim sliders don't exist yet at this point)
+	try {
+		deps.showLoading("Preparing data for Virtual Elevation analysis...");
+
+		if (selection.mode === "outAndBack") {
+			log.debug(
+				"Out and Back mode - selected sections:",
+				selection.outAndBackSections,
+			);
+		} else if (selection.mode === "gpsLap") {
+			log.debug(
+				"GPS lap mode - selected lap index ranges:",
+				selection.indexRanges,
+			);
+		} else {
+			log.debug("Normal mode - selected lap data:", selection.selectedEntries);
+		}
+
+		log.debug(
+			"appState.currentFitResult structure:",
+			deps.appState.currentFitResult,
+		);
+		log.debug(
+			"appState.currentFitResult keys:",
+			deps.appState.currentFitResult
+				? Object.keys(deps.appState.currentFitResult)
+				: "null",
+		);
+
+		if (!deps.appState.currentFitResult) {
+			throw new Error("No data available for analysis");
+		}
+
+		const fitData =
+			deps.appState.currentFitData || deps.appState.currentFitResult.fit_data;
+		if (!fitData) {
+			throw new Error("No analysis data available");
+		}
+
+		const normalizedArrays = getNormalizedActivityArrays(fitData);
+		const hasWindYaw = normalizedArrays.windYaw.some(
+			(yaw: number) => !isNaN(yaw) && yaw !== 0,
+		);
+		const initialWindResolution = resolveWindSeries({
+			fitData,
+			windSource: "fit",
+			applyOffset: false,
+		});
+
+		if (initialWindResolution.dataSource === "air_speed") {
+			log.debug("🌬️ Found air speed data, using it as apparent wind speed");
+		} else if (initialWindResolution.dataSource === "wind_speed") {
+			if (hasWindYaw) {
+				log.debug(
+					"🌬️ Found wind speed with yaw, triangulating for apparent wind speed",
+				);
+			} else {
+				log.debug(
+					"🌬️ Found wind speed without yaw, using it as apparent wind speed",
+				);
+			}
+		} else {
+			log.debug(
+				"🌬️ No air/wind speed data found, using constant wind as source",
+			);
+		}
+
+		const hasRoadSpeed = normalizedArrays.roadSpeed.some(
+			(v: number) => !isNaN(v) && v !== 0,
+		);
+		const hasEnhancedSpeed = normalizedArrays.velocity.some(
+			(v: number) => !isNaN(v) && v !== 0,
+		);
+		if (hasRoadSpeed && hasEnhancedSpeed) {
+			log.debug("🚴 Found enhanced speed and road speed, prefer road speed");
+		}
+
+		deps.showLoading("Running Virtual Elevation calculation...");
+
+		const hasEnvironmentalData = !!(
+			fitData.temperature &&
+			fitData.humidity &&
+			fitData.pressure
+		);
+		const payload = prepareAnalysisPayload({
+			fitData,
+			selection,
+			params: deps.appState.currentParameters,
+			cda: deps.appState.currentParameters.cda,
+			crr: deps.appState.currentParameters.crr,
+			getNormalizedActivityArrays,
+			calculateRhoArray: (fd) => {
+				const currentNormalized = getNormalizedActivityArrays(fd);
+				const hasAirDensityData = currentNormalized.airDensity.some(
+					(rho) => !isNaN(rho) && rho > 0,
+				);
+				if (hasAirDensityData) {
+					log.debug("💨 Found air density data, using it for calculations");
+					return currentNormalized.airDensity;
+				}
+
+				if (hasEnvironmentalData) {
+					const calculated = calculateRhoArrayFromFitData(fd);
+					if (calculated) {
+						log.debug("💨 Calculated air density from environmental data");
+					}
+					return calculated;
+				}
+
+				log.debug(
+					"💨 No air density found, using constant value from weather API",
+				);
+				return null;
+			},
+		});
+
+		const powerDataPoints = payload.filteredData.power.filter(
+			(p) => p > 0,
+		).length;
+		if (powerDataPoints < payload.filteredData.timestamps.length * 0.5) {
+			log.warn(
+				`Only ${powerDataPoints}/${payload.filteredData.timestamps.length} records have power data`,
+			);
+		}
+
+		deps.hideLoading();
+
+		deps.appState.currentRhoArray = payload.rhoArray;
+		deps.appState.currentVEResult = payload.initialResult;
+		deps.appState.filteredVEData = {
+			positionLat: payload.filteredData.positionLat,
+			positionLong: payload.filteredData.positionLong,
+		};
+
+		modeHandler.syncState(deps.appState, selection);
+
+		const parametersComponent = deps.getParametersComponent();
+		const mapVisualization = deps.getMapVisualization();
+
+		const callbacks = createModeRenderCallbacks({
+			standard: (args) =>
+				showVirtualElevationAnalysisInline(
+					deps.appState,
+					deps.parameterStorage,
+					parametersComponent,
+					getServices(deps),
+					mapVisualization,
+					{
+						onSaveScreenshot: () => {
+							void handleSaveScreenshot(deps.appState, deps.resultsStorage);
+						},
+						onStoreResult: () => {
+							void handleStoreResult(deps.appState, deps.resultsStorage);
+						},
+						onExportAll: () => {
+							void handleExportAllResults(deps.resultsStorage);
+						},
+						saveCurrentLapSettings: () => {
+							void saveCurrentLapSettings(deps.appState, deps.parameterStorage);
+						},
+					},
+					args.initialResult,
+					args.analyzedLaps,
+					args.timestamps,
+					args.power,
+					args.velocity,
+					args.positionLat,
+					args.positionLong,
+					args.altitude,
+					args.distance,
+					args.windSpeed,
+					args.temperature,
+					args.cdaReference,
+					args.defaultAirSpeedOffset,
+				),
+			gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
+				showGpsLapVEAnalysis(
+					getServices(deps),
+					deps.parameterStorage,
+					deps.resultsStorage,
+					waitForPlotly,
+					lapIndexRanges,
+					fitData,
+					params,
+					defaultAirSpeedOffset,
+				),
+			outAndBack: ({ sections, fitData, params, defaultAirSpeedOffset }) =>
+				showOutAndBackVEAnalysis(
+					getServices(deps),
+					deps.parameterStorage,
+					deps.resultsStorage,
+					sections,
+					fitData,
+					params,
+					defaultAirSpeedOffset,
+					waitForPlotly,
+				),
+		});
+
+		await modeHandler.render({
+			appState: deps.appState,
+			selection,
+			fitData,
+			params: deps.appState.currentParameters,
+			defaultAirSpeedOffset: payload.defaultAirSpeedOffset,
+			initialResult: payload.initialResult,
+			filteredData: payload.filteredData,
+			callbacks,
+		});
+	} catch (err) {
+		log.error("Virtual Elevation analysis failed:", err);
+		deps.hideLoading();
+		const errorMessage = err instanceof Error ? err.message : "Unknown error";
+		deps.showError(`Virtual Elevation analysis failed: ${errorMessage}`);
+	}
+}
