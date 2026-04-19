@@ -111,6 +111,12 @@ The in-place-update (BEHV-03) and calibration (BEHV-04) parity surfaces are anch
 
 **Manual checks:** BEHV-03 and BEHV-04 parity surfaces were exercised by the Plan 04-03 16-step browser checklist covering GPS-lap tab preservation (Wind tab across CdA slider, Crr slider, Auto Adjust), out-and-back tab preservation (Power tab across slider and Auto Adjust), Auto Adjust producing non-zero calibration in both GPS-lap and out-and-back, manual calibration re-run producing updated plots, and per-mode settings persistence across mode switches. User reported "APPROVED" (`.planning/phases/04-gps-and-out-and-back-shell-extraction/04-03-SUMMARY.md` `Task 2 — Manual browser verification`). Reference: `docs/testing/ui-shell-manual-checklist.md`.
 
+**Requirement ID traceability cross-check:**
+- `SHEL-05` / `SHEL-06` → ROADMAP Phase 4 success criterion 3 ("GPS-lap and out-and-back shell logic live outside `frontend/src/main.ts` behind narrower module boundaries"). Token-exact match confirmed against `.planning/REQUIREMENTS.md` (SHEL-05, SHEL-06) and `.planning/ROADMAP.md` Phase 4 `Requirements: [SHEL-05, SHEL-06, BEHV-03, BEHV-04]`.
+- `BEHV-03` → ROADMAP Phase 4 success criterion 1 ("GPS in-place updates preserve active tab and scroll position during auto-adjust and slider changes"). Token-exact match confirmed against `.planning/REQUIREMENTS.md` and Phase 4 summary frontmatter (`04-01-SUMMARY.md`, `04-02-SUMMARY.md`, `04-03-SUMMARY.md` all list BEHV-03 in `requirements`).
+- `BEHV-04` → ROADMAP Phase 4 success criterion 2 ("GPS lap, GPS gate one-way, and out-and-back modes retain correct air-speed calibration behavior after shell extraction"). Token-exact match confirmed against `.planning/REQUIREMENTS.md` and Phase 4 summary frontmatter (`04-01-SUMMARY.md`, `04-02-SUMMARY.md`, `04-03-SUMMARY.md` all list BEHV-04 in `requirements`).
+- No ID drift: the canonical IDs above are the only forms used anywhere in this artifact; hyphen-padded numeric suffixes and underscore-delimited variants are deliberately absent (verified by the plan's acceptance grep).
+
 **Verification time:** ~10 min (artifact + traceability backfill)
 
 ## Gaps
