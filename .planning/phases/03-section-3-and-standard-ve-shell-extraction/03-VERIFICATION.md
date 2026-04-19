@@ -74,11 +74,39 @@ The standard VE parity surface (BEHV-02) is anchored to the same evidence qualit
 
 ## Verification Metadata
 
-_Populated in Task 3 with verification date, evidence sources, and command list._
+**Verification date:** 2026-04-19
+**Verification approach:** Goal-backward against Phase 3 ROADMAP success criteria; cross-referenced 03-01/03-02/03-03 plan + summary artifacts; aligned requirement evidence rows with `docs/testing/ui-shell-regression-contract.md` and `docs/testing/ui-shell-manual-checklist.md` per the BEHV-02 parity-depth audit gap.
+
+**Evidence sources:**
+- `.planning/REQUIREMENTS.md` (canonical requirement IDs SHEL-03, SHEL-04, BEHV-01, BEHV-02)
+- `.planning/ROADMAP.md` Phase 3 entry (success criteria, requirement mapping)
+- `.planning/phases/03-section-3-and-standard-ve-shell-extraction/03-01-PLAN.md`
+- `.planning/phases/03-section-3-and-standard-ve-shell-extraction/03-02-PLAN.md`
+- `.planning/phases/03-section-3-and-standard-ve-shell-extraction/03-03-PLAN.md`
+- `.planning/phases/03-section-3-and-standard-ve-shell-extraction/03-01-SUMMARY.md`
+- `.planning/phases/03-section-3-and-standard-ve-shell-extraction/03-02-SUMMARY.md`
+- `.planning/phases/03-section-3-and-standard-ve-shell-extraction/03-03-SUMMARY.md`
+- `docs/testing/ui-shell-regression-contract.md`
+- `docs/testing/ui-shell-manual-checklist.md`
+
+**Commands used for proof capture (referenced from Phase 3 plan/summary evidence):**
+- `bash scripts/validate-ui-shell-guardrails.sh --ci-only` (Plan 03-03 closeout) — PASSED
+- `cd frontend && npm run check` (Plan 03-01, 03-02) — PASSED
+- `cd frontend && npm run test` (Plan 03-01, 03-02) — PASSED 43/43
+- `cd frontend && npm run build` (Plan 03-02 close) — PASSED (412 kB bundle)
+
+**Manual checks:** Standard VE BEHV-02 parity surface is covered by `docs/testing/ui-shell-manual-checklist.md` `## FIT and CSV file-load navigation`. No new manual-only surface was introduced by Phase 3 beyond what Phase 1 already locked in via `docs/testing/ui-shell-regression-contract.md`.
+
+**Verification time:** ~10 min (artifact + traceability backfill)
 
 ## Gaps
 
-_Populated in Task 3 after the requirement-evidence matrix is complete._
+**No gaps found.** Requirement IDs SHEL-03, SHEL-04, BEHV-01, and BEHV-02 each have explicit evidence rows in `## Requirements Coverage` with concrete shell-module artifacts, regression-contract anchors, and validation commands. BEHV-02 parity evidence is now elevated to the same depth as other preserved-behavior flows by citing the regression-contract command chain plus the manual-checklist anchor.
+
+- SHEL-03: None
+- SHEL-04: None
+- BEHV-01: None
+- BEHV-02: None
 
 ---
 *Verified: 2026-04-19T20:00:00Z*
