@@ -467,8 +467,9 @@ export async function handleAnalyze(): Promise<void> {
 		const mapVisualization = deps.getMapVisualization();
 
 		const callbacks = createModeRenderCallbacks({
-			standard: (args) =>
-				showVirtualElevationAnalysisInline(
+			standard: async (args) => {
+				await waitForPlotly();
+				return showVirtualElevationAnalysisInline(
 					deps.appState,
 					deps.parameterStorage,
 					parametersComponent,
@@ -501,7 +502,8 @@ export async function handleAnalyze(): Promise<void> {
 					args.temperature,
 					args.cdaReference,
 					args.defaultAirSpeedOffset,
-				),
+				);
+			},
 			gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
 				showGpsLapVEAnalysis(
 					getServices(deps),
