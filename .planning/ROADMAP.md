@@ -15,7 +15,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 - [x] **Phase 3: Section 3 and Standard VE Shell Extraction** - Extract Section 3 and standard VE shell behavior while preserving current standard-mode behavior (completed 2026-04-16)
 - [x] **Phase 4: GPS and Out-and-Back Shell Extraction** - Extract GPS-based shell behavior while preserving in-place updates and calibration correctness (completed 2026-04-19)
 - [x] **Phase 5: Closeout, Secondary Cleanup, and Roadmap Sync** - Finish the `main.ts` reduction, apply only justified secondary cleanup, and sync planning/docs (completed 2026-04-19)
-- [ ] **Phase 6: Verification Artifact Backfill (Phases 03-05)** - Backfill missing phase verification artifacts and parity evidence so requirement closure is machine-verifiable
+- [x] **Phase 6: Verification Artifact Backfill (Phases 03-05)** - Backfill missing phase verification artifacts and parity evidence so requirement closure is machine-verifiable (completed 2026-04-20)
 - [ ] **Phase 7: Phase-02 Summary Frontmatter Repair** - Backfill `requirements_completed` metadata for phase-02 summaries to resolve partial requirement closure state
 - [ ] **Phase 8: Regression Contract Anchor Sync** - Re-anchor regression-contract documentation to current shell ownership paths
 
@@ -116,13 +116,13 @@ Plans:
   1. `03-VERIFICATION.md`, `04-VERIFICATION.md`, and `05-VERIFICATION.md` exist with explicit requirement coverage and evidence.
   2. BEHV-02 standard VE parity evidence is elevated to the same artifact quality as other preserved-behavior flows.
   3. Previously orphaned requirements mapped to phases 03-05 are no longer orphaned in the 3-source requirement matrix.
-**Plans**: 0 plans
+**Plans**: 4 plans
 
 Plans:
 - [x] 06-01: Create Phase 03 verification artifact with requirement-evidence matrix (completed 2026-04-19)
 - [x] 06-02: Create Phase 04 verification artifact with in-place update and calibration evidence matrix (completed 2026-04-19)
-- [ ] 06-03: Create Phase 05 verification artifact with closeout requirement evidence matrix
-- [ ] 06-04: Strengthen BEHV-02 parity artifact depth and re-check matrix consistency
+- [x] 06-03: Create Phase 05 verification artifact with closeout requirement evidence matrix (completed 2026-04-20)
+- [x] 06-04: Strengthen BEHV-02 parity artifact depth and re-check matrix consistency (completed 2026-04-20)
 
 ### Phase 7: Phase-02 Summary Frontmatter Repair
 **Goal**: Resolve partial requirement closure for Phase 2 by backfilling summary frontmatter metadata needed by the 3-source audit matrix
@@ -171,6 +171,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. Section 3 and Standard VE Shell Extraction | 3/3 | Complete | 2026-04-16 |
 | 4. GPS and Out-and-Back Shell Extraction | 3/3 | Complete | 2026-04-19 |
 | 5. Closeout, Secondary Cleanup, and Roadmap Sync | 2/2 | Complete | 2026-04-19 |
-| 6. Verification Artifact Backfill (Phases 03-05) | 2/4 | In Progress | - |
+| 6. Verification Artifact Backfill (Phases 03-05) | 4/4 | Complete | 2026-04-20 |
 | 7. Phase-02 Summary Frontmatter Repair | 0/3 | Planned | - |
 | 8. Regression Contract Anchor Sync | 0/2 | Planned | - |
