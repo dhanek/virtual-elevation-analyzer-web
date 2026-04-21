@@ -82,8 +82,5 @@ None - no external service configuration required.
 - Shell/dom helper foundation complete and ready for Plan 02-02 (shell module interfaces and dependency wiring)
 - Plan 02-03 can consume the new helpers to replace duplicated main.ts code
 - All 38 tests pass (17 new + 21 existing), zero regressions on check/lint/build
----
-*Phase: 02-shell-infrastructure-and-delegation*
-*Completed: 2026-04-14*
 
 ## Self-Check: PASSED
