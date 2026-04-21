@@ -135,12 +135,12 @@ Plans:
   1. Every Phase-02 summary includes accurate `requirements_completed` frontmatter.
   2. SHEL-01 and SHEL-02 no longer appear partial in the 3-source requirement matrix.
   3. Phase-02 requirement evidence remains consistent across plan, summary, and verification artifacts.
-**Plans**: 0 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 07-01: Backfill `requirements_completed` in 02-01 summary frontmatter
-- [ ] 07-02: Backfill `requirements_completed` in 02-02 and 02-03 summary frontmatter
-- [ ] 07-03: Re-run requirement-matrix sanity check for SHEL-01 and SHEL-02
+- [ ] 07-01-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-01 summary
+- [ ] 07-02-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-02 and 02-03 summaries
+- [ ] 07-03-PLAN.md — Run focused SHEL-01/SHEL-02 matrix sanity check and record evidence
 
 ### Phase 8: Regression Contract Anchor Sync
 **Goal**: Restore regression-contract documentation linkage quality by updating contract anchors to the current post-extraction shell ownership paths
