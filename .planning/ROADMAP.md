@@ -138,7 +138,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-01 summary
+- [x] 07-01-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-01 summary
 - [ ] 07-02-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-02 and 02-03 summaries
 - [ ] 07-03-PLAN.md — Run focused SHEL-01/SHEL-02 matrix sanity check and record evidence
 
