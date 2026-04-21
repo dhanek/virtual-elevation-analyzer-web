@@ -1,35 +1,7 @@
 ---
+requirements-completed: ["SHEL-01"]
 phase: 02-shell-infrastructure-and-delegation
 plan: 02
-subsystem: shell/analysis
-tags: [delegation, interfaces, pure-functions, render-delegates]
-dependency_graph:
-  requires: [02-01]
-  provides: [SHEL-01]
-  affects: [shell/analysis]
-tech_stack:
-  added: [vitest-module-mocking, ModeRenderCallbacks-type-extraction]
-  patterns: [injected-dependency, delegate-factory, barrel-reexport]
-key_files:
-  created:
-    - frontend/src/shell/analysis/types.ts
-    - frontend/src/shell/analysis/prepareAnalysisPayload.ts
-    - frontend/src/shell/analysis/prepareAnalysisPayload.test.ts
-    - frontend/src/shell/analysis/renderDelegates.ts
-    - frontend/src/shell/analysis/index.ts
-  modified: []
-decisions:
-  - "Added params/cda/crr to PayloadPreparationInput (plan's interface was missing VE calculator inputs)"
-  - "Used NormalizedActivityArrays type import instead of any for getNormalizedActivityArrays injection"
-  - "Used ModeRenderCallbacks['gpsLap'] type extraction instead of importing LapIndexRange/ActivityDataLike separately"
-  - "Mocked VeCalculatorFactory and AnalysisModes in tests to avoid WASM runtime dependency"
-metrics:
-  duration: 12m
-  completed: "2026-04-14"
-  tasks: 2
-  files_created: 5
-  tests_added: 5
-  test_pass_rate: 100
 ---
 
 # Phase 02 Plan 02: Shell Analysis Interfaces and Delegation Wiring Summary
@@ -39,7 +11,6 @@ Pure payload-preparation function with injected dependencies and named render de
 ## Tasks Completed
 
 | # | Name | Commit | Files |
-|---|------|--------|-------|
 | 1 | Define shell dependency types and pure payload-preparation function | `47ab5b9` | types.ts, prepareAnalysisPayload.ts, prepareAnalysisPayload.test.ts |
 | 2 | Create named render delegate factories and barrel export | `c9ec703` | renderDelegates.ts, index.ts |
 
@@ -95,7 +66,6 @@ Pure payload-preparation function with injected dependencies and named render de
 ## Verification Results
 
 | Check | Result |
-|-------|--------|
 | `vitest run src/shell/analysis/` | ✅ 5/5 tests pass |
 | `tsc --noEmit` | ✅ No type errors |
 | `npm run check` | ✅ Clean |

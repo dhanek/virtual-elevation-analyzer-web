@@ -1,32 +1,7 @@
 ---
+requirements-completed: ["SHEL-01"]
 phase: 02-shell-infrastructure-and-delegation
 plan: 03
-subsystem: main.ts + shell/section3
-tags: [delegation, section3, dom-helpers, behavior-preservation]
-dependency_graph:
-  requires: [02-01, 02-02]
-  provides: [SHEL-01]
-  affects: [frontend/src/main.ts, frontend/src/shell/section3]
-tech_stack:
-  added: [section3-shell-template, section3-lap-binder]
-  patterns: [composition-root, helper-delegation, behavior-preserving-rewire]
-key_files:
-  created:
-    - frontend/src/shell/section3/renderSection3Template.ts
-    - frontend/src/shell/section3/bindLapSelection.ts
-    - frontend/src/shell/section3/index.ts
-  modified:
-    - frontend/src/main.ts
-decisions:
-  - "Kept all analysis math and WASM interaction untouched; only orchestration and UI binding seams moved"
-  - "Replaced legacy tab/wind/footer inline bindings with shell/dom helpers across standard, GPS-lap, and out-and-back paths"
-  - "Resumed Task 2 after interruption and validated end-to-end guardrails before closing plan"
-metrics:
-  duration: resumed-after-interruption
-  completed: "2026-04-15"
-  tasks: 2
-  files_created: 3
-  files_modified: 1
 ---
 
 # Phase 02 Plan 03: Main Orchestration Delegation and Section 3 Shell Summary
@@ -36,7 +11,6 @@ Section 3 template rendering/binding moved into `shell/section3`, and `main.ts` 
 ## Tasks Completed
 
 | # | Name | Commit | Files |
-|---|------|--------|-------|
 | 1 | Extract Section 3 template rendering and lap selection into shell modules | `9ecff7f` | `renderSection3Template.ts`, `bindLapSelection.ts`, `index.ts`, `main.ts` |
 | 2 | Rewire handleAnalyze, tab switching, wind-source, and action-footer to use shell helpers | `13d5b98` | `main.ts` |
 
@@ -72,7 +46,6 @@ No task output was dropped during the interruption.
 ## Verification Results
 
 | Check | Result |
-|-------|--------|
 | `cd frontend && npm run check` | ✅ pass |
 | `cd frontend && npm run lint` | ✅ pass |
 | `cd frontend && npm run test` | ✅ pass (43/43) |
