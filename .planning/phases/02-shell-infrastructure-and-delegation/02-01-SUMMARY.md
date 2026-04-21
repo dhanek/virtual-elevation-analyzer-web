@@ -1,56 +1,5 @@
 ---
-phase: 02-shell-infrastructure-and-delegation
-plan: 01
-subsystem: ui
-tags: [dom, shell, helpers, vitest, jsdom]
-
-requires:
-  - phase: 01-guardrails-and-regression-protection
-    provides: validation scripts, regression contract, hotspot inventory
-provides:
-  - "Typed DOM lookup helpers (getElement, getRequiredElement)"
-  - "Selectable checkbox-card render/bind helpers for lap/section selection"
-  - "VE tab switching helper for all three analysis modes"
-  - "Range/number input synchronization helper"
-  - "Wind-source radio binding helper"
-  - "Action footer button binding helper"
-  - "Barrel index.ts re-exporting all shell/dom modules"
-  - "17 unit tests across 3 test files"
-affects: [03-section3-shell, 04-gps-lap-out-and-back-shell]
-
-tech-stack:
-  added: [jsdom]
-  patterns: [shell/dom helper extraction, @vitest-environment jsdom per-file config]
-
-key-files:
-  created:
-    - frontend/src/shell/dom/elements.ts
-    - frontend/src/shell/dom/selectableCards.ts
-    - frontend/src/shell/dom/tabs.ts
-    - frontend/src/shell/dom/rangeNumberPair.ts
-    - frontend/src/shell/dom/windSource.ts
-    - frontend/src/shell/dom/actionFooter.ts
-    - frontend/src/shell/dom/selectableCards.test.ts
-    - frontend/src/shell/dom/tabs.test.ts
-    - frontend/src/shell/dom/rangeNumberPair.test.ts
-    - frontend/src/shell/index.ts
-  modified:
-    - frontend/src/main.ts
-    - frontend/package.json
-
-key-decisions:
-  - "Per-file @vitest-environment jsdom comment for DOM tests instead of changing global vitest config"
-  - "@ts-expect-error comments on unused shell imports in main.ts until Plan 02-03 consumes them"
-
-patterns-established:
-  - "Shell DOM helpers: pure functions in shell/dom/ with explicit interfaces, no AppState coupling"
-  - "Test pattern: @vitest-environment jsdom block comment + document.createElement for DOM test setup"
-  - "Logging pattern: all shell modules use log from utils/log.ts, never console.*"
-
-requirements-completed: [SHEL-02]
-
-duration: 76min
-completed: 2026-04-14
+requirements-completed: ["SHEL-02"]
 ---
 
 # Phase 2 Plan 01: Extract shared DOM helper seams Summary
@@ -138,4 +87,3 @@ None - no external service configuration required.
 *Completed: 2026-04-14*
 
 ## Self-Check: PASSED
-
