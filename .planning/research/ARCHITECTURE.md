@@ -1,260 +1,144 @@
 # Architecture Research
 
-**Domain:** Brownfield frontend UI-shell stabilization for a framework-free TypeScript + Rust/WASM app
-**Researched:** 2026-04-12
-**Confidence:** HIGH
+**Domain:** VE analysis browser app enhancement architecture
+**Researched:** 2026-04-22
+**Confidence:** MEDIUM-HIGH
 
-## Standard Architecture
+## Current Architecture (v1.0 baseline)
 
-### System Overview
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                    Composition Root Layer                   │
-├─────────────────────────────────────────────────────────────┤
-│  main.ts                                                   │
-│  - bootstraps app                                          │
-│  - wires top-level dependencies                            │
-│  - delegates to shell modules                              │
-├─────────────────────────────────────────────────────────────┤
-│                   Feature Shell Layer                       │
-├─────────────────────────────────────────────────────────────┤
-│  Section 3 shell   Standard VE shell   GPS shell   OAB shell│
-│  - render/bind     - render/update     - tabs      - tabs   │
-│  - lifecycle       - slider wiring     - updates   - updates│
-├─────────────────────────────────────────────────────────────┤
-│                Adapter / Integration Layer                  │
-├─────────────────────────────────────────────────────────────┤
-│  Plotly adapter         Map adapter         DOM helpers      │
-│  - update strategy      - Leaflet cleanup   - query/bind     │
-│  - trace/layout seam    - marker lifecycle  - templates      │
-├─────────────────────────────────────────────────────────────┤
-│               State / Domain / Service Layer                │
-├─────────────────────────────────────────────────────────────┤
-│  AppState   analysis/*   modes/*   activity/*   utils/*     │
-│  wasm API   storage      weather   DEM         map data      │
-└─────────────────────────────────────────────────────────────┘
 ```
-
-### Component Responsibilities
-
-| Component | Responsibility | Typical Implementation |
-| --------- | -------------- | ---------------------- |
-| `main.ts` composition root | Bootstrap and top-level orchestration only | Small entry module that constructs services and delegates to narrower shell modules |
-| Feature shell controllers | Own one area of UI behavior and lifecycle | Module or small class with `mount`, `bind`, `update`, `destroy` style seams |
-| DOM helpers | Centralize repeated lookup/binding/template utilities | Small utility modules, not a framework substitute |
-| Plot adapter | Encapsulate plot creation vs update policy | Thin wrapper over Plotly `react` / `restyle` / `relayout` patterns |
-| Map adapter/controller | Encapsulate Leaflet-specific lifecycle and cleanup | Stateful class/module with explicit listener and layer cleanup |
-| `AppState` | Store typed state only | No DOM nodes, no long-lived service singletons |
-| analysis/state/services modules | Domain logic and side-effect services | Existing extracted modules remain the primary home for non-UI behavior |
-
-## Recommended Project Structure
-
-A successful stabilization phase usually turns the old god-module into a composition root and introduces a feature-shell area without rewriting the whole project shape.
-
-```text
 frontend/src/
-├── main.ts                    # composition root only
-├── ui/
-│   ├── shell/                 # workflow/section orchestration
-│   │   ├── Section3Shell.ts   # lap/GPS selection shell
-│   │   ├── StandardVEShell.ts # standard VE panel shell
-│   │   ├── GpsLapShell.ts     # GPS-lap panel shell
-│   │   └── OutAndBackShell.ts # out-and-back shell
-│   ├── dom/                   # shared DOM/query/bind helpers
-│   │   ├── elements.ts
-│   │   ├── events.ts
-│   │   └── templates.ts
-│   └── plot/                  # optional thin Plotly adapter layer
-│       └── PlotlyAdapter.ts
+├── main.ts                    # Composition root
+├── shell/                     # UI shell modules
+│   ├── app.ts
+│   ├── analysis.ts
+│   ├── fileLoad.ts
+│   ├── section3.ts
+│   ├── dem.ts
+│   ├── ve.ts
+│   ├── gpsLap.ts
+│   └── outAndBack.ts
 ├── components/
-│   └── MapVisualization.ts    # kept or trimmed only if needed
-├── analysis/                  # existing domain helpers
-├── activity/                  # existing load/normalize layer
-├── modes/analysis/            # existing mode abstraction
-├── plots/                     # existing pure builders
-├── state/                     # AppState remains state-only
-└── utils/                     # storage/weather/DEM/log/etc.
+│   └── MapVisualization.ts   # Secondary hotspot
+├── analysis/
+├── activity/
+├── modes/
+├── plots/
+├── state/
+└── utils/
 ```
 
-### Structure Rationale
+## Architecture Changes for v1.1
 
-- **`main.ts`:** should become a top-level composition root, not the implementation site for every workflow.
-- **`ui/shell/`:** creates a home for browser-only orchestration that is too UI-specific for `analysis/` but too important to leave in `main.ts`.
-- **`ui/dom/`:** prevents repeated `getElementById`, event rebinding boilerplate, and HTML-template glue from spreading across new files.
-- **`ui/plot/`:** useful only if the current shell still mixes plot lifecycle policy with feature logic.
-- **`components/MapVisualization.ts`:** remains intact unless a smaller extraction obviously helps the shell work.
+### 1. Worker Integration
 
-## Architectural Patterns
+**Add:**
+```
+frontend/src/
+├── workers/
+│   └── ve-compute.worker.ts   # VE calculation in worker
+├── shell/
+│   └── [existing]            # Updated to use worker
+```
 
-### Pattern 1: Composition Root + Feature Controllers
-
-**What:** Keep the entry file as the place where dependencies are created, but delegate each feature area to a narrower controller/module.
-**When to use:** When one entry file is doing too much orchestration and implementation work.
-**Trade-offs:** Adds more files and interfaces, but makes responsibilities much clearer and regression blast radius smaller.
-
-**Example:**
+**Integration Pattern:**
 ```typescript
-// main.ts
-const section3Shell = createSection3Shell({ appState, mapVisualization, parameterStorage })
-const standardVeShell = createStandardVeShell({ appState, plotly, parameterStorage })
+// Shell delegates computation to worker
+const worker = new VeComputeWorker()
+worker.onmessage = (results) => updatePlots(results)
+worker.postMessage({ rideData, parameters, mode })
 
-section3Shell.mount()
-standardVeShell.mount()
+// Cleanup on module destroy
+worker.terminate()
 ```
 
-### Pattern 2: Render / Bind / Update Separation
+### 2. Pipeline Unification
 
-**What:** Split dynamic UI work into explicit rendering, event binding, and incremental update steps.
-**When to use:** When one function both generates HTML, registers listeners, and performs state updates.
-**Trade-offs:** Slightly more ceremony, but it makes DOM lifecycle bugs easier to reason about and test.
+**Goal:** Unified update pipeline across modes
 
-**Example:**
+**Pattern:**
 ```typescript
-function renderGpsPanel(model: GpsPanelViewModel): string {
-  return buildGpsPanelHtml(model)
+interface AnalysisPipeline {
+  compute(input: AnalysisInput): Promise<AnalysisResult>
+  update(input: Partial<AnalysisInput>): Promise<Partial<AnalysisResult>>
+  cancel(): void
 }
 
-function bindGpsPanelHandlers(root: HTMLElement, actions: GpsPanelActions): void {
-  root.querySelector('[data-action="auto-adjust"]')?.addEventListener('click', actions.autoAdjust)
-}
-
-function updateGpsPanel(root: HTMLElement, model: GpsPanelViewModel): void {
-  updateGpsSummary(root, model)
-  updateGpsPlots(root, model)
-}
+// Each mode implements same interface
+class StandardVePipeline implements AnalysisPipeline { ... }
+class GpsLapPipeline implements AnalysisPipeline { ... }
+class OutAndBackPipeline implements AnalysisPipeline { ... }
 ```
 
-### Pattern 3: Adapter Boundary Around Third-Party UI Libraries
+### 3. GPS UI Consolidation
 
-**What:** Put Plotly/Leaflet lifecycle choices behind a thin local boundary instead of scattering direct calls throughout controllers.
-**When to use:** When third-party APIs are stateful and easy to misuse during incremental updates.
-**Trade-offs:** One more layer to maintain, but far less duplicated lifecycle knowledge.
+**Move GPS mode selector from:**
+- Current: Analysis Parameters section
 
-**Example:**
+**To:**
+- Section 3: Near lap-selection UI (where GPS modes are used)
+
+**State synchronization:**
 ```typescript
-export function updateVePlot(target: HTMLElement, figure: PlotFigure): Promise<void> {
-  return Plotly.react(target, figure.data, figure.layout, figure.config)
+// Single source of truth in AppState
+interface GpsModeState {
+  selectedMode: 'gps-lap' | 'out-and-back' | 'gps-gate-one-way'
+  autoAdjust: boolean
+  // ...
 }
 
-export function resetMapLayer(layer?: L.Layer, map?: L.Map): void {
-  if (layer && map) {
-    map.removeLayer(layer)
-  }
+// Shell reads/writes via state service
+section3Shell.setGpsMode(state.gpsMode)
+```
+
+### 4. Smoothing Layer Ownership
+
+**Decision needed:** Data layer vs visualization layer
+
+**Option A: Data layer (recommended)**
+```typescript
+// In analysis/ or activity/
+function applySmoothing(records: RideRecord[], smoothingParams: SmoothingParams): RideRecord[] {
+  // Smooth elevation data before analysis
+  return smooth(records, smoothingParams)
 }
 ```
 
-### Pattern 4: State-Only Store, UI-Local Runtime Objects
-
-**What:** Keep serializable or domain state in `AppState`; keep DOM nodes, map instances, and service singletons outside it.
-**When to use:** Always in this repo; this is already an explicit project constraint.
-**Trade-offs:** Requires passing dependencies more explicitly, but prevents state from becoming a god-object.
-
-## Data Flow
-
-### Request Flow
-
-```text
-[User Action]
-    ↓
-[Feature shell controller]
-    ↓
-[Domain helper / mode handler / service]
-    ↓
-[AppState update or WASM call]
-    ↓
-[Plot/Map adapter update]
-    ↓
-[DOM update visible to user]
+**Option B: Visualization layer**
+```typescript
+// In plots/ or shell/
+function buildSmoothingPlot(rawData: RideRecord[], smoothedData: RideRecord[]): PlotFigure {
+  // Show both for comparison
+  return buildComparisonPlot(rawData, smoothedData)
+}
 ```
 
-### State Management
+**Recommendation:** Option A - smooth at data layer for consistency, show both in visualization if needed.
 
-```text
-[AppState]
-    ↓ (read)
-[Feature shell controller] ←→ [UI events]
-    ↓ (delegates)
-[analysis/*, modes/*, storage, wasm APIs]
-    ↓ (result)
-[AppState + view model]
-    ↓
-[render/update functions]
-```
+## Key Architecture Decisions
 
-### Key Data Flows
+| Decision | Recommendation | Rationale |
+| -------- | -------------- | --------- |
+| Worker approach | Start with debounced main-thread, upgrade if needed | Simpler initial implementation |
+| Pipeline unification | Shared interface, mode-specific implementations | Consistency without over-abstraction |
+| Smoothing ownership | Data layer | Single source of truth, consistent results |
+| GPS UI move | Section 3, near lap selection | Logical workflow proximity |
 
-1. **File-load to parameters flow:** upload -> parse/normalize -> `AppState` update -> section activation -> auto-scroll to parameters.
-2. **Standard VE flow:** selection/trim changes -> analysis input resolution -> WASM calculator -> plot builders -> standard VE panel update.
-3. **GPS in-place update flow:** GPS settings/auto-adjust -> multi-segment settings resolution -> recalculation -> active-tab-preserving panel refresh.
-4. **Map-assisted selection flow:** map interaction -> selection state update -> shell module refresh -> optional plot refresh.
+## Suggested Build Order
 
-## Scaling Considerations
-
-This project is not server-scale constrained. The relevant scale axis is **UI complexity and regression surface**, not backend traffic.
-
-| Scale | Architecture Adjustments |
-| ----- | ------------------------ |
-| Current single-shell hotspot | Composition root + feature shell extraction is enough |
-| Multiple UI-heavy feature waves | Add browser smoke coverage and stricter DOM/helper conventions |
-| Large future UI expansion | Consider a larger shell/module architecture review only after the current stabilization proves itself |
-
-### Scaling Priorities
-
-1. **First bottleneck:** one file (`main.ts`) owning too much lifecycle logic - fix by extracting feature shell controllers and shared DOM helpers.
-2. **Second bottleneck:** stateful third-party UI integrations (`Plotly`, `Leaflet`) leaking lifecycle details everywhere - fix by adding thin adapters or explicit lifecycle helpers.
-
-## Anti-Patterns
-
-### Anti-Pattern 1: God-Controller Entry File
-
-**What people do:** keep `main.ts` as bootstrapper, renderer, event hub, template owner, plot orchestrator, and workflow implementation file.
-**Why it's wrong:** every small change becomes high-risk and hard to reason about.
-**Do this instead:** turn `main.ts` into a composition root with delegated shell modules.
-
-### Anti-Pattern 2: File Splitting Without Responsibility Splitting
-
-**What people do:** move chunks of code into new files but keep the same mixed render/bind/update responsibilities.
-**Why it's wrong:** complexity is renamed, not reduced.
-**Do this instead:** extract around responsibilities and lifecycle seams, not line-count alone.
-
-### Anti-Pattern 3: Domain Logic Moving with UI Extraction
-
-**What people do:** refactor UI and silently change calculator wiring or analysis semantics in the same move.
-**Why it's wrong:** behavior drift becomes hard to detect and hard to attribute.
-**Do this instead:** keep analysis math, WASM interfaces, and mode semantics stable unless a thin seam absolutely requires a small behavior adjustment.
-
-## Integration Points
-
-### External Services
-
-| Service | Integration Pattern | Notes |
-| ------- | ------------------- | ----- |
-| Plotly | thin local adapter over update APIs | Prefer efficient update paths over redraw-by-recreation when possible |
-| Leaflet | explicit controller/lifecycle wrapper | Clean up listeners and layers on mode switches or panel rebuilds |
-| WASM exports | typed wrapper/factory functions | Keep the public shape stable during shell refactors |
-| Browser storage | service classes outside state | Persistence remains important, but should not leak into every shell controller |
-
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-| -------- | ------------- | ----- |
-| `main.ts ↔ ui/shell/*` | direct construction and method calls | Keep explicit, no global event bus required |
-| `ui/shell/* ↔ state/AppState.ts` | direct reads/writes through typed state access | Preserve state-only boundary |
-| `ui/shell/* ↔ analysis/*` | function calls with typed inputs/results | Prefer pure helpers where possible |
-| `ui/shell/* ↔ plots/*` | view-model/figure data handoff | Keep builders pure and shell DOM-specific |
-| `ui/shell/* ↔ MapVisualization.ts` | narrow imperative calls | Touch only the map behavior each shell truly needs |
+1. **Phase 1:** Pipeline foundation + air-speed fix
+2. **Phase 2:** GPS UI consolidation
+3. **Phase 3:** Worker offload (if profiling confirms need)
+4. **Phase 4:** Smoothing clarification + implementation
+5. **Phase 5:** CSS + Map cleanup
+6. **Phase 6:** Weather spike or closeout
 
 ## Sources
 
-- `.planning/PROJECT.md` - stabilization scope and invariants
-- `.planning/codebase/ARCHITECTURE.md` - current module graph and shell hotspots
-- `.planning/codebase/CONCERNS.md` - remaining architectural pressure points
-- `https://vite.dev/guide/why` - current Vite architecture rationale and plugin/build continuity
-- `https://vitest.dev/guide/browser/` - current browser-testing integration patterns for Vite/Vitest projects
-- `https://plotly.com/javascript/plotlyjs-function-reference/` - update-vs-redraw lifecycle guidance
-- `https://leafletjs.com/reference.html` - listener/layer cleanup surface relevant to map lifecycle management
+- Existing shell modules under `frontend/src/shell/`
+- PROJECT.md current milestone section
+- MILESTONE-CONTEXT.md goals
 
 ---
-*Architecture research for: brownfield frontend UI-shell stabilization*
-*Researched: 2026-04-12*
+*Architecture research for: v1.1 Enhancement Wave*
+*Researched: 2026-04-22*

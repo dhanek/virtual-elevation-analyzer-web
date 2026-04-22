@@ -1,221 +1,236 @@
 # Pitfalls Research
 
-**Domain:** Brownfield frontend UI-shell stabilization for a framework-free browser app
-**Researched:** 2026-04-12
-**Confidence:** HIGH
+**Domain:** VE analysis browser app enhancement pitfalls
+**Researched:** 2026-04-22
+**Confidence:** MEDIUM-HIGH
 
-## Critical Pitfalls
+## Critical Pitfalls for v1.1
 
-### Pitfall 1: Big-Bang Rewrite Disguised as Refactor
+### Pitfall 1: Premature Workerization
 
 **What goes wrong:**
-The team sets out to “clean up `main.ts`” but quickly turns the effort into a UI-platform rethink, folder reshuffle, and abstraction rewrite. Scope expands faster than confidence.
+Adding Web Worker complexity before profiling confirms the bottleneck is in the main thread. Results in more complex code with no measurable user benefit.
 
 **Why it happens:**
-Large files create emotional pressure to fix everything at once. Brownfield teams also underestimate how much behavior lives in messy orchestration code.
+"Multi-lap slider responsiveness" sounds like it needs workers. But existing profiling (`scripts/profile-slider-recompute.ts`) showed no strong worker case on current machine.
 
-**How to avoid:**
-Use a staged extraction plan. Keep `main.ts` as a temporary composition root. Extract one shell area at a time with explicit invariants and checkpoint validation.
+**Prevention:**
+1. Profile before adding workers
+2. Start with debounced main-thread updates (simplest)
+3. Only add workers if profiling shows main thread blocking
 
 **Warning signs:**
-- New architecture diagrams appear before concrete seams
-- The phase starts proposing framework migration or major state rewrites
-- `main.ts` shrinks, but no single workflow is clearly safer to modify
+- Worker implementation starts before profiling data
+- Code adds worker "preemptively"
+- Complexity increases without measurable latency improvement
 
-**Phase to address:**
-Phase 1 - Shell seams and regression guardrails
+**Phase to address:** Worker implementation phase (likely Phase 3)
 
 ---
 
-### Pitfall 2: Behavior Drift While Moving Code
+### Pitfall 2: Pipeline Unification Over-Abstraction
 
 **What goes wrong:**
-The app still “works,” but subtle UX behavior changes: wrong tab stays active, scroll position resets, GPS auto-adjust behaves differently, or calibration values reload incorrectly.
+Creates a generic pipeline that abstracts away real differences between Standard, GPS-lap, and Out-and-back modes. Results in hidden mode-specific behavior that causes bugs.
 
 **Why it happens:**
-Fragile UI behavior often lives in ordering, timing, and lifecycle details rather than in obvious business rules. Those details get lost during extraction.
+"Unification" sounds like consolidation. But each mode has genuinely different semantics that need different handling.
 
-**How to avoid:**
-Write down regression-sensitive invariants before moving code. Protect them with targeted smoke tests and explicit verification steps at each checkpoint.
+**Prevention:**
+1. Keep mode-specific implementations with shared interface
+2. Define boundaries at mode entry/exit, not deep in algorithm
+3. Test each mode explicitly, not just through unified interface
 
 **Warning signs:**
-- Refactor PRs say “no behavior change” but do not list preserved flows
-- GPS or multi-segment flows are only manually spot-checked once
-- In-place update paths are replaced with full rerenders for convenience
+- Pipeline abstraction requires many mode-specific overrides
+- Mode-specific logic scattered across "shared" code
+- Bugs appear only in specific modes
 
-**Phase to address:**
-Phase 1 - Shell seams and regression guardrails
+**Phase to address:** Pipeline phase (likely Phase 1)
 
 ---
 
-### Pitfall 3: Event-Listener Duplication and Stale Closures
+### Pitfall 3: Air-Speed Calibration Silent Behavior Change
 
 **What goes wrong:**
-Dynamic panels re-render, but old event listeners remain or new ones capture stale state. Users see double-triggered actions, wrong tabs, or updates targeting old DOM.
+Fixing "latent air-speed calibration bugs in Standard VE mode" silently changes results for rides that relied on the buggy behavior.
 
 **Why it happens:**
-Framework-free DOM code often mixes template generation, one-off `addEventListener`, and partial DOM replacement without a clear mount/unmount contract.
+"Bugs" that existed for a while may have been worked around or relied upon by users.
 
-**How to avoid:**
-Split render/bind/update steps. Prefer idempotent handler assignment or explicit cleanup. Keep closures short-lived and tied to one mounted DOM subtree.
+**Prevention:**
+1. Document what the "bugs" are and why they were wrong
+2. Get user confirmation before changing calculation behavior
+3. Consider migration path or backward-compatibility option
 
 **Warning signs:**
-- Re-rendered panels require “initialized” flags everywhere
-- Bugs appear only after using the same panel multiple times
-- Developers fix duplicate events by adding more guard booleans
+- Fix changes VE output values
+- No migration path for affected rides
+- Users complain results differ after update
 
-**Phase to address:**
-Phase 2 - Panel extraction and lifecycle cleanup
+**Phase to address:** Pipeline phase (Phase 1) with explicit go/no-go
 
 ---
 
-### Pitfall 4: Plotly / Leaflet Lifecycle Leaks
+### Pitfall 4: GPS UI State Divergence
 
 **What goes wrong:**
-Plots or map layers are recreated unnecessarily, old layers remain attached, listeners accumulate, or updates become expensive and unpredictable.
+Moving GPS mode selector from Analysis Parameters to Section 3 causes state synchronization issues. Mode selector and actual mode behavior get out of sync.
 
 **Why it happens:**
-Third-party UI libraries are stateful. When their lifecycle rules are scattered across many event handlers, cleanup and incremental updates become inconsistent.
+UI state and analysis state live in different places. Moving UI without moving state wiring creates gaps.
 
-**How to avoid:**
-Add thin adapter boundaries or explicit lifecycle helpers. Prefer `Plotly.react` / incremental update patterns and explicit Leaflet listener/layer cleanup when panels change.
+**Prevention:**
+1. Map state dependencies before UI move
+2. Ensure single source of truth for GPS mode state
+3. Add integration test for state sync
 
 **Warning signs:**
-- Repeated `newPlot` style recreation in update-heavy flows
-- Map mode switches require ad hoc manual cleanup code in multiple places
-- Bugs appear only after several mode changes in one session
+- GPS mode works in one location but not other
+- State updates don't propagate correctly
+- Duplicate state for GPS mode
 
-**Phase to address:**
-Phase 2 - Panel extraction and lifecycle cleanup
+**Phase to address:** GPS consolidation phase (likely Phase 2)
 
 ---
 
-### Pitfall 5: Node-Only Tests Giving False Confidence
+### Pitfall 5: Smoothing Layer Ambiguity
 
 **What goes wrong:**
-Unit tests pass and typecheck is green, but the real browser workflow breaks because the issue is in file uploads, dynamic DOM, scroll behavior, focus, or live widget lifecycle.
+Smoothing applied in multiple layers (data processing + visualization) with different parameters or algorithms, causing inconsistent results.
 
 **Why it happens:**
-The highest-risk code in this repo is browser orchestration, while current frontend tests mostly cover pure helpers.
+Smoothing is needed in multiple places for different reasons. Without clarifying ownership, both layers implement it.
 
-**How to avoid:**
-Add a very small number of browser-level smoke tests for the most fragile end-user flows. Do not aim for exhaustive e2e coverage in this phase.
+**Prevention:**
+1. Make explicit decision: data layer owns smoothing
+2. Document which smoothing parameters affect which outputs
+3. Ensure single source of truth for smoothing config
 
 **Warning signs:**
-- Every regression discovered is “browser-only”
-- Manual verification scripts keep growing but are not automated
-- Refactor checkpoints depend entirely on developer memory
+- Same smoothing parameter has different effects in different views
+- Smoothing UI controls unclear about what they affect
+- Results change unexpectedly based on visualization choice
 
-**Phase to address:**
-Phase 1 and Phase 2
+**Phase to address:** Smoothing phase (likely Phase 4)
 
 ---
 
-### Pitfall 6: Secondary Hotspot Steals the Project
+### Pitfall 6: Weather Spike Scope Creep
 
 **What goes wrong:**
-`MapVisualization.ts` becomes so tempting to clean up that it starts dominating the phase, leaving `main.ts` only partially improved.
+Exploratory spike for continuous weather sampling becomes full implementation before the spike proves success. Spike scope bleeds into v1.1 deliverable.
 
 **Why it happens:**
-Large secondary hotspots invite cleanup once contributors are already “in refactor mode.”
+Spike looks promising. Team starts implementing features before the go/no-go decision.
 
-**How to avoid:**
-Keep a hard rule: map work is only in-scope if it directly unblocks or clarifies the main shell extraction.
+**Prevention:**
+1. Define explicit spike success criteria upfront
+2. Timebox the spike
+3. Make go/no-go decision before Phase 6 planning
 
 **Warning signs:**
-- Map-specific abstractions multiply before Section 3 / VE shell work lands
-- A large percentage of changed lines are in map code while `main.ts` remains huge
-- Refactor progress is described mostly in terms of map internals
+- Spike continues past original timebox
+- Full implementation features appear before spike approval
+- No clear go/no-go criteria defined
 
-**Phase to address:**
-Phase 3 - Secondary hotspot follow-up only if justified
+**Phase to address:** Weather spike (if included, Phase 6 or deferred)
 
-## Technical Debt Patterns
+---
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-| -------- | ----------------- | -------------- | --------------- |
-| Giant `innerHTML` blocks in orchestration code | Quick to ship UI changes | Hard-to-track listeners, selectors, and inline styles | Only temporarily while extracting toward render/bind/update seams |
-| Direct third-party calls everywhere | Fast local fixes | Lifecycle policy gets duplicated and inconsistent | Rarely; prefer a thin local adapter where updates are repeated |
-| Guard-flag proliferation for event setup | Masks duplicate binding bugs quickly | Makes lifecycle harder to reason about and test | Only as a temporary stopgap during incremental extraction |
-| Mixed UI + domain refactors in one commit | Fewer passes through the code | Regression attribution becomes unclear | Never ideal; split behavioral fixes from structural refactors when possible |
-| “Any” at UI boundaries | Fast interop | Drift spreads through controllers and view models | Acceptable only at narrow interop seams with explicit containment |
+### Pitfall 7: Map Cleanup Scope Expansion
+
+**What goes wrong:**
+MapVisualization.ts structural cleanup becomes full rewrite or visual redesign. Secondary target consumes primary milestone focus.
+
+**Why it happens:**
+"Improving structure" becomes "making it better" which becomes "fixing everything."
+
+**Prevention:**
+1. Define minimum vs ideal for MAP-01
+2. Hard stop at structural minimum unless explicitly approved
+3. Track time spent on map work vs other v1.1 targets
+
+**Warning signs:**
+- Map work becomes milestone centerpiece
+- Large percentage of changes in map code
+- No clear boundary for when map work is "done"
+
+**Phase to address:** Map cleanup (if included, parallel track)
+
+---
+
+### Pitfall 8: CSS Cleanup Behavior Drift
+
+**What goes wrong:**
+CSS cleanup changes visual behavior unintentionally. Layouts shift, spacing changes, responsive behavior breaks.
+
+**Why it happens:**
+CSS is easy to change but hard to verify. "Cleaning up" patterns accidentally changes layout.
+
+**Prevention:**
+1. Visual regression baseline before CSS work
+2. Automated screenshot comparison if possible
+3. Manual verification checklist
+
+**Warning signs:**
+- CSS changes affect layout geometry
+- Responsive behavior changes
+- Visual appearance differs in subtle ways
+
+**Phase to address:** CSS cleanup (parallel track)
 
 ## Integration Gotchas
 
-| Integration | Common Mistake | Correct Approach |
-| ----------- | -------------- | ---------------- |
-| Plotly | Recreate plots with `newPlot` during every update path | Prefer `react`, `restyle`, and `relayout` where the plot identity should stay stable |
-| Leaflet | Remove visible layers but forget listener/event cleanup | Pair layer changes with explicit listener cleanup and lifecycle ownership |
-| Browser file inputs | Validate happy path only | Test real upload flows and downstream section activation/scroll behavior |
-| IndexedDB/localStorage-backed UI state | Refactor UI without checking persistence semantics | Verify saved settings still restore correctly across mode changes and selection changes |
-| CDN-loaded assets + CSP | Introduce new runtime assets casually during refactor | Keep CSP-compatible assets and avoid widening network surface unnecessarily |
-
-## Performance Traps
-
-| Trap | Symptoms | Prevention | When It Breaks |
-| ---- | -------- | ---------- | -------------- |
-| Full plot recreation on every slider or mode update | Janky updates, flicker, growing latency | Keep update policy explicit and incremental where possible | Breaks quickly in update-heavy VE workflows |
-| Rebinding whole DOM subtrees repeatedly | Duplicate events, poor responsiveness, confusing lifecycle bugs | Separate render from update and keep handler setup idempotent | Breaks once panels are revisited often in one session |
-| Re-cloning large arrays in UI code | Sluggish recompute-adjacent flows | Continue using the extracted cache and keep array churn out of shell code | Breaks on longer rides and multi-segment workflows |
-| Premature workerization | More moving pieces, harder debugging | Profile after shell cleanup before changing concurrency model | Breaks team focus more than runtime at current scale |
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-| ------- | ---- | ---------- |
-| Expanding remote asset usage during refactor | CSP drift and larger external attack surface | Keep the existing privacy-first/browser-local stance and static CSP model |
-| Logging or exporting ride-sensitive data during debugging | Privacy regressions in a privacy-first product | Keep lightweight centralized logging and avoid casual debug dumps of ride data |
-| UI changes that silently alter local persistence semantics | Wrong settings/results restored from browser storage | Verify migration behavior and restoration paths when changing shell wiring |
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-| ------- | ----------- | --------------- |
-| Lost scroll position or unexpected top-of-page jumps | Makes the UI feel broken or disorienting | Preserve known scroll behavior explicitly and test it after extraction |
-| Tab resets on in-place GPS updates | Users lose context while tuning settings | Preserve active tab and only update the data/plots that changed |
-| Hidden state changes during mode switch | Users cannot predict what the app will do | Make shell ownership and update flows clearer and more local |
-| Extracted UI with unchanged inline-style/template sprawl | Code is “moved” but still hard to reason about | Extract responsibility, not just lines of code |
+| Integration | Common Mistake | Prevention |
+| ----------- | -------------- | ----------- |
+| Worker + WASM | WASM module not available in worker context | Test WASM worker import early |
+| Pipeline unification | Hiding mode differences in shared code | Keep mode-specific logic explicit |
+| GPS state sync | UI state and analysis state diverge | Single source of truth, integration test |
+| Smoothing | Multiple layers apply smoothing differently | Document ownership, single source |
+| Map cleanup | Refactor becomes rewrite | Hard scope boundary |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **`main.ts` shrinkage:** Often missing real responsibility transfer - verify extracted modules own render/bind/update logic, not just wrappers
-- [ ] **GPS mode safety:** Often missing tab/scroll preservation - verify in-place updates keep current UX behavior
-- [ ] **Regression protection:** Often missing browser-level validation - verify at least the fragile flows are exercised end-to-end
-- [ ] **Map safety:** Often missing cleanup discipline - verify listener/layer teardown after mode changes
-- [ ] **Behavior preservation:** Often missing persistence checks - verify saved settings/calibration still restore correctly
-- [ ] **Refactor focus:** Often missing scope discipline - verify `MapVisualization.ts` work stayed secondary to `main.ts`
+- [ ] **Worker:** Profiling data shows main thread blocking before implementation
+- [ ] **Pipeline:** All modes tested explicitly, not just via shared interface
+- [ ] **Air-speed fix:** Migration path for affected rides documented
+- [ ] **GPS consolidation:** State sync verified in both directions
+- [ ] **Smoothing:** Documented ownership, single source of truth
+- [ ] **Weather spike:** Timebox respected, go/no-go decision made
+- [ ] **Map cleanup:** Structural minimum only, no visual drift
+- [ ] **CSS cleanup:** Visual regression baseline established
 
 ## Recovery Strategies
 
-| Pitfall | Recovery Cost | Recovery Steps |
-| ------- | ------------- | -------------- |
-| Big-bang rewrite drift | HIGH | Cut scope, re-establish explicit invariants, and land smaller extraction slices |
-| Behavior drift in fragile flows | MEDIUM/HIGH | Reproduce in browser, add smoke coverage, then split behavior fix from structural move |
-| Event-listener duplication | MEDIUM | Rework the affected shell around mount/update/unmount or idempotent binding |
-| Plot/map lifecycle leak | MEDIUM | Introduce thin adapter/helper layer and centralize cleanup ownership |
-| Map hotspot taking over | MEDIUM | Freeze map work, finish primary shell extraction, revisit secondary cleanup later |
+| Pitfall | Recovery | Cost |
+|---------|----------|------|
+| Premature workerization | Revert to debounced main-thread | LOW |
+| Over-abstracted pipeline | Add mode-specific seams back | MEDIUM |
+| Silent air-speed change | Document breaking change, user communication | HIGH |
+| GPS state divergence | Restore original location, re-evaluate | MEDIUM |
+| Multiple smoothing layers | Refactor to single ownership | MEDIUM |
+| Weather scope creep | Cut back to spike scope | LOW |
+| Map rewrite | Revert to structural-only | MEDIUM |
+| CSS visual drift | Establish baseline, verify manually | LOW |
 
-## Pitfall-to-Phase Mapping
+## Phase-Specific Warnings
 
-| Pitfall | Prevention Phase | Verification |
-| ------- | ---------------- | ------------ |
-| Big-bang rewrite disguised as refactor | Phase 1 | `main.ts` extraction plan is staged, scoped, and preserves current architecture constraints |
-| Behavior drift while moving code | Phase 1 | Fragile flows are enumerated and explicitly checked after checkpoints |
-| Event-listener duplication and stale closures | Phase 2 | Re-render/revisit flows do not duplicate actions or lose current state |
-| Plotly / Leaflet lifecycle leaks | Phase 2 | Multi-update sessions remain stable without tab/layer/listener regressions |
-| Node-only tests giving false confidence | Phase 1 / 2 | At least a small browser smoke layer exists or equivalent browser verification is formalized |
-| Secondary hotspot steals the project | Phase 3 | `main.ts` materially improved before optional map work expands |
+| Phase Topic | Likely Pitfall | Mitigation |
+| ----------- | -------------- | ---------- |
+| Pipeline unification | Over-abstraction | Keep mode differences explicit |
+| GPS consolidation | State sync gap | Map dependencies before move |
+| Smoothing | Layer ambiguity | Document ownership before implement |
+| Worker offload | Premature complexity | Profile first, simple first |
+| Weather | Scope creep | Timebox + go/no-go gate |
 
 ## Sources
 
-- `.planning/PROJECT.md` - current scope, constraints, and regression-sensitive behavior
-- `.planning/codebase/CONCERNS.md` - confirmed remaining hotspots and risk concentrations
-- `.planning/codebase/TESTING.md` - current test coverage shape and missing browser-level coverage
-- `https://playwright.dev/docs/best-practices` - isolation, locators, and trace-based debugging guidance relevant to regression protection
-- `https://plotly.com/javascript/plotlyjs-function-reference/` - update-vs-recreate guidance relevant to plot lifecycle traps
-- `https://leafletjs.com/reference.html` - event/listener/layer cleanup API reference relevant to map lifecycle traps
-- repo context and recent bugfix history already captured during the brownfield audit
+- Existing codebase patterns
+- Milestone context document
+- PROJECT.md requirements
+- v1.0 regression patterns
 
 ---
-*Pitfalls research for: brownfield frontend UI-shell stabilization*
-*Researched: 2026-04-12*
+*Pitfalls research for: v1.1 Enhancement Wave*
+*Researched: 2026-04-22*
