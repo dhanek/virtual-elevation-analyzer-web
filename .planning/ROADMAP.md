@@ -16,7 +16,7 @@ This roadmap delivers a targeted stabilization phase for the remaining frontend 
 - [x] **Phase 4: GPS and Out-and-Back Shell Extraction** - Extract GPS-based shell behavior while preserving in-place updates and calibration correctness (completed 2026-04-19)
 - [x] **Phase 5: Closeout, Secondary Cleanup, and Roadmap Sync** - Finish the `main.ts` reduction, apply only justified secondary cleanup, and sync planning/docs (completed 2026-04-19)
 - [x] **Phase 6: Verification Artifact Backfill (Phases 03-05)** - Backfill missing phase verification artifacts and parity evidence so requirement closure is machine-verifiable (completed 2026-04-20)
-- [ ] **Phase 7: Phase-02 Summary Frontmatter Repair** - Backfill `requirements_completed` metadata for phase-02 summaries to resolve partial requirement closure state
+- [x] **Phase 7: Phase-02 Summary Frontmatter Repair** (completed 2026-04-22) - Backfill `requirements_completed` metadata for phase-02 summaries to resolve partial requirement closure state
 - [ ] **Phase 8: Regression Contract Anchor Sync** - Re-anchor regression-contract documentation to current shell ownership paths
 
 ## Phase Details
