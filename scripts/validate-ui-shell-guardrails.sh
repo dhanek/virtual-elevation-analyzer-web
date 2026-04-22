@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/validate-ui-shell-guardrails.sh [--ci-only] [--help]
 
-Runs the Phase 1 UI-shell guardrail validation path.
+Runs the Phase 8 UI-shell guardrail validation path (Modular Shell Architecture).
 
 Options:
   --ci-only   Run only the automated CI parity chain
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-printf 'Running automated UI-shell guardrail checks from %s\n' "$REPO_ROOT"
+printf 'Running automated UI-shell guardrail checks for Modular Shell (anchored in frontend/src/shell/) from %s\n' "$REPO_ROOT"
 
 (
   cd "$REPO_ROOT/backend"
@@ -93,7 +93,7 @@ Next run the manual browser checks in:
   $MANUAL_CHECKLIST
 
 Focus on:
-- file-load navigation
-- GPS in-place updates
-- calibration behavior
+- File Load (shell/fileLoad.ts)
+- GPS Behavior (shell/gps.ts / shell/section3.ts)
+- Calibration (analysis/AirSpeedCalibration.ts)
 EOF
