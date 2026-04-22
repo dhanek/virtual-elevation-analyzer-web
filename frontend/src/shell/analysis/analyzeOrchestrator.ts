@@ -121,6 +121,22 @@ export function initializeAnalysisParameters(): void {
 	}
 }
 
+/**
+ * Parameter Update Paths Documentation
+ *
+ * This function handles parameter changes from the AnalysisParameters component.
+ * It routes updates to the appropriate components based on parameter type.
+ *
+ * Orchestrator-triggered parameters (saved with files via parameter storage layer):
+ * - All parameters that go through setParameters() → trigger this function
+ * - These are persisted with the analysis file
+ * - When VE section is visible, dispatch input event on trimStartSlider to trigger recalculation
+ *
+ * Local-only parameters (runtime adjustments in AppState):
+ * - airSpeedCalibrationPercent: Lives in AppState, not persisted per-file
+ * - These are runtime adjustments that update directly via local functions
+ * - They bypass the parameter storage layer (intentional - runtime adjustment, not a saved parameter)
+ */
 export function handleParametersChange(parameters: AnalysisParameters): void {
 	const deps = getDependencies();
 
