@@ -26,14 +26,14 @@ Regression rule:
 - If `scrollToSection('parametersSection')` moves elsewhere, the new location must preserve the same visible behavior and still be easy to trace from the file-load flow.
 
 ## GPS In-Place Update Behavior
-**Ownership:** `frontend/src/shell/gps.ts` & `frontend/src/shell/section3.ts`
+**Ownership:** `frontend/src/shell/gpsLap/index.ts` & `frontend/src/shell/section3/index.ts`
 **Migration Note:** In-place update logic for GPS and Out-and-Back views was moved from `main.ts` to these specialized modules to separate view-rendering from shell orchestration.
 
 The current GPS in-place update contract is anchored in these functions:
-- `showGpsLapVEPlot(...)` in `frontend/src/shell/gps.ts`
-- `updateGpsLapVEPlots(...)` in `frontend/src/shell/gps.ts`
-- `showOutAndBackVEPlot(...)` in `frontend/src/shell/section3.ts`
-- `updateOutAndBackVEPlots(...)` in `frontend/src/shell/section3.ts`
+- `showGpsLapVEPlot(...)` in `frontend/src/shell/gpsLap/index.ts`
+- `updateGpsLapVEPlots(...)` in `frontend/src/shell/gpsLap/index.ts`
+- `showOutAndBackVEPlot(...)` in `frontend/src/shell/section3/index.ts`
+- `updateOutAndBackVEPlots(...)` in `frontend/src/shell/section3/index.ts`
 
 Expected behavior:
 1. GPS lap mode renders its initial VE shell through `showGpsLapVEPlot(...)`.
@@ -114,12 +114,12 @@ When later phases move shell code, keep the new implementation easy to trace fro
 - `processFitFile` (frontend/src/shell/fileLoad.ts)
 - `processCsvFile` (frontend/src/shell/fileLoad.ts)
 - `scrollToSection('parametersSection')` (frontend/src/shell/fileLoad.ts)
-- `showGpsLapVEPlot` (frontend/src/shell/gps.ts)
-- `updateGpsLapVEPlots` (frontend/src/shell/gps.ts)
-- `showOutAndBackVEPlot` (frontend/src/shell/section3.ts)
-- `updateOutAndBackVEPlots` (frontend/src/shell/section3.ts)
+- `showGpsLapVEPlot` (frontend/src/shell/gpsLap/index.ts)
+- `updateGpsLapVEPlots` (frontend/src/shell/gpsLap/index.ts)
+- `showOutAndBackVEPlot` (frontend/src/shell/section3/index.ts)
+- `updateOutAndBackVEPlots` (frontend/src/shell/section3/index.ts)
 - `calculateAutoAirSpeedCalibrationPercent` (frontend/src/analysis/AirSpeedCalibration.ts)
-- `resolveLmultiSegmentSettings` (frontend/src/analysis/MultiSegmentSettings.ts)
+- `resolveMultiSegmentSettings` (frontend/src/analysis/MultiSegmentSettings.ts)
 - `AnalysisModes` (frontend/src/modes/analysis/AnalysisModes.ts)
 
 If any of these are renamed, moved, or replaced, update this contract in the same change so the guardrail stays grep-verifiable.
