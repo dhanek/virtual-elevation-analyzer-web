@@ -8,6 +8,24 @@ Virtual Elevation Analyzer Web is a privacy-first browser application for cyclis
 
 Make trustworthy virtual elevation analysis of local ride data work well in the browser, without sacrificing correctness or forcing users through a fragile UI shell.
 
+## Current Milestone: v1.1 Enhancement Wave
+
+**Goal:** Users can use the same VE analysis tool with identical results, better performance, enhanced features, and a cleaned design.
+
+**Target features:**
+- **Performance**: Worker offload for multi-lap VE analysis to improve slider responsiveness (combined with PERF-01)
+- **Pipeline unification**: Fix latent air-speed calibration bugs in Standard VE mode; unify render/update pipeline across all modes
+- **GPS mode UI consolidation**: Move GPS analysis mode selector from Analysis Parameters into Section 3 near lap-selection UI
+- **Elevation smoothing**: Clarify data processing vs visualization layer ownership and implement consistently
+- **Continuous weather sampling**: Exploratory spike for per-quarter-hour weather sampling with interpolation (go/no-go decision)
+- **Map cleanup**: Improve MapVisualization.ts structure and optionally polish visuals (MAP-01)
+- **Testing improvements**: Add/improve tests per feature area (TEST-01)
+- **CSS cleanup**: Address CSS debt from v1.0 stabilization (CSS-01)
+
+**Key constraints:**
+- No breaking changes to VE calculation logic
+- Must maintain browser-local privacy model
+
 ## Requirements
 
 ### Validated
@@ -27,15 +45,21 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 
 ### Active
 
-- [ ] Evaluate v2 follow-up priorities (MAP-01, TEST-01, CSS-01, PERF-01) based on the stabilized shell baseline
-- [ ] Reassess whether remaining `MapVisualization.ts` complexity is the next highest-value extraction target for the next milestone
+- [ ] **PERF-01**: Evaluate and implement worker offload for multi-lap VE analysis to improve slider responsiveness
+- [ ] **PIPE-01**: Fix latent air-speed calibration bugs in Standard VE mode; unify render/update pipeline
+- [ ] **GPS-01**: Move GPS analysis mode selector from Analysis Parameters into Section 3
+- [ ] **SMOOTH-01**: Clarify elevation smoothing ownership (data vs visualization layer) and implement consistently
+- [ ] **WEATH-01**: Spike continuous weather sampling with per-quarter-hour interpolation
+- [ ] **MAP-01**: Address MapVisualization.ts complexity (structure minimum, visual polish ideal)
+- [ ] **TEST-01**: Add/improve tests per feature area
+- [ ] **CSS-01**: Address CSS debt identified during v1.0 stabilization
 
 ### Out of Scope
 
-- Broad backend algorithm refactor wave - the current phase is centered on frontend UI-shell stabilization
-- UI redesign or framework migration - the goal is safer structure, not changing the product surface or moving to React/Vue/etc.
-- Large feature expansion unrelated to stabilization - the next phase should reduce risk before another UI-heavy feature wave
-- Worker/offload work by default - only revisit if profiling later shows the stabilized UI is still compute-bound
+- Broad backend algorithm refactor wave - the current phase is centered on frontend enhancement, not core algorithm changes
+- UI redesign or framework migration - the goal is cleaner implementation, not changing the product surface
+- Large feature expansion unrelated to enhancement scope - focus is on the features listed in Current Milestone
+- Breaking changes to VE calculation logic - correctness of existing analysis must be preserved
 
 ## Context
 
@@ -90,4 +114,6 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-19 after Phase 5 completion*
+*Last updated: 2026-04-22 after v1.1 milestone started*
+
+*Previous milestone: v1.0 (UI Shell Stabilization) - completed 2026-04-22*
