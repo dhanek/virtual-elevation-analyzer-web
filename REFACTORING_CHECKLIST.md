@@ -19,4 +19,29 @@ Based on the revised refactoring plan validated against the current codebase.
 | 17 | ✅ Done | Split and modernize the docs | Rewrote the stale top-level docs, added `ARCHITECTURE.md` and `ROADMAP.md`, refreshed `README.md` / `PROJECT_STATUS.md` / `DEPLOYMENT.md`, and converted `README-IMPLEMENTATION.md` into an explicit historical archive note. |
 | 18 | ✅ Done | Replace magic numbers with named, local constants | Replaced repeated hidden thresholds with named constants in `frontend/src/main.ts`, `frontend/src/utils/GpsLapDetection.ts`, `frontend/src/components/MapVisualization.ts`, `frontend/src/utils/GeoCalculations.ts`, and `backend/src/dem_processor.rs` (trim window size, air-speed calibration bounds, lap-detection thresholds, map paddings/marker sizes, earth radius, and affine epsilon). |
 | 19 | ✅ Done | Remove lifecycle guard flags and write-only globals once mode lifecycle is encapsulated | Removed the GPS-lap / out-and-back handler-init guard flags and their mutable handler globals from `frontend/src/main.ts`, switched those slider controls to idempotent `oninput` / `onchange` bindings, dropped the reset logic in `initializeSection3()`, and deleted the write-only `window.__gpsLap*` / `window.__outAndBack*` globals. |
-| 20 | ✅ Done | Profile slider recompute; only then add a Web Worker if it is still needed | Added `frontend/scripts/profile-slider-recompute.ts` plus `npm run profile:slider`, benchmarked the cached recompute core (roughly low-single-digit millisecond medians on this machine across standard, compare, GPS-lap, and out-and-back scenarios), and decided **not** to add a Web Worker yet. Removed the unused `comlink` dependency and Vite worker config. |
+| 20 | ✅ Done | Profile slider recompute; only then add a Web Worker if it is still needed | Added `frontend/scripts/profile-slider-recompute.ts` plus `npm run profile:slider`, benchmarked the cached recompute core (roughly low-single-digit millisecond medians on this machine across standard, compare, GPS-lap, and out-and-back scenarios), and decided **not** to add a Web Worker yet. Removed the unused `comlink` dependency and Vite worker config.
+
+## Pipeline Consistency Check (Phase 1 verification)
+
+- [x] air_speed_offset changes trigger VE recalculation in Standard mode (via orchestrator)
+- [x] airSpeedCalibrationPercent changes trigger VE recalculation in Standard mode (via local call)
+- [x] GPS-lap mode updates work independently (uses mode handler)
+- [x] Out-and-back mode updates work independently (uses mode handler)
+- [x] No duplicate triggers when parameters change (orchestrator handles air_speed_offset, local removed)
+
+
+### Parameter Update Paths by Mode
+
+**Standard VE Mode:**
+- trim sliders → dispatchEvent → handleParametersChange → orchestrator → updateVEPlots
+- CdA/Crr sliders → local updateVEPlots call
+- air_speed_offset → setParameters → handleParametersChange → dispatchEvent → updateVEPlots
+- airSpeedCalibrationPercent → local updateVEPlots call (AppState-level, not persisted)
+
+**GPS-Lap Mode:**
+- CdA/Crr sliders → mode handler → recalculateGpsLapVE → showGpsLapVEAnalysis
+- Independent from orchestrator
+
+**Out-and-Back Mode:**
+- CdA/Crr sliders → mode handler → recalculateOutAndBackVE → showOutAndBackVEAnalysis
+- Independent from orchestrator |
