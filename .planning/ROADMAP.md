@@ -140,7 +140,7 @@ Plans:
 Plans:
 - [x] 07-01-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-01 summary
 - [x] 07-02-PLAN.md — Backfill canonical frontmatter + requirements-completed for 02-02 and 02-03 summaries
-- [ ] 07-03-PLAN.md — Run focused SHEL-01/SHEL-02 matrix sanity check and record evidence
+- [x] 07-03-PLAN.md — Run focused SHEL-01/SHEL-02 matrix sanity check and record evidence
 
 ### Phase 8: Regression Contract Anchor Sync
 **Goal**: Restore regression-contract documentation linkage quality by updating contract anchors to the current post-extraction shell ownership paths
@@ -156,8 +156,8 @@ Plans:
 **Plans**: 0 plans
 
 Plans:
-- [ ] 08-01: Update regression-contract anchors to current shell ownership files
-- [ ] 08-02: Validate and document anchor integrity against current shell module structure
+- [x] 08-01: Update regression-contract anchors to current shell ownership files (completed 2026-04-22)
+- [x] 08-02: Validate and document anchor integrity against current shell module structure (completed 2026-04-22)
 
 ## Progress
 
@@ -172,5 +172,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4. GPS and Out-and-Back Shell Extraction | 3/3 | Complete | 2026-04-19 |
 | 5. Closeout, Secondary Cleanup, and Roadmap Sync | 2/2 | Complete | 2026-04-19 |
 | 6. Verification Artifact Backfill (Phases 03-05) | 4/4 | Complete | 2026-04-20 |
-| 7. Phase-02 Summary Frontmatter Repair | 0/3 | Planned | - |
-| 8. Regression Contract Anchor Sync | 0/2 | Planned | - |
+| 7. Phase-02 Summary Frontmatter Repair | 3/3 | Complete | 2026-04-22 |
+| 8. Regression Contract Anchor Sync | 2/2 | Complete | 2026-04-22 |
