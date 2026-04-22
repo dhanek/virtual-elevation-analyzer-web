@@ -5,14 +5,25 @@ This document is the committed guardrail contract for later frontend UI-shell ex
 **Guided Tour: Modular Shell Architecture**
 The UI Shell has transitioned from a monolithic `main.ts` to a modular architecture under `frontend/src/shell/`. All behavioral anchors are now distributed across specific shell modules.
 
+## STAB-01: UI Shell Stability Verification Path
+**Verification Goal:** Ensure the UI shell maintains behavioral parity across refactors.
+
+**Step-by-Step Verification Guide:**
+1. **Audit Anchors:** Read the "Source Anchors" section at the end of this document. Verify that each referenced file exists and contains the named function.
+2. **Automated Guardrails:** Run `bash scripts/validate-ui-shell-guardrails.sh`. All CI parity checks must pass (green).
+3. **Manual browser validation:** Follow the a-to-z guide in `docs/testing/ui-shell-manual-checklist.md`.
+4. **Behavioral Check:** For each a-to-z item, confirm the result matches the "Expected behavior" described in the corresponding section of this contract.
+
+If any step fails, the refactor is considered regressed.
+
 ## File-load Navigation
-**Ownership:** `frontend/src/shell/fileLoad.ts`
+**Ownership:** `frontend/src/shell/fileLoad/index.ts`
 **Migration Note:** Behavioral logic for handling FIT and CSV file loads was moved from `main.ts` to `fileLoad.ts` to isolate file processing from core application state.
 
 The current file-load navigation contract is anchored in these functions:
-- `processFitFile(...)` in `frontend/src/shell/fileLoad.ts`
-- `processCsvFile(...)` in `frontend/src/shell/fileLoad.ts`
-- `scrollToSection('parametersSection')` in `frontend/src/shell/fileLoad.ts`
+- `processFitFile(...)` in `frontend/src/shell/fileLoad/index.ts`
+- `processCsvFile(...)` in `frontend/src/shell/fileLoad/index.ts`
+- `scrollToSection('parametersSection')` in `frontend/src/shell/fileLoad/index.ts`
 
 Expected behavior:
 1. A successful local FIT file load activates the parameters step.
@@ -111,9 +122,9 @@ Regression rule:
 ## Source Anchors for Later Phases
 
 When later phases move shell code, keep the new implementation easy to trace from these anchors:
-- `processFitFile` (frontend/src/shell/fileLoad.ts)
-- `processCsvFile` (frontend/src/shell/fileLoad.ts)
-- `scrollToSection('parametersSection')` (frontend/src/shell/fileLoad.ts)
+- `processFitFile` (frontend/src/shell/fileLoad/index.ts)
+- `processCsvFile` (frontend/src/shell/fileLoad/index.ts)
+- `scrollToSection('parametersSection')` (frontend/src/shell/fileLoad/index.ts)
 - `showGpsLapVEPlot` (frontend/src/shell/gpsLap/index.ts)
 - `updateGpsLapVEPlots` (frontend/src/shell/gpsLap/index.ts)
 - `showOutAndBackVEPlot` (frontend/src/shell/section3/index.ts)
