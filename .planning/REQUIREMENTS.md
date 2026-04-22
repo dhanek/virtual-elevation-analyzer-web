@@ -9,13 +9,13 @@ Requirements for this stabilization initiative. Each maps to exactly one roadmap
 
 ### Stabilization Safety
 
-- [ ] **STAB-01**: Maintainer can verify regression-sensitive UI-shell behavior through a repeatable verification path instead of relying on memory alone
+- [x] **STAB-01**: Maintainer can verify regression-sensitive UI-shell behavior through a repeatable verification path instead of relying on memory alone
 - [x] **STAB-02**: Project continues to pass backend tests, wasm build, frontend typecheck, lint, unit tests, and production build at stabilization checkpoints
 
 ### Shell Architecture
 
-- [ ] **SHEL-01**: Maintainer can delegate top-level UI-shell orchestration through explicit shell modules instead of embedding those responsibilities throughout `frontend/src/main.ts`
-- [ ] **SHEL-02**: Maintainer has shared DOM, event, and template helpers for repeated dynamic shell patterns instead of re-implementing the same wiring per panel
+- [x] **SHEL-01**: Maintainer can delegate top-level UI-shell orchestration through explicit shell modules instead of embedding those responsibilities throughout `frontend/src/main.ts`
+- [x] **SHEL-02**: Maintainer has shared DOM, event, and template helpers for repeated dynamic shell patterns instead of re-implementing the same wiring per panel
 - [x] **SHEL-03**: Maintainer can change Section 3 lap-selection and GPS-detection UI behavior without editing unrelated analysis-panel code in `frontend/src/main.ts`
 - [x] **SHEL-04**: Maintainer can change standard VE panel shell behavior without editing unrelated GPS-lap or out-and-back shell code in `frontend/src/main.ts`
 - [x] **SHEL-05**: Maintainer can change GPS-lap shell behavior without editing unrelated standard VE or out-and-back shell code in `frontend/src/main.ts`
@@ -30,8 +30,8 @@ Requirements for this stabilization initiative. Each maps to exactly one roadmap
 
 ### Closeout
 
-- [ ] **CLOS-01**: Maintainer ends the phase with `frontend/src/main.ts` functioning primarily as a composition root and materially smaller than the pre-phase baseline
-- [ ] **CLOS-02**: Maintainer can understand the stabilized shell boundaries and remaining hotspots from updated planning/project documentation at phase close
+- [x] **CLOS-01**: Maintainer ends the phase with `frontend/src/main.ts` functioning primarily as a composition root and materially smaller than the pre-phase baseline
+- [x] **CLOS-02**: Maintainer can understand the stabilized shell boundaries and remaining hotspots from updated planning/project documentation at phase close
 
 ## v2 Requirements
 
@@ -68,10 +68,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| STAB-01 | Phase 8 | Pending |
+| STAB-01 | Phase 8 | Complete |
 | STAB-02 | Phase 1 | Complete |
-| SHEL-01 | Phase 7 | Pending |
-| SHEL-02 | Phase 7 | Pending |
+| SHEL-01 | Phase 7 | Complete |
+| SHEL-02 | Phase 7 | Complete |
 | SHEL-03 | Phase 6 | Complete |
 | SHEL-04 | Phase 6 | Complete |
 | BEHV-01 | Phase 6 | Complete |
@@ -80,15 +80,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SHEL-06 | Phase 6 | Complete |
 | BEHV-03 | Phase 6 | Complete |
 | BEHV-04 | Phase 6 | Complete |
-| CLOS-01 | Phase 6 | Pending |
-| CLOS-02 | Phase 6 | Pending |
+| CLOS-01 | Phase 6 | Complete |
+| CLOS-02 | Phase 6 | Complete |
 
 **Coverage:**
 - v1 requirements: 14 total
 - Mapped to phases: 14
 - Unmapped: 0 ✓
-- Complete: 9
-- Pending gap closure: 5
+- Complete: 14
+- Pending gap closure: 0 ✓
 
 ---
 *Requirements defined: 2026-04-12*
