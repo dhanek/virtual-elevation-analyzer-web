@@ -73,32 +73,32 @@ Explicitly excluded. Documented to prevent scope creep.
 
 ## Traceability
 
-Traceability matrix to be populated during roadmap creation.
+Traceability matrix populated during roadmap creation.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| PERF-01     | TBD   | Pending |
-| PIPE-01     | TBD   | Pending |
-| PIPE-02     | TBD   | Pending |
-| PIPE-03     | TBD   | Pending |
-| GPS-01      | TBD   | Pending |
-| GPS-02      | TBD   | Pending |
-| SMOOTH-01   | TBD   | Pending |
-| SMOOTH-02   | TBD   | Pending |
-| WEATH-01    | TBD   | Pending |
-| WEATH-02    | TBD   | Pending |
-| WEATH-03    | TBD   | Pending |
-| MAP-01      | TBD   | Pending |
-| MAP-02      | TBD   | Pending |
-| TEST-01     | TBD   | Pending |
-| CSS-01      | TBD   | Pending |
-| CSS-02      | TBD   | Pending |
+| PERF-01     | Phase 3 | Pending |
+| PIPE-01     | Phase 1 | Pending |
+| PIPE-02     | Phase 1 | Pending |
+| PIPE-03     | Phase 1 | Pending |
+| GPS-01      | Phase 2 | Pending |
+| GPS-02      | Phase 2 | Pending |
+| SMOOTH-01   | Phase 4 | Pending |
+| SMOOTH-02   | Phase 4 | Pending |
+| WEATH-01    | Phase 6 | Pending |
+| WEATH-02    | Phase 6 | Pending |
+| WEATH-03    | Phase 6 | Pending |
+| MAP-01      | Phase 5 | Pending |
+| MAP-02      | Phase 5 | Pending |
+| TEST-01     | Phase 6 | Pending |
+| CSS-01      | Phase 5 | Pending |
+| CSS-02      | Phase 5 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 16 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-22 for v1.1 Enhancement Wave*
-*Last updated: 2026-04-22 after initial definition*
+*Last updated: 2026-04-22 after roadmap creation*

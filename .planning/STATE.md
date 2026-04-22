@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Enhancement Wave
-status: backlog
-last_updated: 2026-04-22T12:00:00.000Z
+status: planning
+last_updated: "2026-04-22T14:55:00.000Z"
 ---
 
 # Project State
@@ -17,10 +17,24 @@ See: .planning/PROJECT.md (updated 2026-04-22)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: -
-Status: Defining requirements
-Last activity: 2026-04-22 - Milestone v1.1 started
+Phase: Roadmap created (awaiting approval)
+Plan: Not started
+**Status:** Planning
+
+**Roadmap:** .planning/ROADMAP.md (6 phases, 16 requirements, 100% coverage)
+
+## Roadmap Summary
+
+| Phase | Name | Requirements | Status |
+| ----- | ---- | ----------- | ------ |
+| 1 | Pipeline Foundation | PIPE-01, PIPE-02, PIPE-03 | Pending |
+| 2 | GPS UI Consolidation | GPS-01, GPS-02 | Pending |
+| 3 | Worker Offload | PERF-01 | Pending |
+| 4 | Smoothing Clarity | SMOOTH-01, SMOOTH-02 | Pending |
+| 5 | CSS + Map Cleanup | CSS-01, CSS-02, MAP-01, MAP-02 | Pending |
+| 6 | Weather Spike | WEATH-01, WEATH-02, WEATH-03, TEST-01 | Pending |
+
+**Total:** 6 phases, 16 requirements
 
 ## Previous Milestone: v1.0 (Completed 2026-04-22)
 
@@ -28,10 +42,9 @@ Last activity: 2026-04-22 - Milestone v1.1 started
 - Shell modularization under `frontend/src/shell/`
 - Regression contracts locked with CI validation
 - Phase directories archived to `milestones/v1.0-phases-archived-2026-04-22/`
-- See `milestones/v1.0/` for archived artifacts
 
 ## Next Steps
 
-Start a new milestone: `/gsd-new-milestone`
-
-Optional pre-step: `/gsd-discuss-milestone` — crystallize what to build next
+Approve roadmap: `/gsd-approve-roadmap`
+Discuss phase: `/gsd-discuss-phase 1`
+Plan phase: `/gsd-plan-phase 1`
