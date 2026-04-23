@@ -208,8 +208,8 @@
 | PIPE-01 | Phase 1 | ✓ Complete |
 | PIPE-02 | Phase 1 | ✓ Complete |
 | PIPE-03 | Phase 1 | ✓ Complete |
-| GPS-01 | Phase 2 | Complete |
-| GPS-02 | Phase 2 | Complete |
+| GPS-01 | Phase 2 | ✓ Complete |
+| GPS-02 | Phase 2 | ✓ Complete |
 | SMOOTH-01 | Phase 4 | Complete |
 | SMOOTH-02 | Phase 4 | Complete |
 | WEATH-01 | Phase 6 | Complete |
