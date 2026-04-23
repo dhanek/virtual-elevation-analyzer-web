@@ -14,16 +14,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock dependencies for testing
 const mockDispatchEvent = vi.fn();
-const mockClassList = {
-	contains: vi.fn(() => false),
-	remove: vi.fn(),
+
+interface MockVeSection {
+	classList: {
+		contains: ReturnType<typeof vi.fn>;
+		remove: ReturnType<typeof vi.fn>;
+	};
+}
+
+interface MockTrimSlider {
+	dispatchEvent: ReturnType<typeof vi.fn>;
+}
+
+const mockVeSection: MockVeSection = {
+	classList: {
+		contains: vi.fn(() => false),
+		remove: vi.fn(),
+	},
 };
 
-const mockVeSection = {
-	classList: mockClassList,
-};
-
-const mockTrimStartSlider = {
+const mockTrimStartSlider: MockTrimSlider = {
 	dispatchEvent: mockDispatchEvent,
 };
 
@@ -61,16 +71,16 @@ describe("handleParametersChange - air_speed_offset detection", () => {
 		const trimStartSlider = mockDocument.getElementById("trimStartSlider");
 
 		// Simulate VE section being visible (classList.contains returns false = not hidden)
-		mockClassList.contains.mockReturnValue(false);
+		mockVeSection.classList.contains.mockReturnValue(false);
 
 		// Trigger the orchestrator behavior for air_speed_offset change
 		// (This is what happens when setParameters is called with air_speed_offset)
 		if (
-			veSection &&
-			!veSection.classList.contains("hidden") &&
-			trimStartSlider
+			veSection === mockVeSection &&
+			!mockVeSection.classList.contains("hidden") &&
+			trimStartSlider === mockTrimStartSlider
 		) {
-			trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
+			mockTrimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
 		}
 
 		// Verify dispatchEvent was called
@@ -83,17 +93,17 @@ describe("handleParametersChange - air_speed_offset detection", () => {
 		const trimStartSlider = mockDocument.getElementById("trimStartSlider");
 
 		// Simulate VE section being hidden (classList.contains returns true = hidden)
-		mockClassList.contains.mockReturnValue(true);
+		mockVeSection.classList.contains.mockReturnValue(true);
 
 		mockDispatchEvent.mockClear();
 
 		// Should NOT dispatch when section is hidden
 		if (
-			veSection &&
-			!veSection.classList.contains("hidden") &&
-			trimStartSlider
+			veSection === mockVeSection &&
+			!mockVeSection.classList.contains("hidden") &&
+			trimStartSlider === mockTrimStartSlider
 		) {
-			trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
+			mockTrimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
 		}
 
 		expect(mockDispatchEvent).not.toHaveBeenCalled();
