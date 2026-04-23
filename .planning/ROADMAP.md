@@ -2,19 +2,20 @@
 
 **Milestone:** v1.1 Enhancement Wave
 **Created:** 2026-04-22
-**Total Phases:** 6
-**Total Requirements:** 16
+**Total Phases:** 7
+**Total Requirements:** 17
 
 ## Phase Overview
 
 | Phase | Name | Goal | Requirements | Success Criteria | Status |
 | ----- | ---- | ---- | ----------- | ---------------- | ------ |
 | 1 | Pipeline Foundation | Fix air-speed calibration bugs; establish unified update pipeline | PIPE-01, PIPE-02, PIPE-03 | 4 | ✓ Complete |
-| 2 | GPS UI Consolidation | Relocate GPS mode selector to Section 3 with state sync | GPS-01, GPS-02 | 3 |
+| 2 | GPS UI Consolidation | Relocate GPS mode selector to Section 3 with state sync | GPS-01, GPS-02 | 3 | Pending |
 | 3 | Worker Offload | Background VE computation for slider responsiveness | PERF-01 | 3 |
 | 4 | Smoothing Clarity | Document and implement consistent smoothing ownership | SMOOTH-01, SMOOTH-02 | 3 |
 | 5 | CSS + Map Cleanup | Structural CSS improvements; MapVisualization refactor | CSS-01, CSS-02, MAP-01, MAP-02 | 4 |
 | 6 | Weather Spike | Exploratory spike with go/no-go decision | WEATH-01, WEATH-02, WEATH-03, TEST-01 | 4 |
+| 7 | Mode Pipeline Unification | Unify calculation and plot update pipeline across analysis modes | UNIFY-01 | 3 | Pending |
 
 ---
 
@@ -204,9 +205,9 @@
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
 | PERF-01 | Phase 3 | Pending |
-| PIPE-01 | Phase 1 | Pending |
-| PIPE-02 | Phase 1 | Pending |
-| PIPE-03 | Phase 1 | Pending |
+| PIPE-01 | Phase 1 | ✓ Complete |
+| PIPE-02 | Phase 1 | ✓ Complete |
+| PIPE-03 | Phase 1 | ✓ Complete |
 | GPS-01 | Phase 2 | Pending |
 | GPS-02 | Phase 2 | Pending |
 | SMOOTH-01 | Phase 4 | Pending |
@@ -214,6 +215,7 @@
 | WEATH-01 | Phase 6 | Pending |
 | WEATH-02 | Phase 6 | Pending |
 | WEATH-03 | Phase 6 | Pending |
+| UNIFY-01 | Phase 7 | Pending |
 | MAP-01 | Phase 5 | Pending |
 | MAP-02 | Phase 5 | Pending |
 | TEST-01 | Phase 6 | Pending |
@@ -221,8 +223,8 @@
 | CSS-02 | Phase 5 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 16 total
-- Mapped to phases: 16 ✓
+- v1.1 requirements: 17 total
+- Mapped to phases: 17 ✓
 - Unmapped: 0 ✓
 
 ---
@@ -250,6 +252,7 @@ Phase 6 (Weather) - Can spike independently, TEST-01 depends on all phases
 | Multiple smoothing layers | Phase 4 | Document ownership, single source |
 | Map scope expansion | Phase 5 | Hard scope boundary (structural only) |
 | Weather scope creep | Phase 6 | Timebox + go/no-go gate |
+| Mode pipeline divergence | Phase 7 | Audit paths for semantic differences first |
 
 ---
 
@@ -260,5 +263,34 @@ Phase 6 (Weather) - Can spike independently, TEST-01 depends on all phases
 - **Regression protection**: All existing CI checks must pass throughout
 
 ---
+## Phase 7: Mode Pipeline Unification
+
+**Goal:** Unify calculation and plot update pipeline across Standard, GPS-lap, and Out-and-back modes. Eliminate the "bug factory" where new parameters must be wired into three separate paths.
+
+### Requirements
+
+- **UNIFY-01**: Maintainer can add a new parameter (calibration, offset, wind source) in one place and it propagates correctly to all analysis modes
+
+### Success Criteria
+
+1. All three modes use a shared `updateModeVEPlots()` entry point that resolves wind series once and rebuilds all plots
+2. Slider changes in any mode trigger recalculation via the unified path (no orphan update functions)
+3. GPS-lap and Out-and-back modes respond to parameter changes (Cda, Crr, trim) like Standard mode does
+
+### Key Decisions
+
+- GPS-lap mode's centralized pipeline is the reference implementation (already works correctly)
+- Lift common pattern into mode-agnostic primitive
+- Keep per-mode `render*` files only for mode-specific DOM shell
+- Shared primitives already exist: `resolveWindSeries`, `buildSegmentSupplementarySeries`, `createVeCalculator`
+
+### Risks
+
+- Scope creep: Focus on orchestrating layer, not the math (shared primitives are already shared)
+- Behavior drift: Audit three paths for semantic differences before unifying
+- Breaking existing workarounds: Document what "bugs" were intentionally preserved
+
+---
+
 *Roadmap created: 2026-04-22 for v1.1 Enhancement Wave*
-*6 phases | 16 requirements | 100% coverage*
+*7 phases | 17 requirements | 100% coverage*
