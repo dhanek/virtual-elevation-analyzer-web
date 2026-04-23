@@ -6,28 +6,30 @@
  *
  * Per D-08: preserves exact HTML structure and CSS classes for visual parity.
  */
-import type { SelectableCardItem } from '../dom/selectableCards';
-import { renderSelectableCards } from '../dom/selectableCards';
+import type { SelectableCardItem } from "../dom/selectableCards";
+import { renderSelectableCards } from "../dom/selectableCards";
 
 /**
  * Input for Section 3 template generation.
  * Formatters are injected so the function stays pure and testable.
  */
 export interface Section3TemplateInput {
-    /** Activity laps from FIT data */
-    laps: any[];  // ActivityLapLike[]
-    /** Whether GPS data is available */
-    hasGpsData: boolean;
-    /** Whether to show GPS lap detection panel */
-    showGpsLapDetection: boolean;
-    /** Whether to show out-and-back detection panel */
-    showOutAndBack: boolean;
-    /** Format elapsed seconds as duration string */
-    formatDuration: (seconds: number) => string;
-    /** Format meters as distance string */
-    formatDistance: (meters: number) => string;
-    /** Format watts as power string */
-    formatPower: (watts: number) => string;
+	/** Activity laps from FIT data */
+	laps: any[]; // ActivityLapLike[]
+	/** Whether GPS data is available */
+	hasGpsData: boolean;
+	/** Whether to show GPS lap detection panel */
+	showGpsLapDetection: boolean;
+	/** Whether to show out-and-back detection panel */
+	showOutAndBack: boolean;
+	/** Current GPS analysis mode (None, GPS based lap splitting, etc.) */
+	gpsAnalysisMode: string;
+	/** Format elapsed seconds as duration string */
+	formatDuration: (seconds: number) => string;
+	/** Format meters as distance string */
+	formatDistance: (meters: number) => string;
+	/** Format watts as power string */
+	formatPower: (watts: number) => string;
 }
 
 /**
@@ -38,22 +40,49 @@ export interface Section3TemplateInput {
  * shell/dom helper instead of inline .map().join('') template.
  */
 export function renderSection3Template(input: Section3TemplateInput): string {
-    const { laps, hasGpsData, showGpsLapDetection, showOutAndBack, formatDuration, formatDistance, formatPower } = input;
+	const {
+		laps,
+		hasGpsData,
+		showGpsLapDetection,
+		showOutAndBack,
+		gpsAnalysisMode,
+		formatDuration,
+		formatDistance,
+		formatPower,
+	} = input;
 
-    // Build FIT lap selectable cards using the shared shell helper
-    const lapItems: SelectableCardItem[] = laps.map((lap: any, index: number) => ({
-        id: `lap-${index + 1}`,
-        label: `Lap ${index + 1}`,
-        details: `${formatDuration(lap.total_elapsed_time)} \u2022 ${formatDistance(lap.total_distance)} \u2022 ${lap.avg_power > 0 ? formatPower(lap.avg_power) : 'N/A'}`,
-        checked: false,
-        dataAttr: 'lap',
-        dataValue: index + 1,
-    }));
-    const lapCardsHtml = renderSelectableCards(lapItems, 'lap-checkbox');
+	// Build FIT lap selectable cards using the shared shell helper
+	const lapItems: SelectableCardItem[] = laps.map(
+		(lap: any, index: number) => ({
+			id: `lap-${index + 1}`,
+			label: `Lap ${index + 1}`,
+			details: `${formatDuration(lap.total_elapsed_time)} \u2022 ${formatDistance(lap.total_distance)} \u2022 ${lap.avg_power > 0 ? formatPower(lap.avg_power) : "N/A"}`,
+			checked: false,
+			dataAttr: "lap",
+			dataValue: index + 1,
+		}),
+	);
+	const lapCardsHtml = renderSelectableCards(lapItems, "lap-checkbox");
 
-    return `
+	return `
         <div class="analysis-layout">
             <div class="analysis-sidebar">
+                ${
+									hasGpsData
+										? `
+                <!-- GPS Mode Selector (shown only when GPS data available) -->
+                <div class="gps-mode-selector">
+                    <label for="gpsAnalysisMode">GPS Analysis Mode</label>
+                    <select id="gpsAnalysisMode" data-gps-mode="${gpsAnalysisMode}">
+                        <option value="None" ${gpsAnalysisMode === "None" ? "selected" : ""}>None</option>
+                        <option value="GPS based lap splitting" ${gpsAnalysisMode === "GPS based lap splitting" ? "selected" : ""}>GPS based lap splitting</option>
+                        <option value="GPS based out and back" ${gpsAnalysisMode === "GPS based out and back" ? "selected" : ""}>GPS based out and back</option>
+                        <option value="GPS gate one way" ${gpsAnalysisMode === "GPS gate one way" ? "selected" : ""}>GPS gate one way</option>
+                    </select>
+                </div>
+                `
+										: ""
+								}
                 <!-- FIT Lap Selection (always shown) -->
                 <div class="lap-selection">
                     <h4>Lap Selection</h4>
@@ -64,7 +93,9 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                         ${lapCardsHtml}
                     </div>
                 </div>
-                ${showGpsLapDetection ? `
+                ${
+									showGpsLapDetection
+										? `
                 <!-- GPS Lap Detection Panel (shown below lap selection when enabled) -->
                 <div class="gps-lap-detection-panel" id="gpsLapDetectionPanel" style="margin-top: 0.5rem;">
                     <h4>GPS Virtual Lap Detection</h4>
@@ -89,8 +120,12 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                         </div>
                     </div>
                 </div>
-                ` : ''}
-                ${showOutAndBack ? `
+                `
+										: ""
+								}
+                ${
+									showOutAndBack
+										? `
                 <!-- Out and Back Detection Panel -->
                 <div class="gps-lap-detection-panel" id="outAndBackPanel" style="margin-top: 0.5rem;">
                     <h4>Out &amp; Back Detection</h4>
@@ -126,8 +161,12 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                         </div>
                     </div>
                 </div>
-                ` : ''}
-                ${!showGpsLapDetection && !showOutAndBack ? `
+                `
+										: ""
+								}
+                ${
+									!showGpsLapDetection && !showOutAndBack
+										? `
                 <div class="map-trim-controls" id="mapTrimControls" style="display: none;">
                     <div class="map-trim-group">
                         <label>Trim Start:</label>
@@ -140,15 +179,20 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                         <input type="number" id="mapTrimEndValue" class="ve-value-input-compact">
                     </div>
                 </div>
-                ` : ''}
+                `
+										: ""
+								}
             </div>
-            ${hasGpsData ? `
+            ${
+							hasGpsData
+								? `
             <div class="analysis-main">
                 <div class="map-container">
                     <div id="mapView"></div>
                 </div>
             </div>
-            ` : `
+            `
+								: `
             <div class="analysis-main">
                 <div style="padding: 2rem; text-align: center; background: #f7fafc; border: 2px dashed #cbd5e0; border-radius: 8px;">
                     <div style="font-size: 3rem; margin-bottom: 1rem;">\u{1F4CD}</div>
@@ -157,7 +201,8 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                     <p style="color: #718096; margin: 0;">Velodrome mode has been automatically enabled (zero altitude reference).</p>
                 </div>
             </div>
-            `}
+            `
+						}
         </div>
         <div class="analysis-actions" style="margin-top: 2rem;">
             <button id="analyzeBtn" class="primary-btn" disabled>Select Laps to Analyze</button>

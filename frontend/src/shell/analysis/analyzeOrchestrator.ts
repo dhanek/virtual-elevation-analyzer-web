@@ -21,7 +21,10 @@ import {
 	handleExportAllResults,
 	saveCurrentLapSettings,
 } from "./storageHandlers";
-import { isGpsLapSelectionMode } from "../section3/section3Orchestration";
+import {
+	isGpsLapSelectionMode,
+	getGpsAnalysisMode,
+} from "../section3/section3Orchestration";
 import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
 
 interface AnalyzeOrchestratorDependencies {
@@ -136,40 +139,18 @@ export function initializeAnalysisParameters(): void {
  * - airSpeedCalibrationPercent: Lives in AppState, not persisted per-file
  * - These are runtime adjustments that update directly via local functions
  * - They bypass the parameter storage layer (intentional - runtime adjustment, not a saved parameter)
+ *
+ * Note: GPS mode is now controlled via Section 3 UI, not via AnalysisParameters.
+ * The auto_lap_detection field was removed from AnalysisParameters.
  */
 export function handleParametersChange(parameters: AnalysisParameters): void {
 	const deps = getDependencies();
 
-	const previousLapDetectionMode = deps.appState.previousAutoLapDetection;
 	deps.appState.currentParameters = parameters;
-
-	// Check if auto_lap_detection changed and Section 3 needs to be re-rendered
-	const lapDetectionChanged =
-		parameters.auto_lap_detection !== previousLapDetectionMode;
-	deps.appState.previousAutoLapDetection = parameters.auto_lap_detection;
 
 	// Don't save if we're currently loading parameters from storage
 	if (deps.appState.isLoadingParameters) {
-		// Still need to update previous value when loading
 		return;
-	}
-
-	// If lap detection mode changed, re-initialize Section 3 to show/hide GPS panel
-	if (
-		lapDetectionChanged &&
-		deps.appState.currentFitData &&
-		deps.appState.currentLaps.length > 0
-	) {
-		log.debug(
-			`Auto lap detection changed: ${previousLapDetectionMode} -> ${parameters.auto_lap_detection}`,
-		);
-		// Reset GPS lap detection state when mode changes
-		deps.appState.gpsLapDetectionResult = null;
-		deps.appState.gpsDetectedLaps = [];
-		deps.appState.gpsSelectedLaps = [];
-		// Re-initialize Section 3 to show/hide GPS lap detection panel
-		deps.initializeSection3();
-		// Continue to save parameters below (don't return early)
 	}
 
 	// Save parameters to IndexedDB for this file
@@ -265,8 +246,7 @@ export function updateAnalyzeButton(): void {
 
 	const analyzeBtn = document.getElementById("analyzeBtn") as HTMLButtonElement;
 	if (analyzeBtn) {
-		const lapDetectionMode =
-			deps.appState.currentParameters?.auto_lap_detection || "None";
+		const lapDetectionMode = getGpsAnalysisMode();
 		const isGpsLapMode = isGpsLapSelectionMode(lapDetectionMode);
 		const isOutAndBackMode = lapDetectionMode === "GPS based out and back";
 
@@ -318,8 +298,7 @@ export function updateAnalyzeButton(): void {
 export async function handleAnalyze(): Promise<void> {
 	const deps = getDependencies();
 
-	const lapDetectionMode =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
+	const lapDetectionMode = getGpsAnalysisMode();
 	const modeHandler = getAnalysisModeHandler(lapDetectionMode);
 	const selection = modeHandler.prepareSelection(deps.appState);
 

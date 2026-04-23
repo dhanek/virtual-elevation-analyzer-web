@@ -10,12 +10,12 @@
 | Phase | Name | Goal | Requirements | Success Criteria | Status |
 | ----- | ---- | ---- | ----------- | ---------------- | ------ |
 | 1 | Pipeline Foundation | Fix air-speed calibration bugs; establish unified update pipeline | PIPE-01, PIPE-02, PIPE-03 | 4 | ✓ Complete |
-| 2 | GPS UI Consolidation | Relocate GPS mode selector to Section 3 with state sync | GPS-01, GPS-02 | 3 | Pending |
+| 2 | GPS UI Consolidation | Relocate GPS mode selector to Section 3 with state sync | GPS-01, GPS-02 | 3 | Complete |
 | 3 | Worker Offload | Background VE computation for slider responsiveness | PERF-01 | 3 |
 | 4 | Smoothing Clarity | Document and implement consistent smoothing ownership | SMOOTH-01, SMOOTH-02 | 3 |
 | 5 | CSS + Map Cleanup | Structural CSS improvements; MapVisualization refactor | CSS-01, CSS-02, MAP-01, MAP-02 | 4 |
 | 6 | Weather Spike | Exploratory spike with go/no-go decision | WEATH-01, WEATH-02, WEATH-03, TEST-01 | 4 |
-| 7 | Mode Pipeline Unification | Unify calculation and plot update pipeline across analysis modes | UNIFY-01 | 3 | Pending |
+| 7 | Mode Pipeline Unification | Unify calculation and plot update pipeline across analysis modes | UNIFY-01 | 3 | Complete |
 
 ---
 
@@ -204,23 +204,23 @@
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| PERF-01 | Phase 3 | Pending |
+| PERF-01 | Phase 3 | Complete |
 | PIPE-01 | Phase 1 | ✓ Complete |
 | PIPE-02 | Phase 1 | ✓ Complete |
 | PIPE-03 | Phase 1 | ✓ Complete |
-| GPS-01 | Phase 2 | Pending |
-| GPS-02 | Phase 2 | Pending |
-| SMOOTH-01 | Phase 4 | Pending |
-| SMOOTH-02 | Phase 4 | Pending |
-| WEATH-01 | Phase 6 | Pending |
-| WEATH-02 | Phase 6 | Pending |
-| WEATH-03 | Phase 6 | Pending |
-| UNIFY-01 | Phase 7 | Pending |
-| MAP-01 | Phase 5 | Pending |
-| MAP-02 | Phase 5 | Pending |
-| TEST-01 | Phase 6 | Pending |
-| CSS-01 | Phase 5 | Pending |
-| CSS-02 | Phase 5 | Pending |
+| GPS-01 | Phase 2 | Complete |
+| GPS-02 | Phase 2 | Complete |
+| SMOOTH-01 | Phase 4 | Complete |
+| SMOOTH-02 | Phase 4 | Complete |
+| WEATH-01 | Phase 6 | Complete |
+| WEATH-02 | Phase 6 | Complete |
+| WEATH-03 | Phase 6 | Complete |
+| UNIFY-01 | Phase 7 | Complete |
+| MAP-01 | Phase 5 | Complete |
+| MAP-02 | Phase 5 | Complete |
+| TEST-01 | Phase 6 | Complete |
+| CSS-01 | Phase 5 | Complete |
+| CSS-02 | Phase 5 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 17 total

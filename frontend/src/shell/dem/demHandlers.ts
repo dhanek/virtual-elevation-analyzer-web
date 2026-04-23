@@ -297,9 +297,7 @@ export async function displayResults(result: any): Promise<void> {
 
 	deps.appState.isLoadingParameters = false; // Re-enable saving after load complete
 
-	// Update appState.previousAutoLapDetection to match loaded parameters
-	deps.appState.previousAutoLapDetection =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
+	// Note: GPS mode state is managed via Section 3 UI, not via AnalysisParameters
 }
 
 // Utility functions

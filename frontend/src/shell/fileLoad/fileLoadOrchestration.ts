@@ -433,9 +433,7 @@ export async function displayCsvResults(
 
 	deps.appState.isLoadingParameters = false;
 
-	// Update appState.previousAutoLapDetection to match loaded parameters
-	deps.appState.previousAutoLapDetection =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
+	// Note: GPS mode state is managed via Section 3 UI, not via AnalysisParameters
 }
 
 // Initialize section 3 for CSV data

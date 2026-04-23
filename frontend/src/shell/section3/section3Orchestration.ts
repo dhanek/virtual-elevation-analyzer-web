@@ -21,6 +21,7 @@ import {
 	renderSection3Template,
 	bindLapSelection,
 	bindSelectAllButton,
+	bindGpsModeSelector,
 	bindGpsDetection,
 	bindOutAndBackDetection,
 } from ".";
@@ -32,6 +33,89 @@ import {
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
+
+// GPS Analysis Mode state - lives in Section 3 shell as single source of truth (per D-04)
+type GpsAnalysisMode =
+	| "None"
+	| "GPS based lap splitting"
+	| "GPS based out and back"
+	| "GPS gate one way";
+let currentGpsAnalysisMode: GpsAnalysisMode = "None";
+
+/**
+ * Get the current GPS analysis mode
+ */
+export function getGpsAnalysisMode(): GpsAnalysisMode {
+	return currentGpsAnalysisMode;
+}
+
+/**
+ * Set the GPS analysis mode and update all dependent UI elements
+ */
+export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
+	const deps = getDependencies();
+	const previousMode = currentGpsAnalysisMode;
+
+	// Update state
+	currentGpsAnalysisMode = mode;
+
+	// If mode changes from non-"None" to "None" or to a different mode, clear GPS detections (per D-07)
+	if (previousMode !== "None" && mode === "None") {
+		// Clear all GPS detections
+		deps.appState.gpsDetectedLaps = [];
+		deps.appState.gpsSelectedLaps = [];
+		deps.appState.gpsLapDetectionResult = null;
+		deps.appState.outAndBackSections = [];
+		deps.appState.outAndBackSelectedSections = [];
+		deps.appState.outAndBackResult = null;
+
+		// Clear map visualization
+		deps.getMapVisualization()?.clearDetectedLaps();
+		deps.getMapVisualization()?.clearGpsMarker();
+		deps.getMapVisualization()?.clearOutAndBackMarkers();
+
+		// Update UI
+		updateGpsDetectedLapsUI();
+		updateOutAndBackSectionsUI();
+	} else if (previousMode !== mode && previousMode !== "None") {
+		// Mode switched to different GPS mode - clear previous detections
+		if (
+			previousMode === "GPS based lap splitting" ||
+			previousMode === "GPS gate one way"
+		) {
+			deps.appState.gpsDetectedLaps = [];
+			deps.appState.gpsSelectedLaps = [];
+			deps.appState.gpsLapDetectionResult = null;
+			deps.getMapVisualization()?.clearDetectedLaps();
+			deps.getMapVisualization()?.clearGpsMarker();
+			updateGpsDetectedLapsUI();
+		} else if (previousMode === "GPS based out and back") {
+			deps.appState.outAndBackSections = [];
+			deps.appState.outAndBackSelectedSections = [];
+			deps.appState.outAndBackResult = null;
+			deps.getMapVisualization()?.clearDetectedLaps();
+			deps.getMapVisualization()?.clearOutAndBackMarkers();
+			updateOutAndBackSectionsUI();
+		}
+	}
+
+	// Update UI visibility based on mode
+	updateGpsMarkerButtonState();
+	updateOutAndBackButtonState();
+
+	// Update map visualization if mode changed
+	if (previousMode !== mode) {
+		const mapViz = deps.getMapVisualization();
+		if (mapViz) {
+			// Clear markers when switching modes
+			mapViz.clearDetectedLaps();
+			mapViz.clearGpsMarker();
+			mapViz.clearOutAndBackMarkers();
+		}
+	}
+
+	log.debug(`GPS analysis mode changed: ${previousMode} -> ${mode}`);
+}
 
 interface Section3Dependencies {
 	appState: AppState;
@@ -203,8 +287,8 @@ export async function runGpsLapDetection(
 		}
 	}
 
-	// Get detection mode, defaulting to GPS based lap splitting (not None since we're running detection)
-	const detectionMode = deps.appState.currentParameters?.auto_lap_detection;
+	// Get detection mode from Section 3 GPS mode state (not None since we're running detection)
+	const detectionMode = getGpsAnalysisMode();
 	const mode =
 		detectionMode && detectionMode !== "None"
 			? detectionMode
@@ -549,8 +633,7 @@ export function updateOutAndBackButtonState(): void {
 
 	const sliderControls = document.getElementById("oabGateSliderControls");
 
-	const lapDetectionMode =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
+	const lapDetectionMode = getGpsAnalysisMode();
 
 	if (lapDetectionMode !== "GPS based out and back") {
 		if (sliderControls) sliderControls.style.display = "none";
@@ -632,8 +715,7 @@ export function updateGpsMarkerButtonState(): void {
 
 	const sliderControls = document.getElementById("gpsGateSliderControls");
 
-	const lapDetectionMode =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
+	const lapDetectionMode = getGpsAnalysisMode();
 	const isGpsLapMode = isGpsLapSelectionMode(lapDetectionMode);
 
 	if (!isGpsLapMode) {
@@ -695,8 +777,7 @@ export function updateSelectedLaps(): void {
 	// Update Out and Back button state based on FIT lap selection
 	updateOutAndBackButtonState();
 
-	const lapDetectionMode =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
+	const lapDetectionMode = getGpsAnalysisMode();
 	const shouldShowSelectionTrimControls =
 		deps.appState.selectedLaps.length > 0 &&
 		!isGpsLapSelectionMode(lapDetectionMode) &&
@@ -1073,12 +1154,9 @@ export function initializeSection3(): void {
 
 	const hasGpsData =
 		deps.appState.currentFitResult?.parsing_statistics?.has_gps_data ?? false;
-	const lapDetectionMode =
-		deps.appState.currentParameters?.auto_lap_detection || "None";
-	const showGpsLapDetection =
-		hasGpsData && isGpsLapSelectionMode(lapDetectionMode);
-	const showOutAndBack =
-		hasGpsData && lapDetectionMode === "GPS based out and back";
+	const gpsMode = getGpsAnalysisMode();
+	const showGpsLapDetection = hasGpsData && isGpsLapSelectionMode(gpsMode);
+	const showOutAndBack = hasGpsData && gpsMode === "GPS based out and back";
 
 	// Generate Section 3 HTML using the shell template helper
 	const analysisHtml = renderSection3Template({
@@ -1086,6 +1164,7 @@ export function initializeSection3(): void {
 		hasGpsData,
 		showGpsLapDetection,
 		showOutAndBack,
+		gpsAnalysisMode: gpsMode,
 		formatDuration,
 		formatDistance,
 		formatPower,
@@ -1137,6 +1216,11 @@ export function initializeSection3(): void {
 			} else {
 				log.debug("No GPS data - skipping map initialization");
 				deps.setMapVisualization(null);
+			}
+
+			// Setup GPS mode selector handler (if GPS data available)
+			if (hasGpsData) {
+				bindGpsModeSelector();
 			}
 
 			// Setup lap selection handlers using shell helpers
