@@ -7,9 +7,9 @@
 
 ## Phase Overview
 
-| Phase | Name | Goal | Requirements | Success Criteria |
-| ----- | ---- | ---- | ----------- | ---------------- |
-| 1 | Pipeline Foundation | Fix air-speed calibration bugs; establish unified update pipeline | PIPE-01, PIPE-02, PIPE-03 | 4 |
+| Phase | Name | Goal | Requirements | Success Criteria | Status |
+| ----- | ---- | ---- | ----------- | ---------------- | ------ |
+| 1 | Pipeline Foundation | Fix air-speed calibration bugs; establish unified update pipeline | PIPE-01, PIPE-02, PIPE-03 | 4 | ✓ Complete |
 | 2 | GPS UI Consolidation | Relocate GPS mode selector to Section 3 with state sync | GPS-01, GPS-02 | 3 |
 | 3 | Worker Offload | Background VE computation for slider responsiveness | PERF-01 | 3 |
 | 4 | Smoothing Clarity | Document and implement consistent smoothing ownership | SMOOTH-01, SMOOTH-02 | 3 |
