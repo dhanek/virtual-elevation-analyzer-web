@@ -257,14 +257,14 @@ Required content:
 
 ## Verification Criteria
 
-| ID | Criterion |
-| --- | --- |
-| V1 | Plan execution is gated by deterministic `3-GATE-RESULT` token |
-| V2 | Worker contract includes explicit wasm bootstrap and tokenized request/response protocol |
-| V3 | Worker cancellation strategy is implemented for superseded inputs |
-| V4 | Worker init/runtime failures fallback gracefully to main-thread runner |
-| V5 | Shared runner preserves debounce, status, latest-input-wins, and prior-result visibility contracts |
-| V6 | Worker and fallback tests pass |
+| ID  | Criterion                                                                                          |
+| --- | -------------------------------------------------------------------------------------------------- |
+| V1  | Plan execution is gated by deterministic `3-GATE-RESULT` token                                     |
+| V2  | Worker contract includes explicit wasm bootstrap and tokenized request/response protocol           |
+| V3  | Worker cancellation strategy is implemented for superseded inputs                                  |
+| V4  | Worker init/runtime failures fallback gracefully to main-thread runner                             |
+| V5  | Shared runner preserves debounce, status, latest-input-wins, and prior-result visibility contracts |
+| V6  | Worker and fallback tests pass                                                                     |
 
 ## Must-Haves for Goal-Backward Verification
 

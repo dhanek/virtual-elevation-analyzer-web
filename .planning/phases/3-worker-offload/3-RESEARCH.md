@@ -39,6 +39,7 @@ Debounce patterns are present in:
 - `frontend/src/shell/section3/section3Orchestration.ts`
 
 This allows an incremental plan:
+
 1. enforce mode-aware debounce (~200ms for heavy multi-segment paths),
 2. add latest-input-wins cancellation semantics,
 3. only add worker path if profiling gate fails.
@@ -63,9 +64,11 @@ Implication: worker should own pure compute payload processing and return data f
 Primary gate should measure real browser slider drag in 15–20 lap scenarios and classify blocking by visible stalls (>100ms sustained/jank).
 
 If gate passes (no meaningful blocking):
+
 - stop at debounced main-thread path and document skip decision.
 
 If gate fails:
+
 - proceed to worker implementation.
 
 ### Step B: Main-thread responsiveness baseline
@@ -113,13 +116,13 @@ Integration points:
 
 ## Risks and Mitigations
 
-| Risk | Why it matters | Mitigation |
-| ---- | -------------- | ---------- |
-| Premature worker complexity | Phase may not need worker | Enforce profile-first gate |
-| Transfer overhead | Large arrays can negate worker benefit | Transferable typed arrays from first worker iteration |
-| Visual regressions/flicker | Frequent recomputes can destabilize UI | Keep last completed plot visible until replacement ready |
-| Race conditions/stale results | Rapid slider input can produce out-of-order completion | Latest-input-wins tokening and stale-result drop |
-| Behavior drift across modes | Multi-mode path can diverge | Preserve explicit per-mode semantics while sharing runner infrastructure |
+| Risk                          | Why it matters                                         | Mitigation                                                               |
+| ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Premature worker complexity   | Phase may not need worker                              | Enforce profile-first gate                                               |
+| Transfer overhead             | Large arrays can negate worker benefit                 | Transferable typed arrays from first worker iteration                    |
+| Visual regressions/flicker    | Frequent recomputes can destabilize UI                 | Keep last completed plot visible until replacement ready                 |
+| Race conditions/stale results | Rapid slider input can produce out-of-order completion | Latest-input-wins tokening and stale-result drop                         |
+| Behavior drift across modes   | Multi-mode path can diverge                            | Preserve explicit per-mode semantics while sharing runner infrastructure |
 
 ---
 
@@ -179,4 +182,4 @@ Validation should be layered so planning can map each requirement to specific te
 
 ---
 
-*Research complete: 2026-05-09*
+_Research complete: 2026-05-09_

@@ -26,6 +26,7 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
 ## Plan 01 — Profiling Gate + Main-Thread Responsiveness
 
 ### Strengths
+
 - Profile-gate artifact has machine-grep-able fields (`Decision: GATE_PASSED|GATE_FAILED`), making Plan 02's guard mechanically checkable.
 - `HEAVY_RECOMPUTE_DEBOUNCE_MS = 200` is exposed as a named constant matching D-07 — easy to verify and tune.
 - Latest-input-wins is enforced via tokening rather than ad-hoc cancellation flags, which is the right primitive.
@@ -35,7 +36,7 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
 
 ### Concerns
 
-- **HIGH — Gate evaluation timing is ambiguous.** Task 1 says "Populate the report with initial baseline entries before and after applying Task 2/3 changes." But the gate rule (`GATE_FAILED when sustained visible freezes…`) doesn't say *which* measurement it applies to. If 200ms debounce + latest-input-wins alone resolves perceived jank, GATE_PASSED is correct and Plan 02 is rightly skipped. If the gate is evaluated against the *baseline* (pre-debounce), Plan 02 always fires for heavy workloads. The current text could be read either way.
+- **HIGH — Gate evaluation timing is ambiguous.** Task 1 says "Populate the report with initial baseline entries before and after applying Task 2/3 changes." But the gate rule (`GATE_FAILED when sustained visible freezes…`) doesn't say _which_ measurement it applies to. If 200ms debounce + latest-input-wins alone resolves perceived jank, GATE_PASSED is correct and Plan 02 is rightly skipped. If the gate is evaluated against the _baseline_ (pre-debounce), Plan 02 always fires for heavy workloads. The current text could be read either way.
 
 - **HIGH — "Visible freeze" is subjective.** The report schema asks for "Visible Freeze Observed (yes/no)" and "Max Stall (ms)" but doesn't prescribe a measurement method (Chrome DevTools long-task entries? `performance.now()` deltas around recompute? `requestAnimationFrame` frame-drop count?). Two reviewers running this gate could disagree.
 
@@ -48,6 +49,7 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
 - **LOW — Test name "schedules only one recompute when multiple inputs arrive within 200ms window"** could be misread as "first wins" instead of "last wins." Suggest renaming to "schedules only the latest recompute…"
 
 ### Suggestions
+
 1. Add an explicit step: **gate evaluation occurs after Tasks 2–3 are implemented.** This makes the "did debounce alone solve it?" question the gate question, which matches the phase's profile-first intent.
 2. Prescribe a measurement method in Task 1: e.g., "use Chrome DevTools Performance recording; count tasks >50ms during a 5-second slider-drag interaction; record the longest." Subjectivity-free.
 3. Specify standard-mode debounce explicitly (e.g., `STANDARD_RECOMPUTE_DEBOUNCE_MS = 0` or document that standard recompute bypasses the runner).
@@ -59,6 +61,7 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
 ## Plan 02 — Conditional Worker Path
 
 ### Strengths
+
 - Execution guard pattern is well-defined and matches the gate output exactly.
 - Worker message protocol is concrete (request/response type strings, token echo, mode discriminator).
 - Acceptance criterion "file does not contain `document.` or `Plotly`" is a great defense against accidental DOM coupling in the worker.
@@ -71,11 +74,11 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
   - separate `wasm-pack` worker entry, or
   - `import.meta.url`-style worker construction with WASM bootstrapping inside, or
   - confirmation that the compute is pure-JS post-extraction and WASM is only used elsewhere.
-  This is the single biggest unknown in the plan and will cause real friction during execution if not pre-resolved.
+    This is the single biggest unknown in the plan and will cause real friction during execution if not pre-resolved.
 
 - **HIGH — Plan-skipping mechanism leans on markdown content.** "If file contains `Decision: GATE_PASSED`, mark this plan as intentionally skipped." This is fine if the executor honors it, but there's no machine-readable gate (frontmatter flag, exit code, etc.) and "intentionally skipped" isn't a defined state in the executor's vocabulary. Consider promoting the decision into the plan's frontmatter (e.g., `precondition: profile-report-gate-failed`) or having Plan 01's final task emit a sentinel file like `3-PROFILE-REPORT.md` containing only `GATE_FAILED` to short-circuit Plan 02.
 
-- **MEDIUM — Worker cancellation strategy is implicit.** Token-checking on completion drops stale results, but the worker still *runs* the stale computation to completion. For a 15-lap recompute that takes 800ms in a worker, the user may queue 5 inputs while one runs. No cancellation = a queue of stale work blocks the next "real" run. Options: terminate-and-recreate worker on supersession, or send a cancel message and have worker check a flag between laps. Plan 02 should pick one.
+- **MEDIUM — Worker cancellation strategy is implicit.** Token-checking on completion drops stale results, but the worker still _runs_ the stale computation to completion. For a 15-lap recompute that takes 800ms in a worker, the user may queue 5 inputs while one runs. No cancellation = a queue of stale work blocks the next "real" run. Options: terminate-and-recreate worker on supersession, or send a cancel message and have worker check a flag between laps. Plan 02 should pick one.
 
 - **MEDIUM — Transfer overhead vs benefit not budgeted.** The plan asserts transferable typed arrays from the start (good), but doesn't define a worker-overhead threshold. If gate fails by 150ms and worker setup + transfer is ~50ms each direction, residual blocking could remain. Add a post-implementation success metric: "p95 main-thread block during slider drag < 50ms."
 
@@ -86,6 +89,7 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
 - **LOW — `AppState.workerAvailable` straddles state-only doctrine.** It's a runtime capability flag, not analysis state. Could live on the worker client itself with a getter, keeping AppState clean.
 
 ### Suggestions
+
 1. **Spike the WASM-in-worker question before/during Task 1.** Either confirm compute is pure-JS post-extraction, or include explicit worker WASM bootstrap in the worker file requirements.
 2. Replace the markdown-content guard with a more deterministic mechanism: write a tiny status file (`3-GATE-RESULT`) containing only the decision token, and frontmatter a `precondition` on Plan 02.
 3. Add a cancellation strategy task: "On supersession, worker client either (a) sends `CANCEL` with new token and worker checks flag between segment iterations, or (b) terminates and respawns the worker." Pick one.
@@ -109,6 +113,7 @@ The two-plan structure correctly enforces the profile-first gate captured in CON
 ## Risk Assessment: **MEDIUM–HIGH**
 
 Justification:
+
 - **HIGH-risk items**: WASM-in-worker bootstrap is a real unknown that will surface at execution time as a 1–2 day detour if not pre-resolved; the gate evaluation timing ambiguity could lead to either always-skip or always-implement outcomes that don't match the phase intent.
 - **MEDIUM-risk items**: subjective freeze measurement, in-flight worker cancellation strategy, conditional plan execution mechanism.
 - **What lowers the risk**: tight, grep-able acceptance criteria; explicit token semantics; faithful translation of CONTEXT decisions; existing debounce patterns and profiling harness already in repo.
@@ -128,10 +133,12 @@ Reviewer unavailable (`codex` CLI not found on this system).
 Only one reviewer (Claude) was available, so true cross-model consensus is limited.
 
 ### Agreed Strengths
+
 - Not enough independent reviewer overlap (Gemini/Codex unavailable).
 - Single-review signal indicates strong profile-first gating, clear tokenized cancellation semantics, and solid fallback/test intent.
 
 ### Agreed Concerns
+
 - Not enough independent reviewer overlap (Gemini/Codex unavailable).
 - Highest-priority concerns from available review:
   1. Worker plan does not explicitly address WASM initialization/execution inside worker context.
@@ -139,4 +146,5 @@ Only one reviewer (Claude) was available, so true cross-model consensus is limit
   3. Plan 02 skip guard relies on markdown text rather than deterministic machine gate.
 
 ### Divergent Views
+
 - No divergent cross-model views can be computed with a single successful reviewer.

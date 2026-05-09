@@ -229,14 +229,14 @@ Required tests:
 
 ## Verification Criteria
 
-| ID | Criterion |
-| --- | --- |
-| V1 | `3-PROFILE-REPORT.md` and `3-GATE-RESULT` exist with aligned decision values |
-| V2 | Gate uses post-mitigation profiling as explicit decision input |
-| V3 | Recompute runner enforces mode-aware debounce policy (`200ms` heavy, `0ms` standard) |
-| V4 | Latest-input-wins + handoff status + preserved prior plots are implemented |
-| V5 | Inline status copy/styles/accessibility contract is implemented without full-screen overlay |
-| V6 | `recomputeRunner.test.ts` passes |
+| ID  | Criterion                                                                                   |
+| --- | ------------------------------------------------------------------------------------------- |
+| V1  | `3-PROFILE-REPORT.md` and `3-GATE-RESULT` exist with aligned decision values                |
+| V2  | Gate uses post-mitigation profiling as explicit decision input                              |
+| V3  | Recompute runner enforces mode-aware debounce policy (`200ms` heavy, `0ms` standard)        |
+| V4  | Latest-input-wins + handoff status + preserved prior plots are implemented                  |
+| V5  | Inline status copy/styles/accessibility contract is implemented without full-screen overlay |
+| V6  | `recomputeRunner.test.ts` passes                                                            |
 
 ## Must-Haves for Goal-Backward Verification
 

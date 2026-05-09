@@ -15,13 +15,13 @@ created: 2026-05-09
 
 ## Test Infrastructure
 
-| Property | Value |
-| ---------------------- | --------------------------------------------------- |
-| **Framework** | vitest + rust cargo tests + wasm-pack build |
-| **Config file** | `frontend/vitest.config.ts`, `backend/Cargo.toml` |
-| **Quick run command** | `cd frontend && npm run test -- src/shell/analysis/parameterChangeHandler.test.ts` |
+| Property               | Value                                                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Framework**          | vitest + rust cargo tests + wasm-pack build                                                                                                                                    |
+| **Config file**        | `frontend/vitest.config.ts`, `backend/Cargo.toml`                                                                                                                              |
+| **Quick run command**  | `cd frontend && npm run test -- src/shell/analysis/parameterChangeHandler.test.ts`                                                                                             |
 | **Full suite command** | `cd backend && cargo test --lib && wasm-pack build --target web --out-dir ../frontend/pkg && cd ../frontend && npm run check && npm run lint && npm run test && npm run build` |
-| **Estimated runtime** | ~180 seconds |
+| **Estimated runtime**  | ~180 seconds                                                                                                                                                                   |
 
 ---
 
@@ -36,13 +36,13 @@ created: 2026-05-09
 
 ## Per-Task Verification Map
 
-| Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
-| --------- | ---- | ---- | ----------- | --------- | ----------------- | ----------- | --------- |
-| 3-01-01 | 01 | 1 | PERF-01 | profiling + integration | `cd frontend && npm run test -- src/shell/analysis/parameterChangeHandler.test.ts` | ✅ | ⬜ pending |
-| 3-01-02 | 01 | 1 | PERF-01 | profiling evidence | `cd frontend && npm run profile:slider` | ✅ | ⬜ pending |
-| 3-02-01 | 02 | 2 | PERF-01 | regression suite | `cd backend && cargo test --lib && wasm-pack build --target web --out-dir ../frontend/pkg && cd ../frontend && npm run check && npm run lint && npm run test && npm run build` | ✅ | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Test Type               | Automated Command                                                                                                                                                              | File Exists | Status     |
+| ------- | ---- | ---- | ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- | ---------- |
+| 3-01-01 | 01   | 1    | PERF-01     | profiling + integration | `cd frontend && npm run test -- src/shell/analysis/parameterChangeHandler.test.ts`                                                                                             | ✅          | ⬜ pending |
+| 3-01-02 | 01   | 1    | PERF-01     | profiling evidence      | `cd frontend && npm run profile:slider`                                                                                                                                        | ✅          | ⬜ pending |
+| 3-02-01 | 02   | 2    | PERF-01     | regression suite        | `cd backend && cargo test --lib && wasm-pack build --target web --out-dir ../frontend/pkg && cd ../frontend && npm run check && npm run lint && npm run test && npm run build` | ✅          | ⬜ pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+_Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky_
 
 ---
 
@@ -55,10 +55,10 @@ created: 2026-05-09
 
 ## Manual-Only Verifications
 
-| Behavior | Requirement | Why Manual | Test Instructions |
-| ---------- | ----------- | ---------- | ----------------- |
-| Slider feels responsive at 15–20 laps | PERF-01 | User-visible jank assessment is browser/interaction dependent | Load heavy multi-lap ride, drag CdA/Crr/trim sliders continuously, verify no visible freeze and inline recompute status appears/disappears correctly. |
-| Auto-cancel semantics preserve latest result only | PERF-01 | Requires interaction timing difficult to assert fully in unit tests | Drag slider rapidly, confirm stale recomputes do not overwrite final slider position output and last completed plot remains visible during recompute. |
+| Behavior                                          | Requirement | Why Manual                                                          | Test Instructions                                                                                                                                     |
+| ------------------------------------------------- | ----------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Slider feels responsive at 15–20 laps             | PERF-01     | User-visible jank assessment is browser/interaction dependent       | Load heavy multi-lap ride, drag CdA/Crr/trim sliders continuously, verify no visible freeze and inline recompute status appears/disappears correctly. |
+| Auto-cancel semantics preserve latest result only | PERF-01     | Requires interaction timing difficult to assert fully in unit tests | Drag slider rapidly, confirm stale recomputes do not overwrite final slider position output and last completed plot remains visible during recompute. |
 
 ---
 
