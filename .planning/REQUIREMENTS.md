@@ -10,7 +10,7 @@ Requirements for v1.1 Enhancement Wave. Each maps to roadmap phases.
 
 ### Performance
 
-- [ ] **PERF-01**: User experiences responsive slider interactions during multi-lap VE analysis (profile first, implement worker offload only if profiling confirms main-thread blocking)
+- [x] **PERF-01**: User experiences responsive slider interactions during multi-lap VE analysis (profile first, implement worker offload only if profiling confirms main-thread blocking)
 
 ### Pipeline Unification
 
@@ -64,41 +64,43 @@ Requirements acknowledged but deferred to future milestone.
 
 Explicitly excluded. Documented to prevent scope creep.
 
-| Feature                    | Reason                                              |
-| -------------------------- | --------------------------------------------------- |
-| Breaking changes to VE calculation logic | Core correctness must be preserved |
-| Framework migration (React/Vue/Svelte) | Goal is cleaner implementation, not platform change |
-| Large feature expansion | Focus is on listed v1.1 enhancements |
-| Map visualization behavioral changes | MAP-01 is structural only, visual polish optional |
+| Feature                                  | Reason                                              |
+| ---------------------------------------- | --------------------------------------------------- |
+| Breaking changes to VE calculation logic | Core correctness must be preserved                  |
+| Framework migration (React/Vue/Svelte)   | Goal is cleaner implementation, not platform change |
+| Large feature expansion                  | Focus is on listed v1.1 enhancements                |
+| Map visualization behavioral changes     | MAP-01 is structural only, visual polish optional   |
 
 ## Traceability
 
 Traceability matrix populated during roadmap creation.
 
-| Requirement | Phase | Status |
-| ----------- | ----- | ------ |
-| PERF-01     | Phase 3 | Pending |
-| PIPE-01     | Phase 1 | Pending |
-| PIPE-02     | Phase 1 | Pending |
-| PIPE-03     | Phase 1 | Pending |
-| GPS-01      | Phase 2 | Pending |
-| GPS-02      | Phase 2 | Pending |
-| SMOOTH-01   | Phase 4 | Pending |
-| SMOOTH-02   | Phase 4 | Pending |
-| WEATH-01    | Phase 6 | Pending |
-| WEATH-02    | Phase 6 | Pending |
-| WEATH-03    | Phase 6 | Pending |
-| MAP-01      | Phase 5 | Pending |
-| MAP-02      | Phase 5 | Pending |
-| TEST-01     | Phase 6 | Pending |
-| CSS-01      | Phase 5 | Pending |
-| CSS-02      | Phase 5 | Pending |
+| Requirement | Phase   | Status   |
+| ----------- | ------- | -------- |
+| PERF-01     | Phase 3 | Complete |
+| PIPE-01     | Phase 1 | Pending  |
+| PIPE-02     | Phase 1 | Pending  |
+| PIPE-03     | Phase 1 | Pending  |
+| GPS-01      | Phase 2 | Pending  |
+| GPS-02      | Phase 2 | Pending  |
+| SMOOTH-01   | Phase 4 | Pending  |
+| SMOOTH-02   | Phase 4 | Pending  |
+| WEATH-01    | Phase 6 | Pending  |
+| WEATH-02    | Phase 6 | Pending  |
+| WEATH-03    | Phase 6 | Pending  |
+| MAP-01      | Phase 5 | Pending  |
+| MAP-02      | Phase 5 | Pending  |
+| TEST-01     | Phase 6 | Pending  |
+| CSS-01      | Phase 5 | Pending  |
+| CSS-02      | Phase 5 | Pending  |
 
 **Coverage:**
+
 - v1.1 requirements: 16 total
 - Mapped to phases: 16 ✓
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-04-22 for v1.1 Enhancement Wave*
-*Last updated: 2026-04-22 after roadmap creation*
+
+_Requirements defined: 2026-04-22 for v1.1 Enhancement Wave_
+_Last updated: 2026-04-22 after roadmap creation_

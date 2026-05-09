@@ -26,11 +26,32 @@ import {
 import { calculateAutoRho } from "./autoRho";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { scheduleRecompute } from "../analysis/recomputeRunner";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
 // Plotly.js type declaration
 declare const Plotly: any;
+
+function updateMetricsDisplay(
+	r2: number,
+	rmse: number,
+	veGain: number,
+	actualGain: number,
+): void {
+	const r2ValueSpan = document.getElementById("r2Value");
+	if (r2ValueSpan) r2ValueSpan.textContent = r2.toFixed(4);
+
+	const rmseValueSpan = document.getElementById("rmseValue");
+	if (rmseValueSpan) rmseValueSpan.textContent = rmse.toFixed(2) + "m";
+
+	const veGainValueSpan = document.getElementById("veGainValue");
+	if (veGainValueSpan) veGainValueSpan.textContent = veGain.toFixed(2) + "m";
+
+	const actualGainValueSpan = document.getElementById("actualGainValue");
+	if (actualGainValueSpan)
+		actualGainValueSpan.textContent = actualGain.toFixed(2) + "m";
+}
 
 /**
  * Update Virtual Elevation plots based on current slider values.
@@ -41,14 +62,19 @@ export function updateVEPlots(
 	trimStart: number,
 	trimEnd: number,
 ) {
-	const windSource = getSelectedWindSource() as WindSource;
-	void updateVEPlotsWithWindSource(
-		appState,
-		analysisInput,
-		trimStart,
-		trimEnd,
-		windSource,
-	);
+	scheduleRecompute({
+		mode: "standard",
+		run: async () => {
+			const windSource = getSelectedWindSource() as WindSource;
+			await updateVEPlotsWithWindSource(
+				appState,
+				analysisInput,
+				trimStart,
+				trimEnd,
+				windSource,
+			);
+		},
+	});
 }
 
 /**
@@ -157,6 +183,13 @@ export async function updateVEPlotsWithWindSource(
 			figures.residuals.layout,
 			figures.residuals.config,
 		);
+
+		updateMetricsDisplay(
+			(result1.r2 + result2.r2) / 2,
+			(result1.rmse + result2.rmse) / 2,
+			(result1.ve_elevation_diff + result2.ve_elevation_diff) / 2,
+			(result1.actual_elevation_diff + result2.actual_elevation_diff) / 2,
+		);
 	} else {
 		let fitWindSpeed: number[];
 		if (windSource === "fit") {
@@ -218,6 +251,13 @@ export async function updateVEPlotsWithWindSource(
 			figures.residuals.data,
 			figures.residuals.layout,
 			figures.residuals.config,
+		);
+
+		updateMetricsDisplay(
+			result.r2,
+			result.rmse,
+			result.ve_elevation_diff,
+			result.actual_elevation_diff,
 		);
 	}
 }
@@ -516,16 +556,9 @@ export function setupVESliders(
 	crrValue.onchange = updateCrrFromInput;
 
 	bindWindSourceRadios(() => {
-		const windSource = getSelectedWindSource() as WindSource;
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlotsWithWindSource(
-			appState,
-			analysisInput,
-			trimStart,
-			trimEnd,
-			windSource,
-		);
+		updateVEPlots(appState, analysisInput, trimStart, trimEnd);
 	});
 
 	const airSpeedCalibrationSlider = document.getElementById(

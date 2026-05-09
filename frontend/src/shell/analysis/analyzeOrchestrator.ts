@@ -26,6 +26,7 @@ import {
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
 import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
+import { configureRecomputeRunner } from "./recomputeRunner";
 
 interface AnalyzeOrchestratorDependencies {
 	appState: AppState;
@@ -101,6 +102,7 @@ export function configureAnalyzeOrchestrator(
 	nextDependencies: AnalyzeOrchestratorDependencies,
 ): void {
 	dependencies = nextDependencies;
+	configureRecomputeRunner(nextDependencies.appState);
 }
 
 // Analysis parameters initialization

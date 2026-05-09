@@ -13,6 +13,7 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 **Goal:** Users can use the same VE analysis tool with identical results, better performance, enhanced features, and a cleaned design.
 
 **Target features:**
+
 - **Performance**: Worker offload for multi-lap VE analysis to improve slider responsiveness (combined with PERF-01)
 - **Pipeline unification**: Fix latent air-speed calibration bugs in Standard VE mode; unify render/update pipeline across all modes
 - **GPS mode UI consolidation**: Move GPS analysis mode selector from Analysis Parameters into Section 3 near lap-selection UI
@@ -23,6 +24,7 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 - **CSS cleanup**: Address CSS debt from v1.0 stabilization (CSS-01)
 
 **Key constraints:**
+
 - No breaking changes to VE calculation logic
 - Must maintain browser-local privacy model
 
@@ -42,10 +44,10 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 - ✓ Phase 3 extracted Section 3 and standard VE shell behavior while preserving auto-scroll and standard analysis behavior
 - ✓ Phase 4 extracted GPS-lap and out-and-back shell behavior while preserving tab/scroll retention and calibration correctness
 - ✓ Phase 5 reduced `frontend/src/main.ts` to composition-root wiring and synchronized planning/docs with the stabilized shell boundaries
+- ✓ **PERF-01** profile-first responsiveness contract validated with deterministic gate artifacts and shared recompute runner (validated in Phase 3: Worker Offload)
 
 ### Active
 
-- [ ] **PERF-01**: Evaluate and implement worker offload for multi-lap VE analysis to improve slider responsiveness
 - [ ] **PIPE-01**: Fix latent air-speed calibration bugs in Standard VE mode; unify render/update pipeline
 - [ ] **GPS-01**: Move GPS analysis mode selector from Analysis Parameters into Section 3
 - [ ] **SMOOTH-01**: Clarify elevation smoothing ownership (data vs visualization layer) and implement consistently
@@ -87,20 +89,21 @@ Regression-sensitive behavior remained the closeout guardrail throughout executi
 
 ## Key Decisions
 
-| Decision | Rationale | Outcome |
-| -------- | --------- | ------- |
-| Use the codebase map and live code as the source of truth for initialization | The repo is brownfield and older planning docs contain historical or stale material | ✓ Good |
-| Center the next phase on targeted frontend UI-shell stabilization | The largest remaining risk is concentrated in `frontend/src/main.ts`, not in missing infrastructure | ✓ Good |
-| Keep `MapVisualization.ts` secondary rather than making it a co-equal refactor target | The highest-value reduction is still in `main.ts`; map changes should only happen when they clearly support that work | ✓ Good |
-| Keep closeout extraction structural-only (no behavior drift) | Regression-sensitive shell behavior had to remain stable while ownership moved across modules | ✓ Good |
-| Preserve regression-sensitive behaviors explicitly during the stabilization phase | Recent fixes around auto-scroll and GPS calibration are easy to accidentally break during UI-shell extraction | ✓ Good |
-| Keep `AppState` state-only and avoid a new god-object rewrite | The project already established a healthier state boundary and should not regress during the next phase | ✓ Good |
+| Decision                                                                              | Rationale                                                                                                             | Outcome |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------- |
+| Use the codebase map and live code as the source of truth for initialization          | The repo is brownfield and older planning docs contain historical or stale material                                   | ✓ Good  |
+| Center the next phase on targeted frontend UI-shell stabilization                     | The largest remaining risk is concentrated in `frontend/src/main.ts`, not in missing infrastructure                   | ✓ Good  |
+| Keep `MapVisualization.ts` secondary rather than making it a co-equal refactor target | The highest-value reduction is still in `main.ts`; map changes should only happen when they clearly support that work | ✓ Good  |
+| Keep closeout extraction structural-only (no behavior drift)                          | Regression-sensitive shell behavior had to remain stable while ownership moved across modules                         | ✓ Good  |
+| Preserve regression-sensitive behaviors explicitly during the stabilization phase     | Recent fixes around auto-scroll and GPS calibration are easy to accidentally break during UI-shell extraction         | ✓ Good  |
+| Keep `AppState` state-only and avoid a new god-object rewrite                         | The project already established a healthier state boundary and should not regress during the next phase               | ✓ Good  |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 **After each phase transition** (via `/gsd-transition`):
+
 1. Requirements invalidated? → Move to Out of Scope with reason
 2. Requirements validated? → Move to Validated with phase reference
 3. New requirements emerged? → Add to Active
@@ -108,12 +111,14 @@ This document evolves at phase transitions and milestone boundaries.
 5. "What This Is" still accurate? → Update if drifted
 
 **After each milestone** (via `/gsd-complete-milestone`):
+
 1. Full review of all sections
 2. Core Value check - still the right priority?
 3. Audit Out of Scope - reasons still valid?
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-22 after v1.1 milestone started*
 
-*Previous milestone: v1.0 (UI Shell Stabilization) - completed 2026-04-22*
+_Last updated: 2026-05-09 after Phase 3 completion_
+
+_Previous milestone: v1.0 (UI Shell Stabilization) - completed 2026-04-22_
