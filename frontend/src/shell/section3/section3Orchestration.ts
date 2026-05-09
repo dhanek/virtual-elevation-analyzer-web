@@ -99,9 +99,8 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
 		}
 	}
 
-	// Update UI visibility based on mode
-	updateGpsMarkerButtonState();
-	updateOutAndBackButtonState();
+	// Re-render Section 3 to show/hide GPS detection panels based on new mode
+	rerenderSection3();
 
 	// Update map visualization if mode changed
 	if (previousMode !== mode) {
@@ -115,6 +114,139 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
 	}
 
 	log.debug(`GPS analysis mode changed: ${previousMode} -> ${mode}`);
+}
+
+/**
+ * Re-render Section 3 with updated GPS mode visibility.
+ * Called after mode changes to show/hide GPS detection panels.
+ */
+function rerenderSection3(): void {
+	const deps = getDependencies();
+	const analysisSection = document.getElementById("analysisSection");
+	const fitData = deps.appState.currentFitData;
+	const laps = deps.appState.currentLaps;
+	if (!analysisSection || !fitData || !laps.length) return;
+
+	const hasGpsData =
+		deps.appState.currentFitResult?.parsing_statistics?.has_gps_data ?? false;
+	const gpsMode = getGpsAnalysisMode();
+	const showGpsLapDetection = hasGpsData && isGpsLapSelectionMode(gpsMode);
+	const showOutAndBack = hasGpsData && gpsMode === "GPS based out and back";
+
+	// Generate updated Section 3 HTML
+	const analysisHtml = renderSection3Template({
+		laps,
+		hasGpsData,
+		showGpsLapDetection,
+		showOutAndBack,
+		gpsAnalysisMode: gpsMode,
+		formatDuration,
+		formatDistance,
+		formatPower,
+	});
+
+	const resultsDiv = analysisSection.querySelector("#results");
+	if (resultsDiv) {
+		resultsDiv.innerHTML = analysisHtml;
+		resultsDiv.classList.remove("hidden");
+	}
+
+	// Re-setup handlers after re-render
+	setTimeout(async () => {
+		try {
+			// Setup GPS mode selector handler
+			if (hasGpsData) {
+				bindGpsModeSelector();
+			}
+
+			// Setup map visualization if GPS data available
+			if (hasGpsData) {
+				const mapViz = deps.getMapVisualization();
+				if (mapViz) {
+					// Destroy old map and reinitialize to handle DOM reconstruction
+					mapViz.destroy();
+					const mapVisualization = new MapVisualization("mapView");
+					await mapVisualization.initialize();
+					mapVisualization.setData(fitData, laps);
+					mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
+					deps.setMapVisualization(mapVisualization);
+
+					// Setup GPS lap detection if enabled
+					if (showGpsLapDetection) {
+						void bindGpsDetection(
+							deps.appState,
+							deps.parameterStorage,
+							mapVisualization,
+							{
+								getSelectedDataTimeRange,
+								findDataIndexAtTimeOffset,
+								runGpsLapDetection,
+							},
+						);
+					}
+
+					// Setup Out and Back detection if enabled
+					if (showOutAndBack) {
+						void bindOutAndBackDetection(
+							deps.appState,
+							deps.parameterStorage,
+							mapVisualization,
+							{
+								getSelectedDataTimeRange,
+								findDataIndexAtTimeOffset,
+								runOutAndBackDetection,
+							},
+						);
+					}
+				} else {
+					// Map not yet initialized, initialize it
+					const mapVisualization = new MapVisualization("mapView");
+					await mapVisualization.initialize();
+					mapVisualization.setData(fitData, laps);
+					mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
+					deps.setMapVisualization(mapVisualization);
+
+					if (showGpsLapDetection) {
+						void bindGpsDetection(
+							deps.appState,
+							deps.parameterStorage,
+							mapVisualization,
+							{
+								getSelectedDataTimeRange,
+								findDataIndexAtTimeOffset,
+								runGpsLapDetection,
+							},
+						);
+					}
+
+					if (showOutAndBack) {
+						void bindOutAndBackDetection(
+							deps.appState,
+							deps.parameterStorage,
+							mapVisualization,
+							{
+								getSelectedDataTimeRange,
+								findDataIndexAtTimeOffset,
+								runOutAndBackDetection,
+							},
+						);
+					}
+				}
+			}
+
+			// Setup lap selection handlers
+			const lapListEl = document.getElementById("lapList");
+			if (lapListEl) {
+				bindLapSelection(lapListEl, () => updateSelectedLaps());
+				bindSelectAllButton("selectAllLaps", "lapList", () =>
+					updateSelectedLaps(),
+				);
+			}
+			deps.setupAnalyzeButton();
+		} catch (error) {
+			log.error("Error re-rendering section 3:", error);
+		}
+	}, 100);
 }
 
 interface Section3Dependencies {
@@ -625,49 +757,6 @@ export function handleOutAndBackSectionSelectionChange(): void {
 	deps.updateAnalyzeButton();
 }
 
-/**
- * Update Out and Back slider visibility based on FIT lap selection
- */
-export function updateOutAndBackButtonState(): void {
-	const deps = getDependencies();
-
-	const sliderControls = document.getElementById("oabGateSliderControls");
-
-	const lapDetectionMode = getGpsAnalysisMode();
-
-	if (lapDetectionMode !== "GPS based out and back") {
-		if (sliderControls) sliderControls.style.display = "none";
-		return;
-	}
-
-	if (deps.appState.selectedLaps.length > 0) {
-		// FIT laps are selected - setup and show slider controls
-		void bindOutAndBackDetection(
-			deps.appState,
-			deps.parameterStorage,
-			deps.getMapVisualization(),
-			{
-				getSelectedDataTimeRange,
-				findDataIndexAtTimeOffset,
-				runOutAndBackDetection,
-			},
-		);
-	} else {
-		// No FIT laps selected - hide slider controls
-		if (sliderControls) sliderControls.style.display = "none";
-
-		// Clear any existing detection when FIT laps are deselected
-		if (deps.appState.outAndBackSections.length > 0) {
-			deps.appState.outAndBackSections = [];
-			deps.appState.outAndBackSelectedSections = [];
-			deps.appState.outAndBackResult = null;
-			deps.getMapVisualization()?.clearDetectedLaps();
-			deps.getMapVisualization()?.clearOutAndBackMarkers();
-			updateOutAndBackSectionsUI();
-		}
-	}
-}
-
 export function initializeMapTrimControls(dataLength: number): void {
 	const mapTrimStartSlider = document.getElementById(
 		"mapTrimStartSlider",
@@ -706,52 +795,6 @@ export function initializeMapTrimControls(dataLength: number): void {
 	mapTrimEndValue.max = (dataLength - 1).toString();
 }
 
-/**
- * Update GPS gate slider visibility based on FIT lap selection
- * The slider is shown when FIT laps are selected and GPS lap mode is enabled
- */
-export function updateGpsMarkerButtonState(): void {
-	const deps = getDependencies();
-
-	const sliderControls = document.getElementById("gpsGateSliderControls");
-
-	const lapDetectionMode = getGpsAnalysisMode();
-	const isGpsLapMode = isGpsLapSelectionMode(lapDetectionMode);
-
-	if (!isGpsLapMode) {
-		// GPS lap detection is not enabled
-		if (sliderControls) sliderControls.style.display = "none";
-		return;
-	}
-
-	if (deps.appState.selectedLaps.length > 0) {
-		// FIT laps are selected - setup and show slider controls
-		void bindGpsDetection(
-			deps.appState,
-			deps.parameterStorage,
-			deps.getMapVisualization(),
-			{
-				getSelectedDataTimeRange,
-				findDataIndexAtTimeOffset,
-				runGpsLapDetection,
-			},
-		);
-	} else {
-		// No FIT laps selected - hide slider controls
-		if (sliderControls) sliderControls.style.display = "none";
-
-		// Clear any existing GPS lap detection when FIT laps are deselected
-		if (deps.appState.gpsDetectedLaps.length > 0) {
-			deps.appState.gpsDetectedLaps = [];
-			deps.appState.gpsSelectedLaps = [];
-			deps.appState.gpsLapDetectionResult = null;
-			deps.getMapVisualization()?.clearDetectedLaps();
-			deps.getMapVisualization()?.clearGpsMarker();
-			updateGpsDetectedLapsUI();
-		}
-	}
-}
-
 export function updateSelectedLaps(): void {
 	const deps = getDependencies();
 
@@ -770,12 +813,6 @@ export function updateSelectedLaps(): void {
 	if (mapVisualization) {
 		mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 	}
-
-	// Update GPS marker button state based on FIT lap selection
-	updateGpsMarkerButtonState();
-
-	// Update Out and Back button state based on FIT lap selection
-	updateOutAndBackButtonState();
 
 	const lapDetectionMode = getGpsAnalysisMode();
 	const shouldShowSelectionTrimControls =
