@@ -27,6 +27,14 @@ import { calculateAutoRho } from "./autoRho";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { scheduleRecompute } from "../analysis/recomputeRunner";
+import {
+	cycleDemDisplayProfile,
+	profileCycleStateText,
+} from "../analysis/elevationProfileCycle";
+import {
+	DEM_PROFILE_FALLBACK_ORDER,
+	type ElevationDisplayProfile,
+} from "../../analysis/elevationProfiles";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -53,12 +61,65 @@ function updateMetricsDisplay(
 		actualGainValueSpan.textContent = actualGain.toFixed(2) + "m";
 }
 
+function isValidSelectionProfile(
+	profile: number[] | null,
+	selectedIndices: number[],
+): profile is number[] {
+	if (!profile) return false;
+	if (selectedIndices.length === 0) return false;
+	return selectedIndices.every((index) => index >= 0 && index < profile.length);
+}
+
+function filterProfileBySelection(
+	profile: number[],
+	selectedIndices: number[],
+): number[] {
+	return selectedIndices.map((index) => profile[index]);
+}
+
+function resolveActiveAltitudeForSelection(
+	appState: AppState,
+	selectedIndices: number[],
+	fallbackAltitude: number[],
+): number[] {
+	if (selectedIndices.length !== fallbackAltitude.length) {
+		return fallbackAltitude;
+	}
+
+	const byProfile: Record<ElevationDisplayProfile, number[] | null> = {
+		"fit-raw": appState.fitRawElevation,
+		"dem-raw-nearest": appState.demRawNearestElevation,
+		"dem-smoothed-moving-average": appState.demSmoothedMovingAverageElevation,
+		"dem-interpolated": appState.demInterpolatedElevation,
+	};
+
+	const activeProfile = byProfile[appState.activeDisplayProfile];
+	if (isValidSelectionProfile(activeProfile, selectedIndices)) {
+		return filterProfileBySelection(activeProfile, selectedIndices);
+	}
+
+	for (const profileKey of DEM_PROFILE_FALLBACK_ORDER) {
+		const candidate = byProfile[profileKey];
+		if (isValidSelectionProfile(candidate, selectedIndices)) {
+			return filterProfileBySelection(candidate, selectedIndices);
+		}
+	}
+
+	const fitRaw = byProfile["fit-raw"];
+	if (isValidSelectionProfile(fitRaw, selectedIndices)) {
+		return filterProfileBySelection(fitRaw, selectedIndices);
+	}
+
+	return fallbackAltitude;
+}
+
 /**
  * Update Virtual Elevation plots based on current slider values.
  */
 export function updateVEPlots(
 	appState: AppState,
 	analysisInput: AnalysisInput,
+	selectedIndices: number[],
 	trimStart: number,
 	trimEnd: number,
 ) {
@@ -69,6 +130,7 @@ export function updateVEPlots(
 			await updateVEPlotsWithWindSource(
 				appState,
 				analysisInput,
+				selectedIndices,
 				trimStart,
 				trimEnd,
 				windSource,
@@ -83,6 +145,7 @@ export function updateVEPlots(
 export async function updateVEPlotsWithWindSource(
 	appState: AppState,
 	analysisInput: AnalysisInput,
+	selectedIndices: number[],
 	trimStart: number,
 	trimEnd: number,
 	windSource: WindSource,
@@ -102,6 +165,11 @@ export async function updateVEPlotsWithWindSource(
 		trimStart,
 		trimEnd,
 	);
+	const activeAltitude = resolveActiveAltitudeForSelection(
+		appState,
+		selectedIndices,
+		analysisInput.altitude,
+	);
 
 	if (windSource === "compare") {
 		const constantWindSpeed = new Array(analysisInput.windSpeed.length).fill(
@@ -113,7 +181,7 @@ export async function updateVEPlotsWithWindSource(
 			velocity: analysisInput.velocity,
 			positionLat: analysisInput.positionLat,
 			positionLong: analysisInput.positionLong,
-			altitude: analysisInput.altitude,
+			altitude: activeAltitude,
 			distance: analysisInput.distance,
 			windSpeed: constantWindSpeed,
 			params: appState.currentParameters,
@@ -140,7 +208,7 @@ export async function updateVEPlotsWithWindSource(
 			velocity: analysisInput.velocity,
 			positionLat: analysisInput.positionLat,
 			positionLong: analysisInput.positionLong,
-			altitude: analysisInput.altitude,
+			altitude: activeAltitude,
 			distance: analysisInput.distance,
 			windSpeed: calibratedWindSpeed,
 			params: appState.currentParameters,
@@ -168,9 +236,8 @@ export async function updateVEPlotsWithWindSource(
 			context,
 			virtualElevationConstant: Array.from(result1.virtual_elevation),
 			virtualElevationFit: Array.from(result2.virtual_elevation),
-			actualElevation: analysisInput.altitude,
+			actualElevation: activeAltitude,
 		});
-
 		Plotly.react(
 			"vePlot",
 			figures.elevation.data,
@@ -215,7 +282,7 @@ export async function updateVEPlotsWithWindSource(
 			velocity: analysisInput.velocity,
 			positionLat: analysisInput.positionLat,
 			positionLong: analysisInput.positionLong,
-			altitude: analysisInput.altitude,
+			altitude: activeAltitude,
 			distance: analysisInput.distance,
 			windSpeed: fitWindSpeed,
 			params: appState.currentParameters,
@@ -235,11 +302,10 @@ export async function updateVEPlotsWithWindSource(
 		const figures = buildVirtualElevationFigures({
 			context,
 			virtualElevation: Array.from(result.virtual_elevation),
-			actualElevation: analysisInput.altitude,
+			actualElevation: activeAltitude,
 			cdaLabel: cda.toFixed(3),
 			crrLabel: crr.toFixed(4),
 		});
-
 		Plotly.react(
 			"vePlot",
 			figures.elevation.data,
@@ -271,6 +337,7 @@ export function setupVESliders(
 	services: ShellServices,
 	mapVisualization: MapVisualization | null,
 	saveCurrentLapSettings: () => void,
+	selectedIndices: number[],
 	timestamps: number[],
 	power: number[],
 	velocity: number[],
@@ -390,7 +457,7 @@ export function setupVESliders(
 			trimStartValue.value = corrected.toString();
 			return;
 		}
-		updateVEPlots(appState, analysisInput, value, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, value, trimEnd);
 		updateSecondaryPlots(value, trimEnd);
 		if (mapVisualization) {
 			mapVisualization.fitBoundsToTrimRegion(
@@ -400,6 +467,7 @@ export function setupVESliders(
 				positionLong,
 			);
 		}
+		triggerAutoRhoOnTrimChange();
 		saveCurrentLapSettings();
 	};
 
@@ -413,7 +481,7 @@ export function setupVESliders(
 			trimEndValue.value = corrected.toString();
 			return;
 		}
-		updateVEPlots(appState, analysisInput, trimStart, value);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, value);
 		updateSecondaryPlots(trimStart, value);
 		if (mapVisualization) {
 			mapVisualization.fitBoundsToTrimRegion(
@@ -423,6 +491,7 @@ export function setupVESliders(
 				positionLong,
 			);
 		}
+		triggerAutoRhoOnTrimChange();
 		saveCurrentLapSettings();
 	};
 
@@ -431,7 +500,7 @@ export function setupVESliders(
 		cdaValue.value = value.toFixed(3);
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
 		saveCurrentLapSettings();
 	};
 
@@ -440,7 +509,7 @@ export function setupVESliders(
 		crrValue.value = value.toFixed(4);
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
 		saveCurrentLapSettings();
 	};
 
@@ -454,7 +523,7 @@ export function setupVESliders(
 		);
 		trimStartSlider.value = clamped.toString();
 		trimStartValue.value = clamped.toString();
-		updateVEPlots(appState, analysisInput, clamped, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, clamped, trimEnd);
 		updateSecondaryPlots(clamped, trimEnd);
 		if (mapVisualization) {
 			mapVisualization.fitBoundsToTrimRegion(
@@ -464,6 +533,7 @@ export function setupVESliders(
 				positionLong,
 			);
 		}
+		triggerAutoRhoOnTrimChange();
 		saveCurrentLapSettings();
 	};
 
@@ -477,7 +547,7 @@ export function setupVESliders(
 		);
 		trimEndSlider.value = clamped.toString();
 		trimEndValue.value = clamped.toString();
-		updateVEPlots(appState, analysisInput, trimStart, clamped);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, clamped);
 		updateSecondaryPlots(trimStart, clamped);
 		if (mapVisualization) {
 			mapVisualization.fitBoundsToTrimRegion(
@@ -487,6 +557,7 @@ export function setupVESliders(
 				positionLong,
 			);
 		}
+		triggerAutoRhoOnTrimChange();
 		saveCurrentLapSettings();
 	};
 
@@ -498,7 +569,7 @@ export function setupVESliders(
 		cdaValue.value = clamped.toFixed(3);
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
 		saveCurrentLapSettings();
 	};
 
@@ -510,7 +581,7 @@ export function setupVESliders(
 		crrValue.value = clamped.toFixed(4);
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
 		saveCurrentLapSettings();
 	};
 
@@ -536,9 +607,6 @@ export function setupVESliders(
 		}, 500);
 	};
 
-	trimStartSlider.addEventListener("input", triggerAutoRhoOnTrimChange);
-	trimEndSlider.addEventListener("input", triggerAutoRhoOnTrimChange);
-
 	if (
 		appState.currentParameters?.auto_calculate_rho &&
 		!appState.isCalculatingAutoRho
@@ -558,7 +626,7 @@ export function setupVESliders(
 	bindWindSourceRadios(() => {
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
 	});
 
 	const airSpeedCalibrationSlider = document.getElementById(
@@ -579,7 +647,13 @@ export function setupVESliders(
 			appState.airSpeedCalibrationPercent = value;
 			const trimStart = parseInt(trimStartSlider.value);
 			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+			updateVEPlots(
+				appState,
+				analysisInput,
+				selectedIndices,
+				trimStart,
+				trimEnd,
+			);
 			updateSecondaryPlots(trimStart, trimEnd);
 			saveCurrentLapSettings();
 		};
@@ -593,7 +667,13 @@ export function setupVESliders(
 			appState.airSpeedCalibrationPercent = clamped;
 			const trimStart = parseInt(trimStartSlider.value);
 			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+			updateVEPlots(
+				appState,
+				analysisInput,
+				selectedIndices,
+				trimStart,
+				trimEnd,
+			);
 			updateSecondaryPlots(trimStart, trimEnd);
 			saveCurrentLapSettings();
 		};
@@ -621,7 +701,13 @@ export function setupVESliders(
 				airSpeedCalibrationSlider.value = calibrationPercent.toFixed(1);
 				airSpeedCalibrationValue.value = calibrationPercent.toFixed(1);
 				appState.airSpeedCalibrationPercent = calibrationPercent;
-				updateVEPlots(appState, analysisInput, trimStart, trimEnd);
+				updateVEPlots(
+					appState,
+					analysisInput,
+					selectedIndices,
+					trimStart,
+					trimEnd,
+				);
 				updateSecondaryPlots(trimStart, trimEnd);
 				saveCurrentLapSettings();
 			};
@@ -705,6 +791,31 @@ export function setupVESliders(
 		if (airSpeedOffsetErrorMetric && !isNaN(initialError)) {
 			airSpeedOffsetErrorMetric.textContent = initialError.toFixed(2);
 		}
+	}
+
+	const elevationProfileCycleButton = document.getElementById(
+		"elevationProfileCycleButton",
+	) as HTMLButtonElement | null;
+	const elevationProfileCycleState = document.getElementById(
+		"elevationProfileCycleState",
+	) as HTMLSpanElement | null;
+	if (elevationProfileCycleButton && elevationProfileCycleState) {
+		elevationProfileCycleButton.addEventListener("click", () => {
+			const nextProfile = cycleDemDisplayProfile(appState);
+			elevationProfileCycleState.textContent =
+				profileCycleStateText(nextProfile);
+			const trimStart = parseInt(trimStartSlider.value);
+			const trimEnd = parseInt(trimEndSlider.value);
+			updateVEPlots(
+				appState,
+				analysisInput,
+				selectedIndices,
+				trimStart,
+				trimEnd,
+			);
+			updateSecondaryPlots(trimStart, trimEnd);
+			saveCurrentLapSettings();
+		});
 	}
 
 	const mapTrimControls = document.getElementById("mapTrimControls");

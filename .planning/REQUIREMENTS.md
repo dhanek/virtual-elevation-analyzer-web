@@ -14,19 +14,23 @@ Requirements for v1.1 Enhancement Wave. Each maps to roadmap phases.
 
 ### Pipeline Unification
 
-- [ ] **PIPE-01**: User gets correct air-speed calibration results in Standard VE mode (fix latent bugs)
-- [ ] **PIPE-02**: User observes consistent render/update behavior across Standard, GPS-lap, and Out-and-back modes
-- [ ] **PIPE-03**: Maintainer can run unified analysis pipeline with mode-specific implementations
+- [x] **PIPE-01**: User gets correct air-speed calibration results in Standard VE mode (fix latent bugs)
+- [x] **PIPE-02**: User observes consistent render/update behavior across Standard, GPS-lap, and Out-and-back modes
+- [x] **PIPE-03**: Maintainer can run unified analysis pipeline with mode-specific implementations
 
 ### GPS Mode UI
 
-- [ ] **GPS-01**: User can access GPS analysis mode selector from Section 3 near lap-selection UI (relocated from Analysis Parameters)
-- [ ] **GPS-02**: User's GPS mode selection state stays synchronized across all relevant UI locations
+- [x] **GPS-01**: User can access GPS analysis mode selector from Section 3 near lap-selection UI (relocated from Analysis Parameters)
+- [x] **GPS-02**: User's GPS mode selection state stays synchronized across all relevant UI locations
 
 ### Elevation Smoothing
 
-- [ ] **SMOOTH-01**: Maintainer knows where elevation smoothing is applied (data layer vs visualization layer ownership documented)
-- [ ] **SMOOTH-02**: User observes consistent smoothing behavior across all analysis modes
+- [x] **SMOOTH-01**: Maintainer knows where elevation smoothing is applied (data layer vs visualization layer ownership documented)
+- [x] **SMOOTH-02**: User observes consistent smoothing behavior across all analysis modes
+
+### Mode Pipeline Unification
+
+- [ ] **UNIFY-01**: Maintainer can add a new parameter (calibration, offset, wind source) in one place and it propagates correctly to all analysis modes
 
 ### Weather Sampling
 
@@ -78,13 +82,14 @@ Traceability matrix populated during roadmap creation.
 | Requirement | Phase   | Status   |
 | ----------- | ------- | -------- |
 | PERF-01     | Phase 3 | Complete |
-| PIPE-01     | Phase 1 | Pending  |
-| PIPE-02     | Phase 1 | Pending  |
-| PIPE-03     | Phase 1 | Pending  |
-| GPS-01      | Phase 2 | Pending  |
-| GPS-02      | Phase 2 | Pending  |
-| SMOOTH-01   | Phase 4 | Pending  |
-| SMOOTH-02   | Phase 4 | Pending  |
+| PIPE-01     | Phase 1 | Complete |
+| PIPE-02     | Phase 1 | Complete |
+| PIPE-03     | Phase 1 | Complete |
+| GPS-01      | Phase 2 | Complete |
+| GPS-02      | Phase 2 | Complete |
+| SMOOTH-01   | Phase 4 | Complete |
+| SMOOTH-02   | Phase 4 | Complete |
+| UNIFY-01    | Phase 7 | Pending  |
 | WEATH-01    | Phase 6 | Pending  |
 | WEATH-02    | Phase 6 | Pending  |
 | WEATH-03    | Phase 6 | Pending  |
@@ -96,8 +101,8 @@ Traceability matrix populated during roadmap creation.
 
 **Coverage:**
 
-- v1.1 requirements: 16 total
-- Mapped to phases: 16 ✓
+- v1.1 requirements: 17 total
+- Mapped to phases: 17 ✓
 - Unmapped: 0 ✓
 
 ---

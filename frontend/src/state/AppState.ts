@@ -9,6 +9,10 @@ import type { DEMSourceResult } from "../utils/MultiDEMManager";
 import type { DEMSourceType } from "../utils/RemoteDEMConfig";
 import type { VEAnalysisResult } from "../utils/ResultsStorage";
 import type {
+	ElevationDisplayProfile,
+	ElevationProfilesState,
+} from "../analysis/elevationProfiles";
+import type {
 	FitData,
 	LapData,
 	ParsingStatistics,
@@ -173,7 +177,7 @@ export interface AnalysisState {
 	lastWeatherQueryKey: string | null;
 }
 
-export interface DemState {
+export interface DemState extends ElevationProfilesState {
 	selectedDEMFile: File | null;
 	elevationCorrectionEnabled: boolean;
 	elevationErrorRate: number;
@@ -250,6 +254,12 @@ export class AppState {
 		elevationErrorRate: 0,
 		remoteDEMSources: [],
 		remoteDEMResults: null,
+		fitRawElevation: null,
+		demRawNearestElevation: null,
+		demSmoothedMovingAverageElevation: null,
+		demInterpolatedElevation: null,
+		activeDisplayProfile: "fit-raw",
+		demProfilesAvailable: false,
 	};
 
 	readonly ui: UiState = {
@@ -585,5 +595,53 @@ export class AppState {
 
 	set remoteDEMResults(results: Map<DEMSourceType, DEMSourceResult> | null) {
 		this.dem.remoteDEMResults = results;
+	}
+
+	get fitRawElevation(): number[] | null {
+		return this.dem.fitRawElevation;
+	}
+
+	set fitRawElevation(elevation: number[] | null) {
+		this.dem.fitRawElevation = elevation;
+	}
+
+	get demRawNearestElevation(): number[] | null {
+		return this.dem.demRawNearestElevation;
+	}
+
+	set demRawNearestElevation(elevation: number[] | null) {
+		this.dem.demRawNearestElevation = elevation;
+	}
+
+	get demSmoothedMovingAverageElevation(): number[] | null {
+		return this.dem.demSmoothedMovingAverageElevation;
+	}
+
+	set demSmoothedMovingAverageElevation(elevation: number[] | null) {
+		this.dem.demSmoothedMovingAverageElevation = elevation;
+	}
+
+	get demInterpolatedElevation(): number[] | null {
+		return this.dem.demInterpolatedElevation;
+	}
+
+	set demInterpolatedElevation(elevation: number[] | null) {
+		this.dem.demInterpolatedElevation = elevation;
+	}
+
+	get activeDisplayProfile(): ElevationDisplayProfile {
+		return this.dem.activeDisplayProfile;
+	}
+
+	set activeDisplayProfile(profile: ElevationDisplayProfile) {
+		this.dem.activeDisplayProfile = profile;
+	}
+
+	get demProfilesAvailable(): boolean {
+		return this.dem.demProfilesAvailable;
+	}
+
+	set demProfilesAvailable(isAvailable: boolean) {
+		this.dem.demProfilesAvailable = isAvailable;
 	}
 }

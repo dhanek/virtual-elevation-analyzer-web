@@ -14,10 +14,11 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 
 **Target features:**
 
-- **Performance**: Worker offload for multi-lap VE analysis to improve slider responsiveness (combined with PERF-01)
-- **Pipeline unification**: Fix latent air-speed calibration bugs in Standard VE mode; unify render/update pipeline across all modes
-- **GPS mode UI consolidation**: Move GPS analysis mode selector from Analysis Parameters into Section 3 near lap-selection UI
-- **Elevation smoothing**: Clarify data processing vs visualization layer ownership and implement consistently
+- **Performance**: Multi-lap slider responsiveness via profile-first recompute runner (PERF-01 complete)
+- **Pipeline foundation**: Air-speed calibration fixes + consistent update behavior baseline across modes (PIPE-01/02/03 complete)
+- **GPS mode UI consolidation**: GPS mode selector moved into Section 3 lap workflow (GPS-01/02 complete)
+- **Elevation smoothing**: Data-layer smoothing ownership and cross-mode profile consistency (SMOOTH-01/02 complete)
+- **Mode pipeline unification**: Full single-entry-point mode update pipeline still pending (UNIFY-01)
 - **Continuous weather sampling**: Exploratory spike for per-quarter-hour weather sampling with interpolation (go/no-go decision)
 - **Map cleanup**: Improve MapVisualization.ts structure and optionally polish visuals (MAP-01)
 - **Testing improvements**: Add/improve tests per feature area (TEST-01)
@@ -44,17 +45,18 @@ Make trustworthy virtual elevation analysis of local ride data work well in the 
 - ✓ Phase 3 extracted Section 3 and standard VE shell behavior while preserving auto-scroll and standard analysis behavior
 - ✓ Phase 4 extracted GPS-lap and out-and-back shell behavior while preserving tab/scroll retention and calibration correctness
 - ✓ Phase 5 reduced `frontend/src/main.ts` to composition-root wiring and synchronized planning/docs with the stabilized shell boundaries
-- ✓ **PERF-01** profile-first responsiveness contract validated with deterministic gate artifacts and shared recompute runner (validated in Phase 3: Worker Offload)
+- ✓ **PERF-01** profile-first responsiveness contract validated with deterministic gate artifacts and shared recompute runner (Phase 3)
+- ✓ **PIPE-01 / PIPE-02 / PIPE-03** calibration bug fixes + pipeline baseline verified (Phase 1)
+- ✓ **GPS-01 / GPS-02** GPS mode selector relocation + sync verified (Phase 2)
+- ✓ **SMOOTH-01 / SMOOTH-02** smoothing ownership + consistent profile wiring verified (Phase 4)
 
 ### Active
 
-- [ ] **PIPE-01**: Fix latent air-speed calibration bugs in Standard VE mode; unify render/update pipeline
-- [ ] **GPS-01**: Move GPS analysis mode selector from Analysis Parameters into Section 3
-- [ ] **SMOOTH-01**: Clarify elevation smoothing ownership (data vs visualization layer) and implement consistently
-- [ ] **WEATH-01**: Spike continuous weather sampling with per-quarter-hour interpolation
-- [ ] **MAP-01**: Address MapVisualization.ts complexity (structure minimum, visual polish ideal)
+- [ ] **UNIFY-01**: Unify calculation + plot update entry pipeline across analysis modes
+- [ ] **WEATH-01 / WEATH-02 / WEATH-03**: Complete weather spike + go/no-go + graceful degradation outcomes
+- [ ] **MAP-01 / MAP-02**: Address MapVisualization.ts structure while preserving behavior
 - [ ] **TEST-01**: Add/improve tests per feature area
-- [ ] **CSS-01**: Address CSS debt identified during v1.0 stabilization
+- [ ] **CSS-01 / CSS-02**: Address CSS debt identified during v1.0 stabilization
 
 ### Out of Scope
 
@@ -119,6 +121,6 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-_Last updated: 2026-05-09 after Phase 3 completion_
+_Last updated: 2026-05-10 after todo/phase reality sync_
 
 _Previous milestone: v1.0 (UI Shell Stabilization) - completed 2026-04-22_

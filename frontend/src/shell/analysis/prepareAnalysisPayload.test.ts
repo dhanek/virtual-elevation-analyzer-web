@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PayloadPreparationInput } from "./prepareAnalysisPayload";
 import type { PreparedAnalysisSelection } from "../../modes/analysis/types";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
+import { AppState } from "../../state/AppState";
 
 // Mock the WASM-dependent module so tests run without WASM runtime
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
@@ -134,6 +135,7 @@ function createInput(
 ): PayloadPreparationInput {
 	const fitData = (overrides.fitData as any) ?? createMockFitData();
 	return {
+		appState: new AppState(),
 		fitData,
 		selection: createSelection(),
 		params: defaultParams,

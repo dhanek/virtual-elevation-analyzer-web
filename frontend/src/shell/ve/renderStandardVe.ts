@@ -29,6 +29,10 @@ import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { applyAirSpeedOffset } from "../../analysis/WindSourceResolver";
+import {
+	profileCycleStateText,
+	showProfileCycleControl,
+} from "../analysis/elevationProfileCycle";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -177,6 +181,7 @@ export async function showVirtualElevationAnalysisInline(
 	callbacks: StandardVeCallbacks,
 	initialResult: any,
 	analyzedLaps: number[],
+	selectedIndices: number[],
 	timestamps: number[],
 	power: number[],
 	velocity: number[],
@@ -239,6 +244,18 @@ export async function showVirtualElevationAnalysisInline(
                     <div class="ve-controls-scrollable">
                         <div class="ve-controls">
                             <h4>Analysis Parameters</h4>
+                            ${
+															showProfileCycleControl(appState)
+																? `
+                            <div class="ve-elevation-profile-cycle">
+                                <label>Elevation profile</label>
+                                <button type="button" id="elevationProfileCycleButton" class="secondary-btn">Cycle</button>
+                                <span id="elevationProfileCycleState">${profileCycleStateText(appState.activeDisplayProfile)}</span>
+                                <div class="ve-elevation-profile-helper">Cycle profile: raw -> smoothing -> interpolated</div>
+                            </div>
+                            `
+																: ""
+														}
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>Trim Start (seconds):</label>
@@ -388,6 +405,7 @@ export async function showVirtualElevationAnalysisInline(
 		services,
 		mapVisualization,
 		callbacks.saveCurrentLapSettings,
+		selectedIndices,
 		timestamps,
 		power,
 		velocity,

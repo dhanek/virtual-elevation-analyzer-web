@@ -42,6 +42,11 @@ import {
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
 import {
+	cycleDemDisplayProfile,
+	profileCycleStateText,
+	showProfileCycleControl,
+} from "../analysis/elevationProfileCycle";
+import {
 	calculateGpsLapStats,
 	calculateMeanElevationProfile,
 	renderGpsLapVEPlots,
@@ -326,11 +331,46 @@ export async function showGpsLapVEPlot(
 		initialStats,
 		lapCount: lapProfiles.length,
 		defaultAirSpeedOffset,
+		showProfileCycle: showProfileCycleControl(appState),
+		profileCycleState: profileCycleStateText(appState.activeDisplayProfile),
 	});
 	veAnalysisContent.innerHTML = veAnalysisTemplate;
 
 	// Setup slider event handlers for CdA/Crr with recalculation
 	setupGpsLapSliderHandlers(appState, parameterStorage, waitForPlotly, params);
+
+	const elevationProfileCycleButton = document.getElementById(
+		"elevationProfileCycleButton",
+	) as HTMLButtonElement | null;
+	const elevationProfileCycleState = document.getElementById(
+		"elevationProfileCycleState",
+	) as HTMLSpanElement | null;
+	if (elevationProfileCycleButton && elevationProfileCycleState) {
+		elevationProfileCycleButton.addEventListener("click", () => {
+			const nextProfile = cycleDemDisplayProfile(appState);
+			elevationProfileCycleState.textContent =
+				profileCycleStateText(nextProfile);
+			const windSource = getSelectedWindSource();
+			const cda = parseFloat(
+				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
+					"0.3",
+			);
+			const crr = parseFloat(
+				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
+					"0.008",
+			);
+			scheduleGpsLapRecompute(() =>
+				updateGpsLapVEPlots(
+					appState,
+					parameterStorage,
+					waitForPlotly,
+					cda,
+					crr,
+					windSource,
+				),
+			);
+		});
+	}
 
 	// Setup tab switching
 	setupTabSwitching({
@@ -584,6 +624,8 @@ interface GpsLapVeTemplateOptions {
 	initialStats: { meanR2: number; meanRMSE: number; closingError: number };
 	lapCount: number;
 	defaultAirSpeedOffset: number;
+	showProfileCycle: boolean;
+	profileCycleState: string;
 }
 
 function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
@@ -599,6 +641,8 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
 		initialStats,
 		lapCount,
 		defaultAirSpeedOffset,
+		showProfileCycle,
+		profileCycleState,
 	} = opts;
 
 	return `
@@ -609,6 +653,18 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                     <div class="ve-controls-scrollable">
                         <div class="ve-controls">
                             <h4>Analysis Parameters</h4>
+                            ${
+															showProfileCycle
+																? `
+                            <div class="ve-elevation-profile-cycle">
+                                <label>Elevation profile</label>
+                                <button type="button" id="elevationProfileCycleButton" class="secondary-btn">Cycle</button>
+                                <span id="elevationProfileCycleState">${profileCycleState}</span>
+                                <div class="ve-elevation-profile-helper">Cycle profile: raw -> smoothing -> interpolated</div>
+                            </div>
+                            `
+																: ""
+														}
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>CdA (Drag Coefficient × Area):</label>

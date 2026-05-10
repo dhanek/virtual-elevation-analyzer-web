@@ -218,15 +218,19 @@ export function handleParametersChange(parameters: AnalysisParameters): void {
 	}
 
 	// If VE analysis is already visible, recalculate when parameters change
-	const veSection = document.getElementById("veSection");
-	if (veSection && !veSection.classList.contains("hidden")) {
-		// Get the current sliders and data for recalculation
+	const veSection =
+		document.getElementById("veAnalysisSection") ??
+		document.getElementById("veSection");
+	const isVeVisible =
+		!!veSection &&
+		!veSection.classList.contains("hidden") &&
+		!veSection.classList.contains("inactive");
+	if (isVeVisible) {
 		const trimStartSlider = document.getElementById(
 			"trimStartSlider",
 		) as HTMLInputElement;
 
 		if (trimStartSlider) {
-			// trimStart and trimEnd are read from sliders but dispatch triggers recalc
 			trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
 		}
 	}
@@ -409,6 +413,7 @@ export async function handleAnalyze(): Promise<void> {
 			fitData.pressure
 		);
 		const payload = prepareAnalysisPayload({
+			appState: deps.appState,
 			fitData,
 			selection,
 			params: deps.appState.currentParameters,
@@ -488,6 +493,7 @@ export async function handleAnalyze(): Promise<void> {
 					},
 					args.initialResult,
 					args.analyzedLaps,
+					args.selectedIndices,
 					args.timestamps,
 					args.power,
 					args.velocity,
@@ -533,6 +539,7 @@ export async function handleAnalyze(): Promise<void> {
 			defaultAirSpeedOffset: payload.defaultAirSpeedOffset,
 			initialResult: payload.initialResult,
 			filteredData: payload.filteredData,
+			selectedIndices: payload.selectedIndices,
 			callbacks,
 		});
 	} catch (err) {
