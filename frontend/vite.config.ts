@@ -35,9 +35,6 @@ export default defineConfig(() => ({
       allow: ['..']
     }
   },
-  worker: {
-    format: 'es'
-  },
   optimizeDeps: {
     exclude: ['virtual-elevation-analyzer']
   }

@@ -1,3 +1,4 @@
+import { log } from './log';
 export interface ViewportInfo {
     width: number;
     height: number;
@@ -77,7 +78,7 @@ export class ViewportAdapter {
         document.body.className = document.body.className.replace(/viewport-\w+/g, '');
         document.body.classList.add(`viewport-${category}`);
 
-        console.log('Viewport adapted:', {
+        log.debug('Viewport adapted:', {
             width,
             height,
             category,
@@ -89,7 +90,7 @@ export class ViewportAdapter {
     }
 
     private calculateOptimalMapHeight(): number {
-        const { width, height, category } = this.viewportInfo;
+        const { height, category } = this.viewportInfo;
 
         switch (category) {
             case 'mobile':

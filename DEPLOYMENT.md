@@ -1,94 +1,92 @@
-# GitHub Pages Deployment Guide
+# Deployment
 
-## Files Created
+## Production deployment target
 
-1. **`.github/workflows/deploy.yml`** - GitHub Actions workflow for automatic deployment
-2. **`.gitignore`** - Proper ignore patterns for Rust/WASM/Node.js project
-3. **`vite.config.ts`** - Updated with correct base path for GitHub Pages
+The app is deployed as a static site on GitHub Pages:
 
-## Setup Steps
+- Live URL: https://dhanek.github.io/virtual-elevation-analyzer-web/
+- Workflow: `.github/workflows/deploy.yml`
+- Trigger: pushes to `main` and manual `workflow_dispatch`
 
-### 1. Enable GitHub Pages
+## CI pipeline
 
-1. Go to your repository: https://github.com/dhanek/virtual-elevation-analyzer-web
-2. Click **Settings** → **Pages**
-3. Under "Build and deployment":
-   - **Source**: Select "GitHub Actions"
-
-### 2. Commit and Push
+The deploy workflow builds and validates the project in this order:
 
 ```bash
-# Stage the new files
-git add .github/ .gitignore frontend/vite.config.ts DEPLOYMENT.md
-
-# Commit
-git commit -m "Add GitHub Pages deployment workflow"
-
-# Push to trigger deployment
-git push origin main
+cd backend && cargo test --lib
+cd backend && wasm-pack build --target web --out-dir ../frontend/pkg
+cd frontend && npm ci
+cd frontend && npm run check
+cd frontend && npm run lint
+cd frontend && npm run test
+cd frontend && npm run build
 ```
 
-### 3. Monitor Deployment
-
-- Go to the **Actions** tab in your repository
-- Watch the "Deploy to GitHub Pages" workflow run
-- Once complete (usually 2-3 minutes), your app will be live
-
-### 4. Access Your Deployed App
-
-Your app will be available at:
-**https://dhanek.github.io/virtual-elevation-analyzer-web/**
-
-## Local Development
-
-The deployment doesn't affect local development. Continue using:
+The frontend build runs with:
 
 ```bash
-# Build WASM
-cd backend
-wasm-pack build --target web --out-dir ../frontend/pkg
-
-# Run dev server
-cd ../frontend
-npm run dev
+VITE_GITHUB_PAGES=true
 ```
+
+so Vite emits the correct GitHub Pages base path.
+
+## Local deployment parity
+
+Run the same sequence locally before shipping changes:
+
+```bash
+cd backend && cargo test --lib
+cd backend && wasm-pack build --target web --out-dir ../frontend/pkg
+cd frontend && npm ci
+cd frontend && npm run check
+cd frontend && npm run lint
+cd frontend && npm run test
+cd frontend && npm run build
+```
+
+The output is written to `dist/`.
+
+## Local development
+
+For normal development you usually only need:
+
+```bash
+cd frontend && npm install
+cd backend && wasm-pack build --target web --out-dir ../frontend/pkg
+cd frontend && npm run dev
+```
+
+Or use the project build helper:
+
+```bash
+./build.sh
+```
+
+## GitHub Pages setup
+
+In the repository settings:
+
+1. Open **Settings → Pages**
+2. Set **Build and deployment → Source** to **GitHub Actions**
+
+After that, pushes to `main` will publish the newest successful build.
 
 ## Troubleshooting
 
-### If deployment fails:
+### CI fails during frontend type/lint/test/build
 
-1. Check the Actions tab for error logs
-2. Ensure all dependencies are in `package.json`
-3. Verify WASM builds locally before pushing
+Re-run the local parity commands and fix the first failing step before pushing.
 
-### If app loads but doesn't work:
+### CI fails because the WASM package is missing
 
-1. Check browser console for errors
-2. Verify WASM files are in the deployed `pkg/` folder
-3. Check that base path is correct in `vite.config.ts`
+Make sure the workflow or local build runs:
 
-## Project Structure
-
-```
-virtual-elevation-analyzer-web/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml          # GitHub Actions workflow
-├── backend/                    # Rust/WASM code
-│   ├── src/
-│   └── Cargo.toml
-├── frontend/                   # TypeScript/Vite frontend
-│   ├── src/
-│   ├── index.html
-│   ├── package.json
-│   └── vite.config.ts         # Vite config with base path
-├── dist/                       # Build output (gitignored)
-└── .gitignore                 # Ignore patterns
+```bash
+cd backend && wasm-pack build --target web --out-dir ../frontend/pkg
 ```
 
-## Notes
+before any frontend check/build step.
 
-- The workflow automatically builds both Rust/WASM and frontend on every push to `main`
-- WASM files are bundled into the deployment
-- The app uses relative paths for all assets
-- No server-side code is needed - it's a static site
+### The deployed site loads but assets are broken
+
+Check that `VITE_GITHUB_PAGES=true` was set during the production frontend build.

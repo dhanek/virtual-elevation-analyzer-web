@@ -4,6 +4,7 @@
  */
 
 import { TrimRegionMetadata, roundToNearest15Min } from './GeoCalculations';
+import { log } from './log';
 
 export interface WeatherQuery {
     latitude: number;      // Rounded to 6 decimals
@@ -63,7 +64,7 @@ export class WeatherAPI {
             if (result) return result;
 
             // Forecast API returned all-null data — fall back to Archive
-            console.log('⚠️ Forecast API returned null data, falling back to Archive API');
+            log.debug('⚠️ Forecast API returned null data, falling back to Archive API');
         }
 
         // Archive API always has data — non-null assertion is safe here
@@ -87,29 +88,29 @@ export class WeatherAPI {
             ? `${query.date}T${String(query.slotHour).padStart(2, '0')}:${String(query.slotMinute).padStart(2, '0')} UTC`
             : `${query.date}T${String(query.nearestHour).padStart(2, '0')}:00 UTC`;
 
-        console.log('═══════════════════════════════════════════════════════');
-        console.log(`🌐 OPEN-METEO ${apiType.toUpperCase()} API REQUEST (${resolution})`);
-        console.log('═══════════════════════════════════════════════════════');
-        console.log('🔀 API Type:', apiType, `(${daysDiff} days ago)`);
-        console.log('📍 Location:', {
+        log.debug('═══════════════════════════════════════════════════════');
+        log.debug(`🌐 OPEN-METEO ${apiType.toUpperCase()} API REQUEST (${resolution})`);
+        log.debug('═══════════════════════════════════════════════════════');
+        log.debug('🔀 API Type:', apiType, `(${daysDiff} days ago)`);
+        log.debug('📍 Location:', {
             latitude: query.latitude,
             longitude: query.longitude
         });
-        console.log('📅 Date/Time:', {
+        log.debug('📅 Date/Time:', {
             date: query.date,
             slot: `${String(query.slotHour).padStart(2, '0')}:${String(query.slotMinute).padStart(2, '0')}`,
             nearestHour: query.nearestHour,
             utc: timeStr
         });
-        console.log('⏱️  Days Past:', daysDiff);
-        console.log('🔗 Full URL:', url);
-        console.log('═══════════════════════════════════════════════════════');
+        log.debug('⏱️  Days Past:', daysDiff);
+        log.debug('🔗 Full URL:', url);
+        log.debug('═══════════════════════════════════════════════════════');
 
         try {
-            console.log('🔄 Executing fetch request...');
+            log.debug('🔄 Executing fetch request...');
             const response = await fetch(url);
 
-            console.log('📡 API Response Status:', response.status, response.statusText);
+            log.debug('📡 API Response Status:', response.status, response.statusText);
 
             if (!response.ok) {
                 throw new WeatherAPIError(
@@ -131,11 +132,11 @@ export class WeatherAPI {
                     // Check if hourly fallback within this response has data
                     const hasHourlyData = data.hourly?.temperature_2m?.some((v: number | null) => v !== null);
                     if (hasHourlyData) {
-                        console.log('⚠️ minutely_15 data is all null, using hourly from same response');
+                        log.debug('⚠️ minutely_15 data is all null, using hourly from same response');
                         weatherData = this.extractHourlyData(data, query);
                     } else if (allowNullFallback) {
                         // Both minutely_15 and hourly are null — signal caller to try Archive API
-                        console.log('⚠️ Both minutely_15 and hourly data are null in Forecast response');
+                        log.debug('⚠️ Both minutely_15 and hourly data are null in Forecast response');
                         return null;
                     } else {
                         throw new WeatherAPIError(
@@ -148,16 +149,16 @@ export class WeatherAPI {
                 weatherData = this.extractHourlyData(data, query);
             }
 
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('✅ WEATHER DATA RECEIVED');
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('🌡️  Temperature:', weatherData.temperature, '°C');
-            console.log('💧 Dew Point:', weatherData.dewPoint, '°C');
-            console.log('🔽 Pressure:', weatherData.pressure, 'hPa');
-            console.log('💨 Wind Speed:', weatherData.windSpeed, 'm/s');
-            console.log('🧭 Wind Direction:', weatherData.windDirection, '°');
-            console.log('⏰ Queried At:', new Date(weatherData.queriedAt).toISOString());
-            console.log('═══════════════════════════════════════════════════════');
+            log.debug('═══════════════════════════════════════════════════════');
+            log.debug('✅ WEATHER DATA RECEIVED');
+            log.debug('═══════════════════════════════════════════════════════');
+            log.debug('🌡️  Temperature:', weatherData.temperature, '°C');
+            log.debug('💧 Dew Point:', weatherData.dewPoint, '°C');
+            log.debug('🔽 Pressure:', weatherData.pressure, 'hPa');
+            log.debug('💨 Wind Speed:', weatherData.windSpeed, 'm/s');
+            log.debug('🧭 Wind Direction:', weatherData.windDirection, '°');
+            log.debug('⏰ Queried At:', new Date(weatherData.queriedAt).toISOString());
+            log.debug('═══════════════════════════════════════════════════════');
 
             return weatherData;
 
@@ -275,7 +276,7 @@ export class WeatherAPI {
         );
         const pressure = hourIndex !== -1 ? data.hourly.surface_pressure?.[hourIndex] : undefined;
 
-        console.log('🔍 Extracted 15-min weather values at index', slotIndex, ':', {
+        log.debug('🔍 Extracted 15-min weather values at index', slotIndex, ':', {
             temperature,
             dewPoint,
             pressure: `${pressure} (hourly index ${hourIndex})`,
@@ -341,7 +342,7 @@ export class WeatherAPI {
         const windSpeed = data.hourly.wind_speed_10m?.[hourIndex];
         const windDirection = data.hourly.wind_direction_10m?.[hourIndex];
 
-        console.log('🔍 Extracted hourly weather values at index', hourIndex, ':', {
+        log.debug('🔍 Extracted hourly weather values at index', hourIndex, ':', {
             temperature,
             dewPoint,
             pressure,

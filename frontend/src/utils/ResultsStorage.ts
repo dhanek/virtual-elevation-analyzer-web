@@ -1,16 +1,31 @@
 import { fileSave } from 'browser-fs-access';
 import { AnalysisParameters } from '../components/AnalysisParameters';
+import { log } from './log';
 
+// Shape of a VE analysis result kept in IndexedDB.
+//
+// The array fields are `Float64Array` to match the WASM `VEResult` class
+// exactly — this lets `currentVEResult = wasmResult` work without a copy.
+// They are `readonly` because VEResult's fields are readonly and widening
+// them here would break assignment from a VEResult instance.
+//
+// The per-sample arrays other than `virtual_elevation` are optional because
+// GPS-lap mode only produces a single combined virtual_elevation profile
+// (per-sample slope/acceleration/wind/apparent_velocity are not meaningful
+// across stitched laps).
 export interface VEAnalysisResult {
-    virtual_elevation: number[];
-    virtual_slope: number[];
-    acceleration: number[];
-    effective_wind: number[];
-    apparent_velocity: number[];
+    readonly virtual_elevation: Float64Array;
+    readonly virtual_slope?: Float64Array;
+    readonly acceleration?: Float64Array;
+    readonly effective_wind?: Float64Array;
+    readonly apparent_velocity?: Float64Array;
     r2: number;
     rmse: number;
     ve_elevation_diff: number;
     actual_elevation_diff: number;
+    virtual_distance_air: number;
+    virtual_distance_ground: number;
+    vd_difference_percent: number;
 }
 
 export interface SaveResultData {
@@ -75,12 +90,12 @@ export class ResultsStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to delete database:', request.error);
+                log.error('❌ Failed to delete database:', request.error);
                 reject(request.error);
             };
 
             request.onblocked = () => {
-                console.warn('⚠️ Database deletion blocked - close all tabs using this database');
+                log.warn('⚠️ Database deletion blocked - close all tabs using this database');
             };
         });
     }
@@ -133,7 +148,7 @@ export class ResultsStorage {
 
                         resolve();
                     } catch (error) {
-                        console.error('❌ Migration failed:', error);
+                        log.error('❌ Migration failed:', error);
                         reject(error);
                     }
                 } else {
@@ -170,7 +185,7 @@ export class ResultsStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to read existing data:', request.error);
+                log.error('❌ Failed to read existing data:', request.error);
                 reject(request.error);
             };
         });
@@ -239,7 +254,7 @@ export class ResultsStorage {
             };
 
             transaction.onerror = () => {
-                console.error('❌ Migration transaction failed:', transaction.error);
+                log.error('❌ Migration transaction failed:', transaction.error);
                 reject(transaction.error);
             };
         });
@@ -250,7 +265,7 @@ export class ResultsStorage {
             const request = indexedDB.open(this.dbName, 5); // Version 5: Removed error columns, added recordingDate
 
             request.onerror = () => {
-                console.error('❌ IndexedDB failed to open:', request.error);
+                log.error('❌ IndexedDB failed to open:', request.error);
                 reject(request.error);
             };
 
@@ -321,9 +336,9 @@ export class ResultsStorage {
                 description: 'VE Profile Screenshot'
             });
 
-            console.log('✅ Screenshot saved:', screenshotFileName);
+            log.debug('✅ Screenshot saved:', screenshotFileName);
         } catch (error) {
-            console.error('❌ Failed to save screenshot:', error);
+            log.error('❌ Failed to save screenshot:', error);
             throw error;
         }
     }
@@ -333,7 +348,7 @@ export class ResultsStorage {
      */
     async saveResult(data: SaveResultData): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized, cannot save result');
+            log.warn('IndexedDB not initialized, cannot save result');
             throw new Error('Database not initialized');
         }
 
@@ -375,7 +390,7 @@ export class ResultsStorage {
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to save VE result:', request.error);
+                log.error('❌ Failed to save VE result:', request.error);
                 reject(request.error);
             };
         });
@@ -386,7 +401,7 @@ export class ResultsStorage {
      */
     async exportAllResultsToCSV(): Promise<void> {
         if (!this.db) {
-            console.warn('IndexedDB not initialized');
+            log.warn('IndexedDB not initialized');
             throw new Error('Database not initialized');
         }
 
@@ -419,16 +434,16 @@ export class ResultsStorage {
                         extensions: ['.csv'],
                         description: 'VE Analysis Results Export'
                     });
-                    console.log(`✅ Exported ${results.length} results to CSV`);
+                    log.debug(`✅ Exported ${results.length} results to CSV`);
                     resolve();
                 } catch (error) {
-                    console.error('❌ Failed to save CSV:', error);
+                    log.error('❌ Failed to save CSV:', error);
                     reject(error);
                 }
             };
 
             request.onerror = () => {
-                console.error('❌ Failed to retrieve results:', request.error);
+                log.error('❌ Failed to retrieve results:', request.error);
                 reject(request.error);
             };
         });
@@ -511,7 +526,7 @@ export class ResultsStorage {
             };
 
             request.onerror = () => {
-                console.error('Failed to get results:', request.error);
+                log.error('Failed to get results:', request.error);
                 reject(request.error);
             };
         });
@@ -533,7 +548,7 @@ export class ResultsStorage {
             };
 
             request.onerror = () => {
-                console.error('Failed to clear results:', request.error);
+                log.error('Failed to clear results:', request.error);
                 reject(request.error);
             };
         });

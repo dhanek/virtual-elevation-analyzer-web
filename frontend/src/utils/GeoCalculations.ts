@@ -1,3 +1,4 @@
+import { log } from './log';
 /**
  * Geospatial calculations for weather data retrieval
  */
@@ -148,15 +149,15 @@ export function calculateTrimRegionMetadata(
     // Convert timestamp to Date object
     const middleDate = new Date(middleTimestamp * 1000);
 
-    console.log('📊 GPS Calculation Summary:');
-    console.log('  - Total points in slice:', latSlice.length);
-    console.log('  - Valid GPS points:', validPoints.length);
-    console.log('  - Invalid/filtered points:', latSlice.length - validPoints.length);
-    console.log('  - Average latitude:', roundedLat);
-    console.log('  - Average longitude:', roundedLon);
-    console.log('  - First timestamp:', new Date(timestampSlice[0] * 1000).toISOString());
-    console.log('  - Last timestamp:', new Date(timestampSlice[timestampSlice.length - 1] * 1000).toISOString());
-    console.log('  - Middle timestamp:', middleDate.toISOString());
+    log.debug('📊 GPS Calculation Summary:');
+    log.debug('  - Total points in slice:', latSlice.length);
+    log.debug('  - Valid GPS points:', validPoints.length);
+    log.debug('  - Invalid/filtered points:', latSlice.length - validPoints.length);
+    log.debug('  - Average latitude:', roundedLat);
+    log.debug('  - Average longitude:', roundedLon);
+    log.debug('  - First timestamp:', new Date(timestampSlice[0] * 1000).toISOString());
+    log.debug('  - Last timestamp:', new Date(timestampSlice[timestampSlice.length - 1] * 1000).toISOString());
+    log.debug('  - Middle timestamp:', middleDate.toISOString());
 
     return {
         avgLat: roundedLat,
@@ -216,7 +217,7 @@ export function calculateDistance(
     lat2: number,
     lon2: number
 ): number {
-    const R = 6371000; // Earth's radius in meters
+    const EARTH_RADIUS_METERS = 6_371_000;
     const φ1 = (lat1 * Math.PI) / 180;
     const φ2 = (lat2 * Math.PI) / 180;
     const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -228,7 +229,7 @@ export function calculateDistance(
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return R * c;
+    return EARTH_RADIUS_METERS * c;
 }
 
 /**
