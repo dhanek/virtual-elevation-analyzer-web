@@ -4,7 +4,6 @@
  * Verbatim lift from main.ts -- rendering logic for GPS-lap mode plots.
  */
 import type { LapVEProfile } from './types';
-import { getMultiSegmentColor } from '../multiSegment/shared';
 import {
     buildMultiSegmentWindFigure,
     buildMultiSegmentPowerFigure,
@@ -14,6 +13,33 @@ import { formatLapDuration } from '../../utils/GpsLapDetection';
 
 // Plotly.js type declaration
 declare const Plotly: any;
+
+/**
+ * Color palette for stacked lap plots (genuine GPS and standard "Stacked").
+ * Scoped to the stacked VE graph only — stitched/standard plots are unaffected.
+ */
+export const STACKED_LAP_COLORS = [
+    '#e41a1c',
+    '#377eb8',
+    '#4daf4a',
+    '#984ea3',
+    '#ff7f00',
+    '#ffff33',
+    '#a65628',
+    '#f781bf',
+    '#999999',
+];
+
+/**
+ * Map a lap to its color by its position in the selected set, so a selection of
+ * laps 2/4/6 picks the first three palette colors. Because both stacked modes
+ * render through the same path, the same selection yields the same colors in
+ * each.
+ */
+export function stackedLapColor(index: number): string {
+    const wrapped = ((index % STACKED_LAP_COLORS.length) + STACKED_LAP_COLORS.length) % STACKED_LAP_COLORS.length;
+    return STACKED_LAP_COLORS[wrapped];
+}
 
 /**
  * Calculate mean actual elevation profile across all laps
@@ -201,18 +227,6 @@ export function renderGpsLapVEPlots(
     const PlotlyGlobal = (window as any).Plotly;
     if (!PlotlyGlobal) return;
 
-    // Color palette for laps
-    const lapColors = [
-        '#4363d8',  // Blue
-        '#e6194b',  // Red
-        '#3cb44b',  // Green
-        '#f58231',  // Orange
-        '#911eb4',  // Purple
-        '#46f0f0',  // Cyan
-        '#f032e6',  // Magenta
-        '#bcf60c',  // Lime
-    ];
-
     // Find maximum distance for axis
     let maxDist = 0;
     for (const lap of lapProfiles) {
@@ -238,7 +252,7 @@ export function renderGpsLapVEPlots(
     // Add VE traces for each lap
     for (let i = 0; i < lapProfiles.length; i++) {
         const lap = lapProfiles[i];
-        const color = lapColors[i % lapColors.length];
+        const color = stackedLapColor(i);
 
         // Calibrate VE to match mean elevation at start
         const startElevation = meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
@@ -328,9 +342,11 @@ export function renderGpsLapVEPlots(
         }]
     };
 
-    // Render plots
-    PlotlyGlobal.newPlot('gpsLapVePlot', veTraces, veLayout, { responsive: true });
-    PlotlyGlobal.newPlot('gpsLapResidualPlot', residualTraces, residualLayout, { responsive: true });
+    // Render plots in-place. Plotly.react initializes the div on first call and
+    // diffs on subsequent calls, so slider-driven recomputes update smoothly
+    // without the full teardown/rebuild that Plotly.newPlot performs.
+    PlotlyGlobal.react('gpsLapVePlot', veTraces, veLayout, { responsive: true });
+    PlotlyGlobal.react('gpsLapResidualPlot', residualTraces, residualLayout, { responsive: true });
 
     // Update statistics
     const stats = calculateGpsLapStats(lapProfiles, meanElevation);
@@ -345,7 +361,7 @@ export function renderGpsLapVEPlots(
     const summaryTable = document.getElementById('gpsLapSummaryTable');
     if (summaryTable) {
         const rows = lapProfiles.map((lap, i) => {
-            const color = lapColors[i % lapColors.length];
+            const color = stackedLapColor(i);
             const avgSpeed = lap.totalDistance / (lap.duration / 3600); // km/h
             return `<tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 0.5rem;">
@@ -386,7 +402,7 @@ export function renderGpsLapWindPlot(lapProfiles: LapVEProfile[]) {
         title: 'Apparent Wind Speed by Lap',
         series: lapProfiles.map((lap, index) => ({
             label: `Lap ${lap.lapNumber}`,
-            color: getMultiSegmentColor(index),
+            color: stackedLapColor(index),
             metrics: lap.supplementarySeries,
         })),
     });
@@ -408,7 +424,7 @@ export function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
         title: 'Power by Lap',
         series: lapProfiles.map((lap, index) => ({
             label: `Lap ${lap.lapNumber}`,
-            color: getMultiSegmentColor(index),
+            color: stackedLapColor(index),
             metrics: lap.supplementarySeries,
         })),
     });
@@ -430,7 +446,7 @@ export function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
         title: 'Virtual Distance Difference by Lap',
         series: lapProfiles.map((lap, index) => ({
             label: `Lap ${lap.lapNumber}`,
-            color: getMultiSegmentColor(index),
+            color: stackedLapColor(index),
             metrics: lap.supplementarySeries,
         })),
     });

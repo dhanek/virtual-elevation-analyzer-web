@@ -21,6 +21,7 @@ import {
 	calculateGpsLapStats,
 } from "./gpsLapPlots";
 import { showGpsLapVEAnalysis, getGpsLapNumberForRange } from "./renderGpsLap";
+import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
 import { setupTabSwitching } from "../dom/tabs";
 import { log } from "../../utils/log";
 import { scheduleRecompute } from "../analysis/recomputeRunner";
@@ -80,7 +81,9 @@ export async function updateGpsLapVEPlots(
 		lapIdx++
 	) {
 		const range = appState.currentGpsLapIndexRanges[lapIdx];
-		const lapNumber = getGpsLapNumberForRange(appState, range, lapIdx + 1);
+		const lapNumber =
+			appState.currentOverlayLapNumbers?.[lapIdx] ??
+			getGpsLapNumberForRange(appState, range, lapIdx + 1);
 
 		// Extract data for this lap
 		const lapTimestamps: number[] = [];
@@ -290,14 +293,10 @@ export async function recalculateGpsLapVE(
 	const newCda = parseFloat(cdaValueEl.value);
 	const newCrr = parseFloat(crrValueEl.value);
 
-	// Get the selected GPS lap index ranges
-	const selectedGpsLaps = appState.gpsDetectedLaps.filter((lap) =>
-		appState.gpsSelectedLaps.includes(lap.lapNumber),
-	);
-	const selectedLapIndexRanges = selectedGpsLaps.map((lap) => ({
-		startIdx: lap.startIdx,
-		endIdx: lap.endIdx,
-	}));
+	// Use the ranges of the overlay currently on screen. For genuine GPS this is
+	// the selected detected laps; for the stacked-from-standard view the detected
+	// lap arrays are empty and the ranges live on currentGpsLapIndexRanges.
+	const selectedLapIndexRanges = resolveActiveGpsLapRanges(appState);
 
 	if (selectedLapIndexRanges.length === 0) {
 		log.error("No GPS laps selected for recalculation");

@@ -41,15 +41,15 @@ export function resolveElevationProfile(
 	const byProfile: Record<ElevationDisplayProfile, number[] | null> = {
 		"fit-raw": appState.fitRawElevation,
 		"dem-raw-nearest": appState.demRawNearestElevation,
-		"dem-smoothed-moving-average": appState.demSmoothedMovingAverageElevation,
-		"dem-interpolated": appState.demInterpolatedElevation,
+		"dem-interpolated-smoothed-5pt":
+			appState.demInterpolatedSmoothed5ptElevation,
 	};
 
 	if (hasValidProfile(byProfile[current], expectedLength)) {
 		return { profile: current, altitude: byProfile[current]! };
 	}
 
-	// fallback order: dem-raw-nearest -> dem-smoothed-moving-average -> dem-interpolated
+	// fallback order: dem-raw-nearest -> dem-interpolated-smoothed-5pt
 	for (const profile of DEM_PROFILE_FALLBACK_ORDER) {
 		const candidate = byProfile[profile];
 		if (hasValidProfile(candidate, expectedLength)) {

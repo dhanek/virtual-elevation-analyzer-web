@@ -1228,10 +1228,11 @@ body {
 	font-size: 1.1rem;
 }
 
-.ve-elevation-profile-cycle {
-	display: grid;
-	grid-template-columns: auto auto 1fr;
+.ve-elevation-profile-cycle,
+.ve-elevation-profile-switch {
+	display: flex;
 	align-items: center;
+	justify-content: space-between;
 	gap: 0.5rem;
 	margin-bottom: 1rem;
 	padding: 0.75rem;
@@ -1240,15 +1241,10 @@ body {
 	border-radius: 2px;
 }
 
-.ve-elevation-profile-cycle label {
+.ve-elevation-profile-cycle label,
+.ve-elevation-profile-switch label {
 	font-size: 0.9rem;
 	font-weight: 500;
-}
-
-.ve-elevation-profile-helper {
-	grid-column: 1 / -1;
-	font-size: 0.8rem;
-	color: #666;
 }
 
 .ve-control-group {
@@ -1459,6 +1455,50 @@ body {
 .ve-plot-header h4 {
 	margin: 0;
 	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+/* Stitched/Stacked lap-view toggle (ordinary 2+ lap selections) */
+.lap-view-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: 0.5rem;
+}
+
+.lap-view-toggle-label {
+	font-size: 0.8rem;
+	color: #666;
+}
+
+.lap-view-toggle-btn {
+	padding: 0.25rem 0.7rem;
+	background: white;
+	border: 1px solid #d0d4dc;
+	cursor: pointer;
+	font-size: 0.8rem;
+	color: #666;
+	transition: all 0.15s ease;
+}
+
+.lap-view-toggle-btn:first-of-type {
+	border-radius: 4px 0 0 4px;
+}
+
+.lap-view-toggle-btn:last-of-type {
+	border-radius: 0 4px 4px 0;
+	border-left: none;
+}
+
+.lap-view-toggle-btn:hover {
+	background: #f8f9fa;
+	color: #4363d8;
+}
+
+.lap-view-toggle-btn.active {
+	background: #4363d8;
+	border-color: #4363d8;
+	color: white;
 	font-weight: 500;
 }
 

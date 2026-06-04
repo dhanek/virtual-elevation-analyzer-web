@@ -40,6 +40,9 @@ export const standardMode: AnalysisModeHandler = {
 	syncState(appState) {
 		appState.isGpsLapModeActive = false;
 		appState.currentGpsLapIndexRanges = null;
+		// Default to the stitched view; the "Stacked" toggle re-sets these when
+		// the user overlays an ordinary multi-lap selection.
+		appState.currentOverlayLapNumbers = null;
 	},
 
 	render(args: ModeRenderArgs) {

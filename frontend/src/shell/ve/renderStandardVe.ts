@@ -29,10 +29,8 @@ import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { applyAirSpeedOffset } from "../../analysis/WindSourceResolver";
-import {
-	profileCycleStateText,
-	showProfileCycleControl,
-} from "../analysis/elevationProfileCycle";
+import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
+import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -216,6 +214,13 @@ export async function showVirtualElevationAnalysisInline(
 				appState.airSpeedCalibrationPercent = savedParams.airSpeedCalibration;
 			}
 			log.debug("Loaded saved analysis parameters");
+		} else {
+			// No saved settings for this file/lap combination — reset trim to
+			// defaults so stale values from a previously analyzed lap don't leak
+			// into the sliders or map markers.
+			appState.presetTrimStart = 0;
+			appState.presetTrimEnd = timestamps.length - 1;
+			log.debug("No saved settings for lap selection, using default trim range");
 		}
 	}
 
@@ -244,18 +249,7 @@ export async function showVirtualElevationAnalysisInline(
                     <div class="ve-controls-scrollable">
                         <div class="ve-controls">
                             <h4>Analysis Parameters</h4>
-                            ${
-															showProfileCycleControl(appState)
-																? `
-                            <div class="ve-elevation-profile-cycle">
-                                <label>Elevation profile</label>
-                                <button type="button" id="elevationProfileCycleButton" class="secondary-btn">Cycle</button>
-                                <span id="elevationProfileCycleState">${profileCycleStateText(appState.activeDisplayProfile)}</span>
-                                <div class="ve-elevation-profile-helper">Cycle profile: raw -> smoothing -> interpolated</div>
-                            </div>
-                            `
-																: ""
-														}
+                            ${elevationSmoothingToggleMarkup(appState)}
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>Trim Start (seconds):</label>
@@ -343,6 +337,7 @@ export async function showVirtualElevationAnalysisInline(
                             ${hasWindSpeed ? `<button class="ve-tab-button" data-tab="vd">VD</button>` : ""}
                         </div>
                         <div class="ve-tab-content active" id="ve-tab">
+                            ${lapViewToggleMarkup("stitched")}
                             <div class="ve-metrics-compact">
                                 R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
                                 RMSE:<span id="rmseValue">${initialResult.rmse.toFixed(2)}m</span> |
@@ -427,6 +422,7 @@ export async function showVirtualElevationAnalysisInline(
 	}
 
 	setupTabSwitching();
+	bindLapViewToggle();
 
 	bindActionFooter({
 		onSaveScreenshot: callbacks.onSaveScreenshot,

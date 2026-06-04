@@ -27,10 +27,7 @@ import { calculateAutoRho } from "./autoRho";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { scheduleRecompute } from "../analysis/recomputeRunner";
-import {
-	cycleDemDisplayProfile,
-	profileCycleStateText,
-} from "../analysis/elevationProfileCycle";
+import { bindElevationSmoothingToggle } from "../analysis/elevationProfileCycle";
 import {
 	DEM_PROFILE_FALLBACK_ORDER,
 	type ElevationDisplayProfile,
@@ -89,8 +86,8 @@ function resolveActiveAltitudeForSelection(
 	const byProfile: Record<ElevationDisplayProfile, number[] | null> = {
 		"fit-raw": appState.fitRawElevation,
 		"dem-raw-nearest": appState.demRawNearestElevation,
-		"dem-smoothed-moving-average": appState.demSmoothedMovingAverageElevation,
-		"dem-interpolated": appState.demInterpolatedElevation,
+		"dem-interpolated-smoothed-5pt":
+			appState.demInterpolatedSmoothed5ptElevation,
 	};
 
 	const activeProfile = byProfile[appState.activeDisplayProfile];
@@ -793,30 +790,13 @@ export function setupVESliders(
 		}
 	}
 
-	const elevationProfileCycleButton = document.getElementById(
-		"elevationProfileCycleButton",
-	) as HTMLButtonElement | null;
-	const elevationProfileCycleState = document.getElementById(
-		"elevationProfileCycleState",
-	) as HTMLSpanElement | null;
-	if (elevationProfileCycleButton && elevationProfileCycleState) {
-		elevationProfileCycleButton.addEventListener("click", () => {
-			const nextProfile = cycleDemDisplayProfile(appState);
-			elevationProfileCycleState.textContent =
-				profileCycleStateText(nextProfile);
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(
-				appState,
-				analysisInput,
-				selectedIndices,
-				trimStart,
-				trimEnd,
-			);
-			updateSecondaryPlots(trimStart, trimEnd);
-			saveCurrentLapSettings();
-		});
-	}
+	bindElevationSmoothingToggle(appState, () => {
+		const trimStart = parseInt(trimStartSlider.value);
+		const trimEnd = parseInt(trimEndSlider.value);
+		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
+		updateSecondaryPlots(trimStart, trimEnd);
+		saveCurrentLapSettings();
+	});
 
 	const mapTrimControls = document.getElementById("mapTrimControls");
 	const mapTrimStartSlider = document.getElementById(

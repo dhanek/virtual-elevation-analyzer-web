@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AppState } from "../../state/AppState";
 import {
-	DEM_MOVING_AVERAGE_WINDOW,
+	DEM_INTERPOLATED_SMOOTHING_WINDOW,
 	smoothDemMovingAverage,
 } from "../../analysis/demSmoothing";
 import { resolveElevationProfile } from "./elevationProfileResolver";
@@ -27,37 +27,35 @@ const fitData = {
 } as any;
 
 describe("elevation profile contract", () => {
-	it("moving average profile is derived from demRawNearest only", () => {
-		expect(DEM_MOVING_AVERAGE_WINDOW).toBe(9);
-		const demRawNearest = [10, 10, 100, 10, 10];
-		const smoothed = smoothDemMovingAverage(demRawNearest);
+	it("interpolated profile smoothing uses a 5-point window", () => {
+		expect(DEM_INTERPOLATED_SMOOTHING_WINDOW).toBe(5);
+		const demInterpolated = [10, 10, 100, 10, 10];
+		const smoothed = smoothDemMovingAverage(demInterpolated);
 		expect(smoothed[2]).toBeLessThan(100);
-		expect(demRawNearest[2]).toBe(100);
+		expect(demInterpolated[2]).toBe(100);
 	});
 
-	it("interpolated profile is computed independently of moving average profile", () => {
+	it("resolver returns interpolated+5pt profile when selected", () => {
 		const appState = new AppState();
 		appState.fitRawElevation = [10, 20, 30, 40];
 		appState.demRawNearestElevation = [11, 21, 31, 41];
-		appState.demSmoothedMovingAverageElevation = [12, 22, 32, 42];
-		appState.demInterpolatedElevation = [13, 23, 33, 43];
-		appState.activeDisplayProfile = "dem-interpolated";
+		appState.demInterpolatedSmoothed5ptElevation = [13, 23, 33, 43];
+		appState.activeDisplayProfile = "dem-interpolated-smoothed-5pt";
 
 		const resolved = resolveElevationProfile(
 			appState,
 			fitData,
 			fitData.altitude,
 		);
-		expect(resolved.profile).toBe("dem-interpolated");
+		expect(resolved.profile).toBe("dem-interpolated-smoothed-5pt");
 		expect(resolved.altitude).toEqual([13, 23, 33, 43]);
 	});
 
-	it("resolver returns dem-raw-nearest by default when DEM profiles are available", () => {
+	it("resolver returns dem-raw-nearest when selected and available", () => {
 		const appState = new AppState();
 		appState.fitRawElevation = [10, 20, 30, 40];
 		appState.demRawNearestElevation = [11, 21, 31, 41];
-		appState.demSmoothedMovingAverageElevation = [12, 22, 32, 42];
-		appState.demInterpolatedElevation = [13, 23, 33, 43];
+		appState.demInterpolatedSmoothed5ptElevation = [13, 23, 33, 43];
 		appState.activeDisplayProfile = "dem-raw-nearest";
 
 		const resolved = resolveElevationProfile(
@@ -73,8 +71,7 @@ describe("elevation profile contract", () => {
 		const appState = new AppState();
 		appState.fitRawElevation = [10, 20, 30, 40];
 		appState.demRawNearestElevation = [11, 21, 31];
-		appState.demSmoothedMovingAverageElevation = null;
-		appState.demInterpolatedElevation = null;
+		appState.demInterpolatedSmoothed5ptElevation = null;
 		appState.activeDisplayProfile = "dem-raw-nearest";
 
 		const resolved = resolveElevationProfile(

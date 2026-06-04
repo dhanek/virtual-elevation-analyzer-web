@@ -16,6 +16,8 @@ import { renderSelectableCards } from "../dom/selectableCards";
 export interface Section3TemplateInput {
 	/** Activity laps from FIT data */
 	laps: any[]; // ActivityLapLike[]
+	/** Currently selected FIT lap numbers (1-based); kept across mode changes */
+	selectedLaps: number[];
 	/** Whether GPS data is available */
 	hasGpsData: boolean;
 	/** Whether to show GPS lap detection panel */
@@ -42,6 +44,7 @@ export interface Section3TemplateInput {
 export function renderSection3Template(input: Section3TemplateInput): string {
 	const {
 		laps,
+		selectedLaps,
 		hasGpsData,
 		showGpsLapDetection,
 		showOutAndBack,
@@ -51,13 +54,15 @@ export function renderSection3Template(input: Section3TemplateInput): string {
 		formatPower,
 	} = input;
 
-	// Build FIT lap selectable cards using the shared shell helper
+	// Build FIT lap selectable cards using the shared shell helper.
+	// Reflect the retained selection so changing GPS mode (which re-renders this
+	// template) keeps the user's chosen laps checked.
 	const lapItems: SelectableCardItem[] = laps.map(
 		(lap: any, index: number) => ({
 			id: `lap-${index + 1}`,
 			label: `Lap ${index + 1}`,
 			details: `${formatDuration(lap.total_elapsed_time)} \u2022 ${formatDistance(lap.total_distance)} \u2022 ${lap.avg_power > 0 ? formatPower(lap.avg_power) : "N/A"}`,
-			checked: false,
+			checked: selectedLaps.includes(index + 1),
 			dataAttr: "lap",
 			dataValue: index + 1,
 		}),

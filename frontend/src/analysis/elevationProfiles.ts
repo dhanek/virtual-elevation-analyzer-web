@@ -1,35 +1,29 @@
 export type ElevationDisplayProfile =
 	| "fit-raw"
 	| "dem-raw-nearest"
-	| "dem-smoothed-moving-average"
-	| "dem-interpolated";
+	| "dem-interpolated-smoothed-5pt";
 
 export interface ElevationProfilesState {
 	fitRawElevation: number[] | null;
 	demRawNearestElevation: number[] | null;
-	demSmoothedMovingAverageElevation: number[] | null;
-	demInterpolatedElevation: number[] | null;
+	demInterpolatedSmoothed5ptElevation: number[] | null;
 	activeDisplayProfile: ElevationDisplayProfile;
 	demProfilesAvailable: boolean;
 }
 
 export const DEM_PROFILE_FALLBACK_ORDER: ElevationDisplayProfile[] = [
 	"dem-raw-nearest",
-	"dem-smoothed-moving-average",
-	"dem-interpolated",
+	"dem-interpolated-smoothed-5pt",
 ];
 
 export function nextDemDisplayProfile(
 	current: ElevationDisplayProfile,
 ): ElevationDisplayProfile {
 	switch (current) {
+		case "dem-interpolated-smoothed-5pt":
+			return "dem-raw-nearest";
 		case "dem-raw-nearest":
-			return "dem-smoothed-moving-average";
-		case "dem-smoothed-moving-average":
-			return "dem-interpolated";
-		case "dem-interpolated":
-			return "dem-raw-nearest";
 		default:
-			return "dem-raw-nearest";
+			return "dem-interpolated-smoothed-5pt";
 	}
 }

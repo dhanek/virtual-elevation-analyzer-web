@@ -179,8 +179,7 @@ export async function processFitFile(file: File): Promise<void> {
 			deps.appState.fitRawElevation = Array.from(result.fit_data.altitude);
 		}
 		deps.appState.demRawNearestElevation = null;
-		deps.appState.demSmoothedMovingAverageElevation = null;
-		deps.appState.demInterpolatedElevation = null;
+		deps.appState.demInterpolatedSmoothed5ptElevation = null;
 		deps.appState.activeDisplayProfile = "fit-raw";
 		deps.appState.demProfilesAvailable = false;
 
@@ -212,8 +211,8 @@ export async function processFitFile(file: File): Promise<void> {
 						Array.from(originalAltitudes),
 					);
 
-					const demSmoothedMovingAverageElevation = smoothDemMovingAverage(
-						correctionResult.demRawNearestElevation,
+					const demInterpolatedSmoothed5ptElevation = smoothDemMovingAverage(
+						correctionResult.demInterpolatedElevation,
 					);
 
 					log.debug(
@@ -226,11 +225,10 @@ export async function processFitFile(file: File): Promise<void> {
 					deps.appState.elevationErrorRate = correctionResult.errorRate;
 					deps.appState.demRawNearestElevation =
 						correctionResult.demRawNearestElevation;
-					deps.appState.demSmoothedMovingAverageElevation =
-						demSmoothedMovingAverageElevation;
-					deps.appState.demInterpolatedElevation =
-						correctionResult.demInterpolatedElevation;
-					deps.appState.activeDisplayProfile = "dem-raw-nearest";
+					deps.appState.demInterpolatedSmoothed5ptElevation =
+						demInterpolatedSmoothed5ptElevation;
+					deps.appState.activeDisplayProfile =
+						"dem-interpolated-smoothed-5pt";
 					deps.appState.demProfilesAvailable = true;
 
 					log.debug(
@@ -272,8 +270,7 @@ export async function processFitFile(file: File): Promise<void> {
 					`Warning: DEM correction failed: ${demError}. Using GPS altitude.`,
 				);
 				deps.appState.demRawNearestElevation = null;
-				deps.appState.demSmoothedMovingAverageElevation = null;
-				deps.appState.demInterpolatedElevation = null;
+				deps.appState.demInterpolatedSmoothed5ptElevation = null;
 				deps.appState.demProfilesAvailable = false;
 				deps.appState.activeDisplayProfile = "fit-raw";
 				// Continue with original GPS altitude
@@ -330,17 +327,14 @@ export async function processFitFile(file: File): Promise<void> {
 						const bestDEM = deps.appState.remoteDEMResults.get(bestSource)!;
 						if (bestDEM.errorRate < 0.5) {
 							const demRawNearestElevation = Array.from(bestDEM.elevations);
-							const demSmoothedMovingAverageElevation = smoothDemMovingAverage(
-								demRawNearestElevation,
-							);
+							const demInterpolatedSmoothed5ptElevation =
+								smoothDemMovingAverage(bestDEM.interpolatedElevations);
 							result.fit_data.set_altitude(demRawNearestElevation);
 							deps.appState.demRawNearestElevation = demRawNearestElevation;
-							deps.appState.demSmoothedMovingAverageElevation =
-								demSmoothedMovingAverageElevation;
-							deps.appState.demInterpolatedElevation = Array.from(
-								bestDEM.interpolatedElevations,
-							);
-							deps.appState.activeDisplayProfile = "dem-raw-nearest";
+							deps.appState.demInterpolatedSmoothed5ptElevation =
+								demInterpolatedSmoothed5ptElevation;
+							deps.appState.activeDisplayProfile =
+						"dem-interpolated-smoothed-5pt";
 							deps.appState.demProfilesAvailable = true;
 							log.debug(
 								`Applied ${bestSource} DEM as actual elevation (error rate: ${(bestDEM.errorRate * 100).toFixed(1)}%)`,

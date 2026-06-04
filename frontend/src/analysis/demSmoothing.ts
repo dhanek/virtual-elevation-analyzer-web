@@ -1,11 +1,11 @@
-export const DEM_MOVING_AVERAGE_WINDOW = 9;
+export const DEM_INTERPOLATED_SMOOTHING_WINDOW = 5;
 
 export function smoothDemMovingAverage(input: number[]): number[] {
 	if (input.length === 0) {
 		return [];
 	}
 
-	const radius = Math.floor(DEM_MOVING_AVERAGE_WINDOW / 2);
+	const radius = Math.floor(DEM_INTERPOLATED_SMOOTHING_WINDOW / 2);
 	const output = new Array<number>(input.length);
 
 	for (let i = 0; i < input.length; i++) {

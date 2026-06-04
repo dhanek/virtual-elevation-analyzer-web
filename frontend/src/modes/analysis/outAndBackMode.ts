@@ -38,6 +38,7 @@ export const outAndBackMode: AnalysisModeHandler = {
     syncState(appState) {
         appState.isGpsLapModeActive = false;
         appState.currentGpsLapIndexRanges = null;
+        appState.currentOverlayLapNumbers = null;
     },
 
     render(args: ModeRenderArgs) {

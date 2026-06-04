@@ -99,6 +99,25 @@ describe('setupTabSwitching', () => {
         document.body.removeChild(container)
     })
 
+    it('does not accumulate handlers across repeated setup calls (uses latest renderMap)', () => {
+        const { container, buttons } = createTabs()
+        const firstPower = vi.fn()
+        const secondPower = vi.fn()
+
+        // Simulates re-running setupTabSwitching on every recompute.
+        setupTabSwitching({ power: firstPower })
+        setupTabSwitching({ power: secondPower })
+
+        buttons[1].click()
+
+        // Only the latest renderMap should fire, exactly once — no stale handler
+        // from the first setup call.
+        expect(firstPower).not.toHaveBeenCalled()
+        expect(secondPower).toHaveBeenCalledTimes(1)
+
+        document.body.removeChild(container)
+    })
+
     it('handles missing data-tab attribute gracefully', () => {
         const { container, buttons } = createTabs()
         // Remove data-tab from first button

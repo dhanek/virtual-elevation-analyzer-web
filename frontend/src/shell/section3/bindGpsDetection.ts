@@ -121,6 +121,11 @@ export async function bindGpsDetection(
         void updateGatePosition(val);
     };
 
-    // Initial detection with loaded/default offset
-    void updateGatePosition(initialOffset);
+    // Initial detection with loaded/default offset — only when FIT laps are
+    // selected. Detection must not start before the user has chosen which laps
+    // to analyze; otherwise the time-range/detection helpers fall back to the
+    // full activity and detect over the whole track.
+    if (appState.selectedLaps.length > 0) {
+        void updateGatePosition(initialOffset);
+    }
 }

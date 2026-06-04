@@ -3,6 +3,9 @@ import { log } from "../../utils/log";
 
 export const HEAVY_RECOMPUTE_DEBOUNCE_MS = 200;
 export const STANDARD_RECOMPUTE_DEBOUNCE_MS = 0;
+// GPS-lap (incl. the stacked-from-standard overlay) recomputes in-place via
+// Plotly.react, so it can update live during a slider drag like standard mode.
+export const GPS_LAP_RECOMPUTE_DEBOUNCE_MS = 0;
 
 export type RecomputeMode = "standard" | "gps-lap" | "out-and-back";
 export type RecomputeStatus = "idle" | "running" | "handoff";
@@ -91,10 +94,14 @@ export function scheduleRecompute(request: RecomputeRequest): void {
 }
 
 function getDebounceMs(mode: RecomputeMode): number {
-	if (mode === "standard") {
-		return STANDARD_RECOMPUTE_DEBOUNCE_MS;
+	switch (mode) {
+		case "standard":
+			return STANDARD_RECOMPUTE_DEBOUNCE_MS;
+		case "gps-lap":
+			return GPS_LAP_RECOMPUTE_DEBOUNCE_MS;
+		default:
+			return HEAVY_RECOMPUTE_DEBOUNCE_MS;
 	}
-	return HEAVY_RECOMPUTE_DEBOUNCE_MS;
 }
 
 async function runPending(): Promise<void> {

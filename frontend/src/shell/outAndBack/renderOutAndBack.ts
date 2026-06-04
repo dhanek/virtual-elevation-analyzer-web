@@ -42,9 +42,8 @@ import {
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
 import {
-	cycleDemDisplayProfile,
-	profileCycleStateText,
-	showProfileCycleControl,
+	bindElevationSmoothingToggle,
+	elevationSmoothingToggleMarkup,
 } from "../analysis/elevationProfileCycle";
 import {
 	calculateOutAndBackMeanElevation,
@@ -369,18 +368,7 @@ export async function showOutAndBackVEPlot(
                     <div class="ve-controls-scrollable">
                         <div class="ve-controls">
                             <h4>Analysis Parameters</h4>
-                            ${
-															showProfileCycleControl(appState)
-																? `
-                            <div class="ve-elevation-profile-cycle">
-                                <label>Elevation profile</label>
-                                <button type="button" id="elevationProfileCycleButton" class="secondary-btn">Cycle</button>
-                                <span id="elevationProfileCycleState">${profileCycleStateText(appState.activeDisplayProfile)}</span>
-                                <div class="ve-elevation-profile-helper">Cycle profile: raw -> smoothing -> interpolated</div>
-                            </div>
-                            `
-																: ""
-														}
+                            ${elevationSmoothingToggleMarkup(appState)}
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>CdA (Drag Coefficient × Area):</label>
@@ -536,30 +524,18 @@ export async function showOutAndBackVEPlot(
 	// Setup slider sync with recalculation
 	setupOutAndBackSliderSync(services, parameterStorage, waitForPlotly);
 
-	const elevationProfileCycleButton = document.getElementById(
-		"elevationProfileCycleButton",
-	) as HTMLButtonElement | null;
-	const elevationProfileCycleState = document.getElementById(
-		"elevationProfileCycleState",
-	) as HTMLSpanElement | null;
-	if (elevationProfileCycleButton && elevationProfileCycleState) {
-		elevationProfileCycleButton.addEventListener("click", () => {
-			const nextProfile = cycleDemDisplayProfile(appState);
-			elevationProfileCycleState.textContent =
-				profileCycleStateText(nextProfile);
-			const cda = parseFloat(
-				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-					"0.3",
-			);
-			const crr = parseFloat(
-				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-					"0.008",
-			);
-			scheduleOutAndBackRecompute(() =>
-				updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
-			);
-		});
-	}
+	bindElevationSmoothingToggle(appState, () => {
+		const cda = parseFloat(
+			(document.getElementById("cdaValue") as HTMLInputElement)?.value || "0.3",
+		);
+		const crr = parseFloat(
+			(document.getElementById("crrValue") as HTMLInputElement)?.value ||
+				"0.008",
+		);
+		scheduleOutAndBackRecompute(() =>
+			updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
+		);
+	});
 
 	// Setup tab switching
 	setupTabSwitching({

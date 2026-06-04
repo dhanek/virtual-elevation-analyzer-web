@@ -161,6 +161,12 @@ export interface SelectionState {
 	currentAnalyzedLaps: number[];
 	currentFilteredData: FilteredAnalysisData | null;
 	currentGpsLapIndexRanges: LapIndexRange[] | null;
+	/**
+	 * Real lap numbers aligned to currentGpsLapIndexRanges, used so the overlay
+	 * renderer can label stacked ordinary (non-GPS-detected) laps with their
+	 * actual lap numbers. Null when the overlay was reached via GPS detection.
+	 */
+	currentOverlayLapNumbers: number[] | null;
 	gpsSelectedLaps: number[];
 	outAndBackSelectedSections: number[];
 	currentOutAndBackSections: OutAndBackSection[];
@@ -232,6 +238,7 @@ export class AppState {
 		currentAnalyzedLaps: [],
 		currentFilteredData: null,
 		currentGpsLapIndexRanges: null,
+		currentOverlayLapNumbers: null,
 		gpsSelectedLaps: [],
 		outAndBackSelectedSections: [],
 		currentOutAndBackSections: [],
@@ -256,8 +263,7 @@ export class AppState {
 		remoteDEMResults: null,
 		fitRawElevation: null,
 		demRawNearestElevation: null,
-		demSmoothedMovingAverageElevation: null,
-		demInterpolatedElevation: null,
+		demInterpolatedSmoothed5ptElevation: null,
 		activeDisplayProfile: "fit-raw",
 		demProfilesAvailable: false,
 	};
@@ -517,6 +523,14 @@ export class AppState {
 		this.selection.currentGpsLapIndexRanges = indexRanges;
 	}
 
+	get currentOverlayLapNumbers(): number[] | null {
+		return this.selection.currentOverlayLapNumbers;
+	}
+
+	set currentOverlayLapNumbers(lapNumbers: number[] | null) {
+		this.selection.currentOverlayLapNumbers = lapNumbers;
+	}
+
 	get previousAutoLapDetection(): string {
 		return this.ui.previousAutoLapDetection;
 	}
@@ -613,20 +627,12 @@ export class AppState {
 		this.dem.demRawNearestElevation = elevation;
 	}
 
-	get demSmoothedMovingAverageElevation(): number[] | null {
-		return this.dem.demSmoothedMovingAverageElevation;
+	get demInterpolatedSmoothed5ptElevation(): number[] | null {
+		return this.dem.demInterpolatedSmoothed5ptElevation;
 	}
 
-	set demSmoothedMovingAverageElevation(elevation: number[] | null) {
-		this.dem.demSmoothedMovingAverageElevation = elevation;
-	}
-
-	get demInterpolatedElevation(): number[] | null {
-		return this.dem.demInterpolatedElevation;
-	}
-
-	set demInterpolatedElevation(elevation: number[] | null) {
-		this.dem.demInterpolatedElevation = elevation;
+	set demInterpolatedSmoothed5ptElevation(elevation: number[] | null) {
+		this.dem.demInterpolatedSmoothed5ptElevation = elevation;
 	}
 
 	get activeDisplayProfile(): ElevationDisplayProfile {

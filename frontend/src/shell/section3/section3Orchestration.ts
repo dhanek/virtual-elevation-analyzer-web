@@ -136,6 +136,7 @@ function rerenderSection3(): void {
 	// Generate updated Section 3 HTML
 	const analysisHtml = renderSection3Template({
 		laps,
+		selectedLaps: deps.appState.selectedLaps,
 		hasGpsData,
 		showGpsLapDetection,
 		showOutAndBack,
@@ -381,6 +382,17 @@ export async function runGpsLapDetection(
 	const deps = getDependencies();
 
 	if (!deps.appState.currentFitData) return;
+
+	// Detection is scoped to the selected FIT laps. With no selection there is
+	// no scope to detect within, so bail out rather than fall back to the whole
+	// activity (which would detect laps the user never asked for).
+	if (
+		deps.appState.selectedLaps.length === 0 ||
+		deps.appState.currentLaps.length === 0
+	) {
+		log.debug("Skipping GPS lap detection: no FIT laps selected");
+		return;
+	}
 
 	// Calculate trim indices from selected FIT laps' time ranges
 	let trimStart = 0;
@@ -1019,17 +1031,19 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		newMapTrimEndSlider.value = deps.appState.presetTrimEnd.toString();
 		newMapTrimEndValue.value = deps.appState.presetTrimEnd.toString();
 
-		// Set map markers with loaded/default trim values
+		// Set map markers with loaded/default trim values.
+		// Always refresh markers when switching laps so stale markers from a
+		// previously selected lap don't remain when the new lap has no saved config.
 		const mapVisualization = deps.getMapVisualization();
 		if (
 			mapVisualization &&
-			savedSettings &&
 			deps.appState.presetTrimStart !== null &&
 			deps.appState.presetTrimEnd !== null
 		) {
-			log.debug("Setting map trim markers to loaded settings:", {
+			log.debug("Setting map trim markers:", {
 				trimStart: deps.appState.presetTrimStart,
 				trimEnd: deps.appState.presetTrimEnd,
+				fromSavedSettings: !!savedSettings,
 			});
 			const trimStartVal = deps.appState.presetTrimStart;
 			const trimEndVal = deps.appState.presetTrimEnd;
@@ -1198,6 +1212,7 @@ export function initializeSection3(): void {
 	// Generate Section 3 HTML using the shell template helper
 	const analysisHtml = renderSection3Template({
 		laps,
+		selectedLaps: deps.appState.selectedLaps,
 		hasGpsData,
 		showGpsLapDetection,
 		showOutAndBack,

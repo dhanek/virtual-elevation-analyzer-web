@@ -42,9 +42,8 @@ import {
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
 import {
-	cycleDemDisplayProfile,
-	profileCycleStateText,
-	showProfileCycleControl,
+	bindElevationSmoothingToggle,
+	elevationSmoothingToggleMarkup,
 } from "../analysis/elevationProfileCycle";
 import {
 	calculateGpsLapStats,
@@ -60,6 +59,7 @@ import {
 	scheduleGpsLapRecompute,
 } from "./updateGpsLap";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
+import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 
 /**
  * Calculate VE for each GPS-detected lap and show stacked plot.
@@ -78,8 +78,14 @@ export async function showGpsLapVEAnalysis(
 	const { appState } = services;
 	services.showLoading("Calculating VE for each lap...");
 
-	const analyzedLapNumbers = lapIndexRanges.map((range, index) =>
-		getGpsLapNumberForRange(appState, range, index + 1),
+	// When the overlay was reached by stacking ordinary lap selections, real lap
+	// numbers are carried on appState so the legend matches the user's choice;
+	// otherwise fall back to GPS-detected lap lookup.
+	const overlayLapNumbers = appState.currentOverlayLapNumbers;
+	const analyzedLapNumbers = lapIndexRanges.map(
+		(range, index) =>
+			overlayLapNumbers?.[index] ??
+			getGpsLapNumberForRange(appState, range, index + 1),
 	);
 	const resolvedParams = await resolveMultiSegmentAnalysisParams(
 		appState,
@@ -331,46 +337,37 @@ export async function showGpsLapVEPlot(
 		initialStats,
 		lapCount: lapProfiles.length,
 		defaultAirSpeedOffset,
-		showProfileCycle: showProfileCycleControl(appState),
-		profileCycleState: profileCycleStateText(appState.activeDisplayProfile),
+		elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
 	});
 	veAnalysisContent.innerHTML = veAnalysisTemplate;
+
+	// Bind the stitched/stacked toggle when this overlay was reached from an
+	// ordinary 2+ lap selection (no-op otherwise).
+	bindLapViewToggle();
 
 	// Setup slider event handlers for CdA/Crr with recalculation
 	setupGpsLapSliderHandlers(appState, parameterStorage, waitForPlotly, params);
 
-	const elevationProfileCycleButton = document.getElementById(
-		"elevationProfileCycleButton",
-	) as HTMLButtonElement | null;
-	const elevationProfileCycleState = document.getElementById(
-		"elevationProfileCycleState",
-	) as HTMLSpanElement | null;
-	if (elevationProfileCycleButton && elevationProfileCycleState) {
-		elevationProfileCycleButton.addEventListener("click", () => {
-			const nextProfile = cycleDemDisplayProfile(appState);
-			elevationProfileCycleState.textContent =
-				profileCycleStateText(nextProfile);
-			const windSource = getSelectedWindSource();
-			const cda = parseFloat(
-				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-					"0.3",
-			);
-			const crr = parseFloat(
-				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-					"0.008",
-			);
-			scheduleGpsLapRecompute(() =>
-				updateGpsLapVEPlots(
-					appState,
-					parameterStorage,
-					waitForPlotly,
-					cda,
-					crr,
-					windSource,
-				),
-			);
-		});
-	}
+	bindElevationSmoothingToggle(appState, () => {
+		const windSource = getSelectedWindSource();
+		const cda = parseFloat(
+			(document.getElementById("cdaValue") as HTMLInputElement)?.value || "0.3",
+		);
+		const crr = parseFloat(
+			(document.getElementById("crrValue") as HTMLInputElement)?.value ||
+				"0.008",
+		);
+		scheduleGpsLapRecompute(() =>
+			updateGpsLapVEPlots(
+				appState,
+				parameterStorage,
+				waitForPlotly,
+				cda,
+				crr,
+				windSource,
+			),
+		);
+	});
 
 	// Setup tab switching
 	setupTabSwitching({
@@ -624,8 +621,7 @@ interface GpsLapVeTemplateOptions {
 	initialStats: { meanR2: number; meanRMSE: number; closingError: number };
 	lapCount: number;
 	defaultAirSpeedOffset: number;
-	showProfileCycle: boolean;
-	profileCycleState: string;
+	elevationToggleMarkup: string;
 }
 
 function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
@@ -641,8 +637,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
 		initialStats,
 		lapCount,
 		defaultAirSpeedOffset,
-		showProfileCycle,
-		profileCycleState,
+		elevationToggleMarkup,
 	} = opts;
 
 	return `
@@ -653,18 +648,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                     <div class="ve-controls-scrollable">
                         <div class="ve-controls">
                             <h4>Analysis Parameters</h4>
-                            ${
-															showProfileCycle
-																? `
-                            <div class="ve-elevation-profile-cycle">
-                                <label>Elevation profile</label>
-                                <button type="button" id="elevationProfileCycleButton" class="secondary-btn">Cycle</button>
-                                <span id="elevationProfileCycleState">${profileCycleState}</span>
-                                <div class="ve-elevation-profile-helper">Cycle profile: raw -> smoothing -> interpolated</div>
-                            </div>
-                            `
-																: ""
-														}
+                            ${elevationToggleMarkup}
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>CdA (Drag Coefficient × Area):</label>
@@ -757,6 +741,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                         </div>
 
                         <div class="ve-tab-content active" id="ve-tab">
+                            ${lapViewToggleMarkup("stacked")}
                             <div class="ve-metrics-compact">
                                 Mean R²:<span id="gpsLapR2Value">${initialStats.meanR2.toFixed(4)}</span> |
                                 Mean RMSE:<span id="gpsLapRmseValue">${initialStats.meanRMSE.toFixed(2)}m</span> |

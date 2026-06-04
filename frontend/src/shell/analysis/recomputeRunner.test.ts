@@ -37,7 +37,7 @@ describe("recomputeRunner", () => {
 		const calls: number[] = [];
 
 		scheduleRecompute({
-			mode: "gps-lap",
+			mode: "out-and-back",
 			run: () => {
 				calls.push(1);
 			},
@@ -45,7 +45,7 @@ describe("recomputeRunner", () => {
 		vi.advanceTimersByTime(150);
 
 		scheduleRecompute({
-			mode: "gps-lap",
+			mode: "out-and-back",
 			run: () => {
 				calls.push(2);
 			},
@@ -54,6 +54,22 @@ describe("recomputeRunner", () => {
 		await Promise.resolve();
 
 		expect(calls).toEqual([2]);
+	});
+
+	it("gps-lap mode uses zero debounce so it updates live during a drag", async () => {
+		const calls: number[] = [];
+
+		scheduleRecompute({
+			mode: "gps-lap",
+			run: () => {
+				calls.push(1);
+			},
+		});
+		vi.advanceTimersByTime(0);
+		await Promise.resolve();
+
+		// Fires immediately like standard mode — not deferred to slider release.
+		expect(calls).toEqual([1]);
 	});
 
 	it("latest-input-wins ignores stale completion token", async () => {

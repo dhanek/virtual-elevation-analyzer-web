@@ -27,6 +27,11 @@ import {
 } from "../section3/section3Orchestration";
 import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
 import { configureRecomputeRunner } from "./recomputeRunner";
+import {
+	clearLapViewToggle,
+	configureLapViewToggle,
+} from "../ve/lapViewToggle";
+import { deriveOverlayLaps } from "../ve/deriveLapRanges";
 
 interface AnalyzeOrchestratorDependencies {
 	appState: AppState;
@@ -308,6 +313,10 @@ export async function handleAnalyze(): Promise<void> {
 	const modeHandler = getAnalysisModeHandler(lapDetectionMode);
 	const selection = modeHandler.prepareSelection(deps.appState);
 
+	// Reset the stitched/stacked toggle by default; the standard render path
+	// re-enables it when eligible (2+ ordinary laps).
+	clearLapViewToggle();
+
 	if (
 		!deps.appState.currentParameters ||
 		selection.selectedItems.length === 0
@@ -471,41 +480,90 @@ export async function handleAnalyze(): Promise<void> {
 		const callbacks = createModeRenderCallbacks({
 			standard: async (args) => {
 				await waitForPlotly();
-				return showVirtualElevationAnalysisInline(
-					deps.appState,
-					deps.parameterStorage,
-					parametersComponent,
-					getServices(deps),
-					mapVisualization,
-					{
-						onSaveScreenshot: () => {
-							void handleSaveScreenshot(deps.appState, deps.resultsStorage);
+
+				// Stitched view: the standard concatenated VE renderer (default).
+				const renderStitched = () => {
+					deps.appState.isGpsLapModeActive = false;
+					deps.appState.currentGpsLapIndexRanges = null;
+					deps.appState.currentOverlayLapNumbers = null;
+					return showVirtualElevationAnalysisInline(
+						deps.appState,
+						deps.parameterStorage,
+						parametersComponent,
+						getServices(deps),
+						mapVisualization,
+						{
+							onSaveScreenshot: () => {
+								void handleSaveScreenshot(deps.appState, deps.resultsStorage);
+							},
+							onStoreResult: () => {
+								void handleStoreResult(deps.appState, deps.resultsStorage);
+							},
+							onExportAll: () => {
+								void handleExportAllResults(deps.resultsStorage);
+							},
+							saveCurrentLapSettings: () => {
+								void saveCurrentLapSettings(
+									deps.appState,
+									deps.parameterStorage,
+								);
+							},
 						},
-						onStoreResult: () => {
-							void handleStoreResult(deps.appState, deps.resultsStorage);
-						},
-						onExportAll: () => {
-							void handleExportAllResults(deps.resultsStorage);
-						},
-						saveCurrentLapSettings: () => {
-							void saveCurrentLapSettings(deps.appState, deps.parameterStorage);
-						},
-					},
-					args.initialResult,
-					args.analyzedLaps,
-					args.selectedIndices,
-					args.timestamps,
-					args.power,
-					args.velocity,
-					args.positionLat,
-					args.positionLong,
-					args.altitude,
-					args.distance,
-					args.windSpeed,
-					args.temperature,
-					args.cdaReference,
-					args.defaultAirSpeedOffset,
-				);
+						args.initialResult,
+						args.analyzedLaps,
+						args.selectedIndices,
+						args.timestamps,
+						args.power,
+						args.velocity,
+						args.positionLat,
+						args.positionLong,
+						args.altitude,
+						args.distance,
+						args.windSpeed,
+						args.temperature,
+						args.cdaReference,
+						args.defaultAirSpeedOffset,
+					);
+				};
+
+				// Offer the stitched/stacked toggle only for ordinary multi-lap
+				// selections; stacked reuses the GPS-lap overlay renderer with
+				// per-lap index ranges derived from each lap's time span.
+				if (selection.mode === "standard" && args.analyzedLaps.length >= 2) {
+					const timestamps =
+						getNormalizedActivityArrays(fitData).timestamps;
+					const selectedLapInputs = args.analyzedLaps
+						.map((lapNumber) => ({
+							lapNumber,
+							lap: deps.appState.currentLaps[lapNumber - 1],
+						}))
+						.filter((entry) => Boolean(entry.lap));
+					const { ranges, lapNumbers } = deriveOverlayLaps(
+						timestamps,
+						selectedLapInputs,
+					);
+
+					if (ranges.length >= 2) {
+						const renderStacked = () => {
+							deps.appState.isGpsLapModeActive = true;
+							deps.appState.currentGpsLapIndexRanges = ranges;
+							deps.appState.currentOverlayLapNumbers = lapNumbers;
+							return showGpsLapVEAnalysis(
+								getServices(deps),
+								deps.parameterStorage,
+								deps.resultsStorage,
+								waitForPlotly,
+								ranges,
+								fitData,
+								deps.appState.currentParameters!,
+								args.defaultAirSpeedOffset,
+							);
+						};
+						configureLapViewToggle({ renderStitched, renderStacked });
+					}
+				}
+
+				return renderStitched();
 			},
 			gpsLap: ({ lapIndexRanges, fitData, params, defaultAirSpeedOffset }) =>
 				showGpsLapVEAnalysis(

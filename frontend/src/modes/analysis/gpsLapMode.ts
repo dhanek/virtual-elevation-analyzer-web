@@ -38,6 +38,9 @@ export const gpsLapMode: AnalysisModeHandler = {
     syncState(appState, selection) {
         appState.isGpsLapModeActive = true;
         appState.currentGpsLapIndexRanges = selection.indexRanges;
+        // Labels come from GPS-detected lap numbers; clear any stale overlay
+        // numbers left by a prior standard "Stacked" toggle.
+        appState.currentOverlayLapNumbers = null;
     },
 
     render(args: ModeRenderArgs) {
