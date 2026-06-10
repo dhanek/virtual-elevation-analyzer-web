@@ -27,6 +27,7 @@ import {
 } from "../section3/section3Orchestration";
 import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
 import { configureRecomputeRunner } from "./recomputeRunner";
+import { configureParameterMerge } from "./parametersSync";
 import {
 	clearLapViewToggle,
 	configureLapViewToggle,
@@ -108,6 +109,17 @@ export function configureAnalyzeOrchestrator(
 ): void {
 	dependencies = nextDependencies;
 	configureRecomputeRunner(nextDependencies.appState);
+	// Route out-of-form parameter writes (e.g. Crr temp controls in GPS-lap /
+	// out-and-back sidebars) through the parameters component so its private
+	// copy stays in sync and later form edits don't revert them.
+	configureParameterMerge((fields) => {
+		const component = nextDependencies.getParametersComponent();
+		if (component) {
+			component.setParameters(fields);
+		} else if (nextDependencies.appState.currentParameters) {
+			Object.assign(nextDependencies.appState.currentParameters, fields);
+		}
+	});
 }
 
 // Analysis parameters initialization

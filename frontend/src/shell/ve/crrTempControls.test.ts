@@ -218,6 +218,22 @@ describe("bindCrrTempControls", () => {
 		expect(onChange).toHaveBeenCalled();
 	});
 
+	test("weather refresh rounds the ambient temperature to one decimal", () => {
+		params = makeParams({ crr_temp_correction: true, ambient_temp_c: 12 });
+		document.body.innerHTML =
+			`<input type="range" id="crrSlider" value="0.005">` +
+			`<input type="number" id="crrValue" value="0.005">` +
+			crrTempControlsMarkup(params);
+
+		const fields = syncCrrTempAmbientFromWeather(params, 18.333333);
+		expect(fields).toEqual({ ambient_temp_c: 18.3 });
+
+		const ambient = document.getElementById(
+			"crrTempAmbient",
+		) as HTMLInputElement;
+		expect(ambient.value).toBe("18.3");
+	});
+
 	test("weather refresh updates the ambient temperature when correction is on", () => {
 		params = makeParams({ crr_temp_correction: true, ambient_temp_c: 12 });
 		document.body.innerHTML =

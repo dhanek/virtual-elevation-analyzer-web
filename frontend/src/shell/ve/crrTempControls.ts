@@ -94,13 +94,14 @@ export function syncCrrTempAmbientFromWeather(
 ): Partial<AnalysisParameters> {
 	if (!params.crr_temp_correction || Number.isNaN(weatherTempC)) return {};
 
+	const rounded = Math.round(weatherTempC * 10) / 10;
 	const ambient = document.getElementById(
 		"crrTempAmbient",
 	) as HTMLInputElement | null;
 	if (ambient) {
-		ambient.value = weatherTempC.toString();
+		ambient.value = rounded.toString();
 	}
-	return { ambient_temp_c: weatherTempC };
+	return { ambient_temp_c: rounded };
 }
 
 export interface CrrTempControlsBinding {
@@ -151,8 +152,9 @@ export function bindCrrTempControls(binding: CrrTempControlsBinding): void {
 		if (toggle.checked && params.ambient_temp_c == null) {
 			const weatherTemp = params.weather_metadata?.temperature;
 			if (weatherTemp !== undefined && !Number.isNaN(weatherTemp)) {
-				update.ambient_temp_c = weatherTemp;
-				ambient.value = weatherTemp.toString();
+				const rounded = Math.round(weatherTemp * 10) / 10;
+				update.ambient_temp_c = rounded;
+				ambient.value = rounded.toString();
 			}
 		}
 

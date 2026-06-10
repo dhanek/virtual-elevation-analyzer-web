@@ -219,9 +219,14 @@ export async function calculateAutoRho(
 
             // Keep the Crr temperature correction in sync with the fresh
             // ambient temperature (no-op when the correction is disabled).
+            // Re-read the parameters: the toggle may have changed during the
+            // async weather fetch.
             Object.assign(
                 updateParams,
-                syncCrrTempAmbientFromWeather(params, weatherEntry.data.temperature)
+                syncCrrTempAmbientFromWeather(
+                    parametersComponent.getParameters(),
+                    weatherEntry.data.temperature
+                )
             );
 
             parametersComponent.setParameters(updateParams);
