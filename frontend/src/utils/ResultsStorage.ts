@@ -34,7 +34,10 @@ export interface SaveResultData {
     trimStart: number;
     trimEnd: number;
     cda: number;
-    crr: number;
+    crr: number; // 22 °C-referenced slider value
+    crrApplied?: number; // temperature-corrected Crr used in the physics
+    ambientTemp?: number; // ambient °C used for the Crr temperature correction
+    tireSensitivity?: string; // tire sensitivity preset (stiff/typical/supple)
     airSpeedCalibration?: number; // Air speed calibration percentage
     windSource: 'constant' | 'fit' | 'compare' | 'none';
     parameters: AnalysisParameters;
@@ -53,7 +56,10 @@ interface StoredVEResult {
     trimStart: number;
     trimEnd: number;
     cda: number;
-    crr: number;
+    crr: number; // 22 °C-referenced slider value
+    crrApplied?: number; // temperature-corrected Crr used in the physics
+    ambientTemp?: number; // ambient °C used for the Crr temperature correction
+    tireSensitivity?: string; // tire sensitivity preset (stiff/typical/supple)
     airSpeedCalibration?: number; // Air speed calibration percentage
     windSource: string;
     windSpeed: number | string;
@@ -361,6 +367,9 @@ export class ResultsStorage {
             trimEnd: data.trimEnd,
             cda: data.cda,
             crr: data.crr,
+            crrApplied: data.crrApplied,
+            ambientTemp: data.ambientTemp,
+            tireSensitivity: data.tireSensitivity,
             airSpeedCalibration: data.airSpeedCalibration,
             windSource: data.windSource,
             windSpeed: data.parameters.wind_speed ?? '',
@@ -455,7 +464,8 @@ export class ResultsStorage {
     private generateCSVFromResults(results: StoredVEResult[]): string {
         // Headers
         const headers = [
-            'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr', 'AirSpeedCal',
+            'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
+            'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
             'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
             'R2', 'RMSE', 'VEGain', 'ActualGain',
             'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
@@ -484,6 +494,9 @@ export class ResultsStorage {
                 result.trimEnd,
                 result.cda.toFixed(3),
                 result.crr.toFixed(4),
+                result.crrApplied !== undefined ? result.crrApplied.toFixed(4) : '',
+                result.ambientTemp !== undefined ? result.ambientTemp.toFixed(1) : '',
+                result.tireSensitivity ?? '',
                 result.airSpeedCalibration !== undefined ? result.airSpeedCalibration.toFixed(1) : '',
                 result.windSource,
                 result.windSpeed,

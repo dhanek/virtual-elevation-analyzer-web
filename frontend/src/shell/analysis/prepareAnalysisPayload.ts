@@ -15,6 +15,7 @@ import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { collectSelectionIndices } from "../../modes/analysis/AnalysisModes";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { log } from "../../utils/log";
 
 export interface PayloadPreparationInput {
@@ -101,7 +102,13 @@ export function prepareAnalysisPayload(
 		}
 	}
 
-	// Create VE calculator and compute initial result
+	// Create VE calculator and compute initial result. Crr inputs are
+	// 22 °C-referenced; the physics uses the temperature-corrected value when
+	// the correction is enabled.
+	const appliedCrr =
+		input.crr !== null && input.crr !== undefined
+			? resolveAppliedCrr(input.params, input.crr)
+			: input.crr;
 	const calculator = createVeCalculator({
 		timestamps: filteredTimestamps,
 		power: filteredPower,
@@ -114,11 +121,11 @@ export function prepareAnalysisPayload(
 		rhoArray,
 		params: input.params,
 		cda: input.cda,
-		crr: input.crr,
+		crr: appliedCrr,
 	});
 
 	const effectiveCda = input.cda ?? 0.3;
-	const effectiveCrr = input.crr ?? 0.008;
+	const effectiveCrr = resolveAppliedCrr(input.params, input.crr ?? 0.008);
 	const initialResult = calculator.calculate_virtual_elevation(
 		effectiveCda,
 		effectiveCrr,

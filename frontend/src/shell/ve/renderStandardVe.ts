@@ -25,6 +25,8 @@ import {
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
 import { setupVESliders } from "./bindStandardSliders";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { crrTempControlsMarkup } from "./crrTempControls";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -58,6 +60,9 @@ export async function initializeVEAnalysis(
 	// Use initial CdA and Crr from parameters
 	const initialCdA = appState.currentParameters?.cda ?? 0.3;
 	const initialCrr = appState.currentParameters?.crr ?? 0.005;
+	const appliedInitialCrr = appState.currentParameters
+		? resolveAppliedCrr(appState.currentParameters, initialCrr)
+		: initialCrr;
 	const initialWindSource = getSelectedWindSource();
 
 	const context = createPlotContext(
@@ -80,12 +85,12 @@ export async function initializeVEAnalysis(
 				: new Array(analysisInput.windSpeed.length).fill(NaN),
 		params: appState.currentParameters!,
 		cda: initialCdA,
-		crr: initialCrr,
+		crr: appliedInitialCrr,
 	});
 
 	const result = calculator.calculate_virtual_elevation(
 		initialCdA,
-		initialCrr,
+		appliedInitialCrr,
 		trimStart,
 		trimEnd,
 	);
@@ -96,7 +101,7 @@ export async function initializeVEAnalysis(
 		virtualElevation: Array.from(result.virtual_elevation),
 		actualElevation: analysisInput.altitude,
 		cdaLabel: initialCdA.toFixed(3),
-		crrLabel: initialCrr.toFixed(4),
+		crrLabel: appliedInitialCrr.toFixed(4),
 	});
 
 	const hasWindSpeed = analysisInput.windSpeed.some(
@@ -271,6 +276,7 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="range" id="crrSlider" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" value="${appState.currentParameters!.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${crrTempControlsMarkup(appState.currentParameters!)}
                             </div>
 
                             ${

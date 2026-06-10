@@ -67,3 +67,12 @@ pnpm-lock.yaml
 
 # Build artifacts
 *.wasm.map
+
+.planning/
+docs/
+ARCHITECTURE.md
+GEMINI.md
+limit-test.md
+REFACTORING_CHECKLIST.md
+REFACTORING_REPORT.md
+ROADMAP.md

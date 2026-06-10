@@ -59,6 +59,8 @@ import {
 	scheduleOutAndBackRecompute,
 } from "./updateOutAndBack";
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -128,8 +130,11 @@ export async function showOutAndBackVEAnalysis(
 		log.debug("Out and Back VE: No wind data available");
 	}
 
+	// The stored Crr is 22 °C-referenced; the physics uses the
+	// temperature-corrected value when the correction is enabled.
 	const cda = resolvedParams.cda ?? 0.3;
 	const crr = resolvedParams.crr ?? 0.008;
+	const appliedCrr = resolveAppliedCrr(resolvedParams, crr);
 
 	// Calculate VE for each section (outbound and inbound separately)
 	for (const section of sections) {
@@ -175,12 +180,12 @@ export async function showOutAndBackVEAnalysis(
 					windSpeed: outboundData.windSpeed,
 					params: resolvedParams,
 					cda,
-					crr,
+					crr: appliedCrr,
 				});
 
 				const result = calculator.calculate_virtual_elevation(
 					cda,
-					crr,
+					appliedCrr,
 					0,
 					outboundData.timestamps.length - 1,
 				);
@@ -237,12 +242,12 @@ export async function showOutAndBackVEAnalysis(
 					windSpeed: inboundData.windSpeed,
 					params: resolvedParams,
 					cda,
-					crr,
+					crr: appliedCrr,
 				});
 
 				const result = calculator.calculate_virtual_elevation(
 					cda,
-					crr,
+					appliedCrr,
 					0,
 					inboundData.timestamps.length - 1,
 				);
@@ -380,6 +385,7 @@ export async function showOutAndBackVEPlot(
                                     <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${crrTempControlsMarkup(params)}
                             </div>
 
                             ${
@@ -742,4 +748,20 @@ export function setupOutAndBackSliderSync(
 			triggerRecalculation();
 		});
 	}
+
+	bindCrrTempControls({
+		getParams: () => appState.currentParameters,
+		setParams: (fields) => {
+			if (!appState.currentParameters) return;
+			Object.assign(appState.currentParameters, fields);
+			if (appState.currentFileHash && appState.selectedFile) {
+				void parameterStorage.saveParameters(
+					appState.currentFileHash,
+					appState.currentParameters,
+					appState.selectedFile.name,
+				);
+			}
+		},
+		onChange: triggerRecalculation,
+	});
 }
