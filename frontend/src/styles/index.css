@@ -1793,3 +1793,74 @@ body {
 .app-footer-note {
 	margin: 0 0 0.5rem 0;
 }
+
+/* Crr temperature correction controls (override .ve-control-group span/label box styling) */
+.crr-temp-controls label.crr-temp-toggle {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-weight: 400;
+	margin-bottom: 0;
+	cursor: pointer;
+}
+
+.crr-temp-controls .crr-temp-toggle input[type="checkbox"] {
+	accent-color: #4363d8;
+	cursor: pointer;
+	flex: none;
+	margin: 0;
+}
+
+.crr-temp-controls span.crr-temp-info {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 15px;
+	height: 15px;
+	min-width: 0;
+	padding: 0;
+	background: none;
+	border: 1px solid #a0aec0;
+	border-radius: 50%;
+	color: #718096;
+	font-family: Georgia, serif;
+	font-style: italic;
+	font-size: 11px;
+	line-height: 1;
+	cursor: help;
+	flex: none;
+}
+
+.crr-temp-controls .crr-temp-fields {
+	margin-top: 0.5rem;
+}
+
+.crr-temp-controls .crr-temp-row {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.crr-temp-controls .crr-temp-row label {
+	display: inline;
+	margin-bottom: 0;
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+.crr-temp-controls .crr-temp-row input[type="number"] {
+	width: 64px;
+	flex: none;
+}
+
+.crr-temp-controls .crr-temp-row select {
+	flex: 1;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.crr-temp-controls .crr-temp-readout {
+	font-size: 0.85em;
+	color: #555;
+	margin-top: 0.4rem;
+}

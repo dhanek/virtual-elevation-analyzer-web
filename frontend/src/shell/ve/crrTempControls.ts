@@ -59,27 +59,25 @@ export function crrTempControlsMarkup(params: AnalysisParameters): string {
 		`<option value="${value}" ${sensitivity === value ? "selected" : ""}>${label}</option>`;
 
 	return `
-        <div class="ve-control-group" id="crrTempControls">
-            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
-                <input type="checkbox" id="crrTempToggle" ${enabled ? "checked" : ""} style="accent-color: #4363d8; cursor: pointer; flex: none;">
-                <span style="font-size: 0.9rem;">Temp-correct Crr</span>
-                <span id="crrTempInfo" title="${CRR_TEMP_INFO_TOOLTIP}"
-                      style="display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #999; color: #666; font-size: 11px; font-family: serif; font-style: italic; cursor: help; flex: none;">i</span>
+        <div class="ve-control-group crr-temp-controls" id="crrTempControls">
+            <label class="crr-temp-toggle">
+                <input type="checkbox" id="crrTempToggle" ${enabled ? "checked" : ""}>
+                Temp-correct Crr
+                <span id="crrTempInfo" class="crr-temp-info" title="${CRR_TEMP_INFO_TOOLTIP}">i</span>
             </label>
-            <div id="crrTempFields" style="${enabled ? "" : "display: none;"} margin-top: 0.25rem;">
-                <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <label for="crrTempAmbient" style="white-space: nowrap;">Ambient (°C):</label>
+            <div id="crrTempFields" class="crr-temp-fields" style="${enabled ? "" : "display: none;"}">
+                <div class="crr-temp-row">
+                    <label for="crrTempAmbient">Ambient (°C):</label>
                     <input type="number" id="crrTempAmbient" min="-10" max="50" step="0.5"
                            value="${ambient !== null ? ambient : ""}" placeholder="e.g. 18"
-                           title="Ambient air temperature during the session."
-                           style="width: 70px;">
-                    <select id="crrTempSensitivity" title="Tire temperature sensitivity. High s correlates with natural-rubber-rich compounds and thick tread." style="flex: 1;">
+                           title="Ambient air temperature during the session.">
+                    <select id="crrTempSensitivity" title="Tire temperature sensitivity. High s correlates with natural-rubber-rich compounds and thick tread.">
                         ${option("stiff", "Stiff (s=0.5)")}
                         ${option("typical", "Typical (s=0.8)")}
                         ${option("supple", "Supple race (s=1.0)")}
                     </select>
                 </div>
-                <div id="crrTempReadout" style="font-size: 0.85em; color: #555; margin-top: 0.25rem;"></div>
+                <div id="crrTempReadout" class="crr-temp-readout"></div>
             </div>
         </div>
     `;
