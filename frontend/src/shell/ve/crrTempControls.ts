@@ -46,9 +46,8 @@ const CRR_TEMP_INFO_TOOLTIP =
 	"with the selected tire sensitivity.&#10;&#10;" +
 	"Valid ~5–40 °C, tire at steady state (10+ min riding). " +
 	"Not worth enabling when compared sessions are within ±3 °C.&#10;&#10;" +
-	"Ambient temperature is prefilled from the Weather API when available and " +
-	"updates when weather is recalculated. Head-unit temperature is device " +
-	"temperature (sun-soaked, lagged) and is never used.";
+	"Ambient temperature is taken from the Weather API when available and " +
+	"can be overwritten manually.";
 
 export function crrTempControlsMarkup(params: AnalysisParameters): string {
 	const enabled = params.crr_temp_correction === true;
@@ -71,10 +70,10 @@ export function crrTempControlsMarkup(params: AnalysisParameters): string {
                     <input type="number" id="crrTempAmbient" min="-10" max="50" step="0.5"
                            value="${ambient !== null ? ambient : ""}" placeholder="e.g. 18"
                            title="Ambient air temperature during the session.">
-                    <select id="crrTempSensitivity" title="Tire temperature sensitivity. High s correlates with natural-rubber-rich compounds and thick tread.">
-                        ${option("stiff", "Stiff (s=0.5)")}
-                        ${option("typical", "Typical (s=0.8)")}
-                        ${option("supple", "Supple race (s=1.0)")}
+                    <select id="crrTempSensitivity" title="Tire temperature sensitivity (example tires with measured sensitivity). High s correlates with natural-rubber-rich compounds and thick tread.">
+                        ${option("stiff", "Conti GP 5000 S TR, Michelin Power Road (0.5)")}
+                        ${option("typical", "Vittoria Corsa Speed, Schwalbe Pro One (0.8, use if unsure)")}
+                        ${option("supple", "Pirelli P Zero TLR Race (1.0)")}
                     </select>
                 </div>
                 <div id="crrTempReadout" class="crr-temp-readout"></div>
