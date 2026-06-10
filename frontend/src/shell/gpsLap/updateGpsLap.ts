@@ -11,6 +11,7 @@ import type { LapVEProfile } from "./types";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import {
 	renderGpsLapVEPlots,
@@ -135,6 +136,9 @@ export async function updateGpsLapVEPlots(
 		const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
 
 		try {
+			// The slider Crr is 22 °C-referenced; the physics uses the
+			// temperature-corrected value when the correction is enabled.
+			const appliedCrr = resolveAppliedCrr(appState.currentParameters, crr);
 			const calculator = createVeCalculator({
 				timestamps: lapTimestamps,
 				power: lapPower,
@@ -146,13 +150,13 @@ export async function updateGpsLapVEPlots(
 				windSpeed: lapWindSpeed,
 				params: appState.currentParameters,
 				cda,
-				crr,
+				crr: appliedCrr,
 			});
 
 			// Calculate VE for full lap
 			const result = calculator.calculate_virtual_elevation(
 				cda,
-				crr,
+				appliedCrr,
 				0,
 				lapTimestamps.length - 1,
 			);

@@ -2,6 +2,7 @@ import { AppState } from '../../state/AppState';
 import { log } from '../../utils/log';
 import { ResultsStorage } from '../../utils/ResultsStorage';
 import { ParameterStorage, LapSettings } from '../../utils/ParameterStorage';
+import { resolveAppliedCrr } from '../../analysis/CrrTemperatureCorrection';
 
 /**
  * Save current lap settings to IndexedDB.
@@ -146,6 +147,13 @@ export async function handleStoreResult(
         const firstTimestamp = filteredTimestamps[trimStart];
         const recordingDate = new Date(firstTimestamp * 1000).toISOString().split('T')[0];
 
+        // Crr from the slider is 22 °C-referenced; record the temperature-
+        // corrected value actually used in the physics alongside it.
+        const tempCorrectionActive =
+            appState.currentParameters.crr_temp_correction === true &&
+            appState.currentParameters.ambient_temp_c !== null &&
+            appState.currentParameters.ambient_temp_c !== undefined;
+
         const saveData = {
             fileName: appState.selectedFile.name,
             laps: appState.currentAnalyzedLaps,
@@ -153,6 +161,15 @@ export async function handleStoreResult(
             trimEnd: trimEnd,
             cda: cda,
             crr: crr,
+            crrApplied: tempCorrectionActive
+                ? resolveAppliedCrr(appState.currentParameters, crr)
+                : undefined,
+            ambientTemp: tempCorrectionActive
+                ? (appState.currentParameters.ambient_temp_c ?? undefined)
+                : undefined,
+            tireSensitivity: tempCorrectionActive
+                ? (appState.currentParameters.tire_sensitivity ?? 'typical')
+                : undefined,
             airSpeedCalibration: appState.airSpeedCalibrationPercent !== 0 ? appState.airSpeedCalibrationPercent : undefined,
             windSource: appState.currentWindSource,
             parameters: appState.currentParameters,

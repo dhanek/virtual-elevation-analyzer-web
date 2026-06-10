@@ -12,6 +12,7 @@ import type { OutAndBackVEProfile } from "./types";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { getSelectedWindSource } from "../dom/windSource";
@@ -56,6 +57,10 @@ export async function updateOutAndBackVEPlots(
 	}
 
 	const Plotly = await waitForPlotly();
+
+	// The slider Crr is 22 °C-referenced; the physics uses the
+	// temperature-corrected value when the correction is enabled.
+	const appliedCrr = resolveAppliedCrr(appState.currentParameters, crr);
 
 	// Recalculate VE for all sections
 	const profiles: OutAndBackVEProfile[] = [];
@@ -135,12 +140,12 @@ export async function updateOutAndBackVEPlots(
 					windSpeed: outboundData.windSpeed,
 					params: appState.currentParameters,
 					cda,
-					crr,
+					crr: appliedCrr,
 				});
 
 				const result = calculator.calculate_virtual_elevation(
 					cda,
-					crr,
+					appliedCrr,
 					0,
 					outboundData.timestamps.length - 1,
 				);
@@ -197,12 +202,12 @@ export async function updateOutAndBackVEPlots(
 					windSpeed: inboundData.windSpeed,
 					params: appState.currentParameters,
 					cda,
-					crr,
+					crr: appliedCrr,
 				});
 
 				const result = calculator.calculate_virtual_elevation(
 					cda,
-					crr,
+					appliedCrr,
 					0,
 					inboundData.timestamps.length - 1,
 				);

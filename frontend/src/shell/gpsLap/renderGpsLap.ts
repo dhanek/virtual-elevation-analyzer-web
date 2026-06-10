@@ -60,6 +60,8 @@ import {
 } from "./updateGpsLap";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
 
 /**
  * Calculate VE for each GPS-detected lap and show stacked plot.
@@ -134,9 +136,11 @@ export async function showGpsLapVEAnalysis(
 		log.debug("GPS Lap VE: No wind data available");
 	}
 
-	// Get CdA and Crr values
+	// Get CdA and Crr values. The stored Crr is 22 °C-referenced; the physics
+	// uses the temperature-corrected value when the correction is enabled.
 	const cda = resolvedParams.cda ?? 0.3;
 	const crr = resolvedParams.crr ?? 0.008;
+	const appliedCrr = resolveAppliedCrr(resolvedParams, crr);
 
 	// Calculate VE for each lap
 	for (let lapIdx = 0; lapIdx < lapIndexRanges.length; lapIdx++) {
@@ -204,13 +208,13 @@ export async function showGpsLapVEAnalysis(
 				windSpeed: lapWindSpeed,
 				params: resolvedParams,
 				cda,
-				crr,
+				crr: appliedCrr,
 			});
 
 			// Calculate VE for full lap
 			const result = calculator.calculate_virtual_elevation(
 				cda,
-				crr,
+				appliedCrr,
 				0,
 				lapTimestamps.length - 1,
 			);
@@ -592,6 +596,22 @@ export function setupGpsLapSliderHandlers(
 			triggerRecalculation();
 		});
 	}
+
+	bindCrrTempControls({
+		getParams: () => appState.currentParameters,
+		setParams: (fields) => {
+			if (!appState.currentParameters) return;
+			Object.assign(appState.currentParameters, fields);
+			if (appState.currentFileHash && appState.selectedFile) {
+				void parameterStorage.saveParameters(
+					appState.currentFileHash,
+					appState.currentParameters,
+					appState.selectedFile.name,
+				);
+			}
+		},
+		onChange: triggerRecalculation,
+	});
 }
 
 /**
@@ -660,6 +680,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                                     <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${crrTempControlsMarkup(params)}
                             </div>
 
                             ${

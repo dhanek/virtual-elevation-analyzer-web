@@ -26,6 +26,8 @@ import {
 import { calculateAutoRho } from "./autoRho";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { bindCrrTempControls } from "./crrTempControls";
 import { scheduleRecompute } from "../analysis/recomputeRunner";
 import { bindElevationSmoothingToggle } from "../analysis/elevationProfileCycle";
 import {
@@ -155,7 +157,12 @@ export async function updateVEPlotsWithWindSource(
 	if (!cdaSlider || !crrSlider) return;
 
 	const cda = parseFloat(cdaSlider.value);
-	const crr = parseFloat(crrSlider.value);
+	// The slider value is the 22 °C-referenced Crr; the physics uses the
+	// temperature-corrected value when the correction is enabled.
+	const crr = resolveAppliedCrr(
+		appState.currentParameters,
+		parseFloat(crrSlider.value),
+	);
 
 	const context = createPlotContext(
 		analysisInput.timestamps.length,
@@ -796,6 +803,23 @@ export function setupVESliders(
 		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
 		updateSecondaryPlots(trimStart, trimEnd);
 		saveCurrentLapSettings();
+	});
+
+	bindCrrTempControls({
+		getParams: () => appState.currentParameters,
+		setParams: (fields) => {
+			if (parametersComponent) {
+				// Persists per-file via the orchestrator's parameter storage path.
+				parametersComponent.setParameters(fields);
+			} else if (appState.currentParameters) {
+				Object.assign(appState.currentParameters, fields);
+			}
+		},
+		onChange: () => {
+			const trimStart = parseInt(trimStartSlider.value);
+			const trimEnd = parseInt(trimEndSlider.value);
+			updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
+		},
 	});
 
 	const mapTrimControls = document.getElementById("mapTrimControls");

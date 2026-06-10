@@ -15,6 +15,11 @@ export interface AnalysisParameters {
 	velodrome: boolean;
 	// Note: auto_lap_detection removed - GPS mode is now controlled via Section 3 UI
 	auto_calculate_rho: boolean;
+	// Tire temperature compensation: slider Crr is referenced to 22 °C and the
+	// VE physics uses Crr × factor(ambient_temp_c, tire_sensitivity) when enabled.
+	crr_temp_correction?: boolean;
+	ambient_temp_c?: number | null;
+	tire_sensitivity?: "stiff" | "typical" | "supple";
 	rho_source?: "manual" | "weather_api" | "weather_cache";
 	weather_metadata?: {
 		temperature: number;
@@ -46,6 +51,9 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	// Note: auto_lap_detection removed - GPS mode is now controlled via Section 3 UI
 	auto_calculate_rho: false, // auto-calculate rho from weather data
 	rho_source: "manual",
+	crr_temp_correction: false, // opt-in tire temperature compensation, never applied silently
+	ambient_temp_c: null,
+	tire_sensitivity: "typical",
 };
 
 export class AnalysisParametersComponent {
@@ -269,6 +277,11 @@ export class AnalysisParametersComponent {
 			auto_calculate_rho: getBooleanValue("auto_calculate_rho"),
 			rho_source: this.parameters.rho_source || "manual",
 			weather_metadata: this.parameters.weather_metadata,
+			// Tire temp correction fields live in the VE sidebar, not this form -
+			// carry them over so form edits don't drop them.
+			crr_temp_correction: this.parameters.crr_temp_correction,
+			ambient_temp_c: this.parameters.ambient_temp_c,
+			tire_sensitivity: this.parameters.tire_sensitivity,
 		};
 
 		// Validate and notify
