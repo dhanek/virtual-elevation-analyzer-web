@@ -61,6 +61,7 @@ import {
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
+import { mergeAnalysisParameters } from "../analysis/parametersSync";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -752,6 +753,9 @@ export function setupOutAndBackSliderSync(
 	bindCrrTempControls({
 		getParams: () => appState.currentParameters,
 		setParams: (fields) => {
+			// Prefer the parameters-component gateway so its private copy stays
+			// in sync (a later form edit would otherwise revert these fields).
+			if (mergeAnalysisParameters(fields)) return;
 			if (!appState.currentParameters) return;
 			Object.assign(appState.currentParameters, fields);
 			if (appState.currentFileHash && appState.selectedFile) {
