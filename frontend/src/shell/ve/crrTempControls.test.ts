@@ -4,6 +4,7 @@ import {
 	bindCrrTempControls,
 	crrTempControlsMarkup,
 	formatCrrTempReadout,
+	syncCrrTempAmbientFromWeather,
 } from "./crrTempControls";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
@@ -60,6 +61,17 @@ describe("crrTempControlsMarkup", () => {
 		const fields = document.getElementById("crrTempFields") as HTMLElement;
 		expect(toggle.checked).toBe(false);
 		expect(fields.style.display).toBe("none");
+	});
+
+	test("keeps the label short and moves the explanation into an info tooltip", () => {
+		document.body.innerHTML = crrTempControlsMarkup(makeParams());
+		const info = document.getElementById("crrTempInfo") as HTMLElement;
+		expect(info).not.toBeNull();
+		expect(info.title).toContain("22 °C");
+		expect(info.title).toContain("±3 °C");
+		// The long validity hint must not be visible text anymore.
+		const visibleText = document.body.textContent ?? "";
+		expect(visibleText).not.toContain("steady state");
 	});
 
 	test("renders enabled state with persisted values", () => {
@@ -204,6 +216,38 @@ describe("bindCrrTempControls", () => {
 			expect.objectContaining({ tire_sensitivity: "supple" }),
 		);
 		expect(onChange).toHaveBeenCalled();
+	});
+
+	test("weather refresh updates the ambient temperature when correction is on", () => {
+		params = makeParams({ crr_temp_correction: true, ambient_temp_c: 12 });
+		document.body.innerHTML =
+			`<input type="range" id="crrSlider" value="0.005">` +
+			`<input type="number" id="crrValue" value="0.005">` +
+			crrTempControlsMarkup(params);
+
+		const fields = syncCrrTempAmbientFromWeather(params, 21.4);
+		expect(fields).toEqual({ ambient_temp_c: 21.4 });
+
+		const ambient = document.getElementById(
+			"crrTempAmbient",
+		) as HTMLInputElement;
+		expect(ambient.value).toBe("21.4");
+	});
+
+	test("weather refresh leaves parameters alone when correction is off", () => {
+		params = makeParams({ crr_temp_correction: false, ambient_temp_c: 12 });
+		document.body.innerHTML =
+			`<input type="range" id="crrSlider" value="0.005">` +
+			`<input type="number" id="crrValue" value="0.005">` +
+			crrTempControlsMarkup(params);
+
+		const fields = syncCrrTempAmbientFromWeather(params, 21.4);
+		expect(fields).toEqual({});
+
+		const ambient = document.getElementById(
+			"crrTempAmbient",
+		) as HTMLInputElement;
+		expect(ambient.value).toBe("12");
 	});
 
 	test("moving the Crr slider refreshes the readout without recompute calls", () => {

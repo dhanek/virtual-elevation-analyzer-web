@@ -7,6 +7,7 @@ import { WeatherAPI, WeatherAPIError } from '../../utils/WeatherAPI';
 import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js';
 import { showNotification } from '../dom/notifications';
 import { ShellServices } from '../analysis/types';
+import { refreshCrrTempReadout, syncCrrTempAmbientFromWeather } from './crrTempControls';
 
 /**
  * Calculate air density automatically using weather data.
@@ -216,7 +217,15 @@ export async function calculateAutoRho(
                 updateParams.wind_direction = weatherEntry.data.windDirection;
             }
 
+            // Keep the Crr temperature correction in sync with the fresh
+            // ambient temperature (no-op when the correction is disabled).
+            Object.assign(
+                updateParams,
+                syncCrrTempAmbientFromWeather(params, weatherEntry.data.temperature)
+            );
+
             parametersComponent.setParameters(updateParams);
+            refreshCrrTempReadout(parametersComponent.getParameters());
 
             // Show success notification
             const sourceText = weatherEntry.source === 'cache' ? 'cached data' : 'weather API';

@@ -40,6 +40,16 @@ export function formatCrrTempReadout(
 	return text;
 }
 
+const CRR_TEMP_INFO_TOOLTIP =
+	"Crr slider values are referenced to 22 °C (BRR lab test temperature). " +
+	"When enabled, the VE physics uses the Crr corrected to the ambient temperature " +
+	"with the selected tire sensitivity.&#10;&#10;" +
+	"Valid ~5–40 °C, tire at steady state (10+ min riding). " +
+	"Not worth enabling when compared sessions are within ±3 °C.&#10;&#10;" +
+	"Ambient temperature is prefilled from the Weather API when available and " +
+	"updates when weather is recalculated. Head-unit temperature is device " +
+	"temperature (sun-soaked, lagged) and is never used.";
+
 export function crrTempControlsMarkup(params: AnalysisParameters): string {
 	const enabled = params.crr_temp_correction === true;
 	const ambient = params.ambient_temp_c ?? null;
@@ -50,16 +60,18 @@ export function crrTempControlsMarkup(params: AnalysisParameters): string {
 
 	return `
         <div class="ve-control-group" id="crrTempControls">
-            <label class="ve-radio-label" title="Crr slider values are referenced to 22 °C (BRR lab temperature). When enabled, the VE physics uses the Crr corrected to the session's ambient temperature.">
-                <input type="checkbox" id="crrTempToggle" ${enabled ? "checked" : ""} style="margin-right: 0.5rem; accent-color: #4363d8; cursor: pointer;">
-                <span>Temperature-correct Crr (referenced to 22 °C)</span>
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
+                <input type="checkbox" id="crrTempToggle" ${enabled ? "checked" : ""} style="accent-color: #4363d8; cursor: pointer; flex: none;">
+                <span style="font-size: 0.9rem;">Temp-correct Crr</span>
+                <span id="crrTempInfo" title="${CRR_TEMP_INFO_TOOLTIP}"
+                      style="display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #999; color: #666; font-size: 11px; font-family: serif; font-style: italic; cursor: help; flex: none;">i</span>
             </label>
             <div id="crrTempFields" style="${enabled ? "" : "display: none;"} margin-top: 0.25rem;">
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <label for="crrTempAmbient" style="white-space: nowrap;">Ambient (°C):</label>
                     <input type="number" id="crrTempAmbient" min="-10" max="50" step="0.5"
                            value="${ambient !== null ? ambient : ""}" placeholder="e.g. 18"
-                           title="Ambient air temperature during the session. Head-unit temperature is device temperature (sun-soaked, lagged) - prefer a manual ambient value."
+                           title="Ambient air temperature during the session."
                            style="width: 70px;">
                     <select id="crrTempSensitivity" title="Tire temperature sensitivity. High s correlates with natural-rubber-rich compounds and thick tread." style="flex: 1;">
                         ${option("stiff", "Stiff (s=0.5)")}
@@ -68,12 +80,30 @@ export function crrTempControlsMarkup(params: AnalysisParameters): string {
                     </select>
                 </div>
                 <div id="crrTempReadout" style="font-size: 0.85em; color: #555; margin-top: 0.25rem;"></div>
-                <div style="font-size: 0.8em; color: #888; margin-top: 0.25rem;">
-                    Valid ~5–40 °C, tire at steady state. Not worth enabling when compared sessions are within ±3 °C.
-                </div>
             </div>
         </div>
     `;
+}
+
+/**
+ * Sync the ambient temperature from a fresh Weather-API fetch. Returns the
+ * parameter fields to merge (empty when the correction is disabled, so a
+ * manual workflow is never disturbed) and mirrors the value into the visible
+ * input when present.
+ */
+export function syncCrrTempAmbientFromWeather(
+	params: AnalysisParameters,
+	weatherTempC: number,
+): Partial<AnalysisParameters> {
+	if (!params.crr_temp_correction || Number.isNaN(weatherTempC)) return {};
+
+	const ambient = document.getElementById(
+		"crrTempAmbient",
+	) as HTMLInputElement | null;
+	if (ambient) {
+		ambient.value = weatherTempC.toString();
+	}
+	return { ambient_temp_c: weatherTempC };
 }
 
 export interface CrrTempControlsBinding {
