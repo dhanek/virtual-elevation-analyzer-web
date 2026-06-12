@@ -174,8 +174,12 @@ export class MapVisualization {
 		if (!this.map || this.routePoints.length === 0) return;
 
 		const bounds = L.latLngBounds(this.routePoints);
+		// animate: false — Leaflet silently drops any fitBounds issued while a
+		// zoom animation is in flight (_tryAnimatedZoom returns early), which
+		// swallowed the follow-up fitBoundsToSelectedLaps during map rebuilds.
 		this.map.fitBounds(bounds, {
 			padding: [ROUTE_BOUNDS_PADDING_PX, ROUTE_BOUNDS_PADDING_PX],
+			animate: false,
 		});
 	}
 
