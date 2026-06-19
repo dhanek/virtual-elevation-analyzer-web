@@ -1,0 +1,314 @@
+/* Workflow Sections */
+.workflow-section {
+	background: white;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	margin-bottom: var(--space-2xl);
+	padding: var(--space-2xl);
+	width: 100%;
+}
+
+.workflow-section.inactive {
+	opacity: 0.5;
+	pointer-events: none;
+}
+
+.workflow-section h2 {
+	color: var(--color-text);
+	margin: 0 0 var(--space-xl) 0;
+	font-size: 1.5rem;
+	font-weight: 300;
+	letter-spacing: -0.02em;
+	border-bottom: 2px solid var(--color-primary);
+	padding-bottom: var(--space-md);
+	display: flex;
+	align-items: center;
+	gap: var(--space-lg);
+}
+
+.section-number {
+	background: var(--color-primary);
+	color: white;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 500;
+	font-size: 1rem;
+}
+
+.section-number.completed {
+	background: var(--color-success);
+}
+
+.file-section {
+	max-width: 800px;
+	margin: 0 auto;
+}
+
+.file-input-wrapper {
+	position: relative;
+	margin-bottom: var(--space-xl);
+}
+
+.file-input {
+	width: 100%;
+	padding: var(--space-2xl);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--color-bg);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	text-align: center;
+	color: var(--color-text-muted);
+	font-size: 1rem;
+}
+
+.file-input:hover {
+	border-color: var(--color-primary);
+	background: white;
+}
+
+.file-input.dragover {
+	border-color: var(--color-primary);
+	background: white;
+	box-shadow: 0 0 0 2px rgba(67, 99, 216, 0.1);
+}
+
+.file-info {
+	background: white;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	padding: var(--space-xl);
+	margin-top: var(--space-lg);
+}
+
+.file-info h3 {
+	color: var(--color-text);
+	margin: 0 0 var(--space-md) 0;
+	font-weight: 400;
+	font-size: 1.1rem;
+}
+
+.analyze-button {
+	width: 100%;
+	padding: clamp(0.875rem, 2vw, 1.125rem) clamp(1.5rem, 3vw, 2rem);
+	background: var(--color-primary);
+	color: white;
+	border: none;
+	border-radius: var(--radius-sm);
+	font-size: clamp(1rem, 1.8vw, 1.125rem);
+	font-weight: 400;
+	cursor: pointer;
+	transition: background 0.2s ease;
+	margin-top: var(--space-xl);
+	letter-spacing: -0.01em;
+}
+
+.analyze-button:hover:not(:disabled) {
+	background: #2952cc;
+}
+
+.analyze-button:disabled {
+	background: #e5e5e5;
+	color: #9ca3af;
+	cursor: not-allowed;
+}
+
+.loading {
+	display: none;
+	text-align: center;
+	margin-top: var(--space-lg);
+}
+
+.loading.show {
+	display: block;
+}
+
+.spinner {
+	display: inline-block;
+	width: 20px;
+	height: 20px;
+	border: 3px solid #f3f3f3;
+	border-top: 3px solid var(--color-primary);
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+	margin-right: 10px;
+}
+
+@keyframes spin {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+.error {
+	background: #fff5f5;
+	border: 1px solid #fed7d7;
+	color: var(--color-danger-strong);
+	padding: var(--space-lg);
+	border-radius: var(--radius-lg);
+	margin-top: var(--space-lg);
+	white-space: pre-wrap;
+	font-family: system-ui, -apple-system, sans-serif;
+	line-height: 1.5;
+}
+
+.statistics {
+	background: white;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	padding: var(--space-lg);
+	margin: var(--space-lg) 0;
+	width: 100%;
+	max-width: none;
+}
+
+.statistics h3 {
+	color: var(--color-text);
+	margin: 0 0 clamp(1.5rem, 3vw, 2rem) 0;
+	font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+	font-weight: 300;
+	letter-spacing: -0.02em;
+	border-bottom: 1px solid var(--color-primary);
+	padding-bottom: var(--space-md);
+}
+
+.stats-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+	gap: clamp(1rem, 2vw, 1.5rem);
+}
+
+.stat-item {
+	background: var(--color-bg);
+	padding: clamp(1rem, 2vw, 1.25rem);
+	border-radius: var(--radius-sm);
+	border-left: 2px solid var(--color-primary);
+}
+
+.stat-label {
+	font-size: clamp(0.85rem, 1.5vw, 0.95rem);
+	color: var(--color-text-muted);
+	margin-bottom: 0.4rem;
+	font-weight: 400;
+}
+
+.stat-value {
+	font-size: clamp(1.1rem, 2vw, 1.3rem);
+	font-weight: 400;
+	color: var(--color-text);
+	letter-spacing: -0.01em;
+}
+
+.laps-section {
+	margin-top: var(--space-xl);
+}
+
+.lap-item {
+	background: white;
+	padding: var(--space-lg);
+	border-radius: 6px;
+	margin-bottom: var(--space-sm);
+	border-left: 4px solid var(--color-success);
+}
+
+.lap-header {
+	font-weight: 600;
+	color: var(--color-text-heading);
+	margin-bottom: var(--space-sm);
+}
+
+.lap-stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+	gap: var(--space-sm);
+	font-size: 0.9rem;
+	color: var(--color-text-muted);
+}
+
+.table-container {
+	overflow-x: auto;
+	margin-top: var(--space-lg);
+	border-radius: 6px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.lap-table {
+	width: 100%;
+	border-collapse: collapse;
+	background: white;
+	font-size: 0.9rem;
+}
+
+.lap-table th {
+	background: var(--color-primary);
+	color: white;
+	padding: 12px 8px;
+	text-align: left;
+	font-weight: 600;
+	border-bottom: 2px solid #3651c7;
+}
+
+.lap-table td {
+	padding: 10px 8px;
+	border-bottom: 1px solid var(--color-border);
+	color: var(--color-text-heading);
+}
+
+.lap-table tbody tr:hover {
+	background: var(--color-surface);
+}
+
+.lap-table tbody tr:nth-child(even) {
+	background: var(--color-surface-alt);
+}
+
+.lap-table tbody tr:nth-child(even):hover {
+	background: #e6f0ff;
+}
+
+.records-section {
+	margin-top: var(--space-2xl);
+}
+
+.records-table {
+	width: 100%;
+	border-collapse: collapse;
+	background: white;
+	font-size: 0.85rem;
+}
+
+.records-table th {
+	background: var(--color-success);
+	color: white;
+	padding: 10px 6px;
+	text-align: left;
+	font-weight: 600;
+	border-bottom: 2px solid #2d7a52;
+	font-size: 0.8rem;
+}
+
+.records-table td {
+	padding: 8px 6px;
+	border-bottom: 1px solid var(--color-border);
+	color: var(--color-text-heading);
+	white-space: nowrap;
+}
+
+.records-table tbody tr:hover {
+	background: #f0fff4;
+}
+
+.records-table tbody tr:nth-child(even) {
+	background: var(--color-surface-alt);
+}
+
+.records-table tbody tr:nth-child(even):hover {
+	background: #e6fffa;
+}

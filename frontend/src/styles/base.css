@@ -1,0 +1,74 @@
+/* Base resets, document shell, header, shared utilities */
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+/* Ensure absolutely no hidden margins or constraints
+   (merged from the former mid-file html/body reset at index.css L953-959) */
+html,
+body {
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	font-family:
+		-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	background: var(--color-bg);
+	min-height: 100vh;
+	color: var(--color-text);
+	line-height: 1.5;
+	overflow-x: hidden;
+}
+
+.container {
+	background: white;
+	min-height: 100vh;
+	padding: 0;
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
+}
+
+.header {
+	background: white;
+	border-bottom: 1px solid #e5e5e5;
+	padding: var(--space-2xl) 0;
+	margin-bottom: 0;
+}
+
+.header-content {
+	max-width: 100%;
+	margin: 0;
+	padding: 0 var(--space-lg);
+}
+
+.header h1 {
+	color: var(--color-text);
+	margin: 0 0 var(--space-sm) 0;
+	font-size: 2rem;
+	font-weight: 300;
+	letter-spacing: -0.02em;
+}
+
+.header p {
+	color: var(--color-text-muted);
+	font-size: 1rem;
+	margin: 0;
+	font-weight: 400;
+}
+
+.main-content {
+	max-width: 100%;
+	margin: 0;
+	padding: var(--space-lg);
+	width: 100%;
+}
+
+.hidden {
+	display: none;
+}

@@ -1,0 +1,563 @@
+/* Virtual Elevation Results Styles */
+.ve-results {
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-lg);
+	padding: var(--space-2xl);
+	margin: var(--space-lg) 0;
+}
+
+.ve-results h3 {
+	color: var(--color-text-heading);
+	margin-bottom: var(--space-xl);
+	border-bottom: 2px solid var(--color-primary);
+	padding-bottom: var(--space-sm);
+}
+
+.ve-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: var(--space-lg);
+	margin-bottom: var(--space-xl);
+}
+
+.ve-metric {
+	background: white;
+	padding: var(--space-lg);
+	border-radius: 6px;
+	border: 1px solid var(--color-border);
+}
+
+.ve-metric label {
+	display: block;
+	font-weight: 600;
+	color: var(--color-text-secondary);
+	margin-bottom: var(--space-sm);
+	font-size: 0.9rem;
+}
+
+.ve-metric span {
+	display: block;
+	font-size: 1.1rem;
+	color: var(--color-text-heading);
+	font-weight: 500;
+}
+
+.ve-data-info {
+	background: white;
+	padding: var(--space-lg);
+	border-radius: 6px;
+	border: 1px solid var(--color-border);
+}
+
+.ve-data-info p {
+	margin: var(--space-sm) 0;
+	color: var(--color-text-secondary);
+}
+
+.ve-header {
+	background: var(--color-surface);
+	border-bottom: 2px solid var(--color-primary);
+	padding: var(--space-lg) var(--space-2xl);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	flex-shrink: 0;
+}
+
+.ve-header h2 {
+	margin: 0;
+	color: var(--color-text-heading);
+}
+
+.ve-header-controls {
+	display: flex;
+	gap: var(--space-lg);
+}
+
+.ve-main-layout {
+	display: flex;
+	height: calc(100vh - 80px);
+	overflow: hidden;
+}
+
+.ve-left-panel {
+	width: 400px;
+	background: var(--color-surface);
+	border-right: 1px solid var(--color-border);
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	flex-shrink: 0;
+}
+
+.ve-right-panel {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.ve-map-container {
+	padding: var(--space-lg);
+	border-bottom: 1px solid var(--color-border);
+}
+
+.ve-map-container h4 {
+	margin: 0 0 var(--space-lg) 0;
+	color: var(--color-text-heading);
+}
+
+.ve-map {
+	height: 300px;
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+	border: 1px solid var(--color-border);
+}
+
+.ve-controls {
+	padding: var(--space-lg);
+	flex: 1;
+}
+
+.ve-controls h4 {
+	margin: 0 0 var(--space-xl) 0;
+	color: var(--color-text-heading);
+	border-bottom: 2px solid var(--color-primary);
+	padding-bottom: var(--space-sm);
+}
+
+.ve-control-group {
+	margin-bottom: var(--space-xl);
+}
+
+.ve-control-group label {
+	display: block;
+	font-weight: 600;
+	color: var(--color-text-secondary);
+	margin-bottom: var(--space-sm);
+	font-size: 0.9rem;
+}
+
+.ve-slider {
+	width: 100%;
+	margin-bottom: var(--space-sm);
+	accent-color: var(--color-primary);
+}
+
+.ve-control-group span {
+	display: inline-block;
+	background: white;
+	padding: var(--space-xs) var(--space-sm);
+	border-radius: var(--radius-md);
+	border: 1px solid var(--color-border);
+	font-family: monospace;
+	font-size: 0.9rem;
+	min-width: 60px;
+	text-align: center;
+}
+
+.ve-metrics {
+	background: white;
+	border-radius: var(--radius-lg);
+	padding: var(--space-lg);
+	border: 1px solid var(--color-border);
+	margin-top: var(--space-lg);
+}
+
+.ve-metric-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: var(--space-sm) 0;
+	border-bottom: 1px solid #f1f5f9;
+}
+
+.ve-metric-item:last-child {
+	border-bottom: none;
+}
+
+.ve-metric-item label {
+	font-weight: 600;
+	color: var(--color-text-secondary);
+	margin: 0;
+}
+
+.ve-metric-item span {
+	font-family: monospace;
+	background: #f1f5f9;
+	padding: var(--space-xs) var(--space-sm);
+	border-radius: var(--radius-md);
+}
+
+.primary-btn {
+	background: var(--color-primary);
+	color: white;
+	border: none;
+	padding: var(--space-md) var(--space-xl);
+	border-radius: 6px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.3s ease;
+}
+
+.primary-btn:hover {
+	background: #3c5aa6;
+}
+
+.secondary-btn {
+	background: var(--color-border);
+	color: var(--color-text-secondary);
+	border: none;
+	padding: var(--space-md) var(--space-xl);
+	border-radius: 6px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.3s ease;
+}
+
+.secondary-btn:hover {
+	background: #cbd5e0;
+}
+
+/* Virtual Elevation Analysis Styles */
+.ve-inline-container {
+	width: 100%;
+	position: static;
+	display: block;
+}
+
+.ve-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: var(--space-xl);
+	padding-bottom: var(--space-lg);
+	border-bottom: 1px solid #e5e5e5;
+}
+
+.ve-header h3 {
+	margin: 0;
+	color: var(--color-text);
+}
+
+.ve-control-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 0; /* Remove gap, use margin on control-group instead */
+	margin-bottom: var(--space-xl);
+}
+
+.ve-controls {
+	background: var(--color-surface-alt);
+	padding: var(--space-xl);
+	border-radius: var(--radius-md);
+	border: 1px solid #e9ecef;
+}
+
+.ve-controls h4 {
+	margin: 0 0 var(--space-lg) 0;
+	color: var(--color-text);
+	font-size: 1.1rem;
+}
+
+.ve-elevation-profile-cycle,
+.ve-elevation-profile-switch {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-sm);
+	margin-bottom: var(--space-lg);
+	padding: var(--space-md);
+	background: #fff;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+}
+
+.ve-elevation-profile-cycle label,
+.ve-elevation-profile-switch label {
+	font-size: 0.9rem;
+	font-weight: 500;
+}
+
+.ve-control-group {
+	margin-bottom: 1.25rem;
+}
+
+.ve-control-group:last-child {
+	margin-bottom: 0;
+}
+
+.ve-control-group label {
+	display: block;
+	margin-bottom: var(--space-sm);
+	font-weight: 500;
+	color: var(--color-text-heading);
+	font-size: 0.9rem;
+}
+
+.ve-slider {
+	width: 100%;
+	margin-bottom: var(--space-xs);
+}
+
+.ve-control-group span {
+	font-family: monospace;
+	font-size: 0.9rem;
+	color: var(--color-text-secondary);
+	background: white;
+	padding: var(--space-xs) var(--space-sm);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	display: inline-block;
+}
+
+.ve-value-input {
+	font-family: monospace;
+	font-size: 0.9rem;
+	color: var(--color-text);
+	background: white;
+	padding: var(--space-xs) var(--space-sm);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	width: 100px;
+	text-align: center;
+}
+
+.ve-value-input:focus {
+	outline: none;
+	border-color: var(--color-primary);
+	box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.ve-metrics {
+	background: white;
+	padding: var(--space-lg);
+	border-radius: var(--radius-md);
+	border: 1px solid #e9ecef;
+}
+
+.ve-metric-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: var(--space-md);
+}
+
+.ve-metric-item:last-child {
+	margin-bottom: 0;
+}
+
+.ve-metric-item label {
+	font-size: 0.85rem;
+	color: var(--color-text-heading);
+	font-weight: 500;
+}
+
+.ve-metric-item span {
+	font-family: monospace;
+	font-size: 0.9rem;
+	color: var(--color-text);
+	font-weight: 600;
+}
+
+.ve-plots {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xl);
+	margin-top: var(--space-2xl);
+}
+
+.ve-plot-container {
+	background: white;
+	border: 1px solid #e9ecef;
+	border-radius: var(--radius-md);
+	padding: var(--space-md);
+	flex: 1;
+}
+
+.ve-plot-container h4 {
+	margin: 0 0 var(--space-sm) 0;
+	color: var(--color-text);
+	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+.ve-plot {
+	width: 100%;
+	height: 400px;
+	border: 1px solid #f0f0f0;
+	border-radius: var(--radius-sm);
+}
+
+.ve-wind-source {
+	background: white;
+	padding: var(--space-lg);
+	border-radius: var(--radius-md);
+	border: 1px solid #e9ecef;
+	margin-top: var(--space-xl);
+	margin-bottom: var(--space-xl);
+}
+
+.ve-wind-source h4 {
+	margin: 0 0 var(--space-md) 0;
+	color: var(--color-text);
+	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+.ve-radio-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-md);
+}
+
+.ve-radio-label {
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	padding: var(--space-sm);
+	background: white;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	transition: all 0.2s ease;
+}
+
+.ve-radio-label:hover {
+	background: var(--color-surface-alt);
+	border-color: var(--color-primary);
+}
+
+.ve-radio-label input[type="radio"] {
+	margin-right: var(--space-sm);
+	accent-color: var(--color-primary);
+	cursor: pointer;
+}
+
+.ve-radio-label span {
+	font-size: 0.9rem;
+	color: var(--color-text-heading);
+}
+
+.ve-tabs {
+	display: flex;
+	gap: var(--space-xs);
+	margin-bottom: var(--space-md);
+	border-bottom: 1px solid #e9ecef;
+}
+
+.ve-tab-button {
+	padding: 0.4rem var(--space-md);
+	background: white;
+	border: none;
+	border-bottom: 2px solid transparent;
+	cursor: pointer;
+	font-size: 0.85rem;
+	color: var(--color-text-muted);
+	transition: all 0.15s ease;
+	font-weight: 400;
+}
+
+.ve-tab-button:hover {
+	color: var(--color-primary);
+	background: var(--color-surface-alt);
+}
+
+.ve-tab-button.active {
+	color: var(--color-primary);
+	border-bottom-color: var(--color-primary);
+	font-weight: 500;
+}
+
+.ve-tab-content {
+	display: none;
+}
+
+.ve-tab-content.active {
+	display: block;
+}
+
+/* Compact metrics and plot header */
+.ve-plot-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: var(--space-sm);
+}
+
+.ve-plot-header h4 {
+	margin: 0;
+	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+/* Stitched/Stacked lap-view toggle (ordinary 2+ lap selections) */
+.lap-view-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: var(--space-sm);
+}
+
+.lap-view-toggle-label {
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
+}
+
+.lap-view-toggle-btn {
+	padding: var(--space-xs) 0.7rem;
+	background: white;
+	border: 1px solid #d0d4dc;
+	cursor: pointer;
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
+	transition: all 0.15s ease;
+}
+
+.lap-view-toggle-btn:first-of-type {
+	border-radius: 4px 0 0 4px;
+}
+
+.lap-view-toggle-btn:last-of-type {
+	border-radius: 0 4px 4px 0;
+	border-left: none;
+}
+
+.lap-view-toggle-btn:hover {
+	background: var(--color-surface-alt);
+	color: var(--color-primary);
+}
+
+.lap-view-toggle-btn.active {
+	background: var(--color-primary);
+	border-color: var(--color-primary);
+	color: white;
+	font-weight: 500;
+}
+
+.ve-metrics-compact {
+	font-family: monospace;
+	font-size: 0.75rem;
+	color: var(--color-text-muted);
+	white-space: nowrap;
+	margin-bottom: var(--space-sm);
+	padding: var(--space-xs) 0;
+}
+
+.ve-metrics-compact span {
+	font-weight: 600;
+	color: var(--color-text);
+	margin-left: 0.15rem;
+	margin-right: 0.35rem;
+}
+
+.ve-recompute-status {
+	color: var(--color-primary);
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 8px 0;
+	font-size: 16px;
+	font-weight: 400;
+	line-height: 1.5;
+}

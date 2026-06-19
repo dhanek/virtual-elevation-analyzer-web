@@ -1,0 +1,40 @@
+/* Design tokens (D-02) — the project style guide.
+   Values extracted from the pre-split index.css frequency analysis (05-UI-SPEC).
+   MUST NOT declare ViewportAdapter runtime vars (--vw, --vh, --aspect-ratio,
+   --viewport-category, --map-height, --content-max-width, --grid-columns). */
+:root {
+	/* Colors — brand / accent */
+	--color-primary: #4363d8;
+	--color-success: #38a169;
+	--color-danger: #e53e3e;
+	--color-danger-strong: #c53030;
+
+	/* Colors — text */
+	--color-text: #1a1a1a;
+	--color-text-heading: #2d3748;
+	--color-text-secondary: #4a5568;
+	--color-text-muted: #666;
+
+	/* Colors — borders */
+	--color-border: #e2e8f0;
+	--color-border-strong: #d4d4d4;
+
+	/* Colors — surfaces */
+	--color-surface: #f7fafc;
+	--color-surface-alt: #f8f9fa;
+	--color-surface-white: #ffffff;
+	--color-bg: #fafafa;
+
+	/* Spacing scale */
+	--space-xs: 0.25rem;
+	--space-sm: 0.5rem;
+	--space-md: 0.75rem;
+	--space-lg: 1rem;
+	--space-xl: 1.5rem;
+	--space-2xl: 2rem;
+
+	/* Radii */
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 8px;
+}
