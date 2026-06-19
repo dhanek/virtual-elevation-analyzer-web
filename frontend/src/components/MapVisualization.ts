@@ -1,4 +1,5 @@
 import * as L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import type {
 	DetectedLap,
 	PassingPoint,
@@ -97,16 +98,13 @@ export class MapVisualization {
 	}
 
 	public async initialize(): Promise<void> {
-		// Import Leaflet CSS
-		const link = document.createElement("link");
-		link.rel = "stylesheet";
-		link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-		document.head.appendChild(link);
-
-		// Wait for CSS to load
-		await new Promise((resolve) => {
-			link.onload = resolve;
-		});
+		// Leaflet CSS is bundled via the static `import "leaflet/dist/leaflet.css"`
+		// at the top of this module (no runtime CDN <link>). Yield one frame so any
+		// pending layout/style flush completes before the map is constructed and
+		// before downstream Plotly plots size to their containers — this preserves
+		// the event-loop boundary the previous link.onload await provided. Without
+		// it, VE plots can render against a not-yet-settled container and collapse.
+		await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
 
 		// Initialize the map
 		this.map = L.map(this.container, {
