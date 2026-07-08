@@ -8,7 +8,7 @@
 	width: 100%;
 }
 
-.workflow-section.inactive {
+.workflow-section--inactive {
 	opacity: 0.5;
 	pointer-events: none;
 }
@@ -39,7 +39,7 @@
 	font-size: 1rem;
 }
 
-.section-number.completed {
+.section-number--completed {
 	background: var(--color-success);
 }
 
@@ -71,7 +71,7 @@
 	background: white;
 }
 
-.file-input.dragover {
+.file-input--dragover {
 	border-color: var(--color-primary);
 	background: white;
 	box-shadow: 0 0 0 2px rgba(67, 99, 216, 0.1);
@@ -123,7 +123,7 @@
 	margin-top: var(--space-lg);
 }
 
-.loading.show {
+.loading--show {
 	display: block;
 }
 

@@ -241,7 +241,7 @@ export async function showVirtualElevationAnalysisInline(
 
 	const veSection = document.getElementById("veAnalysisSection");
 	if (veSection) {
-		veSection.classList.remove("hidden", "inactive");
+		veSection.classList.remove("hidden", "workflow-section--inactive");
 	}
 
 	const veAnalysisContent = document.getElementById("veAnalysisContent");

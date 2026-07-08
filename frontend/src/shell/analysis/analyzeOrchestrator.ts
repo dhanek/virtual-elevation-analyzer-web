@@ -241,7 +241,7 @@ export function handleParametersChange(parameters: AnalysisParameters): void {
 	const isVeVisible =
 		!!veSection &&
 		!veSection.classList.contains("hidden") &&
-		!veSection.classList.contains("inactive");
+		!veSection.classList.contains("workflow-section--inactive");
 	if (isVeVisible) {
 		const trimStartSlider = document.getElementById(
 			"trimStartSlider",

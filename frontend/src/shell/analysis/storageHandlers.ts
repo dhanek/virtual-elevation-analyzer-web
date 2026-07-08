@@ -244,38 +244,19 @@ function calculateAverage(values: number[], excludeZero: boolean = false): numbe
 function showNotesDialog(): Promise<string> {
     return new Promise((resolve) => {
         const dialog = document.createElement('div');
-        dialog.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            z-index: 10000;
-            min-width: 300px;
-        `;
+        dialog.className = 'notes-dialog';
 
         dialog.innerHTML = `
-            <h3 style="margin-top: 0;">Add Notes</h3>
-            <input type="text" id="notesInput" placeholder="e.g., test_config_A" style="width: 100%; padding: 8px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px;">
-            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px;">
-                <button id="notesCancelBtn" style="padding: 8px 16px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>
-                <button id="notesOkBtn" style="padding: 8px 16px; border: none; background: #007bff; color: white; border-radius: 4px; cursor: pointer;">OK</button>
+            <h3 class="notes-dialog__title">Add Notes</h3>
+            <input type="text" id="notesInput" placeholder="e.g., test_config_A" class="notes-dialog__input">
+            <div class="notes-dialog__actions">
+                <button id="notesCancelBtn" class="notes-dialog__button notes-dialog__button--cancel">Cancel</button>
+                <button id="notesOkBtn" class="notes-dialog__button notes-dialog__button--ok">OK</button>
             </div>
         `;
 
         const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 9999;
-        `;
+        overlay.className = 'notes-dialog__overlay';
 
         document.body.appendChild(overlay);
         document.body.appendChild(dialog);
