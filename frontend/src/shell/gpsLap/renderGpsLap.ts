@@ -312,7 +312,7 @@ export async function showGpsLapVEPlot(
 	// Show the VE analysis section
 	const veSection = document.getElementById("veAnalysisSection") as HTMLElement;
 	if (veSection) {
-		veSection.classList.remove("hidden", "inactive");
+		veSection.classList.remove("hidden", "workflow-section--inactive");
 	}
 
 	const veAnalysisContent = document.getElementById(

@@ -213,7 +213,7 @@ export async function displayResults(result: any): Promise<void> {
         ${
 					laps.length > 0
 						? `
-        <div style="margin-top: 1.5rem; padding: 1rem; background: #f0fff4; border: 1px solid #38a169; border-radius: 4px; color: #2d7a52;">
+        <div class="analysis-success-note">
             File analyzed successfully! Found ${laps.length} lap${laps.length > 1 ? "s" : ""} with ${stats.has_gps_data ? "GPS data" : "no GPS data"}.
             ${stats.has_gps_data ? "Map and lap selection are now available below." : ""}
         </div>
@@ -225,16 +225,16 @@ export async function displayResults(result: any): Promise<void> {
 					deps.appState.elevationCorrectionEnabled &&
 					deps.appState.selectedDEMFile
 						? `
-        <div style="margin-top: 1.5rem; padding: 1rem; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
-            <h4 style="margin: 0 0 0.5rem 0; color: #2d7a52;">📊 Elevation Correction Applied</h4>
-            <p style="margin: 0 0 0.5rem 0; color: #2d7a52;"><strong>DEM file:</strong> ${deps.appState.selectedDEMFile.name}</p>
-            <p style="margin: 0 0 0.5rem 0; color: #2d7a52;">
+        <div class="dem-correction-note">
+            <h4 class="dem-correction-note__title">📊 Elevation Correction Applied</h4>
+            <p class="dem-correction-note__line"><strong>DEM file:</strong> ${deps.appState.selectedDEMFile.name}</p>
+            <p class="dem-correction-note__line">
                 <strong>Successfully corrected:</strong> ${(100 - deps.appState.elevationErrorRate * 100).toFixed(1)}%
             </p>
             ${
 							deps.appState.elevationErrorRate > 0.01
 								? `
-            <p style="margin: 0; color: #f57c00; font-weight: 500;">
+            <p class="dem-correction-note__warning">
                 ⚠️ ${(deps.appState.elevationErrorRate * 100).toFixed(1)}% of points used GPS fallback (DEM lookup failed)
             </p>
             `

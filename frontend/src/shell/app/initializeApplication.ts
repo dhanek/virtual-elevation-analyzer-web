@@ -80,7 +80,7 @@ function activateSection(sectionNumber: number): void {
 	for (let i = 1; i < sectionNumber; i++) {
 		const numberEl = document.getElementById(`section${i}Number`);
 		if (numberEl) {
-			numberEl.classList.add("completed");
+			numberEl.classList.add("section-number--completed");
 			numberEl.textContent = "✓";
 		}
 	}
@@ -91,9 +91,9 @@ function activateSection(sectionNumber: number): void {
 		const section = document.getElementById(sectionId);
 		if (section) {
 			if (index + 1 <= sectionNumber) {
-				section.classList.remove("inactive");
+				section.classList.remove("workflow-section--inactive");
 			} else {
-				section.classList.add("inactive");
+				section.classList.add("workflow-section--inactive");
 			}
 		}
 	});
@@ -119,12 +119,12 @@ export async function initializeApplicationShell(
 
 	function showLoading(message: string): void {
 		dom.loadingText.textContent = message;
-		dom.loading.classList.add("show");
+		dom.loading.classList.add("loading--show");
 		dom.analyzeButton.disabled = true;
 	}
 
 	function hideLoading(): void {
-		dom.loading.classList.remove("show");
+		dom.loading.classList.remove("loading--show");
 		dom.analyzeButton.disabled = false;
 	}
 
@@ -226,16 +226,16 @@ export async function initializeApplicationShell(
 	// Drag and drop handlers
 	dom.fileDropZone.addEventListener("dragover", (event) => {
 		event.preventDefault();
-		dom.fileDropZone.classList.add("dragover");
+		dom.fileDropZone.classList.add("file-input--dragover");
 	});
 
 	dom.fileDropZone.addEventListener("dragleave", () => {
-		dom.fileDropZone.classList.remove("dragover");
+		dom.fileDropZone.classList.remove("file-input--dragover");
 	});
 
 	dom.fileDropZone.addEventListener("drop", (event) => {
 		event.preventDefault();
-		dom.fileDropZone.classList.remove("dragover");
+		dom.fileDropZone.classList.remove("file-input--dragover");
 
 		const files = event.dataTransfer?.files;
 		if (files && files.length > 0) {
@@ -262,16 +262,25 @@ export async function initializeApplicationShell(
 
 	dom.demFileDropZone.addEventListener("dragover", (event) => {
 		event.preventDefault();
-		dom.demFileDropZone.classList.add("dragover");
+		dom.demFileDropZone.classList.add(
+			"file-input--dragover",
+			"dem-file-input--dragover",
+		);
 	});
 
 	dom.demFileDropZone.addEventListener("dragleave", () => {
-		dom.demFileDropZone.classList.remove("dragover");
+		dom.demFileDropZone.classList.remove(
+			"file-input--dragover",
+			"dem-file-input--dragover",
+		);
 	});
 
 	dom.demFileDropZone.addEventListener("drop", async (event) => {
 		event.preventDefault();
-		dom.demFileDropZone.classList.remove("dragover");
+		dom.demFileDropZone.classList.remove(
+			"file-input--dragover",
+			"dem-file-input--dragover",
+		);
 
 		const files = event.dataTransfer?.files;
 		if (files && files.length > 0) {

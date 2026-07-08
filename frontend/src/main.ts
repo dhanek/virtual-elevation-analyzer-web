@@ -97,7 +97,7 @@ initializeApplicationShell({
 	},
 }).catch((err) => {
 	log.error("Failed to initialize application:", err);
-	loading.classList.remove("show");
+	loading.classList.remove("loading--show");
 	error.textContent = `Failed to initialize application: ${err.message}`;
 	error.classList.remove("hidden");
 });
