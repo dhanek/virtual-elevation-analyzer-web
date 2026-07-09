@@ -843,7 +843,7 @@ export function setupVESliders(
 		mapTrimStartValue &&
 		mapTrimEndValue
 	) {
-		mapTrimControls.style.display = "flex";
+		mapTrimControls.classList.remove("hidden");
 		mapTrimStartSlider.min = "0";
 		mapTrimStartSlider.max = (
 			timestamps.length - MIN_TRIM_WINDOW_SAMPLES

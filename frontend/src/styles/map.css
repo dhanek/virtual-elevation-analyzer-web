@@ -121,8 +121,12 @@
    End of consolidated map & analysis layout block (D-03)
    ================================================================ */
 
+/* Visible display is flex; hidden state is the shared .hidden utility toggled
+   from the markup/JS (inversion-trap conversion, D-06). The compound guard is
+   required because base.css (.hidden) imports before map.css — a bare .hidden
+   would lose the cascade to the display: flex declaration below. */
 .map-trim-controls {
-	display: none;
+	display: flex;
 	flex-direction: column;
 	gap: var(--space-sm);
 	padding: var(--space-md);
@@ -130,6 +134,10 @@
 	border: 1px solid var(--color-border-strong);
 	border-radius: var(--radius-sm);
 	margin-top: var(--space-sm);
+}
+
+.map-trim-controls.hidden {
+	display: none;
 }
 
 .map-trim-group {
@@ -168,13 +176,33 @@
 	box-shadow: 0 0 0 1px var(--color-primary);
 }
 
+/* No-GPS placeholder shown in .analysis-main when the file has no coordinates.
+   (Rule repurposed: the previous .no-gps-message declarations had zero markup
+   consumers; these values come from the formerly inline-styled template div.) */
 .no-gps-message {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	height: 100%;
-	color: var(--color-text-muted);
-	font-size: 1.1rem;
+	padding: var(--space-2xl);
+	text-align: center;
+	background: var(--color-surface);
+	border: 2px dashed #cbd5e0;
+	border-radius: var(--radius-lg);
+}
+
+.no-gps-message__icon {
+	font-size: 3rem;
+	margin-bottom: var(--space-lg);
+}
+
+.no-gps-message__title {
+	margin-bottom: var(--space-sm);
+}
+
+.no-gps-message__text {
+	color: #718096;
+	margin-bottom: var(--space-lg);
+}
+
+.no-gps-message__text--last {
+	margin: 0;
 }
 
 .lap-selection {
@@ -233,7 +261,10 @@
 	background: #f0f4ff;
 }
 
-.lap-checkbox-item.selected {
+/* Compound selector kept (not a pure modifier): must stay at 0,2,0 specificity
+   after :hover in source order so a hovered selected card keeps the selected
+   background (pure .lap-checkbox-item--selected at 0,1,0 would lose to :hover). */
+.lap-checkbox-item.lap-checkbox-item--selected {
 	background: #e6f0ff;
 	border-color: var(--color-primary);
 }
@@ -263,7 +294,7 @@
 	border: none;
 }
 
-.marker-content {
+.lap-marker__content {
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -275,11 +306,13 @@
 	font-size: 14px;
 }
 
-.marker-content.start {
+/* Both the divIcon container modifier (lap-marker--start/--end) and the content
+   modifier are Leaflet-bound in MapVisualization.ts — keep in lockstep (D-13). */
+.lap-marker--start .lap-marker__content--start {
 	background: var(--color-success);
 }
 
-.marker-content.end {
+.lap-marker--end .lap-marker__content--end {
 	background: var(--color-danger);
 }
 
@@ -313,12 +346,17 @@
 	border: none !important;
 }
 
-.gate-marker-label-a {
+.gate-marker-label--a {
 	background: #00aa00 !important;
 	color: white !important;
 }
 
-.gate-marker-label-b {
+.gate-marker-label--b {
 	background: #0066cc !important;
 	color: white !important;
+}
+
+/* Section 3 footer action row (formerly inline margin on the template div) */
+.analysis-actions {
+	margin-top: var(--space-2xl);
 }

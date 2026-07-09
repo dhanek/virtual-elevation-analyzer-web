@@ -4,6 +4,13 @@
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-sm);
 	padding: var(--space-sm);
+	margin-top: var(--space-sm);
+	margin-bottom: var(--space-sm);
+}
+
+.gps-lap-detection-panel__hint {
+	font-size: 0.75rem;
+	color: var(--color-text-muted);
 	margin-bottom: var(--space-sm);
 }
 
@@ -34,4 +41,88 @@
 #gpsLapList {
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-sm);
+}
+
+/* Gate slider controls — shared by the GPS lap detection and out-and-back
+   panels. Initially hidden via the shared .hidden utility in the markup; the
+   compound guards are required because base.css (.hidden) imports before
+   gps-panels.css, so the display: block declarations below would otherwise
+   win the cascade over a bare .hidden. */
+.gps-gate-slider-controls,
+.oab-gate-slider-controls {
+	display: block;
+}
+
+.gps-gate-slider-controls.hidden,
+.oab-gate-slider-controls.hidden {
+	display: none;
+}
+
+.gate-slider-group {
+	margin-bottom: var(--space-md);
+}
+
+.gate-slider-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	margin-bottom: var(--space-sm);
+}
+
+.gate-slider-row--tight {
+	margin-bottom: var(--space-xs);
+}
+
+.gate-slider-row__label {
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+.gate-slider-row__label--gate-a {
+	color: #00aa00;
+	font-weight: 500;
+}
+
+.gate-slider-row__label--gate-b {
+	color: #0066cc;
+	font-weight: 500;
+}
+
+.gate-slider-row__slider {
+	flex: 1;
+}
+
+.gate-slider-row__value {
+	width: 50px;
+	text-align: right;
+}
+
+.gate-slider-row__unit {
+	font-size: 0.85rem;
+}
+
+.gate-position-info {
+	font-size: 0.75rem;
+	color: var(--color-text-muted);
+}
+
+.gate-position-info--indented {
+	margin-left: 3.5rem;
+}
+
+/* Detected laps / out-and-back sections summary (initially hidden via the
+   shared .hidden utility; no display declaration, so .hidden wins unaided) */
+.detected-laps-info {
+	margin-top: var(--space-lg);
+}
+
+.detected-laps-info__summary {
+	font-size: 0.9em;
+	color: var(--color-text-muted);
+	margin-bottom: var(--space-sm);
+}
+
+.detected-laps-info__list {
+	max-height: 200px;
+	overflow-y: auto;
 }

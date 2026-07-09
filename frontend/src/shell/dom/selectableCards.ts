@@ -27,7 +27,7 @@ export function renderSelectableCards(items: SelectableCardItem[], cssClass: str
 
     return items
         .map(item => {
-            const selectedClass = item.checked ? ' selected' : ''
+            const selectedClass = item.checked ? ' lap-checkbox-item--selected' : ''
             const checkedAttr = item.checked ? ' checked' : ''
             return `<div class="lap-checkbox-item${selectedClass}" data-${item.dataAttr}="${item.dataValue}">
             <input type="checkbox" class="${cssClass}" id="${item.id}"${checkedAttr}>
@@ -72,9 +72,9 @@ export function bindSelectableCardEvents(
         container.querySelectorAll(`.lap-checkbox-item[${dataSelector}]`).forEach(item => {
             const checkbox = item.querySelector(`.${checkboxClass}`) as HTMLInputElement | null
             if (checkbox?.checked) {
-                item.classList.add('selected')
+                item.classList.add('lap-checkbox-item--selected')
             } else {
-                item.classList.remove('selected')
+                item.classList.remove('lap-checkbox-item--selected')
             }
         })
     }
