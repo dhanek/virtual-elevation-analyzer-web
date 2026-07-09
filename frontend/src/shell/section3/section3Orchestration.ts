@@ -496,18 +496,18 @@ export function updateGpsDetectedLapsUI(): void {
 	if (!lapsInfo || !lapCountSpan || !lapList) return;
 
 	if (deps.appState.gpsDetectedLaps.length === 0) {
-		lapsInfo.style.display = "none";
+		lapsInfo.classList.add("hidden");
 		return;
 	}
 
-	lapsInfo.style.display = "block";
+	lapsInfo.classList.remove("hidden");
 	lapCountSpan.textContent = deps.appState.gpsDetectedLaps.length.toString();
 
 	// Populate lap list
 	lapList.innerHTML = deps.appState.gpsDetectedLaps
 		.map(
 			(lap) => `
-        <div class="lap-checkbox-item selected" data-gps-lap="${lap.lapNumber}">
+        <div class="lap-checkbox-item lap-checkbox-item--selected" data-gps-lap="${lap.lapNumber}">
             <input type="checkbox" class="gps-lap-checkbox" id="gps-lap-${lap.lapNumber}" checked>
             <div class="lap-info">
                 <div class="lap-number">Lap ${lap.lapNumber}</div>
@@ -568,9 +568,9 @@ export function handleGpsLapSelectionChange(): void {
 				".gps-lap-checkbox",
 			) as HTMLInputElement;
 			if (checkbox?.checked) {
-				item.classList.add("selected");
+				item.classList.add("lap-checkbox-item--selected");
 			} else {
-				item.classList.remove("selected");
+				item.classList.remove("lap-checkbox-item--selected");
 			}
 		});
 
@@ -683,11 +683,11 @@ export function updateOutAndBackSectionsUI(): void {
 	if (!sectionsInfo || !sectionCountSpan || !sectionList) return;
 
 	if (deps.appState.outAndBackSections.length === 0) {
-		sectionsInfo.style.display = "none";
+		sectionsInfo.classList.add("hidden");
 		return;
 	}
 
-	sectionsInfo.style.display = "block";
+	sectionsInfo.classList.remove("hidden");
 	sectionCountSpan.textContent =
 		deps.appState.outAndBackSections.length.toString();
 
@@ -695,7 +695,7 @@ export function updateOutAndBackSectionsUI(): void {
 	sectionList.innerHTML = deps.appState.outAndBackSections
 		.map(
 			(section) => `
-        <div class="lap-checkbox-item selected" data-oab-section="${section.sectionNumber}">
+        <div class="lap-checkbox-item lap-checkbox-item--selected" data-oab-section="${section.sectionNumber}">
             <input type="checkbox" class="oab-section-checkbox" id="oab-section-${section.sectionNumber}" checked>
             <div class="lap-info">
                 <div class="lap-number">Section ${section.sectionNumber}</div>
@@ -756,9 +756,9 @@ export function handleOutAndBackSectionSelectionChange(): void {
 				".oab-section-checkbox",
 			) as HTMLInputElement;
 			if (checkbox?.checked) {
-				item.classList.add("selected");
+				item.classList.add("lap-checkbox-item--selected");
 			} else {
-				item.classList.remove("selected");
+				item.classList.remove("lap-checkbox-item--selected");
 			}
 		});
 
@@ -838,7 +838,7 @@ export function updateSelectedLaps(): void {
 	const mapTrimControls = document.getElementById("mapTrimControls");
 	if (mapTrimControls) {
 		if (shouldShowSelectionTrimControls) {
-			mapTrimControls.style.display = "flex";
+			mapTrimControls.classList.remove("hidden");
 			void initializeMapTrimControlsForSelectedLaps();
 
 			if (
@@ -856,7 +856,7 @@ export function updateSelectedLaps(): void {
 				}, 500);
 			}
 		} else {
-			mapTrimControls.style.display = "none";
+			mapTrimControls.classList.add("hidden");
 		}
 	}
 

@@ -56,7 +56,7 @@ export async function bindOutAndBackDetection(
     gateBValue.max = String(maxSeconds);
 
     // Show slider controls
-    sliderControls.style.display = 'block';
+    sliderControls.classList.remove('hidden');
 
     // Load saved gate positions or use defaults
     let initialOffsetA = 5;  // Default 5 seconds

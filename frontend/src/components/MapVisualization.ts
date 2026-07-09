@@ -503,8 +503,8 @@ export class MapVisualization {
 			if (startPoint) {
 				const startMarker = L.marker(startPoint, {
 					icon: L.divIcon({
-						className: "lap-marker start-marker",
-						html: `<div class="marker-content start">▶</div>`,
+						className: "lap-marker lap-marker--start",
+						html: `<div class="lap-marker__content lap-marker__content--start">▶</div>`,
 						iconSize: [24, 24],
 						iconAnchor: [12, 12],
 					}),
@@ -516,8 +516,8 @@ export class MapVisualization {
 			if (endPoint && endPoint !== startPoint) {
 				const endMarker = L.marker(endPoint, {
 					icon: L.divIcon({
-						className: "lap-marker end-marker",
-						html: `<div class="marker-content end">⏹</div>`,
+						className: "lap-marker lap-marker--end",
+						html: `<div class="lap-marker__content lap-marker__content--end">⏹</div>`,
 						iconSize: [24, 24],
 						iconAnchor: [12, 12],
 					}),
@@ -1045,7 +1045,7 @@ export class MapVisualization {
 			permanent: true,
 			direction: "top",
 			offset: [0, -GATE_MARKER_TOOLTIP_OFFSET_Y_PX],
-			className: "gate-marker-label gate-marker-label-a",
+			className: "gate-marker-label gate-marker-label--a",
 		});
 
 		this.gpsMarkerA.addTo(this.gpsMarkerLayer);
@@ -1081,7 +1081,7 @@ export class MapVisualization {
 			permanent: true,
 			direction: "top",
 			offset: [0, -GATE_MARKER_TOOLTIP_OFFSET_Y_PX],
-			className: "gate-marker-label gate-marker-label-b",
+			className: "gate-marker-label gate-marker-label--b",
 		});
 
 		this.gpsMarkerB.addTo(this.gpsMarkerLayer);

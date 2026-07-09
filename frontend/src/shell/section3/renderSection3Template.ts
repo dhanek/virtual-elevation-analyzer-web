@@ -102,25 +102,25 @@ export function renderSection3Template(input: Section3TemplateInput): string {
 									showGpsLapDetection
 										? `
                 <!-- GPS Lap Detection Panel (shown below lap selection when enabled) -->
-                <div class="gps-lap-detection-panel" id="gpsLapDetectionPanel" style="margin-top: 0.5rem;">
+                <div class="gps-lap-detection-panel" id="gpsLapDetectionPanel">
                     <h4>GPS Virtual Lap Detection</h4>
-                    <p style="font-size: 0.75rem; color: #666; margin-bottom: 0.5rem;">
+                    <p class="gps-lap-detection-panel__hint">
                         Select FIT laps above, then set gate position to detect virtual laps.
                     </p>
-                    <div class="gps-gate-slider-controls" id="gpsGateSliderControls" style="display: none;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                            <label style="font-size: 0.85rem; white-space: nowrap;">Gate Position:</label>
-                            <input type="range" id="gpsGateSlider" min="0" max="100" value="5" step="1" style="flex: 1;">
-                            <input type="number" id="gpsGateValue" value="5" min="0" step="1" style="width: 50px; text-align: right;">
-                            <span style="font-size: 0.85rem;">s</span>
+                    <div class="gps-gate-slider-controls hidden" id="gpsGateSliderControls">
+                        <div class="gate-slider-row">
+                            <label class="gate-slider-row__label">Gate Position:</label>
+                            <input type="range" id="gpsGateSlider" min="0" max="100" value="5" step="1" class="gate-slider-row__slider">
+                            <input type="number" id="gpsGateValue" value="5" min="0" step="1" class="gate-slider-row__value">
+                            <span class="gate-slider-row__unit">s</span>
                         </div>
-                        <div id="gpsGatePositionInfo" style="font-size: 0.75rem; color: #666;"></div>
+                        <div id="gpsGatePositionInfo" class="gate-position-info"></div>
                     </div>
-                    <div id="gpsDetectedLapsInfo" style="margin-top: 1rem; display: none;">
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">
+                    <div id="gpsDetectedLapsInfo" class="detected-laps-info hidden">
+                        <div class="detected-laps-info__summary">
                             Detected <span id="gpsLapCount">0</span> virtual laps
                         </div>
-                        <div class="lap-list" id="gpsLapList" style="max-height: 200px; overflow-y: auto;">
+                        <div class="lap-list detected-laps-info__list" id="gpsLapList">
                             <!-- GPS detected laps will be populated here -->
                         </div>
                     </div>
@@ -132,36 +132,36 @@ export function renderSection3Template(input: Section3TemplateInput): string {
 									showOutAndBack
 										? `
                 <!-- Out and Back Detection Panel -->
-                <div class="gps-lap-detection-panel" id="outAndBackPanel" style="margin-top: 0.5rem;">
+                <div class="gps-lap-detection-panel" id="outAndBackPanel">
                     <h4>Out &amp; Back Detection</h4>
-                    <p style="font-size: 0.75rem; color: #666; margin-bottom: 0.5rem;">
+                    <p class="gps-lap-detection-panel__hint">
                         Set two gates: A (start/end) and B (turnaround). B must be after A.
                     </p>
-                    <div class="oab-gate-slider-controls" id="oabGateSliderControls" style="display: none;">
-                        <div style="margin-bottom: 0.75rem;">
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                                <label style="font-size: 0.85rem; white-space: nowrap; color: #00aa00; font-weight: 500;">Gate A:</label>
-                                <input type="range" id="oabGateASlider" min="0" max="100" value="5" step="1" style="flex: 1;">
-                                <input type="number" id="oabGateAValue" value="5" min="0" step="1" style="width: 50px; text-align: right;">
-                                <span style="font-size: 0.85rem;">s</span>
+                    <div class="oab-gate-slider-controls hidden" id="oabGateSliderControls">
+                        <div class="gate-slider-group">
+                            <div class="gate-slider-row gate-slider-row--tight">
+                                <label class="gate-slider-row__label gate-slider-row__label--gate-a">Gate A:</label>
+                                <input type="range" id="oabGateASlider" min="0" max="100" value="5" step="1" class="gate-slider-row__slider">
+                                <input type="number" id="oabGateAValue" value="5" min="0" step="1" class="gate-slider-row__value">
+                                <span class="gate-slider-row__unit">s</span>
                             </div>
-                            <div id="oabGateAInfo" style="font-size: 0.75rem; color: #666; margin-left: 3.5rem;"></div>
+                            <div id="oabGateAInfo" class="gate-position-info gate-position-info--indented"></div>
                         </div>
                         <div>
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                                <label style="font-size: 0.85rem; white-space: nowrap; color: #0066cc; font-weight: 500;">Gate B:</label>
-                                <input type="range" id="oabGateBSlider" min="0" max="100" value="60" step="1" style="flex: 1;">
-                                <input type="number" id="oabGateBValue" value="60" min="0" step="1" style="width: 50px; text-align: right;">
-                                <span style="font-size: 0.85rem;">s</span>
+                            <div class="gate-slider-row gate-slider-row--tight">
+                                <label class="gate-slider-row__label gate-slider-row__label--gate-b">Gate B:</label>
+                                <input type="range" id="oabGateBSlider" min="0" max="100" value="60" step="1" class="gate-slider-row__slider">
+                                <input type="number" id="oabGateBValue" value="60" min="0" step="1" class="gate-slider-row__value">
+                                <span class="gate-slider-row__unit">s</span>
                             </div>
-                            <div id="oabGateBInfo" style="font-size: 0.75rem; color: #666; margin-left: 3.5rem;"></div>
+                            <div id="oabGateBInfo" class="gate-position-info gate-position-info--indented"></div>
                         </div>
                     </div>
-                    <div id="outAndBackSectionsInfo" style="margin-top: 1rem; display: none;">
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">
+                    <div id="outAndBackSectionsInfo" class="detected-laps-info hidden">
+                        <div class="detected-laps-info__summary">
                             Detected <span id="outAndBackSectionCount">0</span> out-and-back sections
                         </div>
-                        <div class="lap-list" id="outAndBackSectionList" style="max-height: 200px; overflow-y: auto;">
+                        <div class="lap-list detected-laps-info__list" id="outAndBackSectionList">
                             <!-- Out and Back sections will be populated here -->
                         </div>
                     </div>
@@ -172,7 +172,7 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                 ${
 									!showGpsLapDetection && !showOutAndBack
 										? `
-                <div class="map-trim-controls" id="mapTrimControls" style="display: none;">
+                <div class="map-trim-controls hidden" id="mapTrimControls">
                     <div class="map-trim-group">
                         <label>Trim Start:</label>
                         <input type="range" id="mapTrimStartSlider" class="ve-slider-compact">
@@ -199,17 +199,17 @@ export function renderSection3Template(input: Section3TemplateInput): string {
             `
 								: `
             <div class="analysis-main">
-                <div style="padding: 2rem; text-align: center; background: #f7fafc; border: 2px dashed #cbd5e0; border-radius: 8px;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">\u{1F4CD}</div>
-                    <h3 style="margin-bottom: 0.5rem;">No GPS Data Available</h3>
-                    <p style="color: #718096; margin-bottom: 1rem;">This file contains power and speed data but no GPS coordinates.</p>
-                    <p style="color: #718096; margin: 0;">Velodrome mode has been automatically enabled (zero altitude reference).</p>
+                <div class="no-gps-message">
+                    <div class="no-gps-message__icon">\u{1F4CD}</div>
+                    <h3 class="no-gps-message__title">No GPS Data Available</h3>
+                    <p class="no-gps-message__text">This file contains power and speed data but no GPS coordinates.</p>
+                    <p class="no-gps-message__text no-gps-message__text--last">Velodrome mode has been automatically enabled (zero altitude reference).</p>
                 </div>
             </div>
             `
 						}
         </div>
-        <div class="analysis-actions" style="margin-top: 2rem;">
+        <div class="analysis-actions">
             <button id="analyzeBtn" class="primary-btn" disabled>Select Laps to Analyze</button>
         </div>
     `;
