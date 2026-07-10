@@ -60,7 +60,9 @@ describe("crrTempControlsMarkup", () => {
 		) as HTMLInputElement;
 		const fields = document.getElementById("crrTempFields") as HTMLElement;
 		expect(toggle.checked).toBe(false);
-		expect(fields.style.display).toBe("none");
+		expect(
+			fields.classList.contains("crr-temp-controls__fields--hidden"),
+		).toBe(true);
 	});
 
 	test("keeps the label short and moves the explanation into an info tooltip", () => {
@@ -137,7 +139,9 @@ describe("bindCrrTempControls", () => {
 		);
 		expect(onChange).toHaveBeenCalled();
 		const fields = document.getElementById("crrTempFields") as HTMLElement;
-		expect(fields.style.display).not.toBe("none");
+		expect(
+			fields.classList.contains("crr-temp-controls__fields--hidden"),
+		).toBe(false);
 	});
 
 	test("enabling the toggle prefills ambient temp from weather metadata", () => {

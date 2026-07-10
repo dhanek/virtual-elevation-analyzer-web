@@ -103,7 +103,7 @@ export class AnalysisParametersComponent {
                                value="${this.parameters.rho}" title="Air density (1.225 at sea level, 15°C)">
                     </div>
 
-                    <div class="param-item checkbox-item">
+                    <div class="param-item param-item--checkbox">
                         <label for="auto_calculate_rho">
                             <input type="checkbox" id="auto_calculate_rho" ${this.parameters.auto_calculate_rho ? "checked" : ""}>
                             Auto-calculate from weather
@@ -153,13 +153,13 @@ export class AnalysisParametersComponent {
                     </div>
                 </div>
 
-                <div class="param-compact-grid" style="margin-top: 1rem;">
+                <div class="param-compact-grid param-compact-grid--spaced">
                     <div class="param-item">
                         <label for="wind_speed">Wind Speed:</label>
-                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <div class="param-item__row">
                             <input type="number" id="wind_speed" min="0" max="30" step="0.1"
-                                   placeholder="Optional" title="Wind speed (constant value)" style="flex: 1;">
-                            <select id="wind_speed_unit" style="width: 70px;" title="Wind speed unit">
+                                   placeholder="Optional" title="Wind speed (constant value)">
+                            <select id="wind_speed_unit" title="Wind speed unit">
                                 <option value="m/s" ${this.parameters.wind_speed_unit === "m/s" ? "selected" : ""}>m/s</option>
                                 <option value="km/h" ${this.parameters.wind_speed_unit === "km/h" ? "selected" : ""}>km/h</option>
                             </select>
@@ -172,7 +172,7 @@ export class AnalysisParametersComponent {
                                placeholder="Optional" title="Direction wind is coming FROM (0°=N, 90°=E, 180°=S, 270°=W)">
                     </div>
 
-                    <div class="param-item checkbox-item">
+                    <div class="param-item param-item--checkbox">
                         <label for="velodrome">
                             <input type="checkbox" id="velodrome" ${this.parameters.velodrome ? "checked" : ""}>
                             Velodrome (Zero Altitude)
@@ -182,20 +182,20 @@ export class AnalysisParametersComponent {
                     <!-- Note: GPS Analysis Mode moved to Section 3 UI -->
                 </div>
 
-                <div id="weather_info_container" style="display: none; margin-top: 1rem; padding: 0.75rem; background: #f5f5f5; border-radius: 4px; border-left: 3px solid #4CAF50;">
-                    <div style="font-size: 0.9em; color: #666;">
+                <div id="weather_info_container" class="weather-info hidden">
+                    <div class="weather-info__line">
                         <strong>Weather Data:</strong>
-                        <span id="weather_temp" style="margin-left: 0.5rem;">--</span>°C,
-                        <span id="weather_pressure" style="margin-left: 0.25rem;">--</span> hPa,
+                        <span id="weather_temp" class="weather-info__value">--</span>°C,
+                        <span id="weather_pressure" class="weather-info__value weather-info__value--tight">--</span> hPa,
                         Dew Point: <span id="weather_dewpoint">--</span>°C
-                        <span id="weather_source" style="margin-left: 0.5rem; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; background: #e0e0e0;">--</span>
+                        <span id="weather_source" class="weather-info__source">--</span>
                     </div>
-                    <div style="font-size: 0.85em; color: #666; margin-top: 0.25rem;">
+                    <div class="weather-info__line weather-info__line--secondary">
                         <strong>Wind:</strong>
-                        <span id="weather_windspeed" style="margin-left: 0.5rem;">--</span> m/s,
+                        <span id="weather_windspeed" class="weather-info__value">--</span> m/s,
                         Direction: <span id="weather_winddirection">--</span>°
                     </div>
-                    <div style="font-size: 0.85em; color: #888; margin-top: 0.25rem;">
+                    <div class="weather-info__line weather-info__line--meta">
                         Location: <span id="weather_location">--</span> |
                         Time: <span id="weather_timestamp">--</span>
                     </div>
@@ -378,7 +378,7 @@ export class AnalysisParametersComponent {
 			const metadata = this.parameters.weather_metadata;
 
 			// Show the weather info container
-			weatherInfoContainer.style.display = "block";
+			weatherInfoContainer.classList.remove("hidden");
 
 			// Update values
 			const tempSpan = this.container.querySelector("#weather_temp");
@@ -409,12 +409,8 @@ export class AnalysisParametersComponent {
 			if (sourceSpan) {
 				const isCached = metadata.source === "cache";
 				sourceSpan.textContent = isCached ? "💾 Cached" : "⬇️ API";
-				(sourceSpan as HTMLElement).style.background = isCached
-					? "#e3f2fd"
-					: "#fff3e0";
-				(sourceSpan as HTMLElement).style.color = isCached
-					? "#1976d2"
-					: "#e65100";
+				sourceSpan.classList.toggle("weather-info__source--cached", isCached);
+				sourceSpan.classList.toggle("weather-info__source--api", !isCached);
 			}
 
 			if (locationSpan) {
@@ -427,7 +423,7 @@ export class AnalysisParametersComponent {
 			}
 		} else {
 			// Hide the weather info container
-			weatherInfoContainer.style.display = "none";
+			weatherInfoContainer.classList.add("hidden");
 		}
 	}
 

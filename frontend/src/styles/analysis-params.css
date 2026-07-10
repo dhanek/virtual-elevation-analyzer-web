@@ -43,6 +43,10 @@
 	gap: var(--space-md);
 }
 
+.param-compact-grid--spaced {
+	margin-top: var(--space-lg);
+}
+
 .param-item {
 	display: flex;
 	flex-direction: column;
@@ -84,19 +88,33 @@
 	font-style: normal;
 }
 
-.checkbox-item {
+.param-item__row {
+	display: flex;
+	gap: var(--space-sm);
+	align-items: center;
+}
+
+.param-item__row input {
+	flex: 1;
+}
+
+.param-item__row select {
+	width: 70px;
+}
+
+.param-item--checkbox {
 	flex-direction: row;
 	align-items: center;
 }
 
-.checkbox-item label {
+.param-item--checkbox label {
 	display: flex;
 	align-items: center;
 	margin-bottom: 0;
 	cursor: pointer;
 }
 
-.checkbox-item input[type="checkbox"] {
+.param-item--checkbox input[type="checkbox"] {
 	margin-right: var(--space-sm);
 	width: auto;
 }
@@ -143,6 +161,59 @@
 	color: var(--color-text-muted);
 	font-size: 0.9rem;
 	padding: 0 var(--space-xs);
+}
+
+/* Weather-data info panel (shown when auto-calculated rho carries API metadata).
+   No display declaration on the block: visibility uses the shared .hidden utility,
+   which must keep winning the cascade (base.css imports first). */
+.weather-info {
+	margin-top: var(--space-lg);
+	padding: var(--space-md);
+	background: #f5f5f5;
+	border-radius: var(--radius-md);
+	border-left: 3px solid #4caf50;
+}
+
+.weather-info__line {
+	font-size: 0.9em;
+	color: var(--color-text-muted);
+}
+
+.weather-info__line--secondary {
+	font-size: 0.85em;
+	margin-top: var(--space-xs);
+}
+
+.weather-info__line--meta {
+	font-size: 0.85em;
+	color: #888;
+	margin-top: var(--space-xs);
+}
+
+.weather-info__value {
+	margin-left: var(--space-sm);
+}
+
+.weather-info__value--tight {
+	margin-left: var(--space-xs);
+}
+
+.weather-info__source {
+	margin-left: var(--space-sm);
+	padding: 2px 6px;
+	border-radius: 3px;
+	font-size: 0.85em;
+	background: #e0e0e0;
+}
+
+.weather-info__source--cached {
+	background: #e3f2fd;
+	color: #1976d2;
+}
+
+.weather-info__source--api {
+	background: #fff3e0;
+	color: #e65100;
 }
 
 .param-actions {
@@ -195,8 +266,11 @@
 	border-color: #9ca3af;
 }
 
-/* Crr temperature correction controls (override .ve-control-group span/label box styling) */
-.crr-temp-controls label.crr-temp-toggle {
+/* Crr temperature correction controls (override .ve-control-group span/label box styling).
+   Specificity guard: analysis-params.css imports BEFORE ve-results.css, so rules that
+   must out-rank .ve-control-group label/span (0,1,1) repeat their own class (0,2,0) —
+   no descendant class selectors, per the pass-3 flatten rule. */
+.crr-temp-controls__toggle.crr-temp-controls__toggle {
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
@@ -205,14 +279,14 @@
 	cursor: pointer;
 }
 
-.crr-temp-controls .crr-temp-toggle input[type="checkbox"] {
+.crr-temp-controls__toggle input[type="checkbox"] {
 	accent-color: var(--color-primary);
 	cursor: pointer;
 	flex: none;
 	margin: 0;
 }
 
-.crr-temp-controls span.crr-temp-info {
+.crr-temp-controls__info.crr-temp-controls__info {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -232,35 +306,40 @@
 	flex: none;
 }
 
-.crr-temp-controls .crr-temp-fields {
+.crr-temp-controls__fields {
+	display: block;
 	margin-top: var(--space-sm);
 }
 
-.crr-temp-controls .crr-temp-row {
+.crr-temp-controls__fields--hidden {
+	display: none;
+}
+
+.crr-temp-controls__row {
 	display: flex;
 	gap: var(--space-sm);
 	align-items: center;
 }
 
-.crr-temp-controls .crr-temp-row label {
+.crr-temp-controls__row.crr-temp-controls__row label {
 	display: inline;
 	margin-bottom: 0;
 	font-weight: 400;
 	white-space: nowrap;
 }
 
-.crr-temp-controls .crr-temp-row input[type="number"] {
+.crr-temp-controls__row input[type="number"] {
 	width: 64px;
 	flex: none;
 }
 
-.crr-temp-controls .crr-temp-row select {
+.crr-temp-controls__row select {
 	flex: 1;
 	min-width: 0;
 	max-width: 100%;
 }
 
-.crr-temp-controls .crr-temp-readout {
+.crr-temp-controls__readout {
 	font-size: 0.85em;
 	color: #555;
 	margin-top: 0.4rem;

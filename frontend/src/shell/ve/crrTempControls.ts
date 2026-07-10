@@ -59,13 +59,13 @@ export function crrTempControlsMarkup(params: AnalysisParameters): string {
 
 	return `
         <div class="ve-control-group crr-temp-controls" id="crrTempControls">
-            <label class="crr-temp-toggle">
+            <label class="crr-temp-controls__toggle">
                 <input type="checkbox" id="crrTempToggle" ${enabled ? "checked" : ""}>
                 Temp-correct Crr
-                <span id="crrTempInfo" class="crr-temp-info" title="${CRR_TEMP_INFO_TOOLTIP}">i</span>
+                <span id="crrTempInfo" class="crr-temp-controls__info" title="${CRR_TEMP_INFO_TOOLTIP}">i</span>
             </label>
-            <div id="crrTempFields" class="crr-temp-fields" style="${enabled ? "" : "display: none;"}">
-                <div class="crr-temp-row">
+            <div id="crrTempFields" class="crr-temp-controls__fields${enabled ? "" : " crr-temp-controls__fields--hidden"}">
+                <div class="crr-temp-controls__row">
                     <label for="crrTempAmbient">Ambient (°C):</label>
                     <input type="number" id="crrTempAmbient" min="-10" max="50" step="0.5"
                            value="${ambient !== null ? ambient : ""}" placeholder="e.g. 18"
@@ -76,7 +76,7 @@ export function crrTempControlsMarkup(params: AnalysisParameters): string {
                         ${option("supple", "Pirelli P Zero TLR Race (1.0)")}
                     </select>
                 </div>
-                <div id="crrTempReadout" class="crr-temp-readout"></div>
+                <div id="crrTempReadout" class="crr-temp-controls__readout"></div>
             </div>
         </div>
     `;
@@ -158,7 +158,10 @@ export function bindCrrTempControls(binding: CrrTempControlsBinding): void {
 			}
 		}
 
-		fields.style.display = toggle.checked ? "" : "none";
+		fields.classList.toggle(
+			"crr-temp-controls__fields--hidden",
+			!toggle.checked,
+		);
 		binding.setParams(update);
 		refreshCrrTempReadout(binding.getParams());
 		binding.onChange();
