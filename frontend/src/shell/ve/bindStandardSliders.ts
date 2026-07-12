@@ -405,7 +405,7 @@ export function setupVESliders(
 		const context = createPlotContext(timestamps.length, start, end);
 
 		const windTab = document.getElementById("wind-tab");
-		if (windTab && windTab.classList.contains("active")) {
+		if (windTab && windTab.classList.contains("ve-tab-content--active")) {
 			const hasWindSpeed = windSpeed.some(
 				(value) => !isNaN(value) && value !== 0,
 			);
@@ -430,7 +430,7 @@ export function setupVESliders(
 			Plotly.react("windSpeedPlot", fig.data, fig.layout, fig.config);
 		}
 		const powerTab = document.getElementById("power-tab");
-		if (powerTab && powerTab.classList.contains("active")) {
+		if (powerTab && powerTab.classList.contains("ve-tab-content--active")) {
 			const fig = buildSpeedPowerFigure({
 				context,
 				velocity,
@@ -439,7 +439,7 @@ export function setupVESliders(
 			Plotly.react("speedPowerPlot", fig.data, fig.layout, fig.config);
 		}
 		const vdTab = document.getElementById("vd-tab");
-		if (vdTab && vdTab.classList.contains("active")) {
+		if (vdTab && vdTab.classList.contains("ve-tab-content--active")) {
 			const fig = buildVirtualDistanceFigure({
 				context,
 				timestamps,

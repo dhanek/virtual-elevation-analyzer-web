@@ -449,7 +449,7 @@ export async function showOutAndBackVEPlot(
                 <div class="ve-plots-main">
                     <div class="ve-plots">
                         <div class="ve-tabs">
-                            <button class="ve-tab-button active" data-tab="ve">VE</button>
+                            <button class="ve-tab-button ve-tab-button--active" data-tab="ve">VE</button>
                             ${
 															showWindTab
 																? `
@@ -467,7 +467,7 @@ export async function showOutAndBackVEPlot(
 														}
                         </div>
 
-                        <div class="ve-tab-content active" id="ve-tab">
+                        <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             <div class="ve-metrics-compact">
                                 RMSE:<span id="oabRmseValue">${initialStats.rmse.toFixed(2)}m</span> |
                                 VE Gain:<span id="oabVeGainValue">${initialStats.avgVeGain.toFixed(2)}m</span> |

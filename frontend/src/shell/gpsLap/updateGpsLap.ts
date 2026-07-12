@@ -257,15 +257,15 @@ export async function updateGpsLapVEPlots(
 	});
 
 	const windTab = document.getElementById("wind-tab");
-	if (windTab?.classList.contains("active")) {
+	if (windTab?.classList.contains("ve-tab-content--active")) {
 		renderGpsLapWindPlot(lapVEProfiles);
 	}
 	const powerTab = document.getElementById("power-tab");
-	if (powerTab?.classList.contains("active")) {
+	if (powerTab?.classList.contains("ve-tab-content--active")) {
 		renderGpsLapPowerPlot(lapVEProfiles);
 	}
 	const vdTab = document.getElementById("vd-tab");
-	if (vdTab?.classList.contains("active")) {
+	if (vdTab?.classList.contains("ve-tab-content--active")) {
 		renderGpsLapVdPlot(lapVEProfiles);
 	}
 

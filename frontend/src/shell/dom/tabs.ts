@@ -27,14 +27,14 @@ function handleTabClick(e: Event): void {
     if (!tabName) return
 
     // Update button active states (re-query in case the DOM changed)
-    document.querySelectorAll('.ve-tab-button').forEach(b => b.classList.remove('active'))
-    target.classList.add('active')
+    document.querySelectorAll('.ve-tab-button').forEach(b => b.classList.remove('ve-tab-button--active'))
+    target.classList.add('ve-tab-button--active')
 
     // Update tab content active states
     document.querySelectorAll('.ve-tab-content').forEach(content => {
-        content.classList.remove('active')
+        content.classList.remove('ve-tab-content--active')
     })
-    document.getElementById(`${tabName}-tab`)?.classList.add('active')
+    document.getElementById(`${tabName}-tab`)?.classList.add('ve-tab-content--active')
 
     const showWindTab = !!document.getElementById('wind-tab')
     const showVdTab = !!document.getElementById('vd-tab')
