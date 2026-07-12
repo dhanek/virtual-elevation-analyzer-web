@@ -439,6 +439,30 @@
 	color: var(--color-text-heading);
 }
 
+/* Air-speed calibration parameter (de-inlined from renderStandardVe.ts) */
+.ve-param-header__value {
+	width: 60px;
+	text-align: right;
+}
+
+.ve-parameter__auto-btn {
+	width: 100%;
+	margin-top: var(--space-sm);
+}
+
+/* Sidebar footer action buttons (de-inlined from renderStandardVe.ts) */
+.ve-sidebar-footer__btn {
+	width: 100%;
+}
+
+.ve-sidebar-footer__btn--spaced {
+	margin-bottom: var(--space-sm);
+}
+
+.ve-sidebar-footer__btn--compact {
+	font-size: 0.9rem;
+}
+
 .ve-tabs {
 	display: flex;
 	gap: var(--space-xs);
@@ -463,7 +487,9 @@
 	background: var(--color-surface-alt);
 }
 
-.ve-tab-button.active {
+/* Pure modifier (0,1,0) is safe: :hover declares the same color, and
+   border/font-weight win over the base rule by source order. */
+.ve-tab-button--active {
 	color: var(--color-primary);
 	border-bottom-color: var(--color-primary);
 	font-weight: 500;
@@ -473,7 +499,7 @@
 	display: none;
 }
 
-.ve-tab-content.active {
+.ve-tab-content--active {
 	display: block;
 }
 
@@ -528,7 +554,9 @@
 	color: var(--color-primary);
 }
 
-.lap-view-toggle-btn.active {
+/* Compound (0,2,0) so a hovered active button keeps the primary background —
+   :hover (0,1,1) would otherwise beat a pure modifier (0,1,0). */
+.lap-view-toggle-btn.lap-view-toggle-btn--active {
 	background: var(--color-primary);
 	border-color: var(--color-primary);
 	color: white;
@@ -549,6 +577,22 @@
 	color: var(--color-text);
 	margin-left: 0.15rem;
 	margin-right: 0.35rem;
+}
+
+.ve-metrics-compact--spaced {
+	margin-bottom: var(--space-lg);
+}
+
+/* VD difference sign colors (D-07 discrete states, de-inlined from
+   renderStandardVe.ts). Doubled class (0,2,0) out-ranks the
+   .ve-metrics-compact span color (0,1,1). Off-palette green/red kept
+   as literals (match the previous inline values). */
+.ve-metrics-compact__value--positive.ve-metrics-compact__value--positive {
+	color: #4caf50;
+}
+
+.ve-metrics-compact__value--negative.ve-metrics-compact__value--negative {
+	color: #f44336;
 }
 
 .ve-recompute-status {

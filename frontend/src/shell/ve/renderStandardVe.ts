@@ -316,11 +316,11 @@ export async function showVirtualElevationAnalysisInline(
                                 <div class="ve-param-header">
                                     <label for="airSpeedCalibration">Air Speed Calibration</label>
                                     <input type="number" id="airSpeedCalibrationValue" value="${appState.airSpeedCalibrationPercent.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           style="width: 60px; text-align: right;" />
+                                           class="ve-param-header__value" />
                                     <span>%</span>
                                 </div>
                                 <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${appState.airSpeedCalibrationPercent.toFixed(1)}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
+                                <button id="autoAdjustCalibration" class="secondary-btn ve-parameter__auto-btn">Auto Adjust</button>
                             </div>
                             `
 																: ""
@@ -328,21 +328,21 @@ export async function showVirtualElevationAnalysisInline(
                         </div>
                     </div>
                     <div class="ve-sidebar-footer">
-                        <button id="saveScreenshot" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Save Screenshot</button>
-                        <button id="storeResult" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Store Result</button>
-                        <button id="exportAllResults" class="secondary-btn" style="width: 100%; font-size: 0.9rem;">Export All Results to CSV</button>
+                        <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
+                        <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
                     </div>
                 </div>
                 <div class="ve-plots-main">
                     <div class="ve-plots">
                         <div class="ve-tabs">
-                            <button class="ve-tab-button active" data-tab="ve">VE</button>
+                            <button class="ve-tab-button ve-tab-button--active" data-tab="ve">VE</button>
                             ${cdaReference ? `<button class="ve-tab-button" data-tab="cda-validation">CdA Validation</button>` : ""}
                             ${hasWindSpeed || hasConstantWind ? `<button class="ve-tab-button" data-tab="wind">Wind</button>` : ""}
                             <button class="ve-tab-button" data-tab="power">Power</button>
                             ${hasWindSpeed ? `<button class="ve-tab-button" data-tab="vd">VD</button>` : ""}
                         </div>
-                        <div class="ve-tab-content active" id="ve-tab">
+                        <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
                             <div class="ve-metrics-compact">
                                 R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
@@ -370,10 +370,10 @@ export async function showVirtualElevationAnalysisInline(
                             <div id="speedPowerPlot" class="ve-plot-container"></div>
                         </div>
                         <div class="ve-tab-content" id="vd-tab">
-                             <div class="ve-metrics-compact" style="margin-bottom: 1rem;">
+                             <div class="ve-metrics-compact ve-metrics-compact--spaced">
                                 VD (Air):<span id="vdAirValue">${(initialResult.virtual_distance_air / 1000).toFixed(3)} km</span> |
                                 VD (Ground):<span id="vdGroundValue">${(initialResult.virtual_distance_ground / 1000).toFixed(3)} km</span> |
-                                Difference:<span id="vdDiffValue" style="${initialResult.vd_difference_percent >= 0 ? "color: #4caf50;" : "color: #f44336;"}">${initialResult.vd_difference_percent >= 0 ? "+" : ""}${initialResult.vd_difference_percent.toFixed(2)}%</span>
+                                Difference:<span id="vdDiffValue" class="ve-metrics-compact__value ${initialResult.vd_difference_percent >= 0 ? "ve-metrics-compact__value--positive" : "ve-metrics-compact__value--negative"}">${initialResult.vd_difference_percent >= 0 ? "+" : ""}${initialResult.vd_difference_percent.toFixed(2)}%</span>
                             </div>
                             <div id="vdPlot" class="ve-plot-container"></div>
                         </div>

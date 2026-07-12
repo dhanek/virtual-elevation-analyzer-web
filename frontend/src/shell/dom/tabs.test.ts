@@ -9,7 +9,7 @@ describe('setupTabSwitching', () => {
         const container = document.createElement('div')
 
         const btn1 = document.createElement('button')
-        btn1.className = 've-tab-button active'
+        btn1.className = 've-tab-button ve-tab-button--active'
         btn1.setAttribute('data-tab', 've')
         btn1.textContent = 'VE'
 
@@ -25,7 +25,7 @@ describe('setupTabSwitching', () => {
 
         const content1 = document.createElement('div')
         content1.id = 've-tab'
-        content1.className = 've-tab-content active'
+        content1.className = 've-tab-content ve-tab-content--active'
 
         const content2 = document.createElement('div')
         content2.id = 'power-tab'
@@ -54,14 +54,14 @@ describe('setupTabSwitching', () => {
         buttons[1].click()
 
         // Check buttons
-        expect(buttons[0].classList.contains('active')).toBe(false)
-        expect(buttons[1].classList.contains('active')).toBe(true)
-        expect(buttons[2].classList.contains('active')).toBe(false)
+        expect(buttons[0].classList.contains('ve-tab-button--active')).toBe(false)
+        expect(buttons[1].classList.contains('ve-tab-button--active')).toBe(true)
+        expect(buttons[2].classList.contains('ve-tab-button--active')).toBe(false)
 
         // Check contents
-        expect(contents[0].classList.contains('active')).toBe(false)
-        expect(contents[1].classList.contains('active')).toBe(true)
-        expect(contents[2].classList.contains('active')).toBe(false)
+        expect(contents[0].classList.contains('ve-tab-content--active')).toBe(false)
+        expect(contents[1].classList.contains('ve-tab-content--active')).toBe(true)
+        expect(contents[2].classList.contains('ve-tab-content--active')).toBe(false)
 
         document.body.removeChild(container)
     })

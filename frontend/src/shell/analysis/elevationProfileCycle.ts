@@ -53,8 +53,8 @@ export function elevationSmoothingToggleMarkup(appState: AppState): string {
         <div class="ve-elevation-profile-switch">
             <label>Elevation profile smoothing</label>
             <div class="lap-view-toggle" id="elevationProfileSwitchToggle" role="group" aria-label="Elevation profile smoothing">
-                <button type="button" class="lap-view-toggle-btn ${on ? "" : "active"}" data-smoothing="off">OFF</button>
-                <button type="button" class="lap-view-toggle-btn ${on ? "active" : ""}" data-smoothing="on">ON</button>
+                <button type="button" class="lap-view-toggle-btn ${on ? "" : "lap-view-toggle-btn--active"}" data-smoothing="off">OFF</button>
+                <button type="button" class="lap-view-toggle-btn ${on ? "lap-view-toggle-btn--active" : ""}" data-smoothing="on">ON</button>
             </div>
         </div>
     `;
@@ -87,7 +87,9 @@ export function bindElevationSmoothingToggle(
 				return;
 			}
 			setDemDisplayProfileEnabled(appState, enabled);
-			buttons.forEach((b) => b.classList.toggle("active", b === button));
+			buttons.forEach((b) =>
+				b.classList.toggle("lap-view-toggle-btn--active", b === button),
+			);
 			onToggle(enabled);
 		});
 	});

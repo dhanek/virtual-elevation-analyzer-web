@@ -747,7 +747,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                 <div class="ve-plots-main">
                     <div class="ve-plots">
                         <div class="ve-tabs">
-                            <button class="ve-tab-button active" data-tab="ve">VE</button>
+                            <button class="ve-tab-button ve-tab-button--active" data-tab="ve">VE</button>
                             ${
 															showWindTab
 																? `
@@ -765,7 +765,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
 														}
                         </div>
 
-                        <div class="ve-tab-content active" id="ve-tab">
+                        <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stacked")}
                             <div class="ve-metrics-compact">
                                 Mean R²:<span id="gpsLapR2Value">${initialStats.meanR2.toFixed(4)}</span> |

@@ -276,15 +276,15 @@ export async function updateOutAndBackVEPlots(
 	renderOutAndBackPlots(Plotly, profiles, meanElevation);
 
 	const windTab = document.getElementById("wind-tab");
-	if (windTab?.classList.contains("active")) {
+	if (windTab?.classList.contains("ve-tab-content--active")) {
 		renderOutAndBackWindPlot(profiles);
 	}
 	const powerTab = document.getElementById("power-tab");
-	if (powerTab?.classList.contains("active")) {
+	if (powerTab?.classList.contains("ve-tab-content--active")) {
 		renderOutAndBackPowerPlot(profiles);
 	}
 	const vdTab = document.getElementById("vd-tab");
-	if (vdTab?.classList.contains("active")) {
+	if (vdTab?.classList.contains("ve-tab-content--active")) {
 		renderOutAndBackVdPlot(profiles);
 	}
 
