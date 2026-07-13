@@ -13,6 +13,14 @@ export async function saveCurrentLapSettings(
 ) {
     if (!appState.currentFileHash || !appState.selectedFile) return;
 
+    // Key the save by the laps the VE view (and its sliders) actually belong
+    // to — NOT the live checkbox selection. Between a lap-checkbox switch and
+    // the next analyze, appState.selectedLaps already points at the new lap
+    // while the sliders still hold the previous lap's trim values; saving
+    // under the selection key would poison the new lap's stored settings
+    // (stale trim loaded on the next analyze). No analysis yet → nothing to save.
+    if (appState.currentAnalyzedLaps.length === 0) return;
+
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
@@ -29,7 +37,7 @@ export async function saveCurrentLapSettings(
     };
 
     try {
-        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
+        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.currentAnalyzedLaps, settings);
     } catch (err) {
         log.error('Failed to save lap settings:', err);
     }
