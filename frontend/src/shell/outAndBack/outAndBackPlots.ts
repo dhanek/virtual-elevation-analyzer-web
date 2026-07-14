@@ -409,7 +409,7 @@ export function renderOutAndBackPlots(
         ).join(' | ');
         closingErrorDiv.innerHTML = `<strong>Closing Error:</strong> ${errorDetails}` +
             (closingErrors.length > 1 ? ` | <strong>Avg:</strong> ${avgError >= 0 ? '+' : ''}${avgError.toFixed(2)} m` : '');
-        closingErrorDiv.style.display = 'block';
+        closingErrorDiv.classList.remove('hidden');
     }
 
     // Plot layouts

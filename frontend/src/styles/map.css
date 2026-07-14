@@ -1,10 +1,4 @@
 /* Map and Lap Selection Styles */
-.map-lap-container {
-	display: grid;
-	grid-template-columns: 2fr 1fr;
-	gap: var(--space-xl);
-	margin-top: var(--space-2xl);
-}
 
 /* ================================================================
    Map & Analysis Layout — consolidated sizing (D-03)
@@ -81,10 +75,6 @@
    giving a deterministic 400px mobile map (baseline value) instead of
    tracking --map-height (min(500, 0.6*vh)) on tall mobile viewports. */
 @media (max-width: 768px) {
-	.map-lap-container {
-		grid-template-columns: 1fr;
-	}
-
 	.analysis-layout {
 		flex-direction: column;
 	}
@@ -205,11 +195,16 @@
 	margin: 0;
 }
 
+/* Consolidated with the former duplicate "Sidebar scrolling" rules at the end
+   of this file (05-08 audit): the later set's radius/padding/max-height won
+   the cascade and is what survives here. */
 .lap-selection {
+	max-height: 100%;
+	overflow-y: auto;
 	background: var(--color-surface);
 	border: 1px solid var(--color-border);
-	border-radius: var(--radius-sm);
-	padding: var(--space-sm);
+	border-radius: var(--radius-lg);
+	padding: var(--space-lg);
 }
 
 .lap-selection h4 {
@@ -241,7 +236,7 @@
 }
 
 .lap-list {
-	max-height: 180px;
+	max-height: calc(100vh - 400px);
 	overflow-y: auto;
 }
 
@@ -314,21 +309,6 @@
 
 .lap-marker--end .lap-marker__content--end {
 	background: var(--color-danger);
-}
-
-/* Sidebar scrolling for tall screens */
-.lap-selection {
-	max-height: 100%;
-	overflow-y: auto;
-	background: var(--color-surface);
-	border: 1px solid var(--color-border);
-	border-radius: var(--radius-lg);
-	padding: var(--space-lg);
-}
-
-.lap-list {
-	max-height: calc(100vh - 400px);
-	overflow-y: auto;
 }
 
 /* GPS Gate Marker Labels */

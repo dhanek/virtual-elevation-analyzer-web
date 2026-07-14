@@ -360,31 +360,39 @@ export function renderGpsLapVEPlots(
     // Populate lap summary table
     const summaryTable = document.getElementById('gpsLapSummaryTable');
     if (summaryTable) {
-        const rows = lapProfiles.map((lap, i) => {
-            const color = stackedLapColor(i);
+        const rows = lapProfiles.map((lap) => {
             const avgSpeed = lap.totalDistance / (lap.duration / 3600); // km/h
-            return `<tr style="border-bottom: 1px solid #e2e8f0;">
-                    <td style="padding: 0.5rem;">
-                        <span style="display: inline-block; width: 12px; height: 12px; background: ${color}; border-radius: 2px; margin-right: 0.5rem;"></span>
+            return `<tr class="ve-lap-summary__row">
+                    <td class="ve-lap-summary__cell ve-lap-summary__cell--label">
+                        <span class="ve-lap-summary__swatch"></span>
                         Lap ${lap.lapNumber}
                     </td>
-                    <td style="text-align: right; padding: 0.5rem;">${formatLapDuration(lap.duration)}</td>
-                    <td style="text-align: right; padding: 0.5rem;">${lap.totalDistance.toFixed(2)} km</td>
-                    <td style="text-align: right; padding: 0.5rem;">${avgSpeed.toFixed(1)} km/h</td>
+                    <td class="ve-lap-summary__cell">${formatLapDuration(lap.duration)}</td>
+                    <td class="ve-lap-summary__cell">${lap.totalDistance.toFixed(2)} km</td>
+                    <td class="ve-lap-summary__cell">${avgSpeed.toFixed(1)} km/h</td>
                 </tr>`;
         }).join('');
 
-        const tableHtml = `<table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        const tableHtml = `<table class="ve-lap-summary__table">
                 <thead>
-                    <tr style="border-bottom: 2px solid #e2e8f0;">
-                        <th style="text-align: left; padding: 0.5rem;">Lap</th>
-                        <th style="text-align: right; padding: 0.5rem;">Duration</th>
-                        <th style="text-align: right; padding: 0.5rem;">Distance</th>
-                        <th style="text-align: right; padding: 0.5rem;">Avg Speed</th>
+                    <tr class="ve-lap-summary__row ve-lap-summary__row--head">
+                        <th class="ve-lap-summary__cell ve-lap-summary__cell--label">Lap</th>
+                        <th class="ve-lap-summary__cell">Duration</th>
+                        <th class="ve-lap-summary__cell">Distance</th>
+                        <th class="ve-lap-summary__cell">Avg Speed</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody></table>`;
         summaryTable.innerHTML = tableHtml;
+
+        // Swatch backgrounds are runtime data (the shared stacked-lap Plotly
+        // palette), so they stay imperative per D-07's continuous-value
+        // exception rather than duplicating the palette as CSS modifiers.
+        summaryTable
+            .querySelectorAll<HTMLSpanElement>('.ve-lap-summary__swatch')
+            .forEach((swatch, i) => {
+                swatch.style.background = stackedLapColor(i);
+            });
     }
 }
 

@@ -69,6 +69,39 @@ body {
 	width: 100%;
 }
 
+/* Single visibility mechanism (D-06). !important protects the invariant:
+   no JS writes style.display outside MapVisualization.ts internals (audited
+   in 05-08), so nothing legitimately needs to out-rank this utility. */
 .hidden {
-	display: none;
+	display: none !important;
+}
+
+/* Floating toast notification (de-inlined from shell/dom/notifications.ts).
+   Created lazily by JS; visibility via the shared .hidden utility (no display
+   declaration here, so .hidden applies unaided). Type colors are D-07
+   discrete-state modifiers; off-palette literals match the previous inline
+   values. */
+.notification {
+	position: fixed;
+	top: 20px;
+	right: 20px;
+	padding: 12px 20px;
+	border-radius: var(--radius-md);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	z-index: 10000;
+	max-width: 400px;
+	font-size: 0.9em;
+	color: #fff;
+}
+
+.notification--success {
+	background: #4caf50;
+}
+
+.notification--warning {
+	background: #ff9800;
+}
+
+.notification--error {
+	background: #f44336;
 }

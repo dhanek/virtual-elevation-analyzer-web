@@ -724,11 +724,11 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                                 <div class="ve-param-header">
                                     <label for="airSpeedCalibration">Air Speed Calibration</label>
                                     <input type="number" id="airSpeedCalibrationValue" value="${currentAirSpeedCalibrationValue}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           style="width: 60px; text-align: right;" />
+                                           class="ve-param-header__value" />
                                     <span>%</span>
                                 </div>
                                 <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${currentAirSpeedCalibrationValue}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
+                                <button id="autoAdjustCalibration" class="secondary-btn ve-parameter__auto-btn">Auto Adjust</button>
                             </div>
                             `
 																: ""
@@ -737,9 +737,9 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                     </div>
 
                     <div class="ve-sidebar-footer">
-                        <button id="saveScreenshot" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Save Screenshot</button>
-                        <button id="storeResult" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Store Result</button>
-                        <button id="exportAllResults" class="secondary-btn" style="width: 100%; font-size: 0.9rem;">Export All Results to CSV</button>
+                        <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
+                        <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
                     </div>
                 </div>
 
@@ -774,13 +774,13 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                                 Laps:<span id="gpsLapCountValue">${lapCount}</span>
                             </div>
                             <div class="ve-plot-container">
-                                <div id="gpsLapVePlot" style="width: 100%; height: 380px;"></div>
+                                <div id="gpsLapVePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div>
                             </div>
                             <div class="ve-plot-container">
-                                <div id="gpsLapResidualPlot" style="width: 100%; height: 200px;"></div>
+                                <div id="gpsLapResidualPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div>
                             </div>
-                            <div class="ve-lap-summary" style="margin-top: 1rem; padding: 1rem; background: #f7fafc; border-radius: 4px;">
-                                <h4 style="margin-bottom: 0.5rem;">Detected Laps Summary</h4>
+                            <div class="ve-lap-summary">
+                                <h4 class="ve-lap-summary__title">Detected Laps Summary</h4>
                                 <div id="gpsLapSummaryTable"></div>
                             </div>
                         </div>
@@ -789,18 +789,18 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
 													showWindTab
 														? `
                         <div class="ve-tab-content" id="wind-tab">
-                            <div id="gpsLapWindPlot" class="ve-plot" style="height: 600px;"></div>
+                            <div id="gpsLapWindPlot" class="ve-plot ve-plot--tall"></div>
                             ${
 															showFitWindControls
 																? `
-                            <div class="ve-parameter" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9;">
-                                <h4 style="margin: 0 0 1rem 0; font-size: 1rem; font-weight: 500;">Air Speed Time Offset</h4>
-                                <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                            <div class="ve-parameter ve-parameter--panel">
+                                <h4 class="ve-parameter__title">Air Speed Time Offset</h4>
+                                <div class="ve-parameter__grid">
                                     <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}"
-                                           style="width: 100%;" />
+                                           class="ve-parameter__slider" />
                                     <input type="number" id="airSpeedOffsetValue" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
-                                           style="width: 60px; text-align: right;" />
-                                    <span style="font-weight: 500;">seconds</span>
+                                           class="ve-parameter__value" />
+                                    <span class="ve-parameter__unit">seconds</span>
                                 </div>
                             </div>
                             `
@@ -812,14 +812,14 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
 												}
 
                         <div class="ve-tab-content" id="power-tab">
-                            <div id="gpsLapPowerPlot" class="ve-plot" style="height: 600px;"></div>
+                            <div id="gpsLapPowerPlot" class="ve-plot ve-plot--tall"></div>
                         </div>
 
                         ${
 													showVirtualDistanceTab
 														? `
                         <div class="ve-tab-content" id="vd-tab">
-                            <div id="gpsLapVdPlot" class="ve-plot" style="height: 600px;"></div>
+                            <div id="gpsLapVdPlot" class="ve-plot ve-plot--tall"></div>
                         </div>
                         `
 														: ""
