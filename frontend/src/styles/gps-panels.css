@@ -23,17 +23,6 @@
 	font-weight: 500;
 }
 
-.gps-marker-controls button {
-	font-size: 0.75rem;
-	padding: 0.4rem var(--space-sm);
-}
-
-.gps-marker-controls button.active {
-	background: #ff6b00;
-	color: white;
-	border-color: #e65c00;
-}
-
 #gpsDetectedLapsInfo {
 	font-size: 0.8rem;
 }

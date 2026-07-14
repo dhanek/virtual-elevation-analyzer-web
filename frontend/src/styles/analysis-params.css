@@ -19,24 +19,6 @@
 	padding-bottom: var(--space-md);
 }
 
-.param-section {
-	margin-bottom: clamp(1.5rem, 3vw, 2rem);
-}
-
-.param-section h5 {
-	color: var(--color-text);
-	margin-bottom: clamp(0.75rem, 1.5vw, 1rem);
-	font-size: clamp(0.95rem, 1.8vw, 1.1rem);
-	font-weight: 400;
-	letter-spacing: -0.01em;
-}
-
-.param-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
-	gap: clamp(1rem, 2vw, 1.5rem);
-}
-
 .param-compact-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
@@ -224,47 +206,8 @@
 	border-top: 1px solid var(--color-border);
 }
 
-.primary-btn {
-	flex: 1;
-	padding: clamp(0.875rem, 2vw, 1.125rem) clamp(1.5rem, 3vw, 2rem);
-	background: var(--color-primary);
-	color: white;
-	border: none;
-	border-radius: var(--radius-sm);
-	font-size: clamp(1rem, 1.8vw, 1.125rem);
-	font-weight: 400;
-	cursor: pointer;
-	transition: background 0.2s ease;
-	letter-spacing: -0.01em;
-}
-
-.primary-btn:hover:not(:disabled) {
-	background: #2952cc;
-}
-
-.primary-btn:disabled {
-	background: #e5e5e5;
-	color: #9ca3af;
-	cursor: not-allowed;
-}
-
-.secondary-btn {
-	padding: clamp(0.875rem, 2vw, 1.125rem) clamp(1.5rem, 3vw, 2rem);
-	background: white;
-	color: var(--color-text);
-	border: 1px solid var(--color-border-strong);
-	border-radius: var(--radius-sm);
-	font-size: clamp(1rem, 1.8vw, 1.125rem);
-	font-weight: 400;
-	cursor: pointer;
-	transition: all 0.2s ease;
-	letter-spacing: -0.01em;
-}
-
-.secondary-btn:hover {
-	background: var(--color-bg);
-	border-color: #9ca3af;
-}
+/* .primary-btn / .secondary-btn: canonical definition lives in
+   ve-results.css (05-08 audit consolidated the former duplicate set here). */
 
 /* Crr temperature correction controls (override .ve-control-group span/label box styling).
    Specificity guard: analysis-params.css imports BEFORE ve-results.css, so rules that

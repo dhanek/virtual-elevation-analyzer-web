@@ -7,7 +7,7 @@ import { AppState } from "../../state/AppState";
 
 function setupDom() {
 	document.body.innerHTML = `
-        <div id="gpsGateSliderControls" style="display:none"></div>
+        <div id="gpsGateSliderControls" class="hidden"></div>
         <input id="gpsGateSlider" type="range" />
         <input id="gpsGateValue" type="number" />
         <div id="gpsGatePositionInfo"></div>

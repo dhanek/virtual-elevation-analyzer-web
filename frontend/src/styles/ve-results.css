@@ -1,208 +1,31 @@
-/* Virtual Elevation Results Styles */
-.ve-results {
-	background: var(--color-surface);
-	border: 1px solid var(--color-border);
-	border-radius: var(--radius-lg);
-	padding: var(--space-2xl);
-	margin: var(--space-lg) 0;
-}
-
-.ve-results h3 {
-	color: var(--color-text-heading);
-	margin-bottom: var(--space-xl);
-	border-bottom: 2px solid var(--color-primary);
-	padding-bottom: var(--space-sm);
-}
-
-.ve-summary {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-	gap: var(--space-lg);
-	margin-bottom: var(--space-xl);
-}
-
-.ve-metric {
-	background: white;
-	padding: var(--space-lg);
-	border-radius: 6px;
-	border: 1px solid var(--color-border);
-}
-
-.ve-metric label {
-	display: block;
-	font-weight: 600;
-	color: var(--color-text-secondary);
-	margin-bottom: var(--space-sm);
-	font-size: 0.9rem;
-}
-
-.ve-metric span {
-	display: block;
-	font-size: 1.1rem;
-	color: var(--color-text-heading);
-	font-weight: 500;
-}
-
-.ve-data-info {
-	background: white;
-	padding: var(--space-lg);
-	border-radius: 6px;
-	border: 1px solid var(--color-border);
-}
-
-.ve-data-info p {
-	margin: var(--space-sm) 0;
-	color: var(--color-text-secondary);
-}
-
-.ve-header {
-	background: var(--color-surface);
-	border-bottom: 2px solid var(--color-primary);
-	padding: var(--space-lg) var(--space-2xl);
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	flex-shrink: 0;
-}
-
-.ve-header h2 {
-	margin: 0;
-	color: var(--color-text-heading);
-}
-
-.ve-header-controls {
-	display: flex;
-	gap: var(--space-lg);
-}
-
-.ve-main-layout {
-	display: flex;
-	height: calc(100vh - 80px);
-	overflow: hidden;
-}
-
-.ve-left-panel {
-	width: 400px;
-	background: var(--color-surface);
-	border-right: 1px solid var(--color-border);
-	display: flex;
-	flex-direction: column;
-	overflow-y: auto;
-	flex-shrink: 0;
-}
-
-.ve-right-panel {
-	flex: 1;
-	display: flex;
-	flex-direction: column;
-	overflow: hidden;
-}
-
-.ve-map-container {
-	padding: var(--space-lg);
-	border-bottom: 1px solid var(--color-border);
-}
-
-.ve-map-container h4 {
-	margin: 0 0 var(--space-lg) 0;
-	color: var(--color-text-heading);
-}
-
-.ve-map {
-	height: 300px;
-	border-radius: var(--radius-lg);
-	overflow: hidden;
-	border: 1px solid var(--color-border);
-}
-
-.ve-controls {
-	padding: var(--space-lg);
-	flex: 1;
-}
-
-.ve-controls h4 {
-	margin: 0 0 var(--space-xl) 0;
-	color: var(--color-text-heading);
-	border-bottom: 2px solid var(--color-primary);
-	padding-bottom: var(--space-sm);
-}
-
-.ve-control-group {
-	margin-bottom: var(--space-xl);
-}
-
-.ve-control-group label {
-	display: block;
-	font-weight: 600;
-	color: var(--color-text-secondary);
-	margin-bottom: var(--space-sm);
-	font-size: 0.9rem;
-}
-
-.ve-slider {
-	width: 100%;
-	margin-bottom: var(--space-sm);
-	accent-color: var(--color-primary);
-}
-
-.ve-control-group span {
-	display: inline-block;
-	background: white;
-	padding: var(--space-xs) var(--space-sm);
-	border-radius: var(--radius-md);
-	border: 1px solid var(--color-border);
-	font-family: monospace;
-	font-size: 0.9rem;
-	min-width: 60px;
-	text-align: center;
-}
-
-.ve-metrics {
-	background: white;
-	border-radius: var(--radius-lg);
-	padding: var(--space-lg);
-	border: 1px solid var(--color-border);
-	margin-top: var(--space-lg);
-}
-
-.ve-metric-item {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	padding: var(--space-sm) 0;
-	border-bottom: 1px solid #f1f5f9;
-}
-
-.ve-metric-item:last-child {
-	border-bottom: none;
-}
-
-.ve-metric-item label {
-	font-weight: 600;
-	color: var(--color-text-secondary);
-	margin: 0;
-}
-
-.ve-metric-item span {
-	font-family: monospace;
-	background: #f1f5f9;
-	padding: var(--space-xs) var(--space-sm);
-	border-radius: var(--radius-md);
-}
-
+/* Shared action buttons — single canonical definition (05-08 audit).
+   Consolidated from the former duplicate sets in analysis-params.css and
+   this file; each declaration is the value that won the pre-consolidation
+   cascade (flex/font-size/letter-spacing and the :disabled +
+   :hover:not(:disabled) rules survived from analysis-params.css, the rest
+   from the later ve-results.css set). */
 .primary-btn {
+	flex: 1;
 	background: var(--color-primary);
 	color: white;
 	border: none;
 	padding: var(--space-md) var(--space-xl);
 	border-radius: 6px;
+	font-size: clamp(1rem, 1.8vw, 1.125rem);
 	font-weight: 600;
+	letter-spacing: -0.01em;
 	cursor: pointer;
 	transition: background 0.3s ease;
 }
 
-.primary-btn:hover {
-	background: #3c5aa6;
+.primary-btn:hover:not(:disabled) {
+	background: #2952cc;
+}
+
+.primary-btn:disabled {
+	background: #e5e5e5;
+	color: #9ca3af;
+	cursor: not-allowed;
 }
 
 .secondary-btn {
@@ -211,7 +34,9 @@
 	border: none;
 	padding: var(--space-md) var(--space-xl);
 	border-radius: 6px;
+	font-size: clamp(1rem, 1.8vw, 1.125rem);
 	font-weight: 600;
+	letter-spacing: -0.01em;
 	cursor: pointer;
 	transition: background 0.3s ease;
 }
@@ -227,20 +52,6 @@
 	display: block;
 }
 
-.ve-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: var(--space-xl);
-	padding-bottom: var(--space-lg);
-	border-bottom: 1px solid #e5e5e5;
-}
-
-.ve-header h3 {
-	margin: 0;
-	color: var(--color-text);
-}
-
 .ve-control-grid {
 	display: flex;
 	flex-direction: column;
@@ -248,17 +59,23 @@
 	margin-bottom: var(--space-xl);
 }
 
+/* Consolidated with the former duplicate "VE Results" rules (05-08 audit):
+   flex: 1, the h4 underline, and padding-bottom survived from the earlier
+   set because the later set never overrode them. */
 .ve-controls {
 	background: var(--color-surface-alt);
 	padding: var(--space-xl);
 	border-radius: var(--radius-md);
 	border: 1px solid #e9ecef;
+	flex: 1;
 }
 
 .ve-controls h4 {
 	margin: 0 0 var(--space-lg) 0;
 	color: var(--color-text);
 	font-size: 1.1rem;
+	border-bottom: 2px solid var(--color-primary);
+	padding-bottom: var(--space-sm);
 }
 
 .ve-elevation-profile-cycle,
@@ -299,6 +116,7 @@
 .ve-slider {
 	width: 100%;
 	margin-bottom: var(--space-xs);
+	accent-color: var(--color-primary);
 }
 
 .ve-control-group span {
@@ -310,6 +128,8 @@
 	border: 1px solid var(--color-border-strong);
 	border-radius: var(--radius-sm);
 	display: inline-block;
+	min-width: 60px;
+	text-align: center;
 }
 
 .ve-value-input {
@@ -328,37 +148,6 @@
 	outline: none;
 	border-color: var(--color-primary);
 	box-shadow: 0 0 0 1px var(--color-primary);
-}
-
-.ve-metrics {
-	background: white;
-	padding: var(--space-lg);
-	border-radius: var(--radius-md);
-	border: 1px solid #e9ecef;
-}
-
-.ve-metric-item {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: var(--space-md);
-}
-
-.ve-metric-item:last-child {
-	margin-bottom: 0;
-}
-
-.ve-metric-item label {
-	font-size: 0.85rem;
-	color: var(--color-text-heading);
-	font-weight: 500;
-}
-
-.ve-metric-item span {
-	font-family: monospace;
-	font-size: 0.9rem;
-	color: var(--color-text);
-	font-weight: 600;
 }
 
 .ve-plots {
