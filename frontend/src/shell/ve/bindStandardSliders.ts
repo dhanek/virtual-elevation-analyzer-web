@@ -34,6 +34,7 @@ import {
 	DEM_PROFILE_FALLBACK_ORDER,
 	type ElevationDisplayProfile,
 } from "../../analysis/elevationProfiles";
+import { veViewMatchesSelection } from "./veSelectionGuard";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -451,6 +452,15 @@ export function setupVESliders(
 		}
 	};
 
+	// Trim-marker repaints must not outlive this panel's lap selection: after
+	// the user switches lap checkboxes, synthetic input dispatches (auto-rho /
+	// parameter changes via handleParametersChange) still run these handlers
+	// with the PREVIOUS lap's trim values and coordinates, which would draw
+	// stale start/end markers over the newly selected lap's route.
+	const mapCanFollowThisPanel = () =>
+		mapVisualization !== null &&
+		veViewMatchesSelection(appState.currentAnalyzedLaps, appState.selectedLaps);
+
 	const updateTrimStart = () => {
 		const value = parseInt(trimStartSlider.value);
 		trimStartValue.value = value.toString();
@@ -463,8 +473,10 @@ export function setupVESliders(
 		}
 		updateVEPlots(appState, analysisInput, selectedIndices, value, trimEnd);
 		updateSecondaryPlots(value, trimEnd);
-		if (mapVisualization) {
-			mapVisualization.fitBoundsToTrimRegion(
+		// Only repaint map trim markers while this panel's laps are still the
+		// selected laps (see veViewMatchesSelection).
+		if (mapCanFollowThisPanel()) {
+			mapVisualization!.fitBoundsToTrimRegion(
 				value,
 				trimEnd,
 				positionLat,
@@ -487,8 +499,8 @@ export function setupVESliders(
 		}
 		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, value);
 		updateSecondaryPlots(trimStart, value);
-		if (mapVisualization) {
-			mapVisualization.fitBoundsToTrimRegion(
+		if (mapCanFollowThisPanel()) {
+			mapVisualization!.fitBoundsToTrimRegion(
 				trimStart,
 				value,
 				positionLat,
@@ -529,8 +541,8 @@ export function setupVESliders(
 		trimStartValue.value = clamped.toString();
 		updateVEPlots(appState, analysisInput, selectedIndices, clamped, trimEnd);
 		updateSecondaryPlots(clamped, trimEnd);
-		if (mapVisualization) {
-			mapVisualization.fitBoundsToTrimRegion(
+		if (mapCanFollowThisPanel()) {
+			mapVisualization!.fitBoundsToTrimRegion(
 				clamped,
 				trimEnd,
 				positionLat,
@@ -553,8 +565,8 @@ export function setupVESliders(
 		trimEndValue.value = clamped.toString();
 		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, clamped);
 		updateSecondaryPlots(trimStart, clamped);
-		if (mapVisualization) {
-			mapVisualization.fitBoundsToTrimRegion(
+		if (mapCanFollowThisPanel()) {
+			mapVisualization!.fitBoundsToTrimRegion(
 				trimStart,
 				clamped,
 				positionLat,
