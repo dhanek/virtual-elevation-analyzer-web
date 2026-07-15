@@ -6,8 +6,8 @@ import type {
 	OutAndBackSection,
 } from "../utils/GpsLapDetection";
 import { log } from "../utils/log";
-
-type NumericSeries = ArrayLike<number>;
+import type { FitData, NumericSeries } from "./map/context";
+import { collectValidPoints, degreeToCardinal } from "./map/geo";
 
 interface LapData {
 	lap_number?: number;
@@ -21,21 +21,6 @@ interface LapData {
 	max_power?: number;
 	start_position_lat?: number;
 	start_position_long?: number;
-}
-
-interface FitData {
-	timestamps: NumericSeries;
-	position_lat: NumericSeries;
-	position_long: NumericSeries;
-	velocity: NumericSeries;
-	power: NumericSeries;
-	altitude: NumericSeries;
-	distance: NumericSeries;
-	air_speed: NumericSeries;
-	wind_speed: NumericSeries;
-	heart_rate: NumericSeries;
-	cadence: NumericSeries;
-	temperature: NumericSeries;
 }
 
 const ROUTE_BOUNDS_PADDING_PX = 20;
@@ -109,18 +94,14 @@ export class MapVisualization {
 		this.laps = laps;
 
 		// Extract valid GPS points and track their indices
-		this.routePoints = [];
-		this.routePointIndices = [];
-		for (let i = 0; i < fitData.timestamps.length; i++) {
-			const lat = fitData.position_lat[i];
-			const lng = fitData.position_long[i];
-
-			// Filter out invalid GPS coordinates
-			if (lat && lng && lat !== 0 && lng !== 0) {
-				this.routePoints.push([lat, lng]);
-				this.routePointIndices.push(i);
-			}
-		}
+		const { points, indices } = collectValidPoints(
+			fitData.position_lat,
+			fitData.position_long,
+			0,
+			fitData.timestamps.length - 1,
+		);
+		this.routePoints = points;
+		this.routePointIndices = indices;
 
 		// Update map view if we have GPS data
 		if (this.routePoints.length > 0) {
@@ -164,7 +145,9 @@ export class MapVisualization {
 		)
 			return;
 
-		// Collect all GPS points that belong to selected laps
+		// Collect all GPS points that belong to selected laps.
+		// routePoints/routePointIndices are the collectValidPoints result over
+		// the full activity (established in setData).
 		const selectedPoints: [number, number][] = [];
 
 		for (const lapNumber of this.selectedLaps) {
@@ -173,15 +156,10 @@ export class MapVisualization {
 
 			if (!lap) continue;
 
-			for (let i = 0; i < this.fitData.timestamps.length; i++) {
-				const timestamp = this.fitData.timestamps[i];
+			for (let k = 0; k < this.routePoints.length; k++) {
+				const timestamp = this.fitData.timestamps[this.routePointIndices[k]];
 				if (timestamp >= lap.start_time && timestamp <= lap.end_time) {
-					const lat = this.fitData.position_lat[i];
-					const lng = this.fitData.position_long[i];
-
-					if (lat && lng && lat !== 0 && lng !== 0) {
-						selectedPoints.push([lat, lng]);
-					}
+					selectedPoints.push(this.routePoints[k]);
 				}
 			}
 		}
@@ -216,16 +194,12 @@ export class MapVisualization {
 		if (!posLat || !posLong) return;
 
 		// Collect GPS points in the trim region (trimEnd is inclusive)
-		const trimmedPoints: [number, number][] = [];
-
-		for (let i = trimStart; i <= Math.min(trimEnd, posLat.length - 1); i++) {
-			const lat = posLat[i];
-			const lng = posLong[i];
-
-			if (lat && lng && lat !== 0 && lng !== 0) {
-				trimmedPoints.push([lat, lng]);
-			}
-		}
+		const { points: trimmedPoints } = collectValidPoints(
+			posLat,
+			posLong,
+			trimStart,
+			trimEnd,
+		);
 
 		log.debug("Trimmed points collected:", trimmedPoints.length);
 
@@ -379,19 +353,11 @@ export class MapVisualization {
 			}
 		}
 
-		// Convert to route point indices (filtering out invalid GPS points)
-		const routeSelectedMask: boolean[] = [];
-		let routeIndex = 0;
-
-		for (let i = 0; i < this.fitData.timestamps.length; i++) {
-			const lat = this.fitData.position_lat[i];
-			const lng = this.fitData.position_long[i];
-
-			if (lat && lng && lat !== 0 && lng !== 0) {
-				routeSelectedMask[routeIndex] = selectedMask[i];
-				routeIndex++;
-			}
-		}
+		// Convert to route point indices (filtering out invalid GPS points):
+		// routePointIndices maps each route point to its fitData index.
+		const routeSelectedMask = this.routePointIndices.map(
+			(i) => selectedMask[i],
+		);
 
 		// Draw non-selected segments (dashed blue with reduced opacity)
 		this.drawSegments(routeSelectedMask, false, {
@@ -454,22 +420,17 @@ export class MapVisualization {
 			const lap = this.laps[lapIndex];
 			if (!lap) continue;
 
-			// Find start and end points
+			// Find start and end points among the valid route points
 			let startPoint: [number, number] | null = null;
 			let endPoint: [number, number] | null = null;
 
-			for (let i = 0; i < this.fitData.timestamps.length; i++) {
-				const timestamp = this.fitData.timestamps[i];
-				const lat = this.fitData.position_lat[i];
-				const lng = this.fitData.position_long[i];
-
-				if (lat && lng && lat !== 0 && lng !== 0) {
-					if (timestamp >= lap.start_time && timestamp <= lap.end_time) {
-						if (!startPoint) {
-							startPoint = [lat, lng];
-						}
-						endPoint = [lat, lng];
+			for (let k = 0; k < this.routePoints.length; k++) {
+				const timestamp = this.fitData.timestamps[this.routePointIndices[k]];
+				if (timestamp >= lap.start_time && timestamp <= lap.end_time) {
+					if (!startPoint) {
+						startPoint = this.routePoints[k];
 					}
+					endPoint = this.routePoints[k];
 				}
 			}
 
@@ -515,29 +476,6 @@ export class MapVisualization {
 				}
 			}, 100);
 		}
-	}
-
-	private degreeToCardinal(degrees: number): string {
-		const directions = [
-			"N",
-			"NNE",
-			"NE",
-			"ENE",
-			"E",
-			"ESE",
-			"SE",
-			"SSE",
-			"S",
-			"SSW",
-			"SW",
-			"WSW",
-			"W",
-			"WNW",
-			"NW",
-			"NNW",
-		];
-		const index = Math.round((degrees % 360) / 22.5) % 16;
-		return directions[index];
 	}
 
 	public showWindIndicator(
@@ -602,7 +540,7 @@ export class MapVisualization {
 
 		// Create direction text with cardinal direction
 		const direction = document.createElement("div");
-		const cardinal = this.degreeToCardinal(windDirection);
+		const cardinal = degreeToCardinal(windDirection);
 		direction.textContent = `${windDirection.toFixed(0)}°`;
 		direction.style.fontSize = "13px";
 		direction.style.color = "#666";
@@ -708,18 +646,12 @@ export class MapVisualization {
 			const color = lapColors[(lap.lapNumber - 1) % lapColors.length];
 
 			// Extract route points for this lap
-			const lapPoints: [number, number][] = [];
-			for (
-				let i = lap.startIdx;
-				i <= lap.endIdx && i < this.fitData.position_lat.length;
-				i++
-			) {
-				const lat = this.fitData.position_lat[i];
-				const lon = this.fitData.position_long[i];
-				if (lat && lon && lat !== 0 && lon !== 0) {
-					lapPoints.push([lat, lon]);
-				}
-			}
+			const { points: lapPoints } = collectValidPoints(
+				this.fitData.position_lat,
+				this.fitData.position_long,
+				lap.startIdx,
+				lap.endIdx,
+			);
 
 			if (lapPoints.length > 1) {
 				// Draw lap polyline
@@ -863,18 +795,12 @@ export class MapVisualization {
 				sectionColors[(section.sectionNumber - 1) % sectionColors.length];
 
 			// Draw outbound segment (A → B) - solid line
-			const outboundPoints: [number, number][] = [];
-			for (
-				let i = section.outboundStartIdx;
-				i <= section.outboundEndIdx && i < this.fitData.position_lat.length;
-				i++
-			) {
-				const lat = this.fitData.position_lat[i];
-				const lon = this.fitData.position_long[i];
-				if (lat && lon && lat !== 0 && lon !== 0) {
-					outboundPoints.push([lat, lon]);
-				}
-			}
+			const { points: outboundPoints } = collectValidPoints(
+				this.fitData.position_lat,
+				this.fitData.position_long,
+				section.outboundStartIdx,
+				section.outboundEndIdx,
+			);
 
 			if (outboundPoints.length > 1) {
 				const outboundLine = L.polyline(outboundPoints, {
@@ -886,18 +812,12 @@ export class MapVisualization {
 			}
 
 			// Draw inbound segment (B → A) - dashed line
-			const inboundPoints: [number, number][] = [];
-			for (
-				let i = section.inboundStartIdx;
-				i <= section.inboundEndIdx && i < this.fitData.position_lat.length;
-				i++
-			) {
-				const lat = this.fitData.position_lat[i];
-				const lon = this.fitData.position_long[i];
-				if (lat && lon && lat !== 0 && lon !== 0) {
-					inboundPoints.push([lat, lon]);
-				}
-			}
+			const { points: inboundPoints } = collectValidPoints(
+				this.fitData.position_lat,
+				this.fitData.position_long,
+				section.inboundStartIdx,
+				section.inboundEndIdx,
+			);
 
 			if (inboundPoints.length > 1) {
 				const inboundLine = L.polyline(inboundPoints, {
