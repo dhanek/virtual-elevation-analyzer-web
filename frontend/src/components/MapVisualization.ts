@@ -6,8 +6,8 @@ import type {
 	OutAndBackSection,
 } from "../utils/GpsLapDetection";
 import { log } from "../utils/log";
-
-type NumericSeries = ArrayLike<number>;
+import type { FitData, NumericSeries } from "./map/context";
+import { collectValidPoints, degreeToCardinal } from "./map/geo";
 
 interface LapData {
 	lap_number?: number;
@@ -22,35 +22,6 @@ interface LapData {
 	start_position_lat?: number;
 	start_position_long?: number;
 }
-
-interface FitData {
-	timestamps: NumericSeries;
-	position_lat: NumericSeries;
-	position_long: NumericSeries;
-	velocity: NumericSeries;
-	power: NumericSeries;
-	altitude: NumericSeries;
-	distance: NumericSeries;
-	air_speed: NumericSeries;
-	wind_speed: NumericSeries;
-	heart_rate: NumericSeries;
-	cadence: NumericSeries;
-	temperature: NumericSeries;
-}
-
-// Callback type for GPS marker changes
-export type GpsMarkerChangeCallback = (
-	lat: number,
-	lon: number,
-	nearestIndex: number,
-) => void;
-// Callback type for Out and Back marker changes (marker A or B)
-export type OutAndBackMarkerChangeCallback = (
-	marker: "A" | "B",
-	lat: number,
-	lon: number,
-	nearestIndex: number,
-) => void;
 
 const ROUTE_BOUNDS_PADDING_PX = 20;
 const FOCUSED_BOUNDS_PADDING_PX = 30;
@@ -71,24 +42,12 @@ export class MapVisualization {
 
 	// GPS Lap Detection state
 	private gpsMarker: L.CircleMarker | null = null;
-	private gpsMarkerPosition: { lat: number; lon: number } | null = null;
 	private gpsMarkerLayer: L.LayerGroup | null = null;
 	private detectedLapsLayer: L.LayerGroup | null = null;
-	private onGpsMarkerChange: GpsMarkerChangeCallback | null = null;
-	private gpsMarkerModeEnabled: boolean = false;
 
 	// Out and Back mode state
-	private outAndBackModeEnabled: boolean = false;
-	private activeMarker: "A" | "B" = "A"; // Which marker to place next
 	private gpsMarkerA: L.CircleMarker | null = null;
 	private gpsMarkerB: L.CircleMarker | null = null;
-	private gpsMarkerAPosition: { lat: number; lon: number } | null = null;
-	private gpsMarkerBPosition: { lat: number; lon: number } | null = null;
-	private onOutAndBackMarkerChange: OutAndBackMarkerChangeCallback | null =
-		null;
-	private boundOutAndBackClickHandler:
-		| ((e: L.LeafletMouseEvent) => void)
-		| null = null;
 
 	constructor(containerId: string) {
 		this.container = document.getElementById(containerId) as HTMLElement;
@@ -135,18 +94,14 @@ export class MapVisualization {
 		this.laps = laps;
 
 		// Extract valid GPS points and track their indices
-		this.routePoints = [];
-		this.routePointIndices = [];
-		for (let i = 0; i < fitData.timestamps.length; i++) {
-			const lat = fitData.position_lat[i];
-			const lng = fitData.position_long[i];
-
-			// Filter out invalid GPS coordinates
-			if (lat && lng && lat !== 0 && lng !== 0) {
-				this.routePoints.push([lat, lng]);
-				this.routePointIndices.push(i);
-			}
-		}
+		const { points, indices } = collectValidPoints(
+			fitData.position_lat,
+			fitData.position_long,
+			0,
+			fitData.timestamps.length - 1,
+		);
+		this.routePoints = points;
+		this.routePointIndices = indices;
 
 		// Update map view if we have GPS data
 		if (this.routePoints.length > 0) {
@@ -190,7 +145,9 @@ export class MapVisualization {
 		)
 			return;
 
-		// Collect all GPS points that belong to selected laps
+		// Collect all GPS points that belong to selected laps.
+		// routePoints/routePointIndices are the collectValidPoints result over
+		// the full activity (established in setData).
 		const selectedPoints: [number, number][] = [];
 
 		for (const lapNumber of this.selectedLaps) {
@@ -199,15 +156,10 @@ export class MapVisualization {
 
 			if (!lap) continue;
 
-			for (let i = 0; i < this.fitData.timestamps.length; i++) {
-				const timestamp = this.fitData.timestamps[i];
+			for (let k = 0; k < this.routePoints.length; k++) {
+				const timestamp = this.fitData.timestamps[this.routePointIndices[k]];
 				if (timestamp >= lap.start_time && timestamp <= lap.end_time) {
-					const lat = this.fitData.position_lat[i];
-					const lng = this.fitData.position_long[i];
-
-					if (lat && lng && lat !== 0 && lng !== 0) {
-						selectedPoints.push([lat, lng]);
-					}
+					selectedPoints.push(this.routePoints[k]);
 				}
 			}
 		}
@@ -242,16 +194,12 @@ export class MapVisualization {
 		if (!posLat || !posLong) return;
 
 		// Collect GPS points in the trim region (trimEnd is inclusive)
-		const trimmedPoints: [number, number][] = [];
-
-		for (let i = trimStart; i <= Math.min(trimEnd, posLat.length - 1); i++) {
-			const lat = posLat[i];
-			const lng = posLong[i];
-
-			if (lat && lng && lat !== 0 && lng !== 0) {
-				trimmedPoints.push([lat, lng]);
-			}
-		}
+		const { points: trimmedPoints } = collectValidPoints(
+			posLat,
+			posLong,
+			trimStart,
+			trimEnd,
+		);
 
 		log.debug("Trimmed points collected:", trimmedPoints.length);
 
@@ -405,19 +353,11 @@ export class MapVisualization {
 			}
 		}
 
-		// Convert to route point indices (filtering out invalid GPS points)
-		const routeSelectedMask: boolean[] = [];
-		let routeIndex = 0;
-
-		for (let i = 0; i < this.fitData.timestamps.length; i++) {
-			const lat = this.fitData.position_lat[i];
-			const lng = this.fitData.position_long[i];
-
-			if (lat && lng && lat !== 0 && lng !== 0) {
-				routeSelectedMask[routeIndex] = selectedMask[i];
-				routeIndex++;
-			}
-		}
+		// Convert to route point indices (filtering out invalid GPS points):
+		// routePointIndices maps each route point to its fitData index.
+		const routeSelectedMask = this.routePointIndices.map(
+			(i) => selectedMask[i],
+		);
 
 		// Draw non-selected segments (dashed blue with reduced opacity)
 		this.drawSegments(routeSelectedMask, false, {
@@ -480,22 +420,17 @@ export class MapVisualization {
 			const lap = this.laps[lapIndex];
 			if (!lap) continue;
 
-			// Find start and end points
+			// Find start and end points among the valid route points
 			let startPoint: [number, number] | null = null;
 			let endPoint: [number, number] | null = null;
 
-			for (let i = 0; i < this.fitData.timestamps.length; i++) {
-				const timestamp = this.fitData.timestamps[i];
-				const lat = this.fitData.position_lat[i];
-				const lng = this.fitData.position_long[i];
-
-				if (lat && lng && lat !== 0 && lng !== 0) {
-					if (timestamp >= lap.start_time && timestamp <= lap.end_time) {
-						if (!startPoint) {
-							startPoint = [lat, lng];
-						}
-						endPoint = [lat, lng];
+			for (let k = 0; k < this.routePoints.length; k++) {
+				const timestamp = this.fitData.timestamps[this.routePointIndices[k]];
+				if (timestamp >= lap.start_time && timestamp <= lap.end_time) {
+					if (!startPoint) {
+						startPoint = this.routePoints[k];
 					}
+					endPoint = this.routePoints[k];
 				}
 			}
 
@@ -541,29 +476,6 @@ export class MapVisualization {
 				}
 			}, 100);
 		}
-	}
-
-	private degreeToCardinal(degrees: number): string {
-		const directions = [
-			"N",
-			"NNE",
-			"NE",
-			"ENE",
-			"E",
-			"ESE",
-			"SE",
-			"SSE",
-			"S",
-			"SSW",
-			"SW",
-			"WSW",
-			"W",
-			"WNW",
-			"NW",
-			"NNW",
-		];
-		const index = Math.round((degrees % 360) / 22.5) % 16;
-		return directions[index];
 	}
 
 	public showWindIndicator(
@@ -628,7 +540,7 @@ export class MapVisualization {
 
 		// Create direction text with cardinal direction
 		const direction = document.createElement("div");
-		const cardinal = this.degreeToCardinal(windDirection);
+		const cardinal = degreeToCardinal(windDirection);
 		direction.textContent = `${windDirection.toFixed(0)}°`;
 		direction.style.fontSize = "13px";
 		direction.style.color = "#666";
@@ -663,103 +575,6 @@ export class MapVisualization {
 	// ==================== GPS Lap Detection Methods ====================
 
 	/**
-	 * Enable GPS marker placement mode
-	 * When enabled, clicking on the map places a GPS marker for lap detection
-	 */
-	public enableGpsMarkerMode(callback: GpsMarkerChangeCallback): void {
-		if (!this.map) return;
-
-		this.gpsMarkerModeEnabled = true;
-		this.onGpsMarkerChange = callback;
-
-		// Change cursor to crosshair when hovering over the map
-		this.container.style.cursor = "crosshair";
-
-		// Add click handler to place marker
-		this.map.on("click", this.handleMapClick.bind(this));
-
-		log.debug("GPS marker mode enabled");
-	}
-
-	/**
-	 * Disable GPS marker placement mode
-	 */
-	public disableGpsMarkerMode(): void {
-		if (!this.map) return;
-
-		this.gpsMarkerModeEnabled = false;
-		this.onGpsMarkerChange = null;
-
-		// Reset cursor
-		this.container.style.cursor = "";
-
-		// Remove click handler
-		this.map.off("click", this.handleMapClick.bind(this));
-
-		log.debug("GPS marker mode disabled");
-	}
-
-	/**
-	 * Handle map click for GPS marker placement
-	 */
-	private handleMapClick(e: L.LeafletMouseEvent): void {
-		if (!this.gpsMarkerModeEnabled || !this.fitData) return;
-
-		const clickedLat = e.latlng.lat;
-		const clickedLon = e.latlng.lng;
-
-		// Find the nearest point on the route
-		const nearest = this.findNearestRoutePoint(clickedLat, clickedLon);
-		if (!nearest) return;
-
-		// Place marker at the nearest route point (snapping to route)
-		this.setGpsMarker(nearest.lat, nearest.lon);
-
-		// Notify callback with the marker position and data index
-		if (this.onGpsMarkerChange) {
-			this.onGpsMarkerChange(nearest.lat, nearest.lon, nearest.dataIndex);
-		}
-	}
-
-	/**
-	 * Find the nearest point on the route to the given coordinates
-	 */
-	private findNearestRoutePoint(
-		lat: number,
-		lon: number,
-	): {
-		lat: number;
-		lon: number;
-		routeIndex: number;
-		dataIndex: number;
-	} | null {
-		if (this.routePoints.length === 0) return null;
-
-		let nearestIndex = 0;
-		let nearestDistance = Infinity;
-
-		for (let i = 0; i < this.routePoints.length; i++) {
-			const [routeLat, routeLon] = this.routePoints[i];
-			// Use simple Euclidean distance for speed (good enough for snapping)
-			const dist = Math.pow(lat - routeLat, 2) + Math.pow(lon - routeLon, 2);
-			if (dist < nearestDistance) {
-				nearestDistance = dist;
-				nearestIndex = i;
-			}
-		}
-
-		const [nearestLat, nearestLon] = this.routePoints[nearestIndex];
-		const dataIndex = this.routePointIndices[nearestIndex];
-
-		return {
-			lat: nearestLat,
-			lon: nearestLon,
-			routeIndex: nearestIndex,
-			dataIndex: dataIndex,
-		};
-	}
-
-	/**
 	 * Set the GPS marker at a specific location
 	 */
 	public setGpsMarker(lat: number, lon: number): void {
@@ -788,50 +603,8 @@ export class MapVisualization {
 		this.gpsMarker.bindPopup("GPS Gate - Click to move");
 
 		this.gpsMarker.addTo(this.gpsMarkerLayer);
-		this.gpsMarkerPosition = { lat, lon };
 
 		log.debug("GPS marker set at:", { lat, lon });
-	}
-
-	/**
-	 * Set GPS marker by data index (used when loading saved marker position)
-	 */
-	public setGpsMarkerByIndex(dataIndex: number): void {
-		if (
-			!this.fitData ||
-			dataIndex < 0 ||
-			dataIndex >= this.fitData.position_lat.length
-		) {
-			return;
-		}
-
-		const lat = this.fitData.position_lat[dataIndex];
-		const lon = this.fitData.position_long[dataIndex];
-
-		if (lat && lon && lat !== 0 && lon !== 0) {
-			this.setGpsMarker(lat, lon);
-		}
-	}
-
-	/**
-	 * Get current GPS marker position
-	 */
-	public getGpsMarkerPosition(): { lat: number; lon: number } | null {
-		return this.gpsMarkerPosition;
-	}
-
-	/**
-	 * Get GPS marker data index (nearest index in fitData)
-	 */
-	public getGpsMarkerDataIndex(): number | null {
-		if (!this.gpsMarkerPosition || !this.fitData) return null;
-
-		const nearest = this.findNearestRoutePoint(
-			this.gpsMarkerPosition.lat,
-			this.gpsMarkerPosition.lon,
-		);
-
-		return nearest?.dataIndex ?? null;
 	}
 
 	/**
@@ -842,7 +615,6 @@ export class MapVisualization {
 			this.gpsMarkerLayer.clearLayers();
 		}
 		this.gpsMarker = null;
-		this.gpsMarkerPosition = null;
 	}
 
 	/**
@@ -874,18 +646,12 @@ export class MapVisualization {
 			const color = lapColors[(lap.lapNumber - 1) % lapColors.length];
 
 			// Extract route points for this lap
-			const lapPoints: [number, number][] = [];
-			for (
-				let i = lap.startIdx;
-				i <= lap.endIdx && i < this.fitData.position_lat.length;
-				i++
-			) {
-				const lat = this.fitData.position_lat[i];
-				const lon = this.fitData.position_long[i];
-				if (lat && lon && lat !== 0 && lon !== 0) {
-					lapPoints.push([lat, lon]);
-				}
-			}
+			const { points: lapPoints } = collectValidPoints(
+				this.fitData.position_lat,
+				this.fitData.position_long,
+				lap.startIdx,
+				lap.endIdx,
+			);
 
 			if (lapPoints.length > 1) {
 				// Draw lap polyline
@@ -910,113 +676,7 @@ export class MapVisualization {
 		}
 	}
 
-	/**
-	 * Check if GPS marker mode is enabled
-	 */
-	public isGpsMarkerModeEnabled(): boolean {
-		return this.gpsMarkerModeEnabled;
-	}
-
 	// ==================== Out and Back Mode Methods ====================
-
-	/**
-	 * Enable Out and Back marker placement mode
-	 * When enabled, clicking on the map places GPS markers A and B alternately
-	 * Note: Call setActiveMarker() BEFORE this to set which marker to place
-	 */
-	public enableOutAndBackMode(callback: OutAndBackMarkerChangeCallback): void {
-		if (!this.map) return;
-
-		// Remove existing handler if any (prevent duplicates)
-		if (this.boundOutAndBackClickHandler) {
-			this.map.off("click", this.boundOutAndBackClickHandler);
-		}
-
-		this.outAndBackModeEnabled = true;
-		this.onOutAndBackMarkerChange = callback;
-		// Don't reset activeMarker here - let setActiveMarker control it
-
-		// Change cursor to crosshair when hovering over the map
-		this.container.style.cursor = "crosshair";
-
-		// Create and store bound handler for proper removal later
-		this.boundOutAndBackClickHandler = this.handleOutAndBackClick.bind(this);
-		this.map.on("click", this.boundOutAndBackClickHandler);
-
-		log.debug(
-			`Out and Back marker mode enabled - place marker ${this.activeMarker} first`,
-		);
-	}
-
-	/**
-	 * Disable Out and Back marker placement mode
-	 */
-	public disableOutAndBackMode(): void {
-		if (!this.map) return;
-
-		this.outAndBackModeEnabled = false;
-		this.onOutAndBackMarkerChange = null;
-
-		// Reset cursor
-		this.container.style.cursor = "";
-
-		// Remove click handler using the stored bound reference
-		if (this.boundOutAndBackClickHandler) {
-			this.map.off("click", this.boundOutAndBackClickHandler);
-			this.boundOutAndBackClickHandler = null;
-		}
-
-		log.debug("Out and Back marker mode disabled");
-	}
-
-	/**
-	 * Set which marker to place next (A or B)
-	 */
-	public setActiveMarker(marker: "A" | "B"): void {
-		this.activeMarker = marker;
-		log.debug(`Active marker set to: ${marker}`);
-	}
-
-	/**
-	 * Get current active marker
-	 */
-	public getActiveMarker(): "A" | "B" {
-		return this.activeMarker;
-	}
-
-	/**
-	 * Handle map click for Out and Back marker placement
-	 */
-	private handleOutAndBackClick(e: L.LeafletMouseEvent): void {
-		if (!this.outAndBackModeEnabled || !this.fitData) return;
-
-		const clickedLat = e.latlng.lat;
-		const clickedLon = e.latlng.lng;
-
-		// Find the nearest point on the route
-		const nearest = this.findNearestRoutePoint(clickedLat, clickedLon);
-		if (!nearest) return;
-
-		// Place the appropriate marker
-		if (this.activeMarker === "A") {
-			this.setGpsMarkerA(nearest.lat, nearest.lon);
-		} else {
-			this.setGpsMarkerB(nearest.lat, nearest.lon);
-		}
-
-		// Notify callback with the marker position and data index
-		if (this.onOutAndBackMarkerChange) {
-			this.onOutAndBackMarkerChange(
-				this.activeMarker,
-				nearest.lat,
-				nearest.lon,
-				nearest.dataIndex,
-			);
-		}
-
-		// Auto-switch to next marker
-		this.activeMarker = this.activeMarker === "A" ? "B" : "A";
-	}
 
 	/**
 	 * Set GPS marker A at a specific location
@@ -1049,7 +709,6 @@ export class MapVisualization {
 		});
 
 		this.gpsMarkerA.addTo(this.gpsMarkerLayer);
-		this.gpsMarkerAPosition = { lat, lon };
 
 		log.debug("GPS marker A set at:", { lat, lon });
 	}
@@ -1085,91 +744,8 @@ export class MapVisualization {
 		});
 
 		this.gpsMarkerB.addTo(this.gpsMarkerLayer);
-		this.gpsMarkerBPosition = { lat, lon };
 
 		log.debug("GPS marker B set at:", { lat, lon });
-	}
-
-	/**
-	 * Set GPS marker A by data index
-	 */
-	public setGpsMarkerAByIndex(dataIndex: number): void {
-		if (
-			!this.fitData ||
-			dataIndex < 0 ||
-			dataIndex >= this.fitData.position_lat.length
-		) {
-			return;
-		}
-
-		const lat = this.fitData.position_lat[dataIndex];
-		const lon = this.fitData.position_long[dataIndex];
-
-		if (lat && lon && lat !== 0 && lon !== 0) {
-			this.setGpsMarkerA(lat, lon);
-		}
-	}
-
-	/**
-	 * Set GPS marker B by data index
-	 */
-	public setGpsMarkerBByIndex(dataIndex: number): void {
-		if (
-			!this.fitData ||
-			dataIndex < 0 ||
-			dataIndex >= this.fitData.position_lat.length
-		) {
-			return;
-		}
-
-		const lat = this.fitData.position_lat[dataIndex];
-		const lon = this.fitData.position_long[dataIndex];
-
-		if (lat && lon && lat !== 0 && lon !== 0) {
-			this.setGpsMarkerB(lat, lon);
-		}
-	}
-
-	/**
-	 * Get GPS marker A position
-	 */
-	public getGpsMarkerAPosition(): { lat: number; lon: number } | null {
-		return this.gpsMarkerAPosition;
-	}
-
-	/**
-	 * Get GPS marker B position
-	 */
-	public getGpsMarkerBPosition(): { lat: number; lon: number } | null {
-		return this.gpsMarkerBPosition;
-	}
-
-	/**
-	 * Get GPS marker A data index
-	 */
-	public getGpsMarkerADataIndex(): number | null {
-		if (!this.gpsMarkerAPosition || !this.fitData) return null;
-
-		const nearest = this.findNearestRoutePoint(
-			this.gpsMarkerAPosition.lat,
-			this.gpsMarkerAPosition.lon,
-		);
-
-		return nearest?.dataIndex ?? null;
-	}
-
-	/**
-	 * Get GPS marker B data index
-	 */
-	public getGpsMarkerBDataIndex(): number | null {
-		if (!this.gpsMarkerBPosition || !this.fitData) return null;
-
-		const nearest = this.findNearestRoutePoint(
-			this.gpsMarkerBPosition.lat,
-			this.gpsMarkerBPosition.lon,
-		);
-
-		return nearest?.dataIndex ?? null;
 	}
 
 	/**
@@ -1186,8 +762,6 @@ export class MapVisualization {
 				this.gpsMarkerB = null;
 			}
 		}
-		this.gpsMarkerAPosition = null;
-		this.gpsMarkerBPosition = null;
 	}
 
 	/**
@@ -1221,18 +795,12 @@ export class MapVisualization {
 				sectionColors[(section.sectionNumber - 1) % sectionColors.length];
 
 			// Draw outbound segment (A → B) - solid line
-			const outboundPoints: [number, number][] = [];
-			for (
-				let i = section.outboundStartIdx;
-				i <= section.outboundEndIdx && i < this.fitData.position_lat.length;
-				i++
-			) {
-				const lat = this.fitData.position_lat[i];
-				const lon = this.fitData.position_long[i];
-				if (lat && lon && lat !== 0 && lon !== 0) {
-					outboundPoints.push([lat, lon]);
-				}
-			}
+			const { points: outboundPoints } = collectValidPoints(
+				this.fitData.position_lat,
+				this.fitData.position_long,
+				section.outboundStartIdx,
+				section.outboundEndIdx,
+			);
 
 			if (outboundPoints.length > 1) {
 				const outboundLine = L.polyline(outboundPoints, {
@@ -1244,18 +812,12 @@ export class MapVisualization {
 			}
 
 			// Draw inbound segment (B → A) - dashed line
-			const inboundPoints: [number, number][] = [];
-			for (
-				let i = section.inboundStartIdx;
-				i <= section.inboundEndIdx && i < this.fitData.position_lat.length;
-				i++
-			) {
-				const lat = this.fitData.position_lat[i];
-				const lon = this.fitData.position_long[i];
-				if (lat && lon && lat !== 0 && lon !== 0) {
-					inboundPoints.push([lat, lon]);
-				}
-			}
+			const { points: inboundPoints } = collectValidPoints(
+				this.fitData.position_lat,
+				this.fitData.position_long,
+				section.inboundStartIdx,
+				section.inboundEndIdx,
+			);
 
 			if (inboundPoints.length > 1) {
 				const inboundLine = L.polyline(inboundPoints, {
@@ -1269,13 +831,6 @@ export class MapVisualization {
 		}
 
 		log.debug(`Displayed ${sections.length} out-and-back sections on map`);
-	}
-
-	/**
-	 * Check if Out and Back mode is enabled
-	 */
-	public isOutAndBackModeEnabled(): boolean {
-		return this.outAndBackModeEnabled;
 	}
 
 	public destroy(): void {
