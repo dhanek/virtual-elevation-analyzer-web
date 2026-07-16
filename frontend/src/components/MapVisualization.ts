@@ -8,13 +8,20 @@ import type {
 import { log } from "../utils/log";
 import type { FitData, LapData, MapContext } from "./map/context";
 import * as detectedRoutes from "./map/detectedRoutes";
-import { collectValidPoints, degreeToCardinal } from "./map/geo";
+import { createGateMarkers, type GateMarkers } from "./map/gateMarkers";
+import * as gateMarkers from "./map/gateMarkers";
+import { collectValidPoints } from "./map/geo";
 import * as routeRendering from "./map/routeRendering";
 import * as trimMarkers from "./map/trimMarkers";
+import * as windIndicator from "./map/windIndicator";
 
-const GATE_MARKER_RADIUS_PX = 12;
-const GATE_MARKER_TOOLTIP_OFFSET_Y_PX = 8;
-
+/**
+ * Map facade (D-08/D-09): owns the Leaflet lifecycle and the shared map
+ * state, and delegates all feature behavior — route rendering, trim markers,
+ * detected routes, gate/A/B markers, wind indicator — to the internal
+ * `components/map/` modules via `MapContext`. `shell/` modules import ONLY
+ * this facade; its public API is frozen (17 live methods).
+ */
 export class MapVisualization {
 	private map: L.Map | null = null;
 	private routeLayer: L.LayerGroup | null = null;
@@ -24,16 +31,11 @@ export class MapVisualization {
 	private selectedLaps: number[] = [];
 	private routePoints: [number, number][] = [];
 	private routePointIndices: number[] = []; // Maps route point index to fitData index
-	private windIndicator: HTMLElement | null = null;
 
-	// GPS Lap Detection state
-	private gpsMarker: L.CircleMarker | null = null;
+	// Gate + out-and-back marker handles (mutated by the gateMarkers module)
+	private readonly gateMarkers: GateMarkers = createGateMarkers();
 	private gpsMarkerLayer: L.LayerGroup | null = null;
 	private detectedLapsLayer: L.LayerGroup | null = null;
-
-	// Out and Back mode state
-	private gpsMarkerA: L.CircleMarker | null = null;
-	private gpsMarkerB: L.CircleMarker | null = null;
 
 	constructor(containerId: string) {
 		this.container = document.getElementById(containerId) as HTMLElement;
@@ -179,93 +181,16 @@ export class MapVisualization {
 		windDirection: number,
 		windSpeedUnit: "m/s" | "km/h" = "m/s",
 	): void {
-		// Remove existing indicator if present
-		if (this.windIndicator) {
-			this.windIndicator.remove();
-		}
-
-		// Only show if wind parameters are non-zero
-		if (windSpeed === 0 && windDirection === 0) {
-			return;
-		}
-
-		// Convert wind speed to selected unit
-		const displaySpeed = windSpeedUnit === "km/h" ? windSpeed * 3.6 : windSpeed;
-
-		// Create wind indicator overlay
-		this.windIndicator = document.createElement("div");
-		this.windIndicator.style.position = "absolute";
-		this.windIndicator.style.top = "10px";
-		this.windIndicator.style.right = "10px";
-		this.windIndicator.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
-		this.windIndicator.style.padding = "12px";
-		this.windIndicator.style.borderRadius = "8px";
-		this.windIndicator.style.border = "1px solid #4363d8";
-		this.windIndicator.style.boxShadow = "0 2px 8px rgba(0,0,0,0.2)";
-		this.windIndicator.style.zIndex = "1000";
-		this.windIndicator.style.display = "flex";
-		this.windIndicator.style.flexDirection = "column";
-		this.windIndicator.style.alignItems = "center";
-		this.windIndicator.style.gap = "6px";
-		this.windIndicator.style.minWidth = "110px";
-
-		// Create title
-		const title = document.createElement("div");
-		title.textContent = "Wind";
-		title.style.fontSize = "16px";
-		title.style.fontWeight = "600";
-		title.style.color = "#4363d8";
-		title.style.marginBottom = "2px";
-
-		// Create arrow element - rotated by windDirection + 180 to point where wind is coming FROM
-		const arrow = document.createElement("div");
-		arrow.innerHTML = "↑";
-		arrow.style.fontSize = "32px";
-		arrow.style.transform = `rotate(${windDirection + 180}deg)`;
-		arrow.style.transition = "transform 0.3s ease";
-		arrow.style.color = "#4363d8";
-		arrow.style.lineHeight = "1";
-
-		// Create speed text
-		const speed = document.createElement("div");
-		speed.textContent = `${displaySpeed.toFixed(1)} ${windSpeedUnit}`;
-		speed.style.fontSize = "14px";
-		speed.style.fontWeight = "500";
-		speed.style.color = "#2d3748";
-		speed.style.marginTop = "2px";
-
-		// Create direction text with cardinal direction
-		const direction = document.createElement("div");
-		const cardinal = degreeToCardinal(windDirection);
-		direction.textContent = `${windDirection.toFixed(0)}°`;
-		direction.style.fontSize = "13px";
-		direction.style.color = "#666";
-
-		// Create "from" text with cardinal direction
-		const fromText = document.createElement("div");
-		fromText.textContent = `from ${cardinal}`;
-		fromText.style.fontSize = "12px";
-		fromText.style.color = "#888";
-		fromText.style.fontStyle = "italic";
-
-		this.windIndicator.appendChild(title);
-		this.windIndicator.appendChild(arrow);
-		this.windIndicator.appendChild(speed);
-		this.windIndicator.appendChild(direction);
-		this.windIndicator.appendChild(fromText);
-
-		// Append to map container
-		this.container.style.position = "relative";
-		this.container.appendChild(this.windIndicator);
-
-		log.debug("Wind indicator shown:", { windSpeed, windDirection, cardinal });
+		windIndicator.showWindIndicator(
+			this.container,
+			windSpeed,
+			windDirection,
+			windSpeedUnit,
+		);
 	}
 
 	public hideWindIndicator(): void {
-		if (this.windIndicator) {
-			this.windIndicator.remove();
-			this.windIndicator = null;
-		}
+		windIndicator.hideWindIndicator(this.container);
 	}
 
 	// ==================== GPS Lap Detection Methods ====================
@@ -274,43 +199,16 @@ export class MapVisualization {
 	 * Set the GPS marker at a specific location
 	 */
 	public setGpsMarker(lat: number, lon: number): void {
-		if (!this.gpsMarkerLayer) return;
-
-		// Clear existing marker
-		this.gpsMarkerLayer.clearLayers();
-
-		// Create new marker with distinctive styling
-		this.gpsMarker = L.circleMarker([lat, lon], {
-			radius: GATE_MARKER_RADIUS_PX,
-			fillColor: "#ff6b00", // Orange
-			color: "#ffffff",
-			weight: 3,
-			opacity: 1,
-			fillOpacity: 0.9,
-		});
-
-		// Add pulsing effect with CSS class
-		const markerElement = this.gpsMarker.getElement?.();
-		if (markerElement) {
-			markerElement.classList.add("gps-gate-marker");
-		}
-
-		// Add popup
-		this.gpsMarker.bindPopup("GPS Gate - Click to move");
-
-		this.gpsMarker.addTo(this.gpsMarkerLayer);
-
-		log.debug("GPS marker set at:", { lat, lon });
+		const ctx = this.getContext();
+		if (!ctx) return;
+		gateMarkers.setGpsMarker(ctx, this.gateMarkers, lat, lon);
 	}
 
 	/**
 	 * Clear the GPS marker
 	 */
 	public clearGpsMarker(): void {
-		if (this.gpsMarkerLayer) {
-			this.gpsMarkerLayer.clearLayers();
-		}
-		this.gpsMarker = null;
+		gateMarkers.clearGpsMarker(this.gpsMarkerLayer, this.gateMarkers);
 	}
 
 	/**
@@ -338,86 +236,25 @@ export class MapVisualization {
 	 * Set GPS marker A at a specific location
 	 */
 	public setGpsMarkerA(lat: number, lon: number): void {
-		if (!this.gpsMarkerLayer) return;
-
-		// Remove existing marker A if present
-		if (this.gpsMarkerA) {
-			this.gpsMarkerLayer.removeLayer(this.gpsMarkerA);
-		}
-
-		// Create marker A with green color
-		this.gpsMarkerA = L.circleMarker([lat, lon], {
-			radius: GATE_MARKER_RADIUS_PX,
-			fillColor: "#00aa00", // Green for start marker
-			color: "#ffffff",
-			weight: 3,
-			opacity: 1,
-			fillOpacity: 0.9,
-		});
-
-		// Add label positioned above the marker
-		this.gpsMarkerA.bindPopup("Gate A (Start/End)");
-		this.gpsMarkerA.bindTooltip("A", {
-			permanent: true,
-			direction: "top",
-			offset: [0, -GATE_MARKER_TOOLTIP_OFFSET_Y_PX],
-			className: "gate-marker-label gate-marker-label--a",
-		});
-
-		this.gpsMarkerA.addTo(this.gpsMarkerLayer);
-
-		log.debug("GPS marker A set at:", { lat, lon });
+		const ctx = this.getContext();
+		if (!ctx) return;
+		gateMarkers.setGpsMarkerA(ctx, this.gateMarkers, lat, lon);
 	}
 
 	/**
 	 * Set GPS marker B at a specific location
 	 */
 	public setGpsMarkerB(lat: number, lon: number): void {
-		if (!this.gpsMarkerLayer) return;
-
-		// Remove existing marker B if present
-		if (this.gpsMarkerB) {
-			this.gpsMarkerLayer.removeLayer(this.gpsMarkerB);
-		}
-
-		// Create marker B with blue color
-		this.gpsMarkerB = L.circleMarker([lat, lon], {
-			radius: GATE_MARKER_RADIUS_PX,
-			fillColor: "#0066cc", // Blue for turnaround marker
-			color: "#ffffff",
-			weight: 3,
-			opacity: 1,
-			fillOpacity: 0.9,
-		});
-
-		// Add label positioned above the marker
-		this.gpsMarkerB.bindPopup("Gate B (Turnaround)");
-		this.gpsMarkerB.bindTooltip("B", {
-			permanent: true,
-			direction: "top",
-			offset: [0, -GATE_MARKER_TOOLTIP_OFFSET_Y_PX],
-			className: "gate-marker-label gate-marker-label--b",
-		});
-
-		this.gpsMarkerB.addTo(this.gpsMarkerLayer);
-
-		log.debug("GPS marker B set at:", { lat, lon });
+		const ctx = this.getContext();
+		if (!ctx) return;
+		gateMarkers.setGpsMarkerB(ctx, this.gateMarkers, lat, lon);
 	}
 
 	/**
 	 * Clear both Out and Back markers
 	 */
 	public clearOutAndBackMarkers(): void {
-		if (this.gpsMarkerLayer) {
-			if (this.gpsMarkerA) {
-				this.gpsMarkerLayer.removeLayer(this.gpsMarkerA);
-				this.gpsMarkerA = null;
-			}
-			if (this.gpsMarkerB) {
-				this.gpsMarkerLayer.removeLayer(this.gpsMarkerB);
-				this.gpsMarkerB = null;
-			}
-		}
+		gateMarkers.clearOutAndBackMarkers(this.gpsMarkerLayer, this.gateMarkers);
 	}
 
 	/**

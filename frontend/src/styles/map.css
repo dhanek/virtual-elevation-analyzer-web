@@ -56,9 +56,12 @@
 	background: var(--color-bg);
 }
 
+/* position: relative anchors the wind-indicator overlay (formerly an
+   imperative container.style.position write in MapVisualization.ts). */
 #mapView {
 	height: 100%;
 	width: 100%;
+	position: relative;
 }
 
 /* Tablet and below: narrower sidebar */
@@ -334,6 +337,60 @@
 .gate-marker-label--b {
 	background: #0066cc !important;
 	color: white !important;
+}
+
+/* Wind indicator overlay (top-right of #mapView, above the Leaflet panes).
+   De-inlined from the former ~30 element.style writes in MapVisualization.ts
+   (D-06/D-07); only the arrow's rotate() transform stays imperative in
+   components/map/windIndicator.ts. Background keeps the literal rgba white —
+   the 0.9 alpha has no computed-identical token. */
+.map-wind-indicator {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	background-color: rgba(255, 255, 255, 0.9);
+	padding: 12px;
+	border-radius: var(--radius-lg);
+	border: 1px solid var(--color-primary);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	z-index: 1000;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	min-width: 110px;
+}
+
+.map-wind-indicator__title {
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--color-primary);
+	margin-bottom: 2px;
+}
+
+.map-wind-indicator__arrow {
+	font-size: 32px;
+	transition: transform 0.3s ease;
+	color: var(--color-primary);
+	line-height: 1;
+}
+
+.map-wind-indicator__speed {
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--color-text-heading);
+	margin-top: 2px;
+}
+
+.map-wind-indicator__direction {
+	font-size: 13px;
+	color: var(--color-text-muted);
+}
+
+.map-wind-indicator__from {
+	font-size: 12px;
+	color: #888;
+	font-style: italic;
 }
 
 /* Section 3 footer action row (formerly inline margin on the template div) */
