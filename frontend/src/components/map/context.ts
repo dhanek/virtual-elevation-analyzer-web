@@ -31,6 +31,25 @@ export interface FitData {
 	temperature: NumericSeries;
 }
 
+/**
+ * Lap summary row as delivered by the data source (moved from the facade in
+ * plan 05-10 so the facade's `setData` signature and the route-rendering
+ * module share one definition).
+ */
+export interface LapData {
+	lap_number?: number;
+	start_time: number;
+	end_time: number;
+	total_elapsed_time: number;
+	total_distance: number;
+	avg_speed: number;
+	max_speed?: number;
+	avg_power?: number;
+	max_power?: number;
+	start_position_lat?: number;
+	start_position_long?: number;
+}
+
 /** Shared map state owned by the `MapVisualization` facade. */
 export interface MapContext {
 	/** The Leaflet map instance. Lifecycle (create/remove) belongs to the facade. */
@@ -70,4 +89,10 @@ export interface MapContext {
 
 	/** For each route point, its source index into the FitData columns, read live. */
 	getRoutePointIndices(): readonly number[];
+
+	/** Lap summary rows for the loaded activity, read live. */
+	getLaps(): readonly LapData[];
+
+	/** Currently selected 1-based lap numbers, read live. */
+	getSelectedLaps(): readonly number[];
 }
