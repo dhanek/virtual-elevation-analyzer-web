@@ -322,7 +322,7 @@
 	font-weight: bold;
 	font-size: 12px;
 	padding: 2px 5px;
-	border-radius: 3px;
+	border-radius: var(--radius-sm);
 }
 
 .gate-marker-label::before {
