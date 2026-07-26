@@ -8,6 +8,7 @@ import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js
 import { showNotification } from '../dom/notifications';
 import { ShellServices } from '../analysis/types';
 import { refreshCrrTempReadout, syncCrrTempAmbientFromWeather } from './crrTempControls';
+import { resolveWeatherFailure } from './weatherFallback';
 
 /**
  * Calculate air density automatically using weather data.
@@ -248,36 +249,30 @@ export async function calculateAutoRho(
         } catch (error) {
             services.hideLoading();
 
+            // WEATH-03 rungs 3/4: degrade to the manual/prior rho.
+            // Diagnostics stay internal (log only); the user-facing text comes
+            // from the pure resolver so error internals cannot leak (T-06-07).
             if (error instanceof WeatherAPIError) {
                 log.error('Weather API error:', error.message, error.code);
-
-                // Show user-friendly error message
-                let userMessage = 'Could not fetch weather data: ';
-                if (error.code === 'DATA_TOO_OLD') {
-                    userMessage += 'Activity is too old (>92 days). Using manual rho value.';
-                } else if (error.code === 'API_ERROR') {
-                    userMessage += 'Weather service unavailable. Using manual rho value.';
-                } else if (error.code === 'FETCH_ERROR') {
-                    userMessage += 'Network error. Check your internet connection.';
-                } else {
-                    userMessage += error.message;
-                }
-
-                showNotification(userMessage, 'warning');
             } else {
                 log.error('Failed to calculate auto rho:', error);
-                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-                showNotification(`Auto-rho calculation failed: ${errorMsg}`, 'error');
             }
 
+            const resolution = resolveWeatherFailure(error);
+            showNotification(resolution.userMessage, resolution.severity);
+
             appState.isCalculatingAutoRho = false;
+            // Returning null keeps the existing manual rho — analysis continues.
             return null;
         }
 
     } catch (error) {
         services.hideLoading();
         log.error('Unexpected error in calculateAutoRho:', error);
-        showNotification('Failed to calculate air density. Using manual value.', 'error');
+
+        const resolution = resolveWeatherFailure(error);
+        showNotification(resolution.userMessage, resolution.severity);
+
         appState.isCalculatingAutoRho = false;
         return null;
     }
