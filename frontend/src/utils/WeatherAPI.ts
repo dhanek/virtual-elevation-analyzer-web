@@ -60,14 +60,21 @@ export class WeatherAPI {
         const useForecastAPI = daysDiff <= this.forecastMaxDays;
 
         if (useForecastAPI) {
+            // allowNullFallback=true: an all-null Forecast response resolves to
+            // null instead of throwing, so this rung can degrade silently.
             const result = await this.fetchFromAPI('Forecast', this.forecastBaseUrl, query, daysDiff, '15min', true);
             if (result) return result;
 
-            // Forecast API returned all-null data — fall back to Archive
+            // WEATH-03 rung 2: Forecast API returned all-null data (typical for
+            // dates older than ~69 days) — degrade to the Archive API rather
+            // than surfacing a failure. Only if Archive also fails does the
+            // caller reach rung 3 (manual rho + warning) via resolveWeatherFailure.
             log.debug('⚠️ Forecast API returned null data, falling back to Archive API');
         }
 
         // Archive API always has data — non-null assertion is safe here
+        // (allowNullFallback defaults to false, so this call throws rather than
+        // returning null when data is missing).
         return (await this.fetchFromAPI('Archive', this.archiveBaseUrl, query, daysDiff, 'hourly'))!;
     }
 

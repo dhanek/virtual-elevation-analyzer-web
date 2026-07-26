@@ -31,30 +31,35 @@ export async function calculateAutoRho(
 
     appState.isCalculatingAutoRho = true;
 
-    log.debug('\n╔═══════════════════════════════════════════════════════════════╗');
-    log.debug('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
-    log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
-
-    if (!appState.currentFitData || !parametersComponent) {
-        log.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
-        log.debug('  - appState.currentFitData:', !!appState.currentFitData);
-        log.debug('  - parametersComponent:', !!parametersComponent);
-        appState.isCalculatingAutoRho = false;
-        return null;
-    }
-
-    const params = parametersComponent.getParameters();
-
-    // Check if auto-calculate is enabled
-    if (!params.auto_calculate_rho) {
-        log.debug('⏭️  Auto-calculate disabled, skipping\n');
-        appState.isCalculatingAutoRho = false;
-        return null;
-    }
-
-    log.debug('✅ Auto-calculate enabled, proceeding...\n');
-
+    // WEATH-03 rung 3 guard: everything after the in-progress flag is set runs
+    // inside this try, so no failure path can leave `isCalculatingAutoRho`
+    // stuck at true (which would permanently disable auto-rho for the session)
+    // or reject to a caller. Callers discard the return value, so returning
+    // null simply leaves the manual/prior rho in place and analysis continues.
     try {
+        log.debug('\n╔═══════════════════════════════════════════════════════════════╗');
+        log.debug('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
+        log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
+
+        if (!appState.currentFitData || !parametersComponent) {
+            log.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
+            log.debug('  - appState.currentFitData:', !!appState.currentFitData);
+            log.debug('  - parametersComponent:', !!parametersComponent);
+            appState.isCalculatingAutoRho = false;
+            return null;
+        }
+
+        const params = parametersComponent.getParameters();
+
+        // Check if auto-calculate is enabled
+        if (!params.auto_calculate_rho) {
+            log.debug('⏭️  Auto-calculate disabled, skipping\n');
+            appState.isCalculatingAutoRho = false;
+            return null;
+        }
+
+        log.debug('✅ Auto-calculate enabled, proceeding...\n');
+
         // IMPORTANT: For auto-rho calculation, always use map trim sliders
         // Map trim sliders are relative to filtered lap data, which is what we need
         // Section 3 trim sliders are relative to full FIT data
