@@ -72,9 +72,11 @@ export class WeatherAPI {
             log.debug('⚠️ Forecast API returned null data, falling back to Archive API');
         }
 
-        // Archive API always has data — non-null assertion is safe here
-        // (allowNullFallback defaults to false, so this call throws rather than
-        // returning null when data is missing).
+        // Archive API: the 'hourly' path never returns null — extractHourlyData
+        // either returns a WeatherResponse or throws a coded WeatherAPIError,
+        // so the non-null assertion is sound. (`allowNullFallback` is not
+        // consulted here at all: it is only read on the '15min' path, see the
+        // `resolution === '15min'` branch in fetchFromAPI below.)
         return (await this.fetchFromAPI('Archive', this.archiveBaseUrl, query, daysDiff, 'hourly'))!;
     }
 
@@ -146,6 +148,12 @@ export class WeatherAPI {
                         log.debug('⚠️ Both minutely_15 and hourly data are null in Forecast response');
                         return null;
                     } else {
+                        // Defensive, currently unreachable: the only '15min'
+                        // call site (fetchWeatherData, the Forecast rung)
+                        // always passes allowNullFallback = true, so this
+                        // branch has no live caller. Kept so a future '15min'
+                        // caller that opts out of the null fallback fails
+                        // loudly rather than returning null.
                         throw new WeatherAPIError(
                             'Weather data is all null in API response',
                             'NULL_DATA'
