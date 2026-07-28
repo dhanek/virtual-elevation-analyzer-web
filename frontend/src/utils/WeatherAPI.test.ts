@@ -194,8 +194,6 @@ describe('WeatherAPI fixtures', () => {
         expect(daysAgo).toBe(9)
         const oldDaysAgo = Math.floor((NOW.getTime() - OLD_ACTIVITY.getTime()) / 86_400_000)
         expect(oldDaysAgo).toBeGreaterThan(82)
-        expect(Object.keys(forecastWithDataBody())).toContain('minutely_15')
-        expect(Object.keys(archiveBody())).toEqual(['hourly'])
     })
 })
 
@@ -294,7 +292,7 @@ describe('fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
         expect(resolveWeatherFailure(error).userMessage).toBe(
             `${WEATHER_FAILURE_PREFIX}: Weather service unavailable. Using manual rho value.`,
         )
-        expect(resolveWeatherFailure(error).keepManualRho).toBe(true)
+        expect(resolveWeatherFailure(error).severity).toBe('warning')
     })
 
     test('maps a network rejection to FETCH_ERROR without leaking the cause', async () => {
@@ -304,13 +302,12 @@ describe('fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
 
         expect(error).toBeInstanceOf(WeatherAPIError)
         expect((error as WeatherAPIError).code).toBe('FETCH_ERROR')
-        const { userMessage, severity, keepManualRho } = resolveWeatherFailure(error)
+        const { userMessage, severity } = resolveWeatherFailure(error)
         expect(userMessage).toBe(
             `${WEATHER_FAILURE_PREFIX}: Network error. Check your internet connection.`,
         )
         expect(userMessage).not.toContain('SECRET_HOST_DETAIL')
         expect(severity).toBe('warning')
-        expect(keepManualRho).toBe(true)
     })
 
     test('surfaces the Archive failure when both rungs fail', async () => {
@@ -323,7 +320,9 @@ describe('fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
 
         expect(fetchMock).toHaveBeenCalledTimes(2)
         expect((error as WeatherAPIError).code).toBe('API_ERROR')
-        expect(resolveWeatherFailure(error).keepManualRho).toBe(true)
+        expect(resolveWeatherFailure(error).userMessage).toBe(
+            `${WEATHER_FAILURE_PREFIX}: Weather service unavailable. Using manual rho value.`,
+        )
     })
 
     test('an all-null Archive response degrades through the generic message', async () => {
@@ -342,7 +341,6 @@ describe('fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
         expect(resolveWeatherFailure(error)).toEqual({
             userMessage: WEATHER_FAILURE_GENERIC_MESSAGE,
             severity: 'warning',
-            keepManualRho: true,
         })
     })
 })

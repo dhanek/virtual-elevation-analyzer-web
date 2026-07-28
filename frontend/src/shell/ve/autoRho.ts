@@ -8,7 +8,7 @@ import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js
 import { showNotification } from '../dom/notifications';
 import { ShellServices } from '../analysis/types';
 import { refreshCrrTempReadout, syncCrrTempAmbientFromWeather } from './crrTempControls';
-import { resolveWeatherFailure } from './weatherFallback';
+import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallback';
 
 /**
  * Calculate air density automatically using weather data.
@@ -31,11 +31,29 @@ export async function calculateAutoRho(
 
     appState.isCalculatingAutoRho = true;
 
+    // `services.hideLoading()` is a global, non-refcounted toggle that also
+    // re-enables the Analyze button. Auto-rho runs from detached timers
+    // (fileLoadOrchestration, section3Orchestration, analyzeOrchestrator), so
+    // overlapping with another in-flight operation is normal — calling
+    // hideLoading() when we never called showLoading() would dismiss *their*
+    // overlay and re-enable the button mid-run. Track ownership instead: only
+    // the call that showed the overlay may hide it, and only once.
+    let loadingShown = false;
+    const hideLoadingIfOwned = (): void => {
+        if (!loadingShown) return;
+        loadingShown = false;
+        services.hideLoading();
+    };
+
     // WEATH-03 rung 3 guard: everything after the in-progress flag is set runs
-    // inside this try, so no failure path can leave `isCalculatingAutoRho`
-    // stuck at true (which would permanently disable auto-rho for the session)
-    // or reject to a caller. Callers discard the return value, so returning
-    // null simply leaves the manual/prior rho in place and analysis continues.
+    // inside this try/finally, so no failure path can leave
+    // `isCalculatingAutoRho` stuck at true (which would permanently disable
+    // auto-rho for the session) — including a throw from inside a catch
+    // handler (`hideLoading` / `showNotification` both touch the DOM). The flag
+    // is cleared in exactly one place, the `finally` below, so a future early
+    // return cannot reintroduce the leak. Callers discard the return value, so
+    // returning null simply leaves the manual/prior rho in place and analysis
+    // continues.
     try {
         log.debug('\n╔═══════════════════════════════════════════════════════════════╗');
         log.debug('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
@@ -45,7 +63,6 @@ export async function calculateAutoRho(
             log.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
             log.debug('  - appState.currentFitData:', !!appState.currentFitData);
             log.debug('  - parametersComponent:', !!parametersComponent);
-            appState.isCalculatingAutoRho = false;
             return null;
         }
 
@@ -54,7 +71,6 @@ export async function calculateAutoRho(
         // Check if auto-calculate is enabled
         if (!params.auto_calculate_rho) {
             log.debug('⏭️  Auto-calculate disabled, skipping\n');
-            appState.isCalculatingAutoRho = false;
             return null;
         }
 
@@ -82,7 +98,6 @@ export async function calculateAutoRho(
             log.warn('❌ No trim sliders found - cannot calculate auto rho');
             log.debug('  This usually means the UI is not ready yet.');
             log.debug('  Will retry when sliders are available.\n');
-            appState.isCalculatingAutoRho = false;
             return null;
         }
 
@@ -96,8 +111,9 @@ export async function calculateAutoRho(
         });
         log.debug('');
 
-        // Show loading state
+        // Show loading state — from here on we own the overlay.
         services.showLoading('Fetching weather data...');
+        loadingShown = true;
 
         try {
             // Calculate GPS metadata from trim region
@@ -105,8 +121,7 @@ export async function calculateAutoRho(
             if (!appState.filteredLapData) {
                 log.warn('❌ No filtered lap data available - cannot calculate auto rho');
                 log.debug('  This usually means laps have not been selected yet.\n');
-                services.hideLoading();
-                appState.isCalculatingAutoRho = false;
+                hideLoadingIfOwned();
                 return null;
             }
 
@@ -137,8 +152,7 @@ export async function calculateAutoRho(
             if (appState.lastWeatherQueryKey === queryKey) {
                 log.debug('⏭️  Query unchanged from last calculation, using cached rho');
                 log.debug('  Query key:', queryKey);
-                services.hideLoading();
-                appState.isCalculatingAutoRho = false;
+                hideLoadingIfOwned();
                 return params.rho; // Return current rho value
             }
 
@@ -247,12 +261,11 @@ export async function calculateAutoRho(
             log.debug('║  Final ρ: ' + rho.toFixed(3) + ' kg/m³                                     ║');
             log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
 
-            services.hideLoading();
-            appState.isCalculatingAutoRho = false;
+            hideLoadingIfOwned();
             return rho;
 
         } catch (error) {
-            services.hideLoading();
+            hideLoadingIfOwned();
 
             // WEATH-03 rungs 3/4: degrade to the manual/prior rho.
             // Diagnostics stay internal (log only); the user-facing text comes
@@ -263,22 +276,69 @@ export async function calculateAutoRho(
                 log.error('Failed to calculate auto rho:', error);
             }
 
+            // The rho still sitting in `params` was fetched for a *different*
+            // trim region, so it no longer describes the current one. Keep the
+            // number (it remains the best available estimate, and the user can
+            // override it), but drop the provenance that claims it is live
+            // weather data for this region. Without this, the weather panel
+            // (AnalysisParameters.updateWeatherInfoDisplay) keeps rendering the
+            // previous region's temperature/location/timestamp as current, and
+            // `rho_source` keeps reporting 'weather_api'/'weather_cache' for a
+            // value the weather service never returned for this region.
+            invalidateStaleWeatherProvenance(parametersComponent);
+
             const resolution = resolveWeatherFailure(error);
             showNotification(resolution.userMessage, resolution.severity);
 
-            appState.isCalculatingAutoRho = false;
-            // Returning null keeps the existing manual rho — analysis continues.
+            // Returning null keeps the existing (now un-attributed) rho —
+            // analysis continues.
             return null;
         }
 
     } catch (error) {
-        services.hideLoading();
+        // Only hides if we actually showed it: a throw anywhere above the
+        // showLoading() call now reaches this handler (the try opens earlier
+        // than it used to), and blindly toggling would dismiss a concurrent
+        // operation's overlay and re-enable the Analyze button mid-run.
+        hideLoadingIfOwned();
         log.error('Unexpected error in calculateAutoRho:', error);
 
-        const resolution = resolveWeatherFailure(error);
-        showNotification(resolution.userMessage, resolution.severity);
+        // Anything reaching here is a bug in the auto-rho path, not a weather
+        // outage: every weather call lives in the inner try above, so a
+        // WeatherAPIError cannot reach this handler. Report unconditionally as
+        // an error (matching the pre-06-05 behaviour) rather than routing
+        // through resolveWeatherFailure, which would silently de-escalate a
+        // future WeatherAPIError raised outside the inner try to a warning.
+        showNotification(AUTO_RHO_FAILURE_MESSAGE, 'error');
 
-        appState.isCalculatingAutoRho = false;
         return null;
+    } finally {
+        appState.isCalculatingAutoRho = false;
     }
+}
+
+/**
+ * Drop the weather provenance attached to the current rho.
+ *
+ * Called when a re-fetch fails after an earlier fetch succeeded: the stored
+ * `rho`, `weather_metadata` and wind vector all belong to the previously
+ * queried trim region. Marking the source `manual` and clearing the metadata
+ * hides the weather panel and stops the stale reading from being presented as
+ * live data for the current region.
+ *
+ * `wind_speed` / `wind_direction` are deliberately left alone: they are
+ * user-editable inputs with no provenance label of their own, so clearing them
+ * would silently switch the analysis to a zero-wind assumption and could
+ * discard a value the user typed by hand. They are treated exactly like `rho`
+ * itself — kept as the prior best estimate, no longer advertised as live.
+ */
+function invalidateStaleWeatherProvenance(
+    parametersComponent: AnalysisParametersComponent
+): void {
+    if (parametersComponent.getParameters().rho_source === 'manual') return;
+
+    parametersComponent.setParameters({
+        rho_source: 'manual',
+        weather_metadata: undefined,
+    });
 }

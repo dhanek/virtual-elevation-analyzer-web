@@ -16,17 +16,21 @@ import { WeatherAPIError } from "../../utils/WeatherAPI";
  * text. Internal diagnostics stay in `log.error` at the call site.
  */
 
-/** The degradation decision for one weather failure. */
+/**
+ * The degradation decision for one weather failure.
+ *
+ * Note there is deliberately no "keep the manual rho" flag here. That
+ * behaviour (threat T-06-08: a weather outage must never block or crash a VE
+ * run) is a property of the *caller* — `autoRho.ts` returns null and leaves
+ * `params.rho` in place — not of this pure mapping, and it is covered by
+ * `autoRho.test.ts`. A constant flag on this interface would only restate the
+ * caller's contract without enforcing it.
+ */
 export interface WeatherFailureResolution {
 	/** Text safe to show to the user. Never contains error internals. */
 	userMessage: string;
 	/** Notification severity to pass to `showNotification`. */
 	severity: "warning" | "error";
-	/**
-	 * True when analysis should continue on the existing manual/prior rho.
-	 * A weather outage must never block or crash a VE run (threat T-06-08).
-	 */
-	keepManualRho: boolean;
 }
 
 /** Shared prefix for weather-fetch failures (unchanged from the pre-refactor text). */
@@ -48,7 +52,13 @@ export const AUTO_RHO_FAILURE_MESSAGE =
  * such as `constructor` or `toString` into a message.
  */
 const CODED_MESSAGES = new Map<string, string>([
-	// Rung 4: activity older than the weather window.
+	// Rung 4 — defensive, currently UNREACHABLE. Nothing in `frontend/src`
+	// constructs a `DATA_TOO_OLD` error: `WeatherAPI` has no age guard at all,
+	// it routes anything past `forecastMaxDays` (82) to the Archive API, which
+	// serves 1940 onward. The ">92 days" in this text corresponds to no
+	// constant in the code. Kept as a defensive mapping so a future age guard
+	// (see the continuous-pipeline follow-up) degrades with real text instead
+	// of the generic message — but do not read it as live behaviour.
 	["DATA_TOO_OLD", "Activity is too old (>92 days). Using manual rho value."],
 	// Rung 3: Open-Meteo reachable but not serving.
 	["API_ERROR", "Weather service unavailable. Using manual rho value."],
@@ -57,13 +67,14 @@ const CODED_MESSAGES = new Map<string, string>([
 ]);
 
 /**
- * Map a weather failure onto its degradation outcome.
+ * Map a weather failure onto its user-facing message and severity.
  *
- * Every branch keeps the manual rho, so the caller can always fall through to
- * "return null, analysis continues on `params.rho`".
+ * Total: every input, including non-Error values, yields a resolution — the
+ * caller can always fall through to "return null, analysis continues on
+ * `params.rho`" without inspecting the failure itself.
  *
  * @param error - Anything thrown by the weather fetch path.
- * @returns The user-facing message, its severity, and the degradation decision.
+ * @returns The user-facing message and its severity.
  */
 export function resolveWeatherFailure(error: unknown): WeatherFailureResolution {
 	if (error instanceof WeatherAPIError) {
@@ -75,7 +86,6 @@ export function resolveWeatherFailure(error: unknown): WeatherFailureResolution 
 				? `${WEATHER_FAILURE_PREFIX}: ${coded}`
 				: WEATHER_FAILURE_GENERIC_MESSAGE,
 			severity: "warning",
-			keepManualRho: true,
 		};
 	}
 
@@ -84,6 +94,5 @@ export function resolveWeatherFailure(error: unknown): WeatherFailureResolution 
 	return {
 		userMessage: AUTO_RHO_FAILURE_MESSAGE,
 		severity: "error",
-		keepManualRho: true,
 	};
 }

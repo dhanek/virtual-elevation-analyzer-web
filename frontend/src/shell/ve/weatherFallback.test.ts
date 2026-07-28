@@ -10,9 +10,13 @@ import {
 /**
  * TEST-01 — coverage for the WEATH-03 degradation ladder (Plan 06-05).
  *
- * Every rung must produce user-safe text, the right severity, and
- * `keepManualRho: true` so a weather outage can never block a VE run
- * (threat T-06-08). No branch may echo error internals (threat T-06-07).
+ * Every rung must produce user-safe text and the right severity, and no branch
+ * may echo error internals (threat T-06-07).
+ *
+ * The "a weather outage never blocks a VE run" half of the contract
+ * (threat T-06-08) is a property of the *caller*, not of this pure mapping, so
+ * it is asserted against real behaviour in `autoRho.test.ts` — this file only
+ * proves the resolver is total and leak-free.
  */
 
 /**
@@ -38,7 +42,14 @@ function weatherError(code?: string): WeatherAPIError {
 	);
 }
 
-/** Codes `WeatherAPI` can throw that have no dedicated user message. */
+/**
+ * Codes the resolver must handle generically (no dedicated user message).
+ *
+ * Some are defensive rather than live: `NULL_DATA` is currently unreachable —
+ * its throw site sits in the `else` of `allowNullFallback`, and the only
+ * '15min' caller always passes `true` (see WeatherAPI.ts, `fetchFromAPI`). It
+ * is listed here so the generic branch stays covered if that changes.
+ */
 const UNMAPPED_CODES = [
 	"NULL_DATA",
 	"INVALID_DATA",
@@ -82,6 +93,9 @@ const ALL_FAILURES: Array<{ label: string; error: unknown }> = [
 ];
 
 describe("weatherFallback fixtures", () => {
+	// This is the one fixture check worth keeping: the entire no-leak sweep
+	// below is vacuous if `weatherError` ever stops planting the sentinel in
+	// both `message` and `details`. It guards a real assumption, not a literal.
 	test("weatherError carries the code, the details payload and the sentinel", () => {
 		const error = weatherError("API_ERROR");
 		expect(error).toBeInstanceOf(WeatherAPIError);
@@ -89,27 +103,45 @@ describe("weatherFallback fixtures", () => {
 		expect(error.message).toContain(LEAK_SENTINEL);
 		expect(JSON.stringify(error.details)).toContain(LEAK_SENTINEL);
 	});
+});
 
-	test("unmapped code list is non-empty", () => {
-		expect(UNMAPPED_CODES.length).toBeGreaterThan(0);
+describe("WEATH-03 shipped message text is frozen (06-05 parity bar)", () => {
+	// Everywhere else in this suite the assertions bind to the exported
+	// constants, which means a rename of the *value* would move the whole suite
+	// with it and stay green. These three literal pins are the only thing
+	// standing between a wording edit and a silent break of the 06-05 byte-
+	// parity promise. Change them deliberately, never to make a test pass.
+	test("the exact strings the user sees have not drifted", () => {
+		expect(WEATHER_FAILURE_PREFIX).toBe("Could not fetch weather data");
+		expect(WEATHER_FAILURE_GENERIC_MESSAGE).toBe(
+			"Could not fetch weather data. Using manual rho value.",
+		);
+		expect(AUTO_RHO_FAILURE_MESSAGE).toBe(
+			"Auto-rho calculation failed. Using manual value.",
+		);
 	});
 
-	test("the seam exports the symbols the assertions bind to", () => {
-		// Tests bind to these constants rather than copy-pasted literals, so a
-		// wording change breaks in one place (Plan 06-05 decision 4).
-		expect(WEATHER_FAILURE_PREFIX).toBeTypeOf("string");
-		expect(WEATHER_FAILURE_GENERIC_MESSAGE).toBeTypeOf("string");
-		expect(AUTO_RHO_FAILURE_MESSAGE).toBeTypeOf("string");
-		expect(resolveWeatherFailure).toBeTypeOf("function");
+	test("the three coded suffixes have not drifted", () => {
+		expect(resolveWeatherFailure(weatherError("DATA_TOO_OLD")).userMessage).toBe(
+			"Could not fetch weather data: Activity is too old (>92 days). Using manual rho value.",
+		);
+		expect(resolveWeatherFailure(weatherError("API_ERROR")).userMessage).toBe(
+			"Could not fetch weather data: Weather service unavailable. Using manual rho value.",
+		);
+		expect(resolveWeatherFailure(weatherError("FETCH_ERROR")).userMessage).toBe(
+			"Could not fetch weather data: Network error. Check your internet connection.",
+		);
 	});
 });
 
-describe("resolveWeatherFailure — rung 4: DATA_TOO_OLD", () => {
-	test("warns that the activity is too old and keeps the manual rho", () => {
+describe("resolveWeatherFailure — rung 4 (defensive, unreachable): DATA_TOO_OLD", () => {
+	// Nothing in frontend/src throws DATA_TOO_OLD today (WeatherAPI has no age
+	// guard; >82d goes to Archive, which serves 1940+). This pins the mapping
+	// for the day one is added — it is not evidence of live behaviour.
+	test("warns that the activity is too old", () => {
 		expect(resolveWeatherFailure(weatherError("DATA_TOO_OLD"))).toEqual({
 			userMessage: `${WEATHER_FAILURE_PREFIX}: Activity is too old (>92 days). Using manual rho value.`,
 			severity: "warning",
-			keepManualRho: true,
 		});
 	});
 });
@@ -119,7 +151,6 @@ describe("resolveWeatherFailure — rung 3: API_ERROR", () => {
 		expect(resolveWeatherFailure(weatherError("API_ERROR"))).toEqual({
 			userMessage: `${WEATHER_FAILURE_PREFIX}: Weather service unavailable. Using manual rho value.`,
 			severity: "warning",
-			keepManualRho: true,
 		});
 	});
 });
@@ -129,7 +160,6 @@ describe("resolveWeatherFailure — rung 3: FETCH_ERROR", () => {
 		expect(resolveWeatherFailure(weatherError("FETCH_ERROR"))).toEqual({
 			userMessage: `${WEATHER_FAILURE_PREFIX}: Network error. Check your internet connection.`,
 			severity: "warning",
-			keepManualRho: true,
 		});
 	});
 });
@@ -155,7 +185,6 @@ describe("resolveWeatherFailure — unmapped WeatherAPIError codes", () => {
 			expect(resolveWeatherFailure(weatherError(code))).toEqual({
 				userMessage: WEATHER_FAILURE_GENERIC_MESSAGE,
 				severity: "warning",
-				keepManualRho: true,
 			});
 		},
 	);
@@ -164,7 +193,6 @@ describe("resolveWeatherFailure — unmapped WeatherAPIError codes", () => {
 		expect(resolveWeatherFailure(weatherError(undefined))).toEqual({
 			userMessage: WEATHER_FAILURE_GENERIC_MESSAGE,
 			severity: "warning",
-			keepManualRho: true,
 		});
 	});
 
@@ -179,11 +207,10 @@ describe("resolveWeatherFailure — unmapped WeatherAPIError codes", () => {
 });
 
 describe("resolveWeatherFailure — non-WeatherAPIError failures", () => {
-	test("a plain Error reports an auto-rho error and keeps the manual rho", () => {
+	test("a plain Error reports an auto-rho error", () => {
 		expect(resolveWeatherFailure(new Error(`boom ${LEAK_SENTINEL}`))).toEqual({
 			userMessage: AUTO_RHO_FAILURE_MESSAGE,
 			severity: "error",
-			keepManualRho: true,
 		});
 	});
 
@@ -196,7 +223,6 @@ describe("resolveWeatherFailure — non-WeatherAPIError failures", () => {
 		expect(resolveWeatherFailure(thrown)).toEqual({
 			userMessage: AUTO_RHO_FAILURE_MESSAGE,
 			severity: "error",
-			keepManualRho: true,
 		});
 	});
 
@@ -241,10 +267,13 @@ describe("resolveWeatherFailure — no-leak guard (T-06-07)", () => {
 	});
 });
 
-describe("resolveWeatherFailure — manual rho survives every rung (T-06-08)", () => {
-	test.each(ALL_FAILURES)("$label keeps the manual rho", ({ error }) => {
+describe("resolveWeatherFailure — total over every failure shape", () => {
+	// The resolver must never throw and must always hand the caller something
+	// showable: that is what lets `autoRho.ts` degrade unconditionally without
+	// inspecting the failure. (That the degradation actually preserves the
+	// manual rho — T-06-08 — is asserted in autoRho.test.ts.)
+	test.each(ALL_FAILURES)("$label resolves to a showable result", ({ error }) => {
 		const resolution = resolveWeatherFailure(error);
-		expect(resolution.keepManualRho).toBe(true);
 		expect(["warning", "error"]).toContain(resolution.severity);
 		expect(resolution.userMessage.length).toBeGreaterThan(0);
 	});
