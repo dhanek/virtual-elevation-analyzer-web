@@ -148,7 +148,11 @@ export async function calculateAutoRho(
             const slot = roundToNearest15Min(metadata.middleDate);
             const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, '0')}:${String(slot.slotMinute).padStart(2, '0')}`;
 
-            // Check if query has actually changed
+            // Check if query has actually changed. The key records the query
+            // whose result is currently loaded into `params`, so it is only
+            // assigned once the fetch has succeeded (see below) — a failed
+            // fetch must not mark its region as already loaded, or the user
+            // has to move the slider away and back to get a retry.
             if (appState.lastWeatherQueryKey === queryKey) {
                 log.debug('⏭️  Query unchanged from last calculation, using cached rho');
                 log.debug('  Query key:', queryKey);
@@ -160,9 +164,6 @@ export async function calculateAutoRho(
             log.debug('  Previous:', appState.lastWeatherQueryKey || 'none');
             log.debug('  Current:', queryKey);
             log.debug('');
-
-            // Update last query key
-            appState.lastWeatherQueryKey = queryKey;
 
             // Initialize weather services
             const weatherCache = new WeatherCache();
@@ -251,6 +252,9 @@ export async function calculateAutoRho(
 
             parametersComponent.setParameters(updateParams);
             refreshCrrTempReadout(parametersComponent.getParameters());
+
+            // The result is now loaded, so this query may be skipped next time.
+            appState.lastWeatherQueryKey = queryKey;
 
             // Show success notification
             const sourceText = weatherEntry.source === 'cache' ? 'cached data' : 'weather API';

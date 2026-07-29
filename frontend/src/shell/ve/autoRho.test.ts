@@ -472,4 +472,35 @@ describe("calculateAutoRho — unchanged query short-circuits", () => {
 		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
 		expect(h.appState.isCalculatingAutoRho).toBe(false);
 	});
+
+	test("a failed fetch does not mark its region as already loaded", async () => {
+		// The query key exists to skip a *redundant* fetch — one whose result is
+		// already in `params.rho`. A failed fetch loaded nothing, so recording
+		// its key strands the user: the same trim region is never retried, and
+		// the only escape is to move the slider away and back.
+		const h = setupHarness();
+		setTrim(T1);
+		mocks.getWeatherData.mockRejectedValueOnce(
+			new WeatherAPIError("down", "API_ERROR"),
+		);
+
+		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+
+		// The network comes back. Same region, no slider move.
+		mocks.getWeatherData.mockResolvedValueOnce(weatherEntry(21.4));
+		mocks.calculateAirDensity.mockReturnValueOnce(1.19837);
+
+		const rho = await calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(2);
+		expect(rho).toBe(1.1984);
+		expect(h.parametersComponent.getParameters().rho_source).toBe(
+			"weather_api",
+		);
+	});
 });
