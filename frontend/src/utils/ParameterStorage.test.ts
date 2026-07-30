@@ -60,9 +60,24 @@ function freshlyCreatedRecord(): AnalysisParameters {
 	};
 }
 
+/**
+ * WR-03 widened normalizeLoadedParameters to return null for a partial record.
+ * These tests all pass a well-formed record, so a null here is a real failure,
+ * not a case to type-guard past — this asserts that rather than suppressing it.
+ */
+function normalizeOrFail(
+	stored: AnalysisParameters | null | undefined,
+): AnalysisParameters {
+	const normalized = normalizeLoadedParameters(stored);
+	if (normalized === null) {
+		throw new Error("expected a normalised record, got null");
+	}
+	return normalized;
+}
+
 describe("normalizeLoadedParameters (D-07)", () => {
 	test("a pre-feature record loads at 1.0 labelled 'unknown'", () => {
-		const normalized = normalizeLoadedParameters(legacyRecord());
+		const normalized = normalizeOrFail(legacyRecord());
 
 		expect(normalized.wind_height_factor).toBe(1.0);
 		expect(normalized.wind_entry).toBe("unknown");
@@ -72,7 +87,7 @@ describe("normalizeLoadedParameters (D-07)", () => {
 	});
 
 	test("an existing provenance survives the factor normalisation", () => {
-		const normalized = normalizeLoadedParameters(
+		const normalized = normalizeOrFail(
 			legacyRecord({ wind_entry: "weather" }),
 		);
 
@@ -86,7 +101,7 @@ describe("normalizeLoadedParameters (D-07)", () => {
 			wind_entry: "weather",
 		});
 
-		const normalized = normalizeLoadedParameters(stored);
+		const normalized = normalizeOrFail(stored);
 
 		expect(normalized).toBe(stored);
 		expect(normalized.wind_height_factor).toBe(0.5);
@@ -95,7 +110,7 @@ describe("normalizeLoadedParameters (D-07)", () => {
 	test("a stored factor of 0 is left alone (=== undefined, not falsiness)", () => {
 		const stored = legacyRecord({ wind_height_factor: 0, wind_entry: "manual" });
 
-		const normalized = normalizeLoadedParameters(stored);
+		const normalized = normalizeOrFail(stored);
 
 		// A ?? or || fallback on the value would rewrite this to 1.0 and hide
 		// the corrupt value from resolveWindHeightFactor's guards.
@@ -104,7 +119,7 @@ describe("normalizeLoadedParameters (D-07)", () => {
 	});
 
 	test("every other stored field survives normalisation", () => {
-		const normalized = normalizeLoadedParameters(legacyRecord());
+		const normalized = normalizeOrFail(legacyRecord());
 
 		expect(normalized.system_mass).toBe(82);
 		expect(normalized.rho).toBe(1.19);
@@ -114,9 +129,32 @@ describe("normalizeLoadedParameters (D-07)", () => {
 	});
 
 	test("a newly created record is not mistaken for a legacy one", () => {
-		const normalized = normalizeLoadedParameters(freshlyCreatedRecord());
+		const normalized = normalizeOrFail(freshlyCreatedRecord());
 
 		expect(normalized.wind_height_factor).toBe(0.5);
 		expect(normalized.wind_entry).toBe("manual");
+	});
+});
+
+/**
+ * WR-03: `stored` is untrusted persisted data. A record lacking `parameters`
+ * used to throw a TypeError inside the IndexedDB onsuccess handler, where the
+ * enclosing Promise executor has already returned — so loadParameters never
+ * settled and the file-load path hung silently.
+ */
+describe("normalizeLoadedParameters tolerates partial records (WR-03)", () => {
+	test("undefined returns null instead of throwing", () => {
+		expect(() => normalizeLoadedParameters(undefined)).not.toThrow();
+		expect(normalizeLoadedParameters(undefined)).toBeNull();
+	});
+
+	test("null returns null instead of throwing", () => {
+		expect(normalizeLoadedParameters(null)).toBeNull();
+	});
+
+	test("a non-object returns null instead of throwing", () => {
+		expect(
+			normalizeLoadedParameters("corrupt" as unknown as AnalysisParameters),
+		).toBeNull();
 	});
 });

@@ -82,8 +82,18 @@ interface StoredParameters {
  * around it is not.
  */
 export function normalizeLoadedParameters(
-	stored: AnalysisParameters,
-): AnalysisParameters {
+	stored: AnalysisParameters | null | undefined,
+): AnalysisParameters | null {
+	// WR-03: `stored` is typed non-optional but is untrusted persisted data — a
+	// record written by an interrupted path, or a v1 record predating the v1->v2
+	// migration below, can lack `parameters` entirely. Dereferencing it would
+	// throw a TypeError inside an IndexedDB onsuccess handler, where the
+	// enclosing Promise executor has already returned and no reject is reachable
+	// from that stack: loadParameters would never settle and the file-load path
+	// would hang with nothing surfaced. Before this phase the same record
+	// resolved harmlessly.
+	if (!stored || typeof stored !== "object") return null;
+
 	// Discriminate on === undefined, not on falsiness. 0 is not a valid factor,
 	// but a || fallback would rewrite it here and hide the corrupt value from
 	// resolveWindHeightFactor's guards. This file uses || fallbacks elsewhere;
