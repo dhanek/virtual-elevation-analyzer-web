@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { VeCalculatorSeriesInput } from "./VeCalculatorFactory";
+import type { WindSeriesResolution } from "./WindSourceResolver";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
 
@@ -31,6 +32,9 @@ vi.mock("@wasm/virtual_elevation_analyzer.js", () => ({
 
 // Imported after the mocks so the module under test picks them up.
 const { createVeCalculator } = await import("./VeCalculatorFactory");
+// Imported for real and deliberately NOT mocked: guard 2 below has to exercise
+// the actual FIT sensor path, or it cannot observe that path being scaled.
+const { resolveWindSeries } = await import("./WindSourceResolver");
 
 /**
  * Positional argument indices into the two WASM constructors.
@@ -246,5 +250,136 @@ describe("equivalence guard 1 — k = 1.0 is pre-feature parity", () => {
 			expect(callPlain(params)[WIND_SPEED_ARG_INDEX]).toBeNull();
 			expect(callWithRho(params)[WIND_SPEED_ARG_INDEX_WITH_RHO]).toBeNull();
 		}
+	});
+});
+
+/**
+ * D-01: the height transfer applies to weather-sourced constant wind only, and
+ * never to the FIT sensor channel — sensor air speed is already measured at the
+ * rider, and `virtual_elevation.rs:338` treats a sensor series as PRIORITY 1
+ * and ignores `params.wind_speed` entirely on that path, so routing it through
+ * the transfer would double-correct a number that needs no correction at all.
+ *
+ * Note what this guard does NOT claim: `params.wind_speed` still differs
+ * between the two factors in the constructor arguments below, and that is
+ * correct — the Rust never reads it when a sensor series is present. The
+ * invariant pinned here is the per-sample **series** argument at index 7.
+ * That difference is asserted rather than merely described, in the middle test
+ * below, because it is what proves the surrounding invariance tests are
+ * comparing two genuinely different configurations.
+ */
+describe("equivalence guard 2 — an air-speed ride is invariant to k (D-01)", () => {
+	const AIR_SPEED_FIT_DATA = {
+		timestamps: [0, 1, 2, 3, 4],
+		air_speed: [3, 4, 5, 3, 4],
+		wind_speed: [],
+		wind_yaw: [],
+	};
+
+	function resolveAtFactor(factor: number) {
+		return resolveWindSeries({
+			fitData: AIR_SPEED_FIT_DATA,
+			windSource: "fit",
+			params: windParams(factor),
+		});
+	}
+
+	/**
+	 * Everything that must hold before "the two series are equal" means anything.
+	 *
+	 * An equality assertion between two things that *should* be equal is the
+	 * easiest kind of test to make vacuous, so all three failure modes are
+	 * excluded up front: a fixture that fell through to the constant path (two
+	 * all-NaN arrays compare equal at any factor whatsoever), an empty series
+	 * (ditto), and a series with no finite non-zero sample — the last matters
+	 * because mutation D is a *multiply*, and multiplying NaN or 0 by k leaves
+	 * it unchanged, so a magnitude-free fixture could not observe the mutation
+	 * it exists to catch.
+	 */
+	function expectUsableSensorSeries(resolution: WindSeriesResolution): void {
+		expect(resolution.dataSource).toBe("air_speed");
+		expect(resolution.selectedWindSource).toBe("fit");
+		expect(
+			resolution.windSpeed.filter(speed => Number.isFinite(speed) && speed !== 0)
+				.length,
+		).toBeGreaterThan(0);
+	}
+
+	test("the resolved sensor series is identical at k = 0.5 and k = 1.0", () => {
+		const atUnity = resolveAtFactor(1.0);
+		const atHalf = resolveAtFactor(0.5);
+
+		expectUsableSensorSeries(atUnity);
+		expectUsableSensorSeries(atHalf);
+
+		expect(atHalf.windSpeed).toEqual(atUnity.windSpeed);
+	});
+
+	test("the two factors really are different configurations", () => {
+		// The witness for the two tests around this one. They both assert that
+		// something does NOT change between k = 1.0 and k = 0.5, which would
+		// also be trivially true if the factor never reached the production
+		// code at all — a broken `windParams`, a dropped override, a resolver
+		// that ignores the field. Pinning the one argument that MUST move
+		// proves the comparison is between genuinely different configurations.
+		//
+		// This is also the D-01 statement in positive form: at the same k the
+		// constant-wind argument is transferred while the sensor series is not.
+		const atUnity = callPlain(windParams(1.0));
+		mocks.createVeCalculator.mockClear();
+		const atHalf = callPlain(windParams(0.5));
+
+		expect(atUnity[WIND_SPEED_ARG_INDEX]).toBe(REPORTED_WIND_SPEED);
+		expect(atHalf[WIND_SPEED_ARG_INDEX]).toBe(TRANSFERRED_WIND_SPEED);
+	});
+
+	test("the series argument reaching WASM is identical at k = 0.5 and k = 1.0", () => {
+		const atUnity = resolveAtFactor(1.0);
+		const atHalf = resolveAtFactor(0.5);
+		expectUsableSensorSeries(atUnity);
+		expectUsableSensorSeries(atHalf);
+
+		// Plain branch.
+		createVeCalculator({
+			...makeSeries(),
+			windSpeed: atUnity.windSpeed,
+			params: windParams(1.0),
+			cda: null,
+			crr: null,
+		});
+		createVeCalculator({
+			...makeSeries(),
+			windSpeed: atHalf.windSpeed,
+			params: windParams(0.5),
+			cda: null,
+			crr: null,
+		});
+		const plainCalls = mocks.createVeCalculator.mock.calls;
+		expect(plainCalls[1][WIND_SERIES_ARG_INDEX]).toEqual(
+			plainCalls[0][WIND_SERIES_ARG_INDEX],
+		);
+
+		// Rho-array branch — asserted too, so a change applied to only one of
+		// the two WASM call sites cannot slip past.
+		createVeCalculator({
+			...makeSeries(),
+			windSpeed: atUnity.windSpeed,
+			rhoArray: RHO_ARRAY,
+			params: windParams(1.0),
+			cda: null,
+			crr: null,
+		});
+		createVeCalculator({
+			...makeSeries(),
+			windSpeed: atHalf.windSpeed,
+			rhoArray: RHO_ARRAY,
+			params: windParams(0.5),
+			cda: null,
+			crr: null,
+		});
+		const rhoCalls = mocks.createVeCalculatorWithRhoArray.mock.calls;
+		expect(rhoCalls[1][WIND_SERIES_ARG_INDEX]).toEqual(
+			rhoCalls[0][WIND_SERIES_ARG_INDEX],
+		);
 	});
 });
