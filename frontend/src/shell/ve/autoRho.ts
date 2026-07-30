@@ -8,6 +8,7 @@ import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js
 import { showNotification } from '../dom/notifications';
 import { ShellServices } from '../analysis/types';
 import { refreshCrrTempReadout, syncCrrTempAmbientFromWeather } from './crrTempControls';
+import { refreshWindHeightReadout, syncWindHeightFromWeather } from './windHeightControls';
 import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallback';
 
 /**
@@ -250,8 +251,39 @@ export async function calculateAutoRho(
                 )
             );
 
+            // Seed the wind height factor, but only from a fill that actually
+            // produced a wind. The gate is on the wind field having been
+            // written above, NOT on the fetch having succeeded: when the API
+            // returns no wind speed the two assignments above leave the wind
+            // untouched, and stamping wind_entry: 'weather' on that path would
+            // claim a provenance for a number the API never wrote (T-08-11).
+            //
+            // The "unknown" case is decided inside the sync hook, which returns
+            // {} for it — one decision site, testable with no bind() call. It
+            // matters at *this* call site because auto-rho genuinely re-fires on
+            // load, from fileLoad/fileLoadOrchestration.ts:389 and
+            // ve/bindStandardSliders.ts:632; neither is suppressed by
+            // isLoadingParameters, which only short-circuits
+            // handleParametersChange (analysis/analyzeOrchestrator.ts:171). So
+            // on any saved file with auto_calculate_rho: true this merge runs
+            // immediately after normalizeLoadedParameters has produced
+            // wind_entry: 'unknown'. Were that treated as a first fill, the
+            // sequence would re-seed k to 0.5 and silently re-fit an analysis
+            // the user has already read (D-07 / R-04, T-08-16).
+            //
+            // As with the Crr merge above, the parameters are re-read rather
+            // than reused: the user may have moved the k slider during the
+            // async weather fetch.
+            if (updateParams.wind_speed !== undefined) {
+                Object.assign(
+                    updateParams,
+                    syncWindHeightFromWeather(parametersComponent.getParameters())
+                );
+            }
+
             parametersComponent.setParameters(updateParams);
             refreshCrrTempReadout(parametersComponent.getParameters());
+            refreshWindHeightReadout(parametersComponent.getParameters());
 
             // The result is now loaded, so this query may be skipped next time.
             appState.lastWeatherQueryKey = queryKey;
@@ -335,6 +367,17 @@ export async function calculateAutoRho(
  * would silently switch the analysis to a zero-wind assumption and could
  * discard a value the user typed by hand. They are treated exactly like `rho`
  * itself — kept as the prior best estimate, no longer advertised as live.
+ *
+ * `wind_entry` and `wind_height_factor` are left alone for that same reason and
+ * one more: the retained wind is still the same *kind* of number — a 10 m model
+ * wind — so the height factor must keep applying to it (D-06). A failed
+ * re-fetch changes what the wind describes, not how it was measured.
+ *
+ * This is why D-06 rejects folding the wind-height signal into `rho_source`:
+ * that field IS cleared here, so a merged signal would be cleared with it, and
+ * a failed re-fetch would silently turn a still-10 m wind into an untransferred
+ * one — changing the physics on an error path. Hence this function writes only
+ * `rho_source` and `weather_metadata`, and gains no code for the wind fields.
  */
 function invalidateStaleWeatherProvenance(
     parametersComponent: AnalysisParametersComponent
