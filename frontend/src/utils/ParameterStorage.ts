@@ -1,3 +1,7 @@
+import {
+	DEFAULT_WIND_HEIGHT_FACTOR,
+	LEGACY_WIND_HEIGHT_FACTOR,
+} from "../analysis/WindHeightTransfer";
 import { AnalysisParameters } from "../components/AnalysisParameters";
 import { log } from "./log";
 
@@ -43,6 +47,57 @@ interface StoredParameters {
 	outAndBackMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // Out and Back markers per lap selection
 	lastUsed: number; // timestamp
 	fileName?: string; // optional, for debugging
+}
+
+/**
+ * The single read-path normalisation for the wind height transfer (D-07).
+ *
+ * D-07: a stored record with no `wind_height_factor` predates this feature. It
+ * was fitted against an untransferred 10 m wind, so it must load at
+ * LEGACY_WIND_HEIGHT_FACTOR (1.0) and reproduce the result the maintainer
+ * already saw. Rejected alternative: letting legacy records fall through to the
+ * fresh 0.5 default from DEFAULT_PARAMETERS. That quietly re-fits every stored
+ * analysis on reopen, changing a number the user has already read and acted on
+ * (R-04). A genuinely new record still gets 0.5 — it arrives carrying the field.
+ *
+ * D-06, as amended: the provenance is normalised to "unknown", never "manual".
+ * Two reasons, both load-bearing:
+ *   (a) The wind on a legacy record may well have come from the weather API, so
+ *       claiming hand entry would be a false statement and the readout would
+ *       warn about a hand entry that never happened.
+ *   (b) syncWindHeightFromWeather treats anything that is not "weather" as a
+ *       FIRST fill. Branding a legacy record "manual" would therefore let
+ *       auto-rho re-seed the factor to 0.5 and silently re-fit the stored
+ *       analysis. That path is live: auto-rho re-runs on load from
+ *       fileLoadOrchestration.ts:389 and bindStandardSliders.ts:631, and
+ *       isLoadingParameters suppresses neither (it only short-circuits
+ *       handleParametersChange in analyzeOrchestrator.ts:171).
+ *
+ * Inferring "weather" from `rho_source` / `weather_metadata` was rejected
+ * outright: `rho_source` is carried over verbatim on every form edit, so a
+ * weather-fill-then-hand-type sequence would misclassify as "weather" and
+ * re-seed 0.5 onto a number the user typed — exactly the D-05 harm.
+ *
+ * Pure and exported so it is unit-testable without IndexedDB; the class method
+ * around it is not.
+ */
+export function normalizeLoadedParameters(
+	stored: AnalysisParameters,
+): AnalysisParameters {
+	// Discriminate on === undefined, not on falsiness. 0 is not a valid factor,
+	// but a || fallback would rewrite it here and hide the corrupt value from
+	// resolveWindHeightFactor's guards. This file uses || fallbacks elsewhere;
+	// this one deliberately does not.
+	if (stored.wind_height_factor === undefined) {
+		return {
+			...stored,
+			wind_height_factor: LEGACY_WIND_HEIGHT_FACTOR,
+			wind_entry: stored.wind_entry ?? "unknown",
+		};
+	}
+	// A record carrying the field is post-feature: returned by identity, with
+	// no defensive copy, so a caller can distinguish the two cases if it needs.
+	return stored;
 }
 
 export class ParameterStorage {
@@ -202,7 +257,7 @@ export class ParameterStorage {
 			request.onsuccess = () => {
 				const result = request.result as StoredParameters | undefined;
 				if (result) {
-					resolve(result.parameters);
+					resolve(normalizeLoadedParameters(result.parameters));
 				} else {
 					resolve(null);
 				}
@@ -352,6 +407,19 @@ export class ParameterStorage {
 							air_speed_offset: 2,
 							velodrome: false,
 							auto_calculate_rho: false,
+							// The Phase-6 precedent of leaving new optional fields out of
+							// these literals does NOT apply here. With the D-06 "unknown"
+							// normalisation above, a record created without these two
+							// fields would be indistinguishable from a pre-feature record
+							// on its next load and would reopen at 1.0 with the feature
+							// silently off. A genuinely new record must carry the fresh
+							// default. The constant is interpolated, never re-literalled,
+							// so there is still exactly one definition of it.
+							// "manual" is correct here because the record has no wind at
+							// all yet (wind_speed: null) - nothing has written one, so the
+							// first weather fill legitimately counts as a first fill.
+							wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+							wind_entry: "manual",
 						},
 						lapSettings: {},
 						lastUsed: Date.now(),
@@ -467,6 +535,10 @@ export class ParameterStorage {
 							air_speed_offset: 2,
 							velodrome: false,
 							auto_calculate_rho: false,
+							// See saveLapSettings: a new record must carry the fresh
+							// default, or it normalises to "unknown" on its next load.
+							wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+							wind_entry: "manual",
 						},
 						lapSettings: {},
 						gpsMarkerSettings: {},
@@ -650,6 +722,10 @@ export class ParameterStorage {
 							air_speed_offset: 2,
 							velodrome: false,
 							auto_calculate_rho: false,
+							// See saveLapSettings: a new record must carry the fresh
+							// default, or it normalises to "unknown" on its next load.
+							wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+							wind_entry: "manual",
 						},
 						lapSettings: {},
 						gpsMarkerSettings: {},
