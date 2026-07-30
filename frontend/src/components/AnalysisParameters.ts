@@ -1,5 +1,8 @@
-import { DEFAULT_WIND_HEIGHT_FACTOR } from "../analysis/WindHeightTransfer";
-import type { WindEntry } from "../analysis/WindHeightTransfer";
+import {
+	DEFAULT_WIND_HEIGHT_FACTOR,
+	LEGACY_WIND_HEIGHT_FACTOR,
+	type WindEntry,
+} from "../analysis/WindHeightTransfer";
 
 export interface AnalysisParameters {
 	system_mass: number;
@@ -248,6 +251,24 @@ export class AnalysisParametersComponent {
 			input.addEventListener("input", () => this.handleParameterChange());
 		});
 
+		// IN-02: these cannot ride on the shared handler above. That handler is
+		// attached to *every* input and select in the container, so wiring the
+		// D-05 signal there would set wind_entry = "manual" when the user edits
+		// system_mass. The other half of the same fact is what makes these
+		// listeners safe: a programmatic `element.value = ...` assignment (how
+		// auto-rho fills the weather wind, and how updateUI rewrites the form)
+		// does NOT dispatch an "input" event, so a weather fill cannot trip them.
+		const windSpeedInput = this.container.querySelector(
+			"#wind_speed",
+		) as HTMLInputElement | null;
+		const windDirectionInput = this.container.querySelector(
+			"#wind_direction",
+		) as HTMLInputElement | null;
+		windSpeedInput?.addEventListener("input", () => this.markManualWindEntry());
+		windDirectionInput?.addEventListener("input", () =>
+			this.markManualWindEntry(),
+		);
+
 		// Reset button
 		const resetBtn = this.container.querySelector("#resetParams");
 		resetBtn?.addEventListener("click", () => this.resetParameters());
@@ -311,10 +332,49 @@ export class AnalysisParametersComponent {
 			crr_temp_correction: this.parameters.crr_temp_correction,
 			ambient_temp_c: this.parameters.ambient_temp_c,
 			tire_sensitivity: this.parameters.tire_sensitivity,
+			// The height factor lives in the VE sidebar and wind_entry is written
+			// by the dedicated wind listeners below - neither is rebuilt from this
+			// form, so carry them over or every keystroke in the mass field
+			// silently resets the factor to the fresh default and re-brands a
+			// reopened legacy record ("unknown") as something it is not.
+			wind_height_factor: this.parameters.wind_height_factor,
+			wind_entry: this.parameters.wind_entry,
 		};
 
 		// Validate and notify
 		this.validateParameters();
+		this.onParametersChange(this.parameters);
+	}
+
+	// D-05: the app does not guess what a hand-typed wind means. The weather API
+	// and the user write to the same input, and a typed number may be a 10 m
+	// forecast or an anemometer reading taken at the rider. Inferring the height
+	// from "the user touched the field" is a silent guess that is wrong for
+	// roughly half of users. So a manual edit sets the factor to 1.0 - the
+	// number is used exactly as typed - and the readout raises a warning; the
+	// factor slider is the resolution mechanism, not this listener.
+	//
+	// This is also the way out of "unknown": a user who hand-types a wind on a
+	// reopened legacy record has just told the app which input wrote it.
+	private markManualWindEntry(): void {
+		// Already in the target state - do not re-emit on every keystroke.
+		if (
+			this.parameters.wind_entry === "manual" &&
+			this.parameters.wind_height_factor === LEGACY_WIND_HEIGHT_FACTOR
+		) {
+			return;
+		}
+
+		// Deliberately NOT this.setParameters(...): that calls updateUI(), which
+		// rewrites #wind_speed.value from the parsed model, so a user midway
+		// through typing "3." would have their input rewritten to "3" under the
+		// cursor. This listener writes the model and re-emits, and leaves the
+		// DOM exactly as the user left it.
+		this.parameters = {
+			...this.parameters,
+			wind_entry: "manual",
+			wind_height_factor: LEGACY_WIND_HEIGHT_FACTOR,
+		};
 		this.onParametersChange(this.parameters);
 	}
 
