@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	bindWindHeightControls,
 	formatWindHeightReadout,
+	refreshWindHeightReadout,
 	syncWindHeightFromWeather,
 	windHeightControlsMarkup,
 	windHeightReadoutIsWarning,
@@ -422,5 +423,86 @@ describe("syncWindHeightFromWeather", () => {
 				makeParams({ wind_entry: "unknown", wind_height_factor: 1.0 }),
 			),
 		).toEqual({});
+	});
+});
+
+/**
+ * CR-01. `wind_height_factor` has three writers, but before this fix only the
+ * slider's own handlers wrote `#windHeightSlider` / `#windHeightValue`. The two
+ * model-only writers — `markManualWindEntry` (D-05) and the auto-rho weather
+ * sync — left the control displaying a factor the physics was no longer using.
+ *
+ * That is not a cosmetic desync. The readout's own instruction is "set the
+ * factor", so the user drags — and the drag starts from the stale value and
+ * re-commits it, height-transferring a wind the user typed by hand. That is
+ * precisely the D-05 harm `markManualWindEntry` exists to prevent.
+ */
+describe("refreshWindHeightReadout keeps the inputs in step with the model", () => {
+	let params: AnalysisParameters;
+
+	function inputs() {
+		return {
+			slider: document.getElementById("windHeightSlider") as HTMLInputElement,
+			value: document.getElementById("windHeightValue") as HTMLInputElement,
+			readout: document.getElementById("windHeightReadout") as HTMLElement,
+		};
+	}
+
+	beforeEach(() => {
+		params = makeParams({
+			wind_speed: 3.5,
+			wind_entry: "weather",
+			wind_height_factor: 0.5,
+		});
+		document.body.innerHTML =
+			`<div id="paramForm">` +
+			`<input type="number" id="wind_speed" value="3.5">` +
+			`<input type="number" id="wind_direction" value="180">` +
+			`</div>` +
+			windHeightControlsMarkup(params);
+		bindWindHeightControls({
+			getParams: () => params,
+			setParams: (fields: Partial<AnalysisParameters>) => {
+				params = { ...params, ...fields };
+			},
+			onChange: () => {},
+		});
+	});
+
+	test("a model-only flip to manual/1.0 moves the slider, not just the text", () => {
+		expect(inputs().slider.value).toBe("0.50");
+
+		// What markManualWindEntry does: writes the model, re-emits, and leaves
+		// the wind field's own DOM alone. It never touches the k control.
+		params = { ...params, wind_entry: "manual", wind_height_factor: 1.0 };
+		refreshWindHeightReadout(params);
+
+		expect(inputs().slider.value).toBe("1.00");
+		expect(inputs().value.value).toBe("1.00");
+		expect(inputs().readout.textContent).toMatch(/by hand/i);
+	});
+
+	test("a weather sync down to 0.5 moves the slider back", () => {
+		params = { ...params, wind_entry: "manual", wind_height_factor: 1.0 };
+		refreshWindHeightReadout(params);
+		expect(inputs().slider.value).toBe("1.00");
+
+		params = { ...params, wind_entry: "weather", wind_height_factor: 0.5 };
+		refreshWindHeightReadout(params);
+		expect(inputs().slider.value).toBe("0.50");
+		expect(inputs().value.value).toBe("0.50");
+	});
+
+	test("a live drag is not fought — the readout tracks but the inputs are left to the user", () => {
+		const { slider, value } = inputs();
+		// Mid-drag the model still holds 0.5; the handler passes a shallow copy
+		// carrying the dragged value. If the refresh wrote the inputs from the
+		// MODEL here it would snap the slider back to 0.50 under the cursor.
+		slider.value = "0.85";
+		slider.dispatchEvent(new Event("input"));
+
+		expect(slider.value).toBe("0.85");
+		expect(value.value).toBe("0.85");
+		expect(inputs().readout.textContent).toContain("2.98");
 	});
 });

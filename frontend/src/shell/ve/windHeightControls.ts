@@ -207,21 +207,60 @@ export interface WindHeightControlsBinding {
 const windFieldsBound = new WeakSet<Element>();
 
 /**
- * Write the readout into the live DOM and toggle its warning modifier.
+ * Write the readout text into the live DOM and toggle its warning modifier.
  *
  * The modifier is driven by the predicate, never by string-matching the text.
  * textContent, never innerHTML (T-08-02).
+ *
+ * Text only, deliberately: this is what the live-drag path needs. See
+ * refreshWindHeightReadout for why the two are separate.
  */
-export function refreshWindHeightReadout(
-	params: AnalysisParameters | null,
-): void {
+function refreshWindHeightText(params: AnalysisParameters): void {
 	const readout = document.getElementById("windHeightReadout");
-	if (!readout || !params) return;
+	if (!readout) return;
 	readout.textContent = formatWindHeightReadout(params);
 	readout.classList.toggle(
 		"wind-height-controls__readout--warning",
 		windHeightReadoutIsWarning(params),
 	);
+}
+
+/**
+ * Bring the whole control — both inputs and the readout — back in step with the
+ * model. Call this after ANY write to `wind_height_factor` that did not come
+ * from the control's own handlers.
+ *
+ * CR-01: `wind_height_factor` has three writers, and only the slider handlers
+ * used to update `#windHeightSlider` / `#windHeightValue`. `markManualWindEntry`
+ * (D-05) and the auto-rho weather sync write the model only, so the control was
+ * left displaying a factor the physics had already stopped using. That is not
+ * cosmetic: the readout tells the user to "set the factor", so they drag — and
+ * the drag starts from the stale value and commits it, height-transferring a
+ * wind they typed by hand. Exactly the D-05 harm markManualWindEntry prevents.
+ *
+ * `syncCrrTempAmbientFromWeather` mirrors its value into the live input for the
+ * same reason; this follows that precedent.
+ *
+ * NOT used by the live-drag handler — mid-drag the model still holds the old
+ * factor, so writing the inputs from it would snap the slider back under the
+ * user's cursor. That path calls refreshWindHeightText instead.
+ */
+export function refreshWindHeightReadout(
+	params: AnalysisParameters | null,
+): void {
+	if (!params) return;
+
+	const factor = resolveWindHeightFactor(params).toFixed(2);
+	const slider = document.getElementById(
+		"windHeightSlider",
+	) as HTMLInputElement | null;
+	const valueInput = document.getElementById(
+		"windHeightValue",
+	) as HTMLInputElement | null;
+	if (slider) slider.value = factor;
+	if (valueInput) valueInput.value = factor;
+
+	refreshWindHeightText(params);
 }
 
 export function bindWindHeightControls(
@@ -258,7 +297,11 @@ export function bindWindHeightControls(
 		// This is the one place the readout is computed from a value that is not
 		// yet in the model. No setParams and no onChange here: a live drag must
 		// not fire a VE recompute per pixel.
-		refreshWindHeightReadout({ ...params, wind_height_factor: dragged });
+		//
+		// Text only (CR-01): the full refresh writes the inputs from the MODEL,
+		// which still holds the pre-drag factor, so using it here would snap the
+		// slider back under the user's cursor on every pointer move.
+		refreshWindHeightText({ ...params, wind_height_factor: dragged });
 	});
 
 	// Releasing the slider commits and recomputes. This is also what clears the
