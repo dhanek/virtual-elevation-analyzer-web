@@ -28,6 +28,7 @@ import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { bindCrrTempControls } from "./crrTempControls";
+import { bindWindHeightControls } from "./windHeightControls";
 import { scheduleRecompute } from "../analysis/recomputeRunner";
 import { bindElevationSmoothingToggle } from "../analysis/elevationProfileCycle";
 import {
@@ -818,6 +819,26 @@ export function setupVESliders(
 	});
 
 	bindCrrTempControls({
+		getParams: () => appState.currentParameters,
+		setParams: (fields) => {
+			if (parametersComponent) {
+				// Persists per-file via the orchestrator's parameter storage path.
+				parametersComponent.setParameters(fields);
+			} else if (appState.currentParameters) {
+				Object.assign(appState.currentParameters, fields);
+			}
+		},
+		onChange: () => {
+			const trimStart = parseInt(trimStartSlider.value);
+			const trimEnd = parseInt(trimEndSlider.value);
+			updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
+		},
+	});
+
+	// Same persistence and recompute needs as the Crr temperature controls above,
+	// so the binding shape is deliberately identical: standard mode routes through
+	// the parameters component directly rather than the parametersSync gateway.
+	bindWindHeightControls({
 		getParams: () => appState.currentParameters,
 		setParams: (fields) => {
 			if (parametersComponent) {
