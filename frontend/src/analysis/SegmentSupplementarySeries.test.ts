@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import {
 	buildSegmentSupplementarySeries,
@@ -75,5 +75,51 @@ describe("buildSegmentSupplementarySeries", () => {
 		expect(result.apparentWindSpeedMps).toEqual([15, 15, 15]);
 		expect(result.virtualDistanceAirKm).toEqual([0, 0.015, 0.03]);
 		expect(result.virtualDistanceGroundKm).toEqual([0, 0.01, 0.02]);
+	});
+});
+
+/**
+ * WR-01: the diagnostic must use the same wind the fit used. Before the fix
+ * this projected the raw 10 m wind, so at k = 0.5 the apparent-wind trace
+ * disagreed with the VE fit by a factor of two.
+ */
+describe("calculateConstantApparentWindSeries honours the height factor", () => {
+	const velocity = [10, 10, 10];
+
+	test("a headwind is scaled by k, matching the fitted wind", () => {
+		// No positions -> the simple `groundSpeed + wind` branch, so the
+		// arithmetic is readable without bearing geometry in the way.
+		const atUnity = calculateConstantApparentWindSeries(velocity, [], [], {
+			wind_speed: 4,
+			wind_direction: null,
+			wind_height_factor: 1.0,
+		});
+		const atHalf = calculateConstantApparentWindSeries(velocity, [], [], {
+			wind_speed: 4,
+			wind_direction: null,
+			wind_height_factor: 0.5,
+		});
+
+		expect(atUnity).toEqual([14, 14, 14]);
+		expect(atHalf).toEqual([12, 12, 12]);
+	});
+
+	test("a pre-feature record (no factor) is left untransferred", () => {
+		expect(
+			calculateConstantApparentWindSeries(velocity, [], [], {
+				wind_speed: 4,
+				wind_direction: null,
+			}),
+		).toEqual([14, 14, 14]);
+	});
+
+	test("k does not resurrect a zero wind", () => {
+		expect(
+			calculateConstantApparentWindSeries(velocity, [], [], {
+				wind_speed: 0,
+				wind_direction: null,
+				wind_height_factor: 0.5,
+			}),
+		).toEqual(velocity);
 	});
 });

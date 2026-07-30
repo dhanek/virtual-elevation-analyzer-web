@@ -1,4 +1,5 @@
 import type { AnalysisParameters } from '../components/AnalysisParameters';
+import { resolveAppliedWindSpeed } from './WindHeightTransfer';
 
 export interface SegmentSupplementarySeries {
     distancesKm: number[];
@@ -16,7 +17,7 @@ export interface BuildSegmentSupplementarySeriesInput {
     positionLong: number[];
     distance: number[];
     windSpeed: number[];
-    params: Pick<AnalysisParameters, 'wind_speed' | 'wind_direction'>;
+    params: Pick<AnalysisParameters, 'wind_speed' | 'wind_direction' | 'wind_height_factor'>;
     selectedWindSource: 'constant' | 'fit' | 'none';
 }
 
@@ -52,13 +53,27 @@ export function buildSegmentSupplementarySeries(
     };
 }
 
+/**
+ * WR-01: this projects the constant wind onto the rider bearing — the same
+ * k x w10 x cos(delta) physics the height transfer exists for. It read the raw
+ * `params.wind_speed`, so at k = 0.5 the "Apparent wind speed" trace and the
+ * air-vs-ground virtual-distance delta were computed from a wind twice the size
+ * of the one the VE fit actually used.
+ *
+ * This is NOT a second application point — D-04 still holds, because the fit's
+ * only multiplication remains the hoisted effectiveWindSpeed in
+ * VeCalculatorFactory. It is a MISSING one in a derived diagnostic, which is
+ * worse for the user: the plot they check the wind assumption against was the
+ * one disagreeing with it. Routed through the same resolver as the physics so
+ * the two cannot drift.
+ */
 export function calculateConstantApparentWindSeries(
     velocity: number[],
     positionLat: number[],
     positionLong: number[],
-    params: Pick<AnalysisParameters, 'wind_speed' | 'wind_direction'>,
+    params: Pick<AnalysisParameters, 'wind_speed' | 'wind_direction' | 'wind_height_factor'>,
 ): number[] {
-    const configuredWindSpeed = params.wind_speed ?? 0;
+    const configuredWindSpeed = resolveAppliedWindSpeed(params, params.wind_speed ?? 0) ?? 0;
     if (configuredWindSpeed === 0) {
         return [...velocity];
     }
