@@ -179,3 +179,134 @@ export function syncWindHeightFromWeather(
 		wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
 	};
 }
+
+export interface WindHeightControlsBinding {
+	/** Current analysis parameters (read live, not captured). */
+	getParams: () => AnalysisParameters | null;
+	/** Persist the changed fields (mode-specific storage path). */
+	setParams: (fields: Partial<AnalysisParameters>) => void;
+	/** Trigger the mode's VE recompute. */
+	onChange: () => void;
+}
+
+/**
+ * Node-identity guard for the additive #wind_speed / #wind_direction refresh
+ * listeners.
+ *
+ * Deliberately NOT a module-level boolean. #wind_speed survives a *sidebar*
+ * re-render, but it does not survive a file load: initializeAnalysisParameters()
+ * (analyzeOrchestrator.ts:126) is called from fileLoadOrchestration.ts:442 and
+ * demHandlers.ts:253, each constructing a new AnalysisParametersComponent whose
+ * render() assigns this.container.innerHTML, destroying and recreating
+ * #wind_speed / #wind_direction. A boolean would latch on the first bind and
+ * leave every subsequent file's fresh nodes unbound, so from the second file
+ * load onward the D-05 warning would not appear when the user types a wind.
+ * A WeakSet keyed on the element handles both directions — same node, skip; new
+ * node, bind — and detached nodes stay garbage-collectable.
+ */
+const windFieldsBound = new WeakSet<Element>();
+
+/**
+ * Write the readout into the live DOM and toggle its warning modifier.
+ *
+ * The modifier is driven by the predicate, never by string-matching the text.
+ * textContent, never innerHTML (T-08-02).
+ */
+export function refreshWindHeightReadout(
+	params: AnalysisParameters | null,
+): void {
+	const readout = document.getElementById("windHeightReadout");
+	if (!readout || !params) return;
+	readout.textContent = formatWindHeightReadout(params);
+	readout.classList.toggle(
+		"wind-height-controls__readout--warning",
+		windHeightReadoutIsWarning(params),
+	);
+}
+
+export function bindWindHeightControls(
+	binding: WindHeightControlsBinding,
+): void {
+	const slider = document.getElementById(
+		"windHeightSlider",
+	) as HTMLInputElement | null;
+	const valueInput = document.getElementById(
+		"windHeightValue",
+	) as HTMLInputElement | null;
+	// The sidebar may not be rendered in this mode.
+	if (!slider || !valueInput) return;
+
+	const initial = resolveWindHeightFactor(binding.getParams() ?? {});
+	slider.value = initial.toFixed(2);
+	valueInput.value = initial.toFixed(2);
+	refreshWindHeightReadout(binding.getParams());
+
+	const commit = (factor: number) => {
+		binding.setParams({ wind_height_factor: factor });
+		refreshWindHeightReadout(binding.getParams());
+		binding.onChange();
+	};
+
+	slider.addEventListener("input", () => {
+		const dragged = parseFloat(slider.value);
+		if (Number.isNaN(dragged)) return;
+		valueInput.value = dragged.toFixed(2);
+		const params = binding.getParams();
+		if (!params) return;
+		// The readout reads from params, but the dragged value is not committed
+		// yet — pass a shallow copy carrying it so the readout tracks the drag.
+		// This is the one place the readout is computed from a value that is not
+		// yet in the model. No setParams and no onChange here: a live drag must
+		// not fire a VE recompute per pixel.
+		refreshWindHeightReadout({ ...params, wind_height_factor: dragged });
+	});
+
+	// Releasing the slider commits and recomputes. This is also what clears the
+	// D-05 warning and the "unknown"-provenance prompt, automatically, because
+	// both live in the readout formatter.
+	slider.addEventListener("change", () => {
+		const parsed = parseFloat(slider.value);
+		if (Number.isNaN(parsed)) return;
+		valueInput.value = parsed.toFixed(2);
+		commit(parsed);
+	});
+
+	valueInput.addEventListener("change", () => {
+		const parsed = parseFloat(valueInput.value);
+		if (Number.isNaN(parsed)) {
+			// Restore the model value rather than committing garbage.
+			const current = resolveWindHeightFactor(binding.getParams() ?? {});
+			valueInput.value = current.toFixed(2);
+			return;
+		}
+		// T-08-09: validating a live user gesture at the input boundary. This is
+		// not the storage-layer clamp Plan 01 forbids — a persisted value is
+		// still never rewritten.
+		const clamped = Math.min(
+			WIND_HEIGHT_FACTOR_MAX,
+			Math.max(WIND_HEIGHT_FACTOR_MIN, parsed),
+		);
+		valueInput.value = clamped.toFixed(2);
+		slider.value = clamped.toFixed(2);
+		commit(clamped);
+	});
+
+	// Keep the readout and its prompts current the moment the user types a wind.
+	// These are additive listeners; the modes' own handlers use oninput
+	// assignment or their own addEventListener, so there is no conflict. Guarded
+	// by node identity (see windFieldsBound above), not by a boolean latch.
+	const windSpeedField = document.getElementById("wind_speed");
+	if (windSpeedField && !windFieldsBound.has(windSpeedField)) {
+		windSpeedField.addEventListener("input", () =>
+			refreshWindHeightReadout(binding.getParams()),
+		);
+		windFieldsBound.add(windSpeedField);
+	}
+	const windDirectionField = document.getElementById("wind_direction");
+	if (windDirectionField && !windFieldsBound.has(windDirectionField)) {
+		windDirectionField.addEventListener("input", () =>
+			refreshWindHeightReadout(binding.getParams()),
+		);
+		windFieldsBound.add(windDirectionField);
+	}
+}
