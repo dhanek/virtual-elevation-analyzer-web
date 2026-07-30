@@ -1,3 +1,6 @@
+import { DEFAULT_WIND_HEIGHT_FACTOR } from "../analysis/WindHeightTransfer";
+import type { WindEntry } from "../analysis/WindHeightTransfer";
+
 export interface AnalysisParameters {
 	system_mass: number;
 	rho: number;
@@ -21,6 +24,23 @@ export interface AnalysisParameters {
 	ambient_temp_c?: number | null;
 	tire_sensitivity?: "stiff" | "typical" | "supple";
 	rho_source?: "manual" | "weather_api" | "weather_cache";
+	// 10 m → rider wind height transfer (see analysis/WindHeightTransfer.ts).
+	//
+	// D-03: wind_speed keeps meaning "wind as reported, untransferred". The
+	// field shows 3.5 when the API reported 3.5; the factor is applied
+	// downstream at the WASM boundary. Applying it at store time was rejected:
+	// it would make the stored value's meaning depend on provenance, require
+	// rewriting state whenever the factor moves, and put the field in
+	// disagreement with the weather panel.
+	//
+	// D-06 (amended): wind_entry records which input last wrote the wind — an
+	// observable event, not a claim about what the number means. Deliberately
+	// not named wind_source and deliberately not merged with rho_source, which
+	// answers a staleness question instead. "unknown" exists for records saved
+	// before this feature so a later auto-rho fill cannot be mistaken for a
+	// first fill and re-seed a factor onto an analysis already read.
+	wind_height_factor?: number;
+	wind_entry?: WindEntry;
 	weather_metadata?: {
 		temperature: number;
 		dewPoint: number;
@@ -54,6 +74,15 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	crr_temp_correction: false, // opt-in tire temperature compensation, never applied silently
 	ambient_temp_c: null,
 	tire_sensitivity: "typical",
+	// D-02: maintainer-requested default of 0.5 for the height transfer.
+	// D-07 overrides it to LEGACY_WIND_HEIGHT_FACTOR for records saved before
+	// this feature — normalised on load in ParameterStorage.loadParameters,
+	// not here, so the single read path stays the one home for that rule.
+	wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+	// A freshly created record has no wind at all (wind_speed: null), so
+	// nothing has written one yet and "manual" is correct: the first weather
+	// fill then legitimately counts as a first fill and seeds the default.
+	wind_entry: "manual",
 };
 
 export class AnalysisParametersComponent {
