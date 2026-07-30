@@ -76,3 +76,10 @@ limit-test.md
 REFACTORING_CHECKLIST.md
 REFACTORING_REPORT.md
 ROADMAP.md
+
+# Local Virtual Wind demonstrator (throwaway, not part of the app)
+vw-demo/
+
+# Claude Code local state — also holds agent worktrees under .claude/worktrees/,
+# which must never be swept into a commit by a stray `git add -A`.
+.claude/
