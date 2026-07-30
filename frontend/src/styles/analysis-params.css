@@ -287,3 +287,75 @@
 	color: #555;
 	margin-top: 0.4rem;
 }
+
+/* Wind height factor controls (08-04): the k slider, its readout and the
+   D-05 / D-06 prompts. Same specificity guard as the Crr temperature block —
+   analysis-params.css imports BEFORE ve-results.css, so rules that must
+   out-rank .ve-control-group label/span (0,1,1) repeat their own class (0,2,0);
+   no descendant class selectors, per the pass-3 flatten rule. */
+.wind-height-controls__label.wind-height-controls__label {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: var(--space-sm);
+}
+
+.wind-height-controls__info.wind-height-controls__info {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 15px;
+	height: 15px;
+	min-width: 0;
+	padding: 0;
+	background: none;
+	border: 1px solid #a0aec0;
+	border-radius: 50%;
+	color: #718096;
+	font-family: Georgia, serif;
+	font-style: italic;
+	font-size: 11px;
+	line-height: 1;
+	cursor: help;
+	flex: none;
+}
+
+.wind-height-controls__row {
+	display: flex;
+	gap: var(--space-sm);
+	align-items: center;
+}
+
+/* The k row pairs a range with a number input, so the range must shrink out of
+   its .ve-slider width: 100% instead of pushing the number input off the row. */
+.wind-height-controls__row input[type="range"] {
+	flex: 1;
+	min-width: 0;
+	margin-bottom: 0;
+}
+
+.wind-height-controls__row input[type="number"] {
+	width: 64px;
+	flex: none;
+}
+
+.wind-height-controls__row.wind-height-controls__row label {
+	display: inline;
+	margin-bottom: 0;
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+.wind-height-controls__readout {
+	font-size: 0.85em;
+	color: #555;
+	margin-top: 0.4rem;
+}
+
+/* The D-05 hand-entry warning and the D-06 "unknown"-provenance prompt: a
+   "set the factor" nudge, not an error, so amber (the dem.css:190 inline
+   warning-text precedent) rather than the --color-danger red. */
+.wind-height-controls__readout--warning {
+	color: #f57c00;
+	font-weight: 500;
+}
