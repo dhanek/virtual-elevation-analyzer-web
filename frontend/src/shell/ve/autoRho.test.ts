@@ -88,6 +88,22 @@ function weatherEntry(temperature: number) {
 	};
 }
 
+/**
+ * An API sample the weather service returned with no wind reading.
+ *
+ * The declared WeatherData type says these are numbers, but the cache can hold
+ * entries without them (autoRho re-fetches on exactly that condition) and the
+ * success path guards both fields against null, so this is the shape the guard
+ * exists for.
+ */
+function weatherEntryWithoutWind(temperature: number) {
+	const entry = weatherEntry(temperature);
+	return {
+		...entry,
+		data: { ...entry.data, windSpeed: null, windDirection: null },
+	};
+}
+
 function setTrim(range: { start: number; end: number }): void {
 	(document.getElementById("mapTrimStartSlider") as HTMLInputElement).value =
 		String(range.start);
@@ -164,6 +180,10 @@ describe("calculateAutoRho — successful fetch", () => {
 		});
 		expect(params.wind_speed).toBe(3.5);
 		expect(params.wind_direction).toBe(220);
+		// The same fill also claims the wind's provenance and seeds the height
+		// factor, so the 10 m wind above is transferred down to rider height.
+		expect(params.wind_entry).toBe("weather");
+		expect(params.wind_height_factor).toBe(0.5);
 		expect(h.appState.isCalculatingAutoRho).toBe(false);
 		expect(h.services.hideLoading).toHaveBeenCalled();
 	});
@@ -502,5 +522,116 @@ describe("calculateAutoRho — unchanged query short-circuits", () => {
 		expect(h.parametersComponent.getParameters().rho_source).toBe(
 			"weather_api",
 		);
+	});
+});
+
+describe("calculateAutoRho — the wind height factor (D-06)", () => {
+	test("a first weather fill seeds the factor and claims weather provenance", async () => {
+		const h = setupHarness();
+		// Start away from the seeded value so the seed is observable rather than
+		// coinciding with the component's default.
+		h.parametersComponent.setParameters({
+			wind_entry: "manual",
+			wind_height_factor: 0.8,
+		});
+
+		await succeedOnT1(h);
+
+		const params = h.parametersComponent.getParameters();
+		expect(params.wind_entry).toBe("weather");
+		expect(params.wind_height_factor).toBe(0.5);
+	});
+
+	test("a refill does not clobber a factor the user tuned", async () => {
+		// Manual verification check 5, automated. A trim-slider move forces a
+		// refetch; the venue-specific k the user chose must survive it.
+		const h = setupHarness();
+		await succeedOnT1(h);
+
+		h.parametersComponent.setParameters({ wind_height_factor: 0.65 });
+
+		setTrim(T2);
+		mocks.getWeatherData.mockResolvedValueOnce(weatherEntry(19.2));
+		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+		const params = h.parametersComponent.getParameters();
+		expect(params.wind_height_factor).toBe(0.65);
+		expect(params.wind_entry).toBe("weather");
+		// The refill did land — this is a refill, not a skipped call.
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(2);
+	});
+
+	test("a response carrying no wind does not claim weather provenance", async () => {
+		// T-08-11: the seeding is gated on the wind actually having been written,
+		// not on the fetch having succeeded. Marking the wind weather-sourced here
+		// would claim a provenance for a number the API never returned.
+		const h = setupHarness();
+		h.parametersComponent.setParameters({
+			wind_entry: "manual",
+			wind_height_factor: 0.8,
+		});
+
+		setTrim(T1);
+		mocks.getWeatherData.mockResolvedValueOnce(weatherEntryWithoutWind(21.4));
+		mocks.calculateAirDensity.mockReturnValueOnce(1.19837);
+
+		const rho = await calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		// The rho still resolved — only the wind was missing.
+		expect(rho).toBe(1.1984);
+		const params = h.parametersComponent.getParameters();
+		expect(params.wind_entry).not.toBe("weather");
+		expect(params.wind_entry).toBe("manual");
+		expect(params.wind_height_factor).toBe(0.8);
+	});
+
+	test("a failed re-fetch drops rho provenance but leaves the wind fields alone", async () => {
+		// D-06's negative case: the retained wind is still the same *kind* of
+		// number (a 10 m model wind), so the factor must keep applying. This is
+		// the test that fails if a refactor folds wind provenance into rho_source,
+		// which invalidateStaleWeatherProvenance does clear.
+		const h = setupHarness();
+		await succeedOnT1(h);
+		h.parametersComponent.setParameters({ wind_height_factor: 0.65 });
+
+		setTrim(T2);
+		mocks.getWeatherData.mockRejectedValueOnce(
+			new WeatherAPIError("down", "API_ERROR"),
+		);
+		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+		const params = h.parametersComponent.getParameters();
+		expect(params.rho_source).toBe("manual");
+		expect(params.weather_metadata).toBeUndefined();
+		expect(params.wind_entry).toBe("weather");
+		expect(params.wind_height_factor).toBe(0.65);
+	});
+
+	test("a reopened pre-feature record is not re-seeded by a successful fill", async () => {
+		// T-08-16 / D-07 / R-04, end-to-end. auto-rho genuinely re-fires on load
+		// from fileLoad/fileLoadOrchestration.ts:389 and
+		// ve/bindStandardSliders.ts:632 — neither suppressed by
+		// isLoadingParameters — so on any saved file with auto_calculate_rho: true
+		// this exact sequence runs right after normalizeLoadedParameters produced
+		// wind_entry: "unknown". The API does return a wind here; the record must
+		// still stay at k = 1.0 rather than being silently re-fitted at 0.5.
+		const h = setupHarness();
+		h.parametersComponent.setParameters({
+			wind_entry: "unknown",
+			wind_height_factor: 1.0,
+		});
+
+		await succeedOnT1(h);
+
+		const params = h.parametersComponent.getParameters();
+		expect(params.wind_height_factor).toBe(1.0);
+		expect(params.wind_entry).toBe("unknown");
+		// The rest of the fill still applied as normal.
+		expect(params.rho).toBe(1.1984);
+		expect(params.wind_speed).toBe(3.5);
 	});
 });

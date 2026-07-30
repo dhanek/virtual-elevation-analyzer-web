@@ -62,6 +62,10 @@ import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
+import {
+	bindWindHeightControls,
+	windHeightControlsMarkup,
+} from "../ve/windHeightControls";
 import { mergeAnalysisParameters } from "../analysis/parametersSync";
 
 /**
@@ -616,6 +620,29 @@ export function setupGpsLapSliderHandlers(
 		},
 		onChange: triggerRecalculation,
 	});
+
+	// Same persistence and recompute needs as the Crr temperature controls above,
+	// so the binding shape is deliberately identical: the k write must go through
+	// the parametersSync gateway or the component's private copy reverts it on the
+	// next form edit (see shell/analysis/parametersSync.ts).
+	bindWindHeightControls({
+		getParams: () => appState.currentParameters,
+		setParams: (fields) => {
+			// Prefer the parameters-component gateway so its private copy stays
+			// in sync (a later form edit would otherwise revert these fields).
+			if (mergeAnalysisParameters(fields)) return;
+			if (!appState.currentParameters) return;
+			Object.assign(appState.currentParameters, fields);
+			if (appState.currentFileHash && appState.selectedFile) {
+				void parameterStorage.saveParameters(
+					appState.currentFileHash,
+					appState.currentParameters,
+					appState.selectedFile.name,
+				);
+			}
+		},
+		onChange: triggerRecalculation,
+	});
 }
 
 /**
@@ -685,6 +712,7 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(params)}
+                                ${windHeightControlsMarkup(params)}
                             </div>
 
                             ${

@@ -27,6 +27,7 @@ import {
 import { setupVESliders } from "./bindStandardSliders";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "./crrTempControls";
+import { windHeightControlsMarkup } from "./windHeightControls";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -277,6 +278,7 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
+                                ${windHeightControlsMarkup(appState.currentParameters!)}
                             </div>
 
                             ${
