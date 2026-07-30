@@ -50,7 +50,18 @@ describe("manual wind entry (D-05)", () => {
 		expect(params.wind_height_factor).toBe(1.0);
 	});
 
-	test("typing a wind direction sets wind_entry='manual' and the factor to 1.0", () => {
+	/**
+	 * WR-04. This test used to assert the opposite, and the assertion was wrong.
+	 *
+	 * D-09 is explicit that k scales wind SPEED only — it never touches the
+	 * bearing. The D-05 argument for resetting k ("the app cannot know whether a
+	 * typed number is a 10 m forecast or a rider-height reading") is an argument
+	 * about the speed; it says nothing about a direction. So a one-degree
+	 * correction to a bearing must not un-transfer a wind speed the weather API
+	 * wrote and the user never edited — otherwise the wind term silently changes
+	 * by 2x because of an edit to an orthogonal field.
+	 */
+	test("typing a wind direction leaves the speed's provenance and factor alone", () => {
 		// A wind speed is needed first, otherwise validateParameters disables
 		// and clears the direction field.
 		component.setParameters({
@@ -61,6 +72,21 @@ describe("manual wind entry (D-05)", () => {
 		onChange.mockClear();
 
 		typeInto("wind_direction", "220");
+
+		const params = component.getParameters();
+		expect(params.wind_direction).toBe(220);
+		expect(params.wind_entry).toBe("weather");
+		expect(params.wind_height_factor).toBe(0.5);
+	});
+
+	test("typing a wind speed still marks manual even after a direction edit", () => {
+		component.setParameters({
+			wind_speed: 3.5,
+			wind_entry: "weather",
+			wind_height_factor: 0.5,
+		});
+		typeInto("wind_direction", "220");
+		typeInto("wind_speed", "4.2");
 
 		const params = component.getParameters();
 		expect(params.wind_entry).toBe("manual");

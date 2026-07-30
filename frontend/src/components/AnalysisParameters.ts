@@ -261,13 +261,13 @@ export class AnalysisParametersComponent {
 		const windSpeedInput = this.container.querySelector(
 			"#wind_speed",
 		) as HTMLInputElement | null;
-		const windDirectionInput = this.container.querySelector(
-			"#wind_direction",
-		) as HTMLInputElement | null;
 		windSpeedInput?.addEventListener("input", () => this.markManualWindEntry());
-		windDirectionInput?.addEventListener("input", () =>
-			this.markManualWindEntry(),
-		);
+		// WR-04: #wind_direction deliberately gets NO manual-entry listener.
+		// D-09 scopes k to wind SPEED only, so a bearing edit says nothing about
+		// how the speed was measured. Marking manual here would un-transfer a
+		// weather-sourced speed the user never touched, changing the wind term by
+		// 2x because of an edit to an orthogonal field. The shared handler above
+		// already reads the new direction into the model.
 
 		// Reset button
 		const resetBtn = this.container.querySelector("#resetParams");
