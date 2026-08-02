@@ -23,8 +23,11 @@ const mocks = vi.hoisted(() => ({
 	createVeCalculatorWithRhoArray: vi.fn(),
 }));
 
-// Mock the specifier the SUBJECT imports. Vitest resolves the `@wasm` → pkg/
-// alias from vite.config.ts even though vitest.config.ts declares none itself.
+// Mock the specifier the SUBJECT imports. The `@wasm` → pkg/ alias is declared
+// in vitest.config.ts (vitest does not merge vite.config.ts when a
+// vitest.config.ts exists), but this file never relies on it: vi.mock
+// short-circuits resolution of that specifier entirely, so no real wasm is
+// loaded here. The real-artifact path is exercised by veWasmSmoke.test.ts.
 vi.mock("@wasm/virtual_elevation_analyzer.js", () => ({
 	create_ve_calculator: mocks.createVeCalculator,
 	create_ve_calculator_with_rho_array: mocks.createVeCalculatorWithRhoArray,
