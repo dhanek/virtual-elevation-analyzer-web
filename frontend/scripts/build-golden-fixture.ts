@@ -78,7 +78,26 @@ export interface AnonymisationRecord {
         destinationOriginLat: number
         destinationOriginLong: number
     }
-    sampleWindow: { startIdx: number; endIdx: number; length: number; sourceRecordCount: number }
+    sampleWindow: {
+        startIdx: number
+        endIdx: number
+        length: number
+        sourceRecordCount: number
+        /**
+         * Whether the window start was supplied by the maintainer or chosen by
+         * the scorer. Without this an auto-chosen cut and a deliberate re-cut
+         * are indistinguishable in the artifact, and the scorer's choice can
+         * move if the input ride ever changes.
+         */
+        selection: 'explicit' | 'auto'
+    }
+    /**
+     * The exact flag string that reproduces this fixture from the source ride.
+     * The point of the header is that the cut is reproducible from the artifact
+     * alone, which means the defaults have to be written down too — a reader
+     * cannot be expected to know what the defaults were on the day.
+     */
+    reproduceWith: string
     rounding: { coordinatesDecimals: number; altitudeDecimals: number; velocityDecimals: number; powerDecimals: number; otherDecimals: number }
     altitudeOffsetMetres: number
     droppedArrays: string[]
@@ -320,7 +339,12 @@ export function anonymise(
             endIdx: window.endIdx,
             length: count,
             sourceRecordCount: sourceCount,
+            selection: options.windowStart === null ? 'auto' : 'explicit',
         },
+        reproduceWith:
+            `--window=${count} --window-start=${window.startIdx} ` +
+            `--rotation-deg=${options.rotationDeg} ` +
+            `--origin-lat=${options.originLat} --origin-long=${options.originLong}`,
         rounding: {
             coordinatesDecimals: COORD_DECIMALS,
             altitudeDecimals: ALTITUDE_DECIMALS,
@@ -571,7 +595,8 @@ export function buildReviewHtml(fixture: GoldenRideFixture): string {
         ['Dropout samples', String(countDropouts(fixture))],
         ['Rotation applied (°)', String(fixture._anonymisation.coordinateTransform.rotationDegrees)],
         ['Altitude offset (m)', String(fixture._anonymisation.altitudeOffsetMetres)],
-        ['Source window', `${fixture._anonymisation.sampleWindow.startIdx}…${fixture._anonymisation.sampleWindow.endIdx} of ${fixture._anonymisation.sampleWindow.sourceRecordCount}`],
+        ['Source window', `${fixture._anonymisation.sampleWindow.startIdx}…${fixture._anonymisation.sampleWindow.endIdx} of ${fixture._anonymisation.sampleWindow.sourceRecordCount} (${fixture._anonymisation.sampleWindow.selection})`],
+        ['Reproduce with', fixture._anonymisation.reproduceWith],
     ]
 
     const tableRows = rows

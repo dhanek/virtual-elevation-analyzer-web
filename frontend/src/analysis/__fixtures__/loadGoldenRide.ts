@@ -30,7 +30,15 @@ export interface GoldenRideAnonymisation {
         destinationOriginLat: number;
         destinationOriginLong: number;
     };
-    sampleWindow: { startIdx: number; endIdx: number; length: number; sourceRecordCount: number };
+    sampleWindow: {
+        startIdx: number;
+        endIdx: number;
+        length: number;
+        sourceRecordCount: number;
+        selection: 'explicit' | 'auto';
+    };
+    /** Flag string that reproduces this fixture from the source ride. */
+    reproduceWith: string;
     altitudeOffsetMetres: number;
     droppedArrays: string[];
 }
