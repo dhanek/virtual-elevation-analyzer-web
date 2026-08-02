@@ -738,15 +738,35 @@ function parseArgs(argv: string[]): Options {
 }
 
 /**
- * Only run when this file is the entry point. `anonymise` and `buildReviewHtml`
- * are pure and exported so the transform can be exercised without a .fit file
- * (and, in a later plan, asserted on directly).
+ * Self-execute only when invoked with a ride path. `anonymise` and
+ * `buildReviewHtml` are pure and exported so the transform can be exercised
+ * without a .fit file, which is why this guard exists at all.
+ *
+ * The discriminator is the presence of a positional argument, NOT the contents
+ * of `process.argv[1]`. Under the documented invocation
+ * (`npx vite-node scripts/build-golden-fixture.ts -- <ride.fit>`) vite-node
+ * puts its OWN binary in `argv[1]` and hands the script only the user args:
+ *
+ *     argv = [ node, .../node_modules/.bin/vite-node, <ride.fit> ]
+ *
+ * so a guard that looked for this file's name in `argv[1]` never fired and the
+ * script exited 0 having silently done nothing.
  */
-const isEntryPoint = process.argv[1]?.includes('build-golden-fixture') ?? false
+const positionalArgs = process.argv.slice(2).filter(arg => arg !== '--' && !arg.startsWith('--'))
 
-if (isEntryPoint) {
+if (positionalArgs.length > 0) {
     void main().catch(error => {
         process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`)
         process.exitCode = 1
     })
+} else if (process.argv[1]?.includes('vite-node') || process.argv[1]?.includes('build-golden-fixture')) {
+    // Launched directly but given nothing to do. Never exit 0 in silence — that
+    // is precisely the failure the guard above is written against.
+    process.stderr.write(
+        'build-golden-fixture: no ride path given.\n' +
+        'Usage: npx vite-node scripts/build-golden-fixture.ts -- <path-to.fit> ' +
+        '[--rotation-deg=n] [--origin-lat=n] [--origin-long=n] [--window=n] ' +
+        '[--window-start=n] [--out-dir=path]\n',
+    )
+    process.exitCode = 1
 }
