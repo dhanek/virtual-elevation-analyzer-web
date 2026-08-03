@@ -25,7 +25,7 @@ import {
 	isGpsLapSelectionMode,
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
-import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
+import { resolveRhoArray } from "./rhoArrayResolver";
 import { configureRecomputeRunner } from "./recomputeRunner";
 import { configureParameterMerge } from "./parametersSync";
 import {
@@ -441,29 +441,14 @@ export async function handleAnalyze(): Promise<void> {
 			cda: deps.appState.currentParameters.cda,
 			crr: deps.appState.currentParameters.crr,
 			getNormalizedActivityArrays,
-			calculateRhoArray: (fd) => {
-				const currentNormalized = getNormalizedActivityArrays(fd);
-				const hasAirDensityData = currentNormalized.airDensity.some(
-					(rho) => !isNaN(rho) && rho > 0,
-				);
-				if (hasAirDensityData) {
-					log.debug("💨 Found air density data, using it for calculations");
-					return currentNormalized.airDensity;
-				}
-
-				if (hasEnvironmentalData) {
-					const calculated = calculateRhoArrayFromFitData(fd);
-					if (calculated) {
-						log.debug("💨 Calculated air density from environmental data");
-					}
-					return calculated;
-				}
-
-				log.debug(
-					"💨 No air density found, using constant value from weather API",
-				);
-				return null;
-			},
+			// One shared resolver, so the analyze path and the update path can
+			// never diverge on how rho is obtained (D-06).
+			calculateRhoArray: (fd) =>
+				resolveRhoArray(
+					fd,
+					getNormalizedActivityArrays(fd),
+					hasEnvironmentalData,
+				),
 		});
 
 		const powerDataPoints = payload.filteredData.power.filter(
@@ -477,6 +462,10 @@ export async function handleAnalyze(): Promise<void> {
 
 		deps.hideLoading();
 
+		// The FULL-ACTIVITY rho series. This write used to be dead -- nothing
+		// read it back (07-RESEARCH.md baseline correction 1) -- which is why
+		// slider updates recomputed VE with no per-point air density. D-06 makes
+		// updateModeVEPlots both write and READ this field.
 		deps.appState.currentRhoArray = payload.rhoArray;
 		deps.appState.currentVEResult = payload.initialResult;
 		deps.appState.filteredVEData = {

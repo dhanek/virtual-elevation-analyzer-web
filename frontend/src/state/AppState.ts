@@ -149,6 +149,15 @@ export interface ActivityState {
 	currentFitResult: ActivityResult | null;
 	currentLaps: ActivityLapLike[];
 	currentCdaReference: number[] | null;
+	/**
+	 * The FULL-ACTIVITY air-density series, indexed like every other activity
+	 * array. Written by the analyze path and both written and READ by
+	 * `updateModeVEPlots`, which slices it per segment.
+	 *
+	 * Before D-06 this was write-only: nothing ever read it back, so slider
+	 * updates recomputed VE with no per-point rho while the initial analyze had
+	 * it. That is the defect the field's read side now closes.
+	 */
 	currentRhoArray: number[] | null;
 }
 

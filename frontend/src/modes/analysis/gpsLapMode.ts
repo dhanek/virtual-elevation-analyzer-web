@@ -1,4 +1,6 @@
-import type { AnalysisModeHandler, ModeRenderArgs, PreparedAnalysisSelection } from './types';
+import { resolveActiveGpsLapRanges } from './activeGpsLapRanges';
+import { writeSegmentModeResultState } from './segmentSummary';
+import type { AnalysisModeHandler, ModeRenderArgs, ModeSegment, PreparedAnalysisSelection } from './types';
 
 const EMPTY_SELECTION_MESSAGE = 'Please select laps and set parameters first.';
 
@@ -54,5 +56,37 @@ export const gpsLapMode: AnalysisModeHandler = {
             params: args.params,
             defaultAirSpeedOffset: args.defaultAirSpeedOffset,
         });
+    },
+
+    /**
+     * Uses the ranges of the overlay currently on screen, NOT `gpsDetectedLaps`.
+     * The stacked-from-standard overlay leaves the detected-lap arrays empty and
+     * stashes its ranges on `currentGpsLapIndexRanges`; reading the detected laps
+     * here would silently break it (07-RESEARCH.md Priority 5, item 5).
+     *
+     * Labels: `getGpsLapNumberForRange` lives in `shell/gpsLap/renderGpsLap.ts`
+     * and cannot be imported from this DOM-free layer, so the fallback label is
+     * the ordinal and the shell adapter relabels from the real lap number.
+     */
+    getUpdateSegments(appState): ModeSegment[] {
+        return resolveActiveGpsLapRanges(appState).map((range, i) => {
+            const lapNumber = appState.currentOverlayLapNumbers?.[i] ?? i + 1;
+            return {
+                key: `gpsLap-${i}`,
+                label: `Lap ${lapNumber}`,
+                range,
+            };
+        });
+    },
+
+    /** Reproduces the synthesis at `updateGpsLap.ts:205-247` exactly. */
+    summarize(appState, profiles, aggregate, inputs) {
+        writeSegmentModeResultState(
+            appState,
+            profiles,
+            aggregate,
+            inputs,
+            profiles.map((_profile, i) => appState.currentOverlayLapNumbers?.[i] ?? i + 1),
+        );
     },
 };
