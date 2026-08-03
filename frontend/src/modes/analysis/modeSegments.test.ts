@@ -47,6 +47,11 @@ function makeSection(sectionNumber: number, base: number): OutAndBackSection {
     } as unknown as OutAndBackSection;
 }
 
+/** Inclusive index run, e.g. range(20, 24) -> [20, 21, 22, 23, 24]. */
+function range(startIdx: number, endIdx: number): number[] {
+    return Array.from({ length: endIdx - startIdx + 1 }, (_, i) => startIdx + i);
+}
+
 /** A profile carrying just enough for `summarize` to do its work. */
 function makeProfile(indices: number[]): SegmentVeProfile {
     return {
@@ -242,12 +247,43 @@ describe('outAndBackMode.getUpdateSegments', () => {
         expect(appState.currentVEResult).toBeNull();
         expect(appState.currentFilteredData).toBeNull();
 
-        handler.summarize(appState, [makeProfile([0, 1, 2, 3])], AGGREGATE, makeInputs());
+        // Ranges matching section 1's outbound (0..4) and inbound (5..9).
+        handler.summarize(
+            appState,
+            [makeProfile([0, 1, 2, 3, 4]), makeProfile([5, 6, 7, 8, 9])],
+            AGGREGATE,
+            makeInputs(),
+        );
 
         expect(appState.currentVEResult).not.toBeNull();
         expect(appState.currentFilteredData).not.toBeNull();
         expect(appState.currentWindSource).toBe('fit');
-        expect(appState.currentAnalyzedLaps).toEqual([1, 2]);
+        // Section 2 produced no segment, so it is not reported as analysed.
+        expect(appState.currentAnalyzedLaps).toEqual([1]);
+    });
+
+    it('reports a section whose legs were all skipped as NOT analysed', () => {
+        const handler = getAnalysisModeHandler('GPS based out and back');
+        const appState = oabState();
+
+        // Only section 2's outbound (20..24) survived.
+        handler.summarize(appState, [makeProfile(range(20, 24))], AGGREGATE, makeInputs());
+
+        expect(appState.currentAnalyzedLaps).toEqual([2]);
+    });
+
+    it('computes segments from the ON-SCREEN sections, not the checkbox state', () => {
+        const handler = getAnalysisModeHandler('GPS based out and back');
+        const appState = oabState();
+        // What was analysed and drawn.
+        appState.currentOutAndBackSections = [makeSection(1, 0)];
+        // The user then ticked a second box WITHOUT re-running the analysis.
+        appState.outAndBackSelectedSections = [1, 2];
+
+        const segments = handler.getUpdateSegments(appState);
+
+        // A slider drag must still recompute exactly what is on screen.
+        expect(segments.map(s => s.key)).toEqual(['s1-out', 's1-in']);
     });
 });
 

@@ -17,6 +17,30 @@
  */
 import type { AppState, LapIndexRange } from "../../state/AppState";
 
+/**
+ * The lap NUMBER to label a range with — the detected lap whose bounds match,
+ * falling back to the ordinal.
+ *
+ * This is a pure lookup over `gpsDetectedLaps`; it lived in
+ * `shell/gpsLap/renderGpsLap.ts` as `getGpsLapNumberForRange` only by accident
+ * of history. Plan 07-02 Task 3 needs it in this layer because
+ * `gpsLapMode.summarize` writes `currentAnalyzedLaps`, and before the primitive
+ * that array held the REAL lap numbers (`updateGpsLap.ts:250`). Labelling by
+ * ordinal instead would silently change what Store Result persists for any
+ * selection that is not laps 1..N — a stored-output regression with no D-09
+ * entry. The shell function now delegates here so there is one lookup.
+ */
+export function resolveGpsLapNumber(
+	appState: AppState,
+	range: LapIndexRange,
+	fallbackLapNumber: number,
+): number {
+	const matchingLap = appState.gpsDetectedLaps.find(
+		(lap) => lap.startIdx === range.startIdx && lap.endIdx === range.endIdx,
+	);
+	return matchingLap?.lapNumber ?? fallbackLapNumber;
+}
+
 export function resolveActiveGpsLapRanges(appState: AppState): LapIndexRange[] {
 	if (
 		appState.currentGpsLapIndexRanges &&

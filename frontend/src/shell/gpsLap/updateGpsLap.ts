@@ -3,16 +3,20 @@
  *
  * Verbatim lift from main.ts -- update logic for GPS-lap mode.
  */
-import type { AppState } from "../../state/AppState";
+import type { AppState, WindSource } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "../analysis/types";
+import type {
+	ModeUpdateCallbacks,
+	SegmentVeProfile,
+} from "../../modes/analysis/types";
 import type { LapVEProfile } from "./types";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveWindSeries } from "../../analysis/WindSourceResolver";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
+import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
+import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
+import { updateModeVEPlots } from "../analysis/updateModeVEPlots";
+import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import {
 	renderGpsLapVEPlots,
 	renderGpsLapWindPlot,
@@ -21,7 +25,7 @@ import {
 	calculateMeanElevationProfile,
 	calculateGpsLapStats,
 } from "./gpsLapPlots";
-import { showGpsLapVEAnalysis, getGpsLapNumberForRange } from "./renderGpsLap";
+import { showGpsLapVEAnalysis } from "./renderGpsLap";
 import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
 import { setupTabSwitching } from "../dom/tabs";
 import { log } from "../../utils/log";
@@ -32,6 +36,106 @@ export function scheduleGpsLapRecompute(run: () => Promise<void> | void): void {
 		mode: "gps-lap",
 		run,
 	});
+}
+
+/**
+ * Build the GPS-lap `ModeUpdateCallbacks`.
+ *
+ * This is the ONLY GPS-lap-specific code left in the update path: the shape of
+ * a `LapVEProfile`, which stat helpers compute the aggregate, and which four
+ * render functions draw it. The spine — wind, elevation, rho, the segment loop,
+ * the tab-active check and the result-state writes — is the primitive's.
+ *
+ * The mapped profiles and the mean elevation are memoised on the identity of
+ * the `profiles` array so `aggregate` and the render callbacks share one
+ * computation without depending on the order the primitive calls them in.
+ */
+function createGpsLapUpdateCallbacks(appState: AppState): ModeUpdateCallbacks {
+	const normalized = getNormalizedActivityArrays(appState.currentFitData!);
+
+	let memoKey: SegmentVeProfile[] | null = null;
+	let memoLaps: LapVEProfile[] = [];
+	let memoMean: { distances: number[]; elevation: number[] } = {
+		distances: [],
+		elevation: [],
+	};
+
+	function laps(profiles: SegmentVeProfile[]): LapVEProfile[] {
+		if (profiles !== memoKey) {
+			memoKey = profiles;
+			memoLaps = profiles.map((profile, i) => {
+				const first = profile.indices[0];
+				const last = profile.indices[profile.indices.length - 1];
+				return {
+					// The handler labels from the same lookup; relabelling here
+					// keeps the summary table and the stored result agreeing.
+					lapNumber:
+						appState.currentOverlayLapNumbers?.[i] ??
+						resolveGpsLapNumber(appState, profile.segment.range, i + 1),
+					distances: profile.distancesKm,
+					virtualElevation: profile.virtualElevation,
+					actualElevation: profile.actualElevation,
+					supplementarySeries: profile.supplementarySeries,
+					duration:
+						profile.indices.length > 0
+							? normalized.timestamps[last] - normalized.timestamps[first]
+							: 0,
+					totalDistance: profile.distancesKm[profile.distancesKm.length - 1] ?? 0,
+				};
+			});
+			memoMean = calculateMeanElevationProfile(memoLaps);
+		}
+		return memoLaps;
+	}
+
+	function meanElevation(profiles: SegmentVeProfile[]) {
+		laps(profiles);
+		return memoMean;
+	}
+
+	return {
+		aggregate(profiles) {
+			const lapProfiles = laps(profiles);
+			const stats = calculateGpsLapStats(lapProfiles, meanElevation(profiles));
+			return {
+				r2: stats.meanR2,
+				rmse: stats.meanRMSE,
+				veGain: stats.avgVeGain,
+				actualGain: stats.avgActualGain,
+				segmentCount: lapProfiles.length,
+				extra: { closingError: stats.closingError },
+			};
+		},
+
+		renderVe(profiles) {
+			const lapProfiles = laps(profiles);
+			renderGpsLapVEPlots(lapProfiles, meanElevation(profiles));
+			setupTabSwitching({
+				wind: () => renderGpsLapWindPlot(lapProfiles),
+				power: () => renderGpsLapPowerPlot(lapProfiles),
+				vd: () => renderGpsLapVdPlot(lapProfiles),
+			});
+		},
+
+		renderWind(profiles) {
+			renderGpsLapWindPlot(laps(profiles));
+		},
+
+		renderPower(profiles) {
+			renderGpsLapPowerPlot(laps(profiles));
+		},
+
+		renderVd(profiles) {
+			renderGpsLapVdPlot(laps(profiles));
+		},
+
+		renderMetrics() {
+			// GPS-lap's metric spans and summary table are painted inside
+			// `renderGpsLapVEPlots` (gpsLapPlots.ts:352-375), which recomputes the
+			// stats itself. Nothing to do here, and duplicating the write would
+			// be a second place for the header to drift from the plot.
+		},
+	};
 }
 
 /**
@@ -56,222 +160,18 @@ export async function updateGpsLapVEPlots(
 
 	await waitForPlotly();
 
-	const normalizedArrays = getNormalizedActivityArrays(appState.currentFitData);
-	const allTimestamps = normalizedArrays.timestamps;
-	const allPower = normalizedArrays.power;
-	const allVelocity = normalizedArrays.velocity;
-	const allPositionLat = normalizedArrays.positionLat;
-	const allPositionLong = normalizedArrays.positionLong;
-	const allAltitude = normalizedArrays.altitude;
-	const allDistance = normalizedArrays.distance;
-
-	const gpsLapUpdateWindResolution = resolveWindSeries({
-		fitData: appState.currentFitData,
-		windSource,
-		params: appState.currentParameters,
-		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+	// `getAnalysisModeHandler` is total — it indexes ANALYSIS_MODES by
+	// `getAnalysisModeId(...)` and always returns a handler, so there is no null
+	// case to guard. `getGpsAnalysisMode()` is the accessor plan 03's
+	// `requestModeUpdate` also uses; the two must agree on one source.
+	await updateModeVEPlots({
+		appState,
+		handler: getAnalysisModeHandler(getGpsAnalysisMode()),
+		callbacks: createGpsLapUpdateCallbacks(appState),
+		windSource: windSource as WindSource,
+		cda,
+		crr,
 	});
-	const allWindSpeed = gpsLapUpdateWindResolution.windSpeed;
-
-	const lapVEProfiles: LapVEProfile[] = [];
-
-	// Calculate VE for each selected GPS lap
-	for (
-		let lapIdx = 0;
-		lapIdx < appState.currentGpsLapIndexRanges.length;
-		lapIdx++
-	) {
-		const range = appState.currentGpsLapIndexRanges[lapIdx];
-		const lapNumber =
-			appState.currentOverlayLapNumbers?.[lapIdx] ??
-			getGpsLapNumberForRange(appState, range, lapIdx + 1);
-
-		// Extract data for this lap
-		const lapTimestamps: number[] = [];
-		const lapPower: number[] = [];
-		const lapVelocity: number[] = [];
-		const lapPositionLat: number[] = [];
-		const lapPositionLong: number[] = [];
-		const lapAltitude: number[] = [];
-		const lapDistance: number[] = [];
-		const lapWindSpeed: number[] = [];
-
-		for (
-			let i = range.startIdx;
-			i <= range.endIdx && i < allTimestamps.length;
-			i++
-		) {
-			lapTimestamps.push(allTimestamps[i]);
-			lapPower.push(allPower[i]);
-			lapVelocity.push(allVelocity[i]);
-			lapPositionLat.push(allPositionLat[i]);
-			lapPositionLong.push(allPositionLong[i]);
-			lapAltitude.push(allAltitude[i]);
-			lapDistance.push(allDistance[i]);
-			lapWindSpeed.push(allWindSpeed[i]);
-		}
-
-		if (lapTimestamps.length < 10) {
-			log.warn(
-				`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`,
-			);
-			continue;
-		}
-
-		const supplementarySeries = buildSegmentSupplementarySeries({
-			timestamps: lapTimestamps,
-			power: lapPower,
-			velocity: lapVelocity,
-			positionLat: lapPositionLat,
-			positionLong: lapPositionLong,
-			distance: lapDistance,
-			windSpeed: lapWindSpeed,
-			params: appState.currentParameters,
-			selectedWindSource: gpsLapUpdateWindResolution.selectedWindSource,
-		});
-		const relativeDistances = supplementarySeries.distancesKm;
-
-		// Calculate duration
-		const duration = lapTimestamps[lapTimestamps.length - 1] - lapTimestamps[0];
-		const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
-
-		try {
-			// The slider Crr is 22 °C-referenced; the physics uses the
-			// temperature-corrected value when the correction is enabled.
-			const appliedCrr = resolveAppliedCrr(appState.currentParameters, crr);
-			const calculator = createVeCalculator({
-				timestamps: lapTimestamps,
-				power: lapPower,
-				velocity: lapVelocity,
-				positionLat: lapPositionLat,
-				positionLong: lapPositionLong,
-				altitude: lapAltitude,
-				distance: lapDistance,
-				windSpeed: lapWindSpeed,
-				params: appState.currentParameters,
-				cda,
-				crr: appliedCrr,
-			});
-
-			// Calculate VE for full lap
-			const result = calculator.calculate_virtual_elevation(
-				cda,
-				appliedCrr,
-				0,
-				lapTimestamps.length - 1,
-			);
-
-			// Extract VE values
-			const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-			// Get actual elevation (use zeros for velodrome mode)
-			const actualElevation = appState.currentParameters.velodrome
-				? new Array(lapAltitude.length).fill(0)
-				: lapAltitude;
-
-			lapVEProfiles.push({
-				lapNumber,
-				distances: relativeDistances,
-				virtualElevation: veArray,
-				actualElevation: actualElevation,
-				supplementarySeries,
-				duration,
-				totalDistance,
-			});
-		} catch (err) {
-			log.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
-		}
-	}
-
-	if (lapVEProfiles.length === 0) {
-		log.error("No valid laps to display");
-		return;
-	}
-
-	// Calculate mean actual elevation profile
-	const meanElevation = calculateMeanElevationProfile(lapVEProfiles);
-
-	// Calculate and update statistics
-	const stats = calculateGpsLapStats(lapVEProfiles, meanElevation);
-
-	// Create a combined VE result for store functionality
-	// Concatenate all lap VE profiles into a single array
-	const combinedVE: number[] = [];
-	for (const lap of lapVEProfiles) {
-		combinedVE.push(...lap.virtualElevation);
-	}
-
-	// Store combined result globally for save functionality
-	appState.currentVEResult = {
-		r2: stats.meanR2,
-		rmse: stats.meanRMSE,
-		ve_elevation_diff: stats.avgVeGain,
-		actual_elevation_diff: stats.avgActualGain,
-		virtual_elevation: new Float64Array(combinedVE),
-		virtual_distance_air: 0,
-		virtual_distance_ground: 0,
-		vd_difference_percent: 0,
-	};
-	appState.currentWindSource = (
-		windSource === "compare"
-			? "compare"
-			: gpsLapUpdateWindResolution.selectedWindSource
-	) as "constant" | "fit" | "compare" | "none";
-
-	// Store filtered data globally for save functionality (combine all lap data)
-	const combinedPower: number[] = [];
-	const combinedVelocity: number[] = [];
-	const combinedTimestamps: number[] = [];
-	const combinedTemperature: number[] = [];
-
-	for (const range of appState.currentGpsLapIndexRanges!) {
-		for (
-			let i = range.startIdx;
-			i <= range.endIdx && i < allTimestamps.length;
-			i++
-		) {
-			combinedPower.push(allPower[i]);
-			combinedVelocity.push(allVelocity[i]);
-			combinedTimestamps.push(allTimestamps[i]);
-			// Temperature may not exist
-			if (appState.currentFitData.temperature) {
-				combinedTemperature.push(appState.currentFitData.temperature[i] || 0);
-			}
-		}
-	}
-	appState.currentFilteredData = {
-		power: combinedPower,
-		velocity: combinedVelocity,
-		timestamps: combinedTimestamps,
-		temperature: combinedTemperature,
-	};
-
-	// Store analyzed laps (GPS lap numbers)
-	appState.currentAnalyzedLaps = lapVEProfiles.map((lap) => lap.lapNumber);
-
-	renderGpsLapVEPlots(lapVEProfiles, meanElevation);
-	setupTabSwitching({
-		wind: () => renderGpsLapWindPlot(lapVEProfiles),
-		power: () => renderGpsLapPowerPlot(lapVEProfiles),
-		vd: () => renderGpsLapVdPlot(lapVEProfiles),
-	});
-
-	const windTab = document.getElementById("wind-tab");
-	if (windTab?.classList.contains("ve-tab-content--active")) {
-		renderGpsLapWindPlot(lapVEProfiles);
-	}
-	const powerTab = document.getElementById("power-tab");
-	if (powerTab?.classList.contains("ve-tab-content--active")) {
-		renderGpsLapPowerPlot(lapVEProfiles);
-	}
-	const vdTab = document.getElementById("vd-tab");
-	if (vdTab?.classList.contains("ve-tab-content--active")) {
-		renderGpsLapVdPlot(lapVEProfiles);
-	}
-
-	log.debug(
-		`GPS Lap VE plots updated with ${lapVEProfiles.length} laps, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`,
-	);
 }
 
 /**

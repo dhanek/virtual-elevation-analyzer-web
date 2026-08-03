@@ -3,18 +3,23 @@
  *
  * Verbatim lift from main.ts -- update logic for out-and-back mode.
  */
-import type { AppState } from "../../state/AppState";
+import type { AppState, WindSource } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "../analysis/types";
+import type {
+	ModeUpdateCallbacks,
+	SegmentVeProfile,
+} from "../../modes/analysis/types";
 import type { OutAndBackVEProfile } from "./types";
 
-import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveWindSeries } from "../../analysis/WindSourceResolver";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
-import { extractSegmentData } from "../../analysis/SegmentExtractor";
+import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
+import {
+	matchesRange,
+	resolveActiveOutAndBackSections,
+} from "../../modes/analysis/activeOutAndBackSections";
+import { updateModeVEPlots } from "../analysis/updateModeVEPlots";
+import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { getSelectedWindSource } from "../dom/windSource";
 import {
 	calculateOutAndBackMeanElevation,
@@ -38,6 +43,157 @@ export function scheduleOutAndBackRecompute(
 }
 
 /**
+ * Reassemble the primitive's FLAT segment list into the per-section shape the
+ * out-and-back plots and stat helpers expect.
+ *
+ * The primitive emits 2N segments (outbound, inbound, outbound, ...); an
+ * `OutAndBackVEProfile` is one section carrying both legs. Pairing is done by
+ * matching each profile's full-activity range against the section it came from,
+ * NOT by position in the array — a leg under 10 samples is skipped by the
+ * primitive, which would shift every subsequent index by one and silently
+ * transplant an inbound leg onto the wrong section.
+ *
+ * A section whose legs were both skipped is dropped, reproducing the old
+ * `outboundVE.length > 0 || inboundVE.length > 0` guard.
+ */
+function toOutAndBackProfiles(
+	appState: AppState,
+	profiles: SegmentVeProfile[],
+): OutAndBackVEProfile[] {
+	const result: OutAndBackVEProfile[] = [];
+
+	for (const section of resolveActiveOutAndBackSections(appState)) {
+		const outbound = profiles.find((profile) =>
+			matchesRange(profile, section.outboundStartIdx, section.outboundEndIdx),
+		);
+		const inbound = profiles.find((profile) =>
+			matchesRange(profile, section.inboundStartIdx, section.inboundEndIdx),
+		);
+
+		if (!outbound && !inbound) {
+			continue;
+		}
+
+		result.push({
+			sectionNumber: section.sectionNumber,
+			outboundDistances: outbound?.distancesKm ?? [],
+			outboundVE: outbound?.virtualElevation ?? [],
+			outboundActualElevation: outbound ? [...outbound.actualElevation] : [],
+			outboundSeries: outbound?.supplementarySeries ?? null,
+			inboundDistances: inbound?.distancesKm ?? [],
+			inboundVE: inbound?.virtualElevation ?? [],
+			inboundActualElevation: inbound ? [...inbound.actualElevation] : [],
+			inboundSeries: inbound?.supplementarySeries ?? null,
+			outboundDuration: section.outboundDuration,
+			inboundDuration: section.inboundDuration,
+			totalDistance: section.totalDistance,
+		});
+	}
+
+	return result;
+}
+
+/**
+ * Build the out-and-back `ModeUpdateCallbacks`.
+ *
+ * As with GPS-lap, this is the only out-and-back-specific code left in the
+ * update path. The mapped profiles and mean elevation are memoised on the
+ * identity of the `profiles` array so `aggregate` and the render callbacks
+ * share one computation regardless of call order.
+ */
+function createOutAndBackUpdateCallbacks(
+	appState: AppState,
+	Plotly: any,
+): ModeUpdateCallbacks {
+	let memoKey: SegmentVeProfile[] | null = null;
+	let memoSections: OutAndBackVEProfile[] = [];
+	let memoMean: { distances: number[]; elevation: number[] } = {
+		distances: [],
+		elevation: [],
+	};
+
+	function sections(profiles: SegmentVeProfile[]): OutAndBackVEProfile[] {
+		if (profiles !== memoKey) {
+			memoKey = profiles;
+			memoSections = toOutAndBackProfiles(appState, profiles);
+			memoMean = calculateOutAndBackMeanElevation(memoSections);
+		}
+		return memoSections;
+	}
+
+	function meanElevation(profiles: SegmentVeProfile[]) {
+		sections(profiles);
+		return memoMean;
+	}
+
+	return {
+		aggregate(profiles) {
+			const sectionProfiles = sections(profiles);
+			const stats = calculateOutAndBackStats(
+				sectionProfiles,
+				meanElevation(profiles),
+			);
+			// `calculateOutAndBackStats` has no r2 at all, so the aggregate's r2
+			// is the mean of the per-SEGMENT calculator r2. Deliberate: it is a
+			// value the out-and-back screen never displayed, and it is now what
+			// Store Result persists (see outAndBackMode.summarize).
+			const meanR2 =
+				profiles.length > 0
+					? profiles.reduce((sum, profile) => sum + (profile.result.r2 ?? 0), 0) /
+						profiles.length
+					: 0;
+
+			return {
+				r2: meanR2,
+				rmse: stats.rmse,
+				veGain: stats.avgVeGain,
+				actualGain: stats.avgActualGain,
+				// Sections, not segments — this is what the header span counts.
+				segmentCount: sectionProfiles.length,
+				extra: { avgDiff: stats.avgDiff },
+			};
+		},
+
+		renderVe(profiles) {
+			renderOutAndBackPlots(Plotly, sections(profiles), meanElevation(profiles));
+		},
+
+		renderWind(profiles) {
+			renderOutAndBackWindPlot(sections(profiles));
+		},
+
+		renderPower(profiles) {
+			renderOutAndBackPowerPlot(sections(profiles));
+		},
+
+		renderVd(profiles) {
+			renderOutAndBackVdPlot(sections(profiles));
+		},
+
+		renderMetrics(aggregate) {
+			// The template renders ve-metrics-compact with these four spans; there
+			// is no #oabVeMetrics element, so refresh all four values here.
+			const rmseSpan = document.getElementById("oabRmseValue");
+			const veGainValueSpan = document.getElementById("oabVeGainValue");
+			const actualGainValueSpan = document.getElementById("oabActualGainValue");
+			const sectionCountSpan = document.getElementById("oabSectionCountValue");
+			if (rmseSpan) {
+				rmseSpan.textContent = `${aggregate.rmse.toFixed(2)}m`;
+			}
+			if (veGainValueSpan) {
+				veGainValueSpan.textContent = `${aggregate.veGain.toFixed(2)}m`;
+			}
+			if (actualGainValueSpan) {
+				actualGainValueSpan.textContent = `${aggregate.actualGain.toFixed(2)}m`;
+			}
+			if (sectionCountSpan) {
+				sectionCountSpan.textContent = aggregate.segmentCount.toString();
+			}
+		},
+	};
+}
+
+/**
  * Update Out and Back VE plots with new CdA/Crr values
  */
 export async function updateOutAndBackVEPlots(
@@ -58,239 +214,17 @@ export async function updateOutAndBackVEPlots(
 
 	const Plotly = await waitForPlotly();
 
-	// The slider Crr is 22 °C-referenced; the physics uses the
-	// temperature-corrected value when the correction is enabled.
-	const appliedCrr = resolveAppliedCrr(appState.currentParameters, crr);
-
-	// Recalculate VE for all sections
-	const profiles: OutAndBackVEProfile[] = [];
-
-	const normalizedArrays = getNormalizedActivityArrays(appState.currentFitData);
-	const allTimestamps = normalizedArrays.timestamps;
-	const allPower = normalizedArrays.power;
-	const allVelocity = normalizedArrays.velocity;
-	const allPositionLat = normalizedArrays.positionLat;
-	const allPositionLong = normalizedArrays.positionLong;
-	const allAltitude = normalizedArrays.altitude;
-	const allDistance = normalizedArrays.distance;
-
-	// Handle wind/air speed via typed locals - check wind source selection
-	const outAndBackUpdateWindResolution = resolveWindSeries({
-		fitData: appState.currentFitData,
-		windSource: getSelectedWindSource(),
-		params: appState.currentParameters,
-		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+	// The wind source was read from the DOM inside the old spine. It is now read
+	// here, at the adapter boundary, and passed in as an argument — the primitive
+	// reads no controls.
+	await updateModeVEPlots({
+		appState,
+		handler: getAnalysisModeHandler(getGpsAnalysisMode()),
+		callbacks: createOutAndBackUpdateCallbacks(appState, Plotly),
+		windSource: getSelectedWindSource() as WindSource,
+		cda,
+		crr,
 	});
-	const allWindSpeed = outAndBackUpdateWindResolution.windSpeed;
-
-	if (outAndBackUpdateWindResolution.selectedWindSource === "constant") {
-		log.debug("Out and Back VE update: Using constant wind settings");
-	} else if (outAndBackUpdateWindResolution.dataSource === "air_speed") {
-		log.debug(
-			`Out and Back VE update: Using FIT air speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`,
-		);
-	} else if (outAndBackUpdateWindResolution.dataSource === "wind_speed") {
-		log.debug(
-			`Out and Back VE update: Using FIT wind speed data (calibration: ${appState.airSpeedCalibrationPercent}%)`,
-		);
-	} else {
-		log.debug("Out and Back VE update: No wind data available");
-	}
-
-	for (const section of appState.currentOutAndBackSections) {
-		const profile: OutAndBackVEProfile = {
-			sectionNumber: section.sectionNumber,
-			outboundDistances: [],
-			outboundVE: [],
-			outboundActualElevation: [],
-			outboundSeries: null,
-			inboundDistances: [],
-			inboundVE: [],
-			inboundActualElevation: [],
-			inboundSeries: null,
-			outboundDuration: section.outboundDuration,
-			inboundDuration: section.inboundDuration,
-			totalDistance: section.totalDistance,
-		};
-
-		// Process outbound
-		try {
-			const outboundData = extractSegmentData({
-				startIdx: section.outboundStartIdx,
-				endIdx: section.outboundEndIdx,
-				allTimestamps,
-				allPower,
-				allVelocity,
-				allPositionLat,
-				allPositionLong,
-				allAltitude,
-				allDistance,
-				allWindSpeed,
-			});
-
-			if (outboundData.timestamps.length >= 10) {
-				const calculator = createVeCalculator({
-					timestamps: outboundData.timestamps,
-					power: outboundData.power,
-					velocity: outboundData.velocity,
-					positionLat: outboundData.positionLat,
-					positionLong: outboundData.positionLong,
-					altitude: outboundData.altitude,
-					distance: outboundData.distance,
-					windSpeed: outboundData.windSpeed,
-					params: appState.currentParameters,
-					cda,
-					crr: appliedCrr,
-				});
-
-				const result = calculator.calculate_virtual_elevation(
-					cda,
-					appliedCrr,
-					0,
-					outboundData.timestamps.length - 1,
-				);
-				const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-				profile.outboundSeries = buildSegmentSupplementarySeries({
-					timestamps: outboundData.timestamps,
-					power: outboundData.power,
-					velocity: outboundData.velocity,
-					positionLat: outboundData.positionLat,
-					positionLong: outboundData.positionLong,
-					distance: outboundData.distance,
-					windSpeed: outboundData.windSpeed,
-					params: appState.currentParameters,
-					selectedWindSource: outAndBackUpdateWindResolution.selectedWindSource,
-				});
-				profile.outboundDistances = profile.outboundSeries.distancesKm;
-				profile.outboundVE = veArray;
-				profile.outboundActualElevation = appState.currentParameters.velodrome
-					? new Array(outboundData.altitude.length).fill(0)
-					: [...outboundData.altitude];
-			}
-		} catch (err) {
-			log.error(
-				`Failed to calculate outbound VE for section ${section.sectionNumber}:`,
-				err,
-			);
-		}
-
-		// Process inbound
-		try {
-			const inboundData = extractSegmentData({
-				startIdx: section.inboundStartIdx,
-				endIdx: section.inboundEndIdx,
-				allTimestamps,
-				allPower,
-				allVelocity,
-				allPositionLat,
-				allPositionLong,
-				allAltitude,
-				allDistance,
-				allWindSpeed,
-			});
-
-			if (inboundData.timestamps.length >= 10) {
-				const calculator = createVeCalculator({
-					timestamps: inboundData.timestamps,
-					power: inboundData.power,
-					velocity: inboundData.velocity,
-					positionLat: inboundData.positionLat,
-					positionLong: inboundData.positionLong,
-					altitude: inboundData.altitude,
-					distance: inboundData.distance,
-					windSpeed: inboundData.windSpeed,
-					params: appState.currentParameters,
-					cda,
-					crr: appliedCrr,
-				});
-
-				const result = calculator.calculate_virtual_elevation(
-					cda,
-					appliedCrr,
-					0,
-					inboundData.timestamps.length - 1,
-				);
-				const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-				profile.inboundSeries = buildSegmentSupplementarySeries({
-					timestamps: inboundData.timestamps,
-					power: inboundData.power,
-					velocity: inboundData.velocity,
-					positionLat: inboundData.positionLat,
-					positionLong: inboundData.positionLong,
-					distance: inboundData.distance,
-					windSpeed: inboundData.windSpeed,
-					params: appState.currentParameters,
-					selectedWindSource: outAndBackUpdateWindResolution.selectedWindSource,
-				});
-				profile.inboundDistances = profile.inboundSeries.distancesKm;
-				profile.inboundVE = veArray;
-				profile.inboundActualElevation = appState.currentParameters.velodrome
-					? new Array(inboundData.altitude.length).fill(0)
-					: [...inboundData.altitude];
-			}
-		} catch (err) {
-			log.error(
-				`Failed to calculate inbound VE for section ${section.sectionNumber}:`,
-				err,
-			);
-		}
-
-		if (profile.outboundVE.length > 0 || profile.inboundVE.length > 0) {
-			profiles.push(profile);
-		}
-	}
-
-	if (profiles.length === 0) {
-		log.error("No valid sections to display");
-		return;
-	}
-
-	// Recalculate mean elevation
-	const meanElevation = calculateOutAndBackMeanElevation(profiles);
-
-	// Update statistics display
-	const stats = calculateOutAndBackStats(profiles, meanElevation);
-
-	// Update header values (the template renders ve-metrics-compact with these four spans;
-	// there is no #oabVeMetrics element, so refresh all four values here instead).
-	const rmseSpan = document.getElementById("oabRmseValue");
-	const veGainValueSpan = document.getElementById("oabVeGainValue");
-	const actualGainValueSpan = document.getElementById("oabActualGainValue");
-	const sectionCountSpan = document.getElementById("oabSectionCountValue");
-	if (rmseSpan) {
-		rmseSpan.textContent = `${stats.rmse.toFixed(2)}m`;
-	}
-	if (veGainValueSpan) {
-		veGainValueSpan.textContent = `${stats.avgVeGain.toFixed(2)}m`;
-	}
-	if (actualGainValueSpan) {
-		actualGainValueSpan.textContent = `${stats.avgActualGain.toFixed(2)}m`;
-	}
-	if (sectionCountSpan) {
-		sectionCountSpan.textContent = profiles.length.toString();
-	}
-
-	// Re-render plots
-	renderOutAndBackPlots(Plotly, profiles, meanElevation);
-
-	const windTab = document.getElementById("wind-tab");
-	if (windTab?.classList.contains("ve-tab-content--active")) {
-		renderOutAndBackWindPlot(profiles);
-	}
-	const powerTab = document.getElementById("power-tab");
-	if (powerTab?.classList.contains("ve-tab-content--active")) {
-		renderOutAndBackPowerPlot(profiles);
-	}
-	const vdTab = document.getElementById("vd-tab");
-	if (vdTab?.classList.contains("ve-tab-content--active")) {
-		renderOutAndBackVdPlot(profiles);
-	}
-
-	log.debug(
-		`Out and Back VE plots updated with ${profiles.length} sections, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`,
-	);
 }
 
 /**

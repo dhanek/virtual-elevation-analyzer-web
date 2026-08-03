@@ -67,6 +67,7 @@ import {
 	windHeightControlsMarkup,
 } from "../ve/windHeightControls";
 import { mergeAnalysisParameters } from "../analysis/parametersSync";
+import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 
 /**
  * Calculate VE for each GPS-detected lap and show stacked plot.
@@ -648,16 +649,19 @@ export function setupGpsLapSliderHandlers(
 /**
  * Look up the GPS lap number for a given index range, falling back to the
  * provided lap number when no matching detected lap is found.
+ *
+ * The lookup itself moved to `modes/analysis/activeGpsLapRanges.ts` in plan
+ * 07-02 Task 3, because `gpsLapMode` labels its segments and writes
+ * `currentAnalyzedLaps` with it and cannot import from the shell (D-03). This
+ * export survives as the shell's name for it so existing callers are untouched
+ * — but there is only ONE implementation.
  */
 export function getGpsLapNumberForRange(
 	appState: AppState,
 	range: { startIdx: number; endIdx: number },
 	fallbackLapNumber: number,
 ): number {
-	const matchingLap = appState.gpsDetectedLaps.find(
-		(lap) => lap.startIdx === range.startIdx && lap.endIdx === range.endIdx,
-	);
-	return matchingLap?.lapNumber ?? fallbackLapNumber;
+	return resolveGpsLapNumber(appState, range, fallbackLapNumber);
 }
 
 interface GpsLapVeTemplateOptions {
