@@ -97,16 +97,24 @@ export const standardMode: AnalysisModeHandler = {
 	 * D-19 Option B (maintainer ruling, 2026-08-03): ONE SEGMENT PER SELECTED
 	 * LAP, each integrated independently by its own calculator run.
 	 *
-	 * Concretely, one segment per CONTIGUOUS RUN of selected full-activity
-	 * indices: adjacent selected laps share a boundary record and therefore
-	 * form a single run, while a non-contiguous selection (laps 1 and 4) yields
-	 * two runs and two independent runs of the integrator.
+	 * Read the ruling literally, because the literal wording is what the
+	 * maintainer reaffirmed after Option A was put to them and declined:
+	 * segmentation is PER SELECTED LAP, not per contiguous run of selected
+	 * indices. Two adjacent laps produce TWO segments and therefore two
+	 * independent integrations, which is the accepted "VE discontinuity at each
+	 * lap boundary" (D-09 entry f). Folding adjacent laps into one run would
+	 * quietly suppress exactly the consequence that was accepted, and would make
+	 * N in "the mean of N per-lap fits" (entry g) mean something else.
+	 *
+	 * A consequence worth naming: adjacent laps SHARE their boundary record
+	 * (lap i's `end_time` equals lap i+1's `start_time`), so the segment lengths
+	 * sum to MORE than the deduplicated selection length — the same convention
+	 * the two GPS modes already follow. `standardSegments.ts` documents how the
+	 * trim window is mapped across that difference without drifting.
 	 *
 	 * `trim` is left undefined here. It lives in the DOM sliders, not in
 	 * AppState, so the Standard binder supplies it through the primitive's
-	 * `segments` override — and under Option B it must first be MAPPED from the
-	 * stitched-output index space onto each segment. See
-	 * `bindStandardSliders.ts` for that mapping.
+	 * `segments` override, mapped by `mapTrimToSegments`.
 	 */
 	getUpdateSegments(appState): ModeSegment[] {
 		const fitData = appState.currentFitData;
@@ -116,17 +124,39 @@ export const standardMode: AnalysisModeHandler = {
 
 		const normalized = getNormalizedActivityArrays(fitData);
 		const selection = this.prepareSelection(appState);
-		const indices = collectSelectionIndices(selection, normalized.timestamps);
-		const ranges = indicesToRanges(indices);
-		const lapLabel = selection.selectedItems.length
-			? `Laps ${selection.selectedItems.join(", ")}`
-			: "Selection";
+		const timeRanges = selection.timeRanges ?? [];
 
-		return ranges.map((range, i) => ({
-			key: `standard-${i}`,
-			label: ranges.length === 1 ? lapLabel : `${lapLabel} (part ${i + 1})`,
-			range,
-		}));
+		const segments: ModeSegment[] = [];
+		timeRanges.forEach((timeRange, lapSlot) => {
+			const lapNumber = selection.selectedItems[lapSlot] ?? lapSlot + 1;
+			const lapIndices = collectSelectionIndices(
+				{ ...selection, indexRanges: null, timeRanges: [timeRange] },
+				normalized.timestamps,
+			);
+			// Normally exactly one range: timestamps are monotonic, so the
+			// indices inside a time window are contiguous. The fold is kept so a
+			// pathological non-monotonic file yields several honest segments
+			// rather than one range silently spanning the gap.
+			const ranges = indicesToRanges(lapIndices);
+			ranges.forEach((range, part) => {
+				segments.push({
+					key:
+						ranges.length === 1
+							? `standard-lap-${lapNumber}`
+							: `standard-lap-${lapNumber}-part-${part + 1}`,
+					label:
+						ranges.length === 1
+							? `Lap ${lapNumber}`
+							: `Lap ${lapNumber} (part ${part + 1})`,
+					range,
+				});
+			});
+		});
+
+		// The stitched output must run in the same order as the analyze-time
+		// selection, which `collectSelectionIndices` produces in ascending
+		// index order regardless of the order the checkboxes were ticked in.
+		return segments.sort((a, b) => a.range.startIdx - b.range.startIdx);
 	},
 
 	/**

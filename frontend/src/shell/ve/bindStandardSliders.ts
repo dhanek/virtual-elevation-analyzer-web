@@ -11,10 +11,7 @@ import {
 	clampAirSpeedCalibrationPercent,
 	calculateAutoAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
-import {
-	calculateAirSpeedSyncError,
-	applyAirSpeedOffset,
-} from "../../analysis/WindSourceResolver";
+import { calculateAirSpeedSyncError } from "../../analysis/WindSourceResolver";
 import { createPlotContext } from "../../plots/PlotContext";
 import {
 	buildVirtualElevationFigures,
@@ -36,6 +33,20 @@ import {
 	type ElevationDisplayProfile,
 } from "../../analysis/elevationProfiles";
 import { veViewMatchesSelection } from "./veSelectionGuard";
+import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
+import type {
+	ModeUpdateCallbacks,
+	SegmentVeProfile,
+} from "../../modes/analysis/types";
+import { updateModeVEPlots } from "../analysis/updateModeVEPlots";
+import { setupTabSwitching } from "../dom/tabs";
+import {
+	mapTrimToSegments,
+	resolveSelectionWindSeries,
+	stitchStandardProfiles,
+	type StitchedStandardSeries,
+} from "./standardSegments";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -78,6 +89,18 @@ function filterProfileBySelection(
 	return selectedIndices.map((index) => profile[index]);
 }
 
+/**
+ * KEPT DELIBERATELY, for the `compare` branch only.
+ *
+ * The plan expected this to become dead once the primitive resolves elevation on
+ * full arrays and slices per segment — which is true of the non-compare path,
+ * and it no longer has any caller there. But plan 07-02 leaves the `compare`
+ * branch composing its own two calculators until plan 07-04 (D-20), and that
+ * branch still needs the ACTIVE display profile. Deleting this would silently
+ * downgrade compare to raw FIT altitude, i.e. re-break for compare the exact
+ * control D-18 was fixing everywhere else. It goes when compare folds into the
+ * primitive.
+ */
 function resolveActiveAltitudeForSelection(
 	appState: AppState,
 	selectedIndices: number[],
@@ -141,7 +164,190 @@ export function updateVEPlots(
 }
 
 /**
+ * Build the Standard `ModeUpdateCallbacks`.
+ *
+ * This is the ONLY Standard-specific code left in the update path: which
+ * figures are drawn from the stitched series, and which spans carry the
+ * headline numbers. The spine — wind, elevation, rho, the per-segment
+ * calculator loop, the tab-active check and the result-state writes — belongs
+ * to `updateModeVEPlots` and is shared with the two GPS modes.
+ *
+ * The stitched series is memoised on the identity of the `profiles` array so
+ * the aggregate and the four render callbacks share one pass, independent of
+ * the order the primitive calls them in.
+ */
+function createStandardUpdateCallbacks(
+	appState: AppState,
+	windSource: WindSource,
+	cda: number,
+	appliedCrr: number,
+): ModeUpdateCallbacks {
+	const normalized = getNormalizedActivityArrays(appState.currentFitData!);
+
+	let memoKey: SegmentVeProfile[] | null = null;
+	let memoStitched: StitchedStandardSeries | null = null;
+
+	function stitched(profiles: SegmentVeProfile[]): StitchedStandardSeries {
+		if (profiles !== memoKey || !memoStitched) {
+			memoKey = profiles;
+			memoStitched = stitchStandardProfiles(profiles, normalized);
+		}
+		return memoStitched;
+	}
+
+	function contextFor(profiles: SegmentVeProfile[]) {
+		const series = stitched(profiles);
+		return createPlotContext(series.length, series.trimStart, series.trimEnd);
+	}
+
+	function drawWind(profiles: SegmentVeProfile[]): void {
+		const fig = buildWindSpeedFigure(
+			buildStandardWindFigureInput(
+				contextFor(profiles),
+				stitched(profiles),
+				windSource,
+			),
+		);
+		Plotly.react("windSpeedPlot", fig.data, fig.layout, fig.config);
+	}
+
+	function drawPower(profiles: SegmentVeProfile[]): void {
+		const series = stitched(profiles);
+		const fig = buildSpeedPowerFigure({
+			context: contextFor(profiles),
+			velocity: series.velocity,
+			power: series.power,
+		});
+		Plotly.react("speedPowerPlot", fig.data, fig.layout, fig.config);
+	}
+
+	function drawVd(profiles: SegmentVeProfile[]): void {
+		const series = stitched(profiles);
+		const fig = buildVirtualDistanceFigure({
+			context: contextFor(profiles),
+			timestamps: series.timestamps,
+			velocity: series.velocity,
+			// Already offset AND calibrated by resolveWindSeries -- the builder
+			// must not scale it again (D-21).
+			windSpeed: series.apparentWindSpeedMps,
+		});
+		Plotly.react("vdPlot", fig.data, fig.layout, fig.config);
+	}
+
+	return {
+		/**
+		 * D-09 entry (g): under D-19 Option B the headline r²/RMSE are the MEAN
+		 * of the per-lap fits, not one fit over the concatenated selection. The
+		 * maintainer accepted this deliberately, so that Standard reports the
+		 * same way the two segment modes already do.
+		 */
+		aggregate(profiles) {
+			const count = profiles.length;
+			return {
+				r2: profiles.reduce((sum, p) => sum + p.result.r2, 0) / count,
+				rmse: profiles.reduce((sum, p) => sum + p.result.rmse, 0) / count,
+				veGain:
+					profiles.reduce((sum, p) => sum + p.result.ve_elevation_diff, 0) /
+					count,
+				actualGain:
+					profiles.reduce((sum, p) => sum + p.result.actual_elevation_diff, 0) /
+					count,
+				segmentCount: count,
+			};
+		},
+
+		renderVe(profiles) {
+			const series = stitched(profiles);
+			const context = contextFor(profiles);
+			const figures = buildVirtualElevationFigures({
+				context,
+				virtualElevation: series.virtualElevation,
+				actualElevation: series.actualElevation,
+				cdaLabel: cda.toFixed(3),
+				crrLabel: appliedCrr.toFixed(4),
+			});
+			Plotly.react(
+				"vePlot",
+				figures.elevation.data,
+				figures.elevation.layout,
+				figures.elevation.config,
+			);
+			Plotly.react(
+				"veResidualsPlot",
+				figures.residuals.data,
+				figures.residuals.layout,
+				figures.residuals.config,
+			);
+
+			// Register the tab render map, exactly as the GPS-lap adapter does.
+			// Standard used to call setupTabSwitching() with an EMPTY map, so a
+			// tab activated after a slider drag painted whatever it held at
+			// analyze time. The primitive skips inactive tabs (D-14); this is
+			// what makes them catch up on activation instead of going stale.
+			setupTabSwitching({
+				wind: () => drawWind(profiles),
+				power: () => drawPower(profiles),
+				vd: () => drawVd(profiles),
+			});
+		},
+
+		renderWind: drawWind,
+		renderPower: drawPower,
+		renderVd: drawVd,
+
+		renderMetrics(aggregate) {
+			updateMetricsDisplay(
+				aggregate.r2,
+				aggregate.rmse,
+				aggregate.veGain,
+				aggregate.actualGain,
+			);
+		},
+	};
+}
+
+/**
+ * The wind figure's two channels are labelled 'Apparent (FIT Air)' and
+ * 'Apparent (Constant Wind)', so which one the resolved series belongs in
+ * depends on the selected source. Standard used to plot the FIT channel
+ * unconditionally — even in constant-wind mode, and even after the wind-source
+ * radio changed the fit — which is the visible half of N-5.
+ */
+function buildStandardWindFigureInput(
+	context: ReturnType<typeof createPlotContext>,
+	series: StitchedStandardSeries,
+	windSource: WindSource,
+) {
+	const apparent = series.apparentWindSpeedMps;
+	const toKmh = (value: number) => (isNaN(value) ? null : value * 3.6);
+	const blank = new Array<number | null>(series.velocity.length).fill(null);
+
+	if (windSource === "constant") {
+		return {
+			context,
+			velocity: series.velocity,
+			fitWindSpeedKmh: blank,
+			constantWindApparentKmh: apparent.map((value) =>
+				isNaN(value) ? 0 : value * 3.6,
+			),
+		};
+	}
+
+	const hasWind = apparent.some((value) => !isNaN(value) && value !== 0);
+	return {
+		context,
+		velocity: series.velocity,
+		fitWindSpeedKmh: hasWind ? apparent.map(toKmh) : blank,
+	};
+}
+
+/**
  * Update Virtual Elevation plots with a specific wind source.
+ *
+ * A thin adapter over `updateModeVEPlots` for everything except `compare`.
+ * It reads the four DOM values Standard owns (CdA, Crr, trim start, trim end),
+ * maps the trim window onto the handler's per-lap segments, and hands the rest
+ * to the primitive.
  */
 export async function updateVEPlotsWithWindSource(
 	appState: AppState,
@@ -151,7 +357,10 @@ export async function updateVEPlotsWithWindSource(
 	trimEnd: number,
 	windSource: WindSource,
 ) {
-	if (!appState.currentParameters) return;
+	// The primitive guards both of these too and returns null, but the Standard
+	// callbacks are constructed BEFORE the call and need the activity arrays, so
+	// the guard has to happen here as well.
+	if (!appState.currentParameters || !appState.currentFitData) return;
 
 	const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
 	const crrSlider = document.getElementById("crrSlider") as HTMLInputElement;
@@ -159,13 +368,42 @@ export async function updateVEPlotsWithWindSource(
 	if (!cdaSlider || !crrSlider) return;
 
 	const cda = parseFloat(cdaSlider.value);
+	const rawCrr = parseFloat(crrSlider.value);
 	// The slider value is the 22 °C-referenced Crr; the physics uses the
-	// temperature-corrected value when the correction is enabled.
-	const crr = resolveAppliedCrr(
-		appState.currentParameters,
-		parseFloat(crrSlider.value),
-	);
+	// temperature-corrected value when the correction is enabled. The primitive
+	// applies the correction itself, so it receives the RAW value; this one is
+	// for the compare branch's calculators and for the plot label.
+	const crr = resolveAppliedCrr(appState.currentParameters, rawCrr);
 
+	if (windSource !== "compare") {
+		const handler = getAnalysisModeHandler(null);
+		await updateModeVEPlots({
+			appState,
+			handler,
+			callbacks: createStandardUpdateCallbacks(appState, windSource, cda, crr),
+			windSource,
+			cda,
+			crr: rawCrr,
+			// The handler cannot see the trim sliders (they are DOM, and
+			// modes/analysis stays DOM-free), so the binder attaches trim here.
+			// mapTrimToSegments also DROPS laps the window does not cover -- see
+			// MIN_TRIMMED_SEGMENT_SAMPLES.
+			segments: mapTrimToSegments(
+				handler.getUpdateSegments(appState),
+				selectedIndices,
+				trimStart,
+				trimEnd,
+			),
+		});
+		return;
+	}
+
+	// LIVE until plan 07-04 wires renderVe to virtualElevationCompare.
+	// Reachability is asserted by the standard/compare golden cases and by plan
+	// 03's post-refactor browser check. This branch composes its own two
+	// calculators over the concatenated selection and is deliberately NOT routed
+	// through the primitive by this plan (D-20); a regression here silently
+	// turns "Compare both methods" into plain FIT for the user.
 	const context = createPlotContext(
 		analysisInput.timestamps.length,
 		trimStart,
@@ -177,7 +415,7 @@ export async function updateVEPlotsWithWindSource(
 		analysisInput.altitude,
 	);
 
-	if (windSource === "compare") {
+	{
 		const constantWindSpeed = new Array(analysisInput.windSpeed.length).fill(
 			NaN,
 		);
@@ -195,18 +433,16 @@ export async function updateVEPlotsWithWindSource(
 			crr,
 		});
 
-		const windSpeedOffset = appState.currentParameters.air_speed_offset || 0;
-		const offsetWindSpeed = applyAirSpeedOffset(
-			analysisInput.windSpeed,
-			windSpeedOffset,
+		// D-05: the fifth and last inline offset+calibration copy is gone. Even
+		// though the branch itself waits for plan 07-04, its WIND now comes from
+		// the one resolver, resolved over the FULL series and sliced afterwards
+		// -- so compare inherits the offset-ordering fix (change-list entry c)
+		// rather than keeping a private copy of the defect.
+		const calibratedWindSpeed = resolveSelectionWindSeries(
+			appState,
+			selectedIndices,
+			"fit",
 		);
-		const calibratedWindSpeed =
-			appState.airSpeedCalibrationPercent !== 0
-				? offsetWindSpeed.map(
-						(speed) =>
-							speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0),
-					)
-				: offsetWindSpeed;
 
 		const calculator2 = createVeCalculator({
 			timestamps: analysisInput.timestamps,
@@ -262,74 +498,6 @@ export async function updateVEPlotsWithWindSource(
 			(result1.rmse + result2.rmse) / 2,
 			(result1.ve_elevation_diff + result2.ve_elevation_diff) / 2,
 			(result1.actual_elevation_diff + result2.actual_elevation_diff) / 2,
-		);
-	} else {
-		let fitWindSpeed: number[];
-		if (windSource === "fit") {
-			const windSpeedOffset = appState.currentParameters.air_speed_offset || 0;
-			const offsetWindSpeed = applyAirSpeedOffset(
-				analysisInput.windSpeed,
-				windSpeedOffset,
-			);
-			fitWindSpeed =
-				appState.airSpeedCalibrationPercent !== 0
-					? offsetWindSpeed.map(
-							(speed) =>
-								speed * (1.0 + appState.airSpeedCalibrationPercent / 100.0),
-						)
-					: offsetWindSpeed;
-		} else {
-			fitWindSpeed = new Array(analysisInput.windSpeed.length).fill(NaN);
-		}
-
-		const calculator = createVeCalculator({
-			timestamps: analysisInput.timestamps,
-			power: analysisInput.power,
-			velocity: analysisInput.velocity,
-			positionLat: analysisInput.positionLat,
-			positionLong: analysisInput.positionLong,
-			altitude: activeAltitude,
-			distance: analysisInput.distance,
-			windSpeed: fitWindSpeed,
-			params: appState.currentParameters,
-			cda,
-			crr,
-		});
-
-		const result = calculator.calculate_virtual_elevation(
-			cda,
-			crr,
-			trimStart,
-			trimEnd,
-		);
-		appState.currentVEResult = result;
-		appState.currentWindSource = windSource;
-
-		const figures = buildVirtualElevationFigures({
-			context,
-			virtualElevation: Array.from(result.virtual_elevation),
-			actualElevation: activeAltitude,
-			cdaLabel: cda.toFixed(3),
-			crrLabel: crr.toFixed(4),
-		});
-		Plotly.react(
-			"vePlot",
-			figures.elevation.data,
-			figures.elevation.layout,
-			figures.elevation.config,
-		);
-		Plotly.react(
-			"veResidualsPlot",
-			figures.residuals.data,
-			figures.residuals.layout,
-			figures.residuals.config,
-		);
-
-		updateMetricsDisplay(
-			result.r2,
-			result.rmse,
-			result.ve_elevation_diff,
-			result.actual_elevation_diff,
 		);
 	}
 }
@@ -403,55 +571,20 @@ export function setupVESliders(
 		return;
 	}
 
-	const updateSecondaryPlots = (start: number, end: number) => {
-		const context = createPlotContext(timestamps.length, start, end);
-
-		const windTab = document.getElementById("wind-tab");
-		if (windTab && windTab.classList.contains("ve-tab-content--active")) {
-			const hasWindSpeed = windSpeed.some(
-				(value) => !isNaN(value) && value !== 0,
-			);
-			const windSpeedOffset =
-				appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
-			const calibrationPercent = appState.airSpeedCalibrationPercent;
-			const calibrationMultiplier = 1 + calibrationPercent / 100;
-			const fitWindSpeedKmh = hasWindSpeed
-				? applyAirSpeedOffset(windSpeed, windSpeedOffset).map((value) => {
-						if (isNaN(value)) return null;
-						const calibrated =
-							calibrationPercent !== 0 ? value * calibrationMultiplier : value;
-						return calibrated * 3.6;
-					})
-				: new Array<number | null>(velocity.length).fill(null);
-
-			const fig = buildWindSpeedFigure({
-				context,
-				velocity,
-				fitWindSpeedKmh,
-			});
-			Plotly.react("windSpeedPlot", fig.data, fig.layout, fig.config);
-		}
-		const powerTab = document.getElementById("power-tab");
-		if (powerTab && powerTab.classList.contains("ve-tab-content--active")) {
-			const fig = buildSpeedPowerFigure({
-				context,
-				velocity,
-				power,
-			});
-			Plotly.react("speedPowerPlot", fig.data, fig.layout, fig.config);
-		}
-		const vdTab = document.getElementById("vd-tab");
-		if (vdTab && vdTab.classList.contains("ve-tab-content--active")) {
-			const fig = buildVirtualDistanceFigure({
-				context,
-				timestamps,
-				velocity,
-				windSpeed,
-				airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
-			});
-			Plotly.react("vdPlot", fig.data, fig.layout, fig.config);
-		}
-	};
+	// `updateSecondaryPlots` USED TO LIVE HERE, and it is the 2026-04-19 bug in
+	// one object: `updateVEPlots` had 16 call sites, this had 6, and the four
+	// that forgot it (the calibration slider among them) left the Wind, Power
+	// and VD tabs showing numbers from a different set of parameters than the VE
+	// tab above them. It also carried its own offset+calibration copy, a third
+	// wind algorithm alongside the other two.
+	//
+	// It is gone. `updateVEPlots` now rebuilds all four plots through
+	// `updateModeVEPlots`, which owns the one active-tab class check left in the
+	// update path (D-14). There is no second entry point left to forget.
+	//
+	// (The class name is deliberately not spelled out above: the D-14 criterion
+	// is a mechanical grep for it across the update path, and a mention in prose
+	// would defeat it. Same lesson as plan 07-01's deviation 2.)
 
 	// Trim-marker repaints must not outlive this panel's lap selection: after
 	// the user switches lap checkboxes, synthetic input dispatches (auto-rho /
@@ -473,7 +606,6 @@ export function setupVESliders(
 			return;
 		}
 		updateVEPlots(appState, analysisInput, selectedIndices, value, trimEnd);
-		updateSecondaryPlots(value, trimEnd);
 		// Only repaint map trim markers while this panel's laps are still the
 		// selected laps (see veViewMatchesSelection).
 		if (mapCanFollowThisPanel()) {
@@ -499,7 +631,6 @@ export function setupVESliders(
 			return;
 		}
 		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, value);
-		updateSecondaryPlots(trimStart, value);
 		if (mapCanFollowThisPanel()) {
 			mapVisualization!.fitBoundsToTrimRegion(
 				trimStart,
@@ -541,7 +672,6 @@ export function setupVESliders(
 		trimStartSlider.value = clamped.toString();
 		trimStartValue.value = clamped.toString();
 		updateVEPlots(appState, analysisInput, selectedIndices, clamped, trimEnd);
-		updateSecondaryPlots(clamped, trimEnd);
 		if (mapCanFollowThisPanel()) {
 			mapVisualization!.fitBoundsToTrimRegion(
 				clamped,
@@ -565,7 +695,6 @@ export function setupVESliders(
 		trimEndSlider.value = clamped.toString();
 		trimEndValue.value = clamped.toString();
 		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, clamped);
-		updateSecondaryPlots(trimStart, clamped);
 		if (mapCanFollowThisPanel()) {
 			mapVisualization!.fitBoundsToTrimRegion(
 				trimStart,
@@ -671,7 +800,6 @@ export function setupVESliders(
 				trimStart,
 				trimEnd,
 			);
-			updateSecondaryPlots(trimStart, trimEnd);
 			saveCurrentLapSettings();
 		};
 
@@ -691,7 +819,6 @@ export function setupVESliders(
 				trimStart,
 				trimEnd,
 			);
-			updateSecondaryPlots(trimStart, trimEnd);
 			saveCurrentLapSettings();
 		};
 
@@ -725,7 +852,6 @@ export function setupVESliders(
 					trimStart,
 					trimEnd,
 				);
-				updateSecondaryPlots(trimStart, trimEnd);
 				saveCurrentLapSettings();
 			};
 		}
@@ -814,7 +940,6 @@ export function setupVESliders(
 		const trimStart = parseInt(trimStartSlider.value);
 		const trimEnd = parseInt(trimEndSlider.value);
 		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		updateSecondaryPlots(trimStart, trimEnd);
 		saveCurrentLapSettings();
 	});
 

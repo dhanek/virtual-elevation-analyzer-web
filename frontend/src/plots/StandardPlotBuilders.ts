@@ -43,12 +43,28 @@ export interface SpeedPowerPlotInput {
     power: number[];
 }
 
+/**
+ * D-21 / N-6: there is NO calibration field here, deliberately.
+ *
+ * `windSpeed` is an ALREADY-RESOLVED apparent-wind series — offset and the
+ * `1 + pct/100` calibration multiplier have both been applied upstream by
+ * `resolveWindSeries`, which after plan 07-02 is the only place in the update
+ * path that applies either. This builder used to re-apply the multiplier
+ * internally, which was harmless only while its callers happened to pass an
+ * un-calibrated series. Once the series arrives pre-calibrated that internal
+ * multiplier becomes a DOUBLE application, and 07-RESEARCH.md named it the
+ * single most likely silent numeric regression in the phase.
+ *
+ * Removing the field rather than passing 0 makes a second application a
+ * COMPILE error instead of a convention. Guarded by
+ * `virtualDistanceCalibration.test.ts`.
+ */
 export interface VirtualDistancePlotInput {
     context: PlotContext;
     timestamps: number[];
     velocity: number[];
+    /** Already offset AND calibrated. Do not scale it again — see above. */
     windSpeed: number[];
-    airSpeedCalibrationPercent: number;
 }
 
 export function getDefaultPlotConfig(): PlotConfig {
@@ -624,18 +640,15 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
 }
 
 export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {
-    const calibrationMultiplier = 1 + input.airSpeedCalibrationPercent / 100;
-    const calibratedWindSpeed = input.airSpeedCalibrationPercent !== 0
-        ? input.windSpeed.map(speed => speed * calibrationMultiplier)
-        : input.windSpeed;
-
+    // D-21: integrate the series exactly as given. No calibration multiplier
+    // lives here any more; see VirtualDistancePlotInput.
     const vdAir: number[] = new Array(input.timestamps.length).fill(0);
     const vdGround: number[] = new Array(input.timestamps.length).fill(0);
 
     for (let i = input.context.trimStart + 1; i < input.timestamps.length; i++) {
         const dt = input.timestamps[i] - input.timestamps[i - 1];
 
-        const apparentSpeed = !isNaN(calibratedWindSpeed[i]) ? calibratedWindSpeed[i] : 0;
+        const apparentSpeed = !isNaN(input.windSpeed[i]) ? input.windSpeed[i] : 0;
         vdAir[i] = vdAir[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
 
         const groundSpeed = !isNaN(input.velocity[i]) && input.velocity[i] > 0 ? input.velocity[i] : 0;

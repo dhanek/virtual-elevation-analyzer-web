@@ -5,13 +5,14 @@ import { initSync } from '@wasm/virtual_elevation_analyzer.js';
 
 import { getNormalizedActivityArrays } from './ActivityArrayCache';
 import { createVeCalculator } from './VeCalculatorFactory';
-// NOTE: `resolveWindSeries`, `buildSegmentSupplementarySeries` and
-// `extractSegmentData` used to be imported here so this harness could
-// RE-IMPLEMENT the segment spine. They are gone because the two segment-mode
-// runners now call the real `updateModeVEPlots` instead of mirroring it. Only
-// the Standard runner still composes by hand, until plan 07-02 Task 4.
-import { applyAirSpeedOffset } from './WindSourceResolver';
+// NOTE: `resolveWindSeries`, `buildSegmentSupplementarySeries`,
+// `extractSegmentData` and `applyAirSpeedOffset` used to be imported here so
+// this harness could RE-IMPLEMENT the segment spine and Standard's inline wind
+// composition. All four are gone: every mode runner now calls the real
+// `updateModeVEPlots`, and the one branch that still composes by hand (compare,
+// which plan 07-04 owns) takes its wind from the real production helper.
 import { prepareAnalysisPayload } from '../shell/analysis/prepareAnalysisPayload';
+import { resolveSelectionWindSeries } from '../shell/ve/standardSegments';
 import { updateModeVEPlots } from '../shell/analysis/updateModeVEPlots';
 import { getAnalysisModeHandler } from '../modes/analysis/AnalysisModes';
 import type { ModeUpdateCallbacks, SegmentVeProfile } from '../modes/analysis/types';
@@ -25,36 +26,45 @@ import { isGoldenRidePresent, loadGoldenRide } from './__fixtures__/loadGoldenRi
 /**
  * D-08 / D-09 GOLDEN VALUE GUARDS — the gate for phase 07.
  *
- * Fourteen committed literals: {standard, gpsLap, outAndBack} x {fit, constant}
+ * Fifteen committed literals: {standard, gpsLap, outAndBack} x {fit, constant}
  * x {rho present, rho absent} = 12, plus standard x compare x {rho present, rho
- * absent} = 2. Captured from a tree containing ZERO phase-07 pipeline edits.
+ * absent} = 2, plus one D-21 virtual-distance case added by plan 07-02 Task 4.
+ * The first fourteen were captured from a tree containing ZERO phase-07
+ * pipeline edits.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * HARNESS FIDELITY — read this before trusting a number in this file.
+ * HARNESS FIDELITY — DISCHARGED as of plan 07-02 Task 4.
  *
- * The three production update paths are DOM-coupled: `updateVEPlotsWithWindSource`
- * reads `document.getElementById("cdaSlider")` (bindStandardSliders.ts:155-158)
- * and all three end in `Plotly.react`. A node test cannot call them.
+ * Plan 07-01 could not call the production update paths: they were DOM-coupled
+ * (`updateVEPlotsWithWindSource` read `document.getElementById("cdaSlider")`)
+ * and all three ended in `Plotly.react`. So the original harness RE-IMPLEMENTED
+ * the slice-and-loop spine — exactly the trap 07-VALIDATION.md flags in
+ * `parameterChangeHandler.test.ts`, where a test that re-implements what it
+ * claims to test stays green if production is replaced with junk. The literals
+ * were labelled PROVISIONAL for that reason.
  *
- * So this harness RE-IMPLEMENTS the slice-and-loop spine, composing the same
- * shared primitives in the same order. Every step below cites the baseline
- * file:line it mirrors. That is exactly the trap 07-VALIDATION.md flags in
- * `parameterChangeHandler.test.ts` — a test that re-implements what it claims to
- * test would stay green if the production code were replaced with junk.
+ * They are no longer provisional. Every mode runner in this file now drives the
+ * REAL `updateModeVEPlots` with an injected no-op renderer:
+ *   - GPS-lap and out-and-back were re-pointed in Task 3, and their eight
+ *     literals held UNCHANGED — which is the proof the mirror was faithful;
+ *   - Standard is re-pointed here. Its four non-compare literals MOVED, by
+ *     design and by maintainer ruling: D-19 Option B replaces one calculator
+ *     run over the concatenated selection with one run PER SELECTED LAP. The
+ *     movement is recorded under named change-list entries (f) and (g) in
+ *     07-GOLDEN-BASELINE.md, never silently re-baselined.
  *
- * THE MITIGATION IS STRUCTURAL, AND IT IS A CONTRACT ON A LATER PLAN:
- * when `updateModeVEPlots` exists (plan 07-02), this harness is re-pointed at
- * that primitive with a no-op injected renderer, and **these same 14 literals
- * must still hold**. That re-pointing is the proof the mirror was faithful.
- * Until it happens these literals are PROVISIONAL — they pin "the numbers did
- * not move", not "the harness matches production".
+ * The only branch still composed by hand is `compare` (cases 5 and 6), which
+ * plan 07-02 deliberately leaves outside the primitive for plan 07-04 (D-20).
+ * Even that branch now takes its wind from the production helper
+ * `resolveSelectionWindSeries`, so no offset/calibration algorithm is mirrored
+ * anywhere in this file.
  *
- * The re-implemented surface is kept minimal on purpose:
- *   - Standard's analyze leg calls the REAL `prepareAnalysisPayload` (DOM-free
- *     by design, Phase 1 D-05) rather than mirroring it;
- *   - GPS-lap reuses the REAL `calculateMeanElevationProfile` /
- *     `calculateGpsLapStats`;
- *   - all three reach WASM only through `createVeCalculator` (Phase 8 D-04).
+ * A CROSS-CHECK WORTH KNOWING ABOUT. The fixture's Standard selection is laps
+ * 8-14, whose per-lap ranges are exactly the fixture's `indexRanges` — the same
+ * ranges the GPS-lap runner uses. So under Option B, Standard and GPS-lap
+ * compute the identical thing and their literals are identical. That is not a
+ * copy-paste: it is the maintainer's stated reason for choosing Option B, that
+ * Standard should report the way the segment modes already do.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -94,6 +104,17 @@ const GOLDEN_CRR = 0.005;
 const GOLDEN_CALIBRATION_PERCENT: number = 5;
 /** 10 decimal places: survives a WASM rebuild, not a bit-parity freeze (D-09). */
 const PRECISION = 10;
+
+/**
+ * Case 15 (D-21 / N-6). Sum over the seven Standard segments of each segment's
+ * final accumulated virtual distance, in km, at
+ * `airSpeedCalibrationPercent = 5`.
+ *
+ * The air total is the number a SECOND application of the calibration
+ * multiplier moves; the ground total is the control that must stay put.
+ */
+const VD_AIR_KM_TOTAL = 14.076827100000003;
+const VD_GROUND_KM_TOTAL = 14.497571;
 
 type WindMode = 'fit' | 'constant';
 
@@ -206,6 +227,11 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
             outAndBackSelectedSections: [],
             gpsDetectedLaps: [],
             gpsSelectedLaps: [],
+            // Standard selects by lap NUMBER over `currentLaps`; the handler
+            // turns those into per-lap time ranges and then into per-lap
+            // full-activity index ranges (D-19 Option B).
+            currentLaps: ride.laps,
+            selectedLaps: ride.laps.map((_, i) => i + 1),
         } as unknown as AppState;
     }
 
@@ -287,12 +313,60 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         return summarise(payload.initialResult);
     }
 
-    function runStandard(wind: WindMode | 'compare', withRho: boolean): GoldenCase {
+    /**
+     * RE-POINTED at the real `updateModeVEPlots` (plan 07-02 Task 4).
+     *
+     * No `segments` override is passed, so each segment defaults to its own full
+     * extent — which is what the trim sliders hold at their defaults
+     * (`bindStandardSliders.ts` maps the full window onto every lap). The
+     * production binder's own mapping is guarded separately, with real numbers,
+     * in `shell/ve/standardSegments.test.ts`.
+     */
+    async function runStandardUpdate(wind: WindMode, withRho: boolean) {
         const ride = loadGoldenRide();
-        const appState = makeAppState();
+        const appState = makeUpdateAppState(ride);
 
-        // Standard selects by time ranges over the whole activity — mirrors
-        // collectSelectionIndices (AnalysisModes.ts:28) via the real payload fn.
+        const outcome = await updateModeVEPlots({
+            appState,
+            handler: getAnalysisModeHandler(null),
+            callbacks: noopCallbacks(),
+            windSource: wind,
+            cda: GOLDEN_CDA,
+            crr: GOLDEN_CRR,
+            isTabActive: () => false,
+            resolveRho: withRho ? () => ride.rhoArray : () => null,
+        });
+
+        expect(outcome).not.toBeNull();
+        // One segment per selected lap. Seven selected laps, seven independent
+        // integrations — the shape D-19 Option B specifies.
+        expect(outcome!.profiles).toHaveLength(ride.laps.length);
+        return outcome!;
+    }
+
+    async function runStandard(wind: WindMode, withRho: boolean): Promise<GoldenCase> {
+        const outcome = await runStandardUpdate(wind, withRho);
+        return summariseSegments(outcome.profiles.map(p => summarise(p.result)));
+    }
+
+    /**
+     * The `compare` branch is NOT routed through the primitive by this plan —
+     * D-20 gives it to plan 07-04 — so cases 5 and 6 keep the plan-01
+     * composition, over the concatenated (deduplicated) selection with a single
+     * calculator per method. They must NOT move.
+     *
+     * The one thing that did change here: the fit series comes from the
+     * production helper `resolveSelectionWindSeries` rather than a hand-written
+     * offset+calibration copy, matching what the production compare branch now
+     * does. The helper resolves over the FULL activity and slices afterwards; on
+     * this fixture the selection IS the full activity, so the numbers are
+     * unchanged, but on a real non-contiguous multi-lap ride compare inherits
+     * change-list entry (c) along with everything else.
+     */
+    function runStandardCompare(withRho: boolean): GoldenCase {
+        const ride = loadGoldenRide();
+        const appState = makeUpdateAppState(ride);
+
         const payload = prepareAnalysisPayload({
             appState,
             fitData: ride.fitData,
@@ -314,22 +388,12 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
 
         const analysisInput = payload.filteredData;
         const rhoArray = withRho ? payload.rhoArray : null;
-        // Trim: the sliders' defaults are the full window (bindStandardSliders.ts:169).
         const trimStart = 0;
         const trimEnd = analysisInput.timestamps.length - 1;
 
-        // bindStandardSliders.ts:181-183 — constant wind is an all-NaN series.
+        // bindStandardSliders.ts — constant wind is an all-NaN series.
         const constantWind = new Array<number>(analysisInput.windSpeed.length).fill(Number.NaN);
-        // bindStandardSliders.ts:198-209 — offset then calibration, outside WASM.
-        const buildFitWind = (): number[] => {
-            const offset = applyAirSpeedOffset(
-                analysisInput.windSpeed,
-                ride.params.air_speed_offset || 0,
-            );
-            return GOLDEN_CALIBRATION_PERCENT !== 0
-                ? offset.map(speed => speed * (1.0 + GOLDEN_CALIBRATION_PERCENT / 100.0))
-                : offset;
-        };
+        const fitWind = resolveSelectionWindSeries(appState, payload.selectedIndices, 'fit');
 
         const calculate = (windSpeed: number[]) => {
             const calculator = createVeCalculator({
@@ -354,25 +418,20 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
             );
         };
 
-        if (wind === 'compare') {
-            // bindStandardSliders.ts:180-265 — two calculators, averaged metrics.
-            const constantResult = summarise(calculate(constantWind));
-            const fitResult = summarise(calculate(buildFitWind()));
-            return {
-                r2: (constantResult.r2 + fitResult.r2) / 2,
-                rmse: (constantResult.rmse + fitResult.rmse) / 2,
-                veElevationDiff: (constantResult.veElevationDiff + fitResult.veElevationDiff) / 2,
-                actualElevationDiff:
-                    (constantResult.actualElevationDiff + fitResult.actualElevationDiff) / 2,
-                veLength: constantResult.veLength,
-                veFirst: constantResult.veFirst,
-                veMid: fitResult.veMid,
-                veLast: fitResult.veLast,
-                veChecksum: constantResult.veChecksum + fitResult.veChecksum,
-            };
-        }
-
-        return summarise(calculate(wind === 'fit' ? buildFitWind() : constantWind));
+        const constantResult = summarise(calculate(constantWind));
+        const fitResult = summarise(calculate(fitWind));
+        return {
+            r2: (constantResult.r2 + fitResult.r2) / 2,
+            rmse: (constantResult.rmse + fitResult.rmse) / 2,
+            veElevationDiff: (constantResult.veElevationDiff + fitResult.veElevationDiff) / 2,
+            actualElevationDiff:
+                (constantResult.actualElevationDiff + fitResult.actualElevationDiff) / 2,
+            veLength: constantResult.veLength,
+            veFirst: constantResult.veFirst,
+            veMid: fitResult.veMid,
+            veLast: fitResult.veLast,
+            veChecksum: constantResult.veChecksum + fitResult.veChecksum,
+        };
     }
 
     // ── GPS-lap ─────────────────────────────────────────────────────────────
@@ -464,34 +523,57 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
      * wind/rho regression can ever move it. It is asserted for completeness;
      * `r2`, `rmse`, `veElevationDiff` and the checksum are the load-bearing ones.
      */
+    /**
+     * RE-BASELINED 2026-08-03 by plan 07-02 Task 4, under D-09 named change-list
+     * entries (f) and (g) — NEVER silently. The pre-refactor values are
+     * preserved verbatim in `07-GOLDEN-BASELINE.md`, alongside the reason each
+     * one moved.
+     *
+     * Why they moved: D-19 Option B (maintainer ruling, 2026-08-03) replaces
+     * Standard's single calculator run over the concatenated 1436-sample
+     * selection with SEVEN independent runs, one per selected lap.
+     *   - `veLength` 1436 -> 1442: adjacent laps share their boundary record, so
+     *     concatenating seven per-lap outputs double-counts six samples. This is
+     *     the convention the two segment modes already follow.
+     *   - `r2` / `rmse` / the gains become the MEAN of the seven per-lap fits
+     *     (entry g), not one fit over the whole selection.
+     *   - the VE array becomes seven independently zero-based segments stitched
+     *     together (entry f) — `build_virtual_elevation` restarts its
+     *     integration from `cumulative_elevation = 0.0` per run.
+     *
+     * They are IDENTICAL to the gpsLap literals below, and that is the point:
+     * the fixture's seven Standard laps resolve to exactly the seven ranges
+     * GPS-lap uses, so under Option B the two modes compute the same thing. Any
+     * future divergence between the two blocks is a defect in one of them.
+     */
     const GOLDEN: Record<string, GoldenCase> = {
         'standard / fit / rho present': {
-            r2: 0.3582413603184697, rmse: 35.18117084156049,
-            veElevationDiff: 60.45100006286543, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.13080271636508098,
-            veMid: 34.314201998008826, veLast: 60.58180277923049,
-            veChecksum: 44597.99421575752,
+            r2: 0.3135718941005455, rmse: 5.163938255431569,
+            veElevationDiff: 8.635857151837952, actualElevationDiff: -0.14285714285714285,
+            veLength: 1442, veFirst: 0.13080271636508098,
+            veMid: 1.8930276578777034, veLast: 18.64123262055564,
+            veChecksum: 7459.003136834831,
         },
         'standard / fit / rho absent': {
-            r2: 0.35714254307762916, rmse: 37.270230991697865,
-            veElevationDiff: 63.82913316434701, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.13300666843549439,
-            veMid: 36.22807384732491, veLast: 63.96213983278249,
-            veChecksum: 47279.65742471859,
+            r2: 0.31396442776478145, rmse: 5.444012415025426,
+            veElevationDiff: 9.118447594906716, actualElevationDiff: -0.14285714285714285,
+            veLength: 1442, veFirst: 0.13300666843549439,
+            veMid: 1.9873054396522434, veLast: 19.192691384772218,
+            veChecksum: 7859.641202644601,
         },
         'standard / constant / rho present': {
-            r2: 0.3832877536459657, rmse: 20.139202189021244,
-            veElevationDiff: 34.274266011495, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.08454169112765618,
-            veMid: 19.460376179422685, veLast: 34.35880770262268,
-            veChecksum: 25112.61887266723,
+            r2: 0.24966734009391217, rmse: 3.065921297319822,
+            veElevationDiff: 4.90796476465448, actualElevationDiff: -0.14285714285714285,
+            veLength: 1442, veFirst: 0.08454169112765618,
+            veMid: 0.525320250493201, veLast: 11.447807151240204,
+            veChecksum: 4274.079504001773,
         },
         'standard / constant / rho absent': {
-            r2: 0.37893431985629084, rmse: 22.394424481180092,
-            veElevationDiff: 37.9255670429352, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.08735132354814168,
-            veMid: 21.548417051715504, veLast: 38.012918366483255,
-            veChecksum: 28017.279006770026,
+            r2: 0.2645543180169767, rmse: 3.337191098428614,
+            veElevationDiff: 5.429462686581246, actualElevationDiff: -0.14285714285714285,
+            veLength: 1442, veFirst: 0.08735132354814168,
+            veMid: 0.6339384644627134, veLast: 12.059466638124354,
+            veChecksum: 4707.914727056141,
         },
         'standard / compare / rho present': {
             r2: 0.37076455698221766, rmse: 27.660186515290867,
@@ -582,23 +664,72 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         },
     };
 
-    test('standard / fit / rho present', () => {
-        expectGolden(runStandard('fit', true), GOLDEN['standard / fit / rho present']);
+    test('standard / fit / rho present', async () => {
+        expectGolden(await runStandard('fit', true), GOLDEN['standard / fit / rho present']);
     });
-    test('standard / fit / rho absent', () => {
-        expectGolden(runStandard('fit', false), GOLDEN['standard / fit / rho absent']);
+    test('standard / fit / rho absent', async () => {
+        expectGolden(await runStandard('fit', false), GOLDEN['standard / fit / rho absent']);
     });
-    test('standard / constant / rho present', () => {
-        expectGolden(runStandard('constant', true), GOLDEN['standard / constant / rho present']);
+    test('standard / constant / rho present', async () => {
+        expectGolden(await runStandard('constant', true), GOLDEN['standard / constant / rho present']);
     });
-    test('standard / constant / rho absent', () => {
-        expectGolden(runStandard('constant', false), GOLDEN['standard / constant / rho absent']);
+    test('standard / constant / rho absent', async () => {
+        expectGolden(await runStandard('constant', false), GOLDEN['standard / constant / rho absent']);
     });
     test('standard / compare / rho present', () => {
-        expectGolden(runStandard('compare', true), GOLDEN['standard / compare / rho present']);
+        expectGolden(runStandardCompare(true), GOLDEN['standard / compare / rho present']);
     });
     test('standard / compare / rho absent', () => {
-        expectGolden(runStandard('compare', false), GOLDEN['standard / compare / rho absent']);
+        expectGolden(runStandardCompare(false), GOLDEN['standard / compare / rho absent']);
+    });
+
+    /**
+     * CASE 15 — the D-21 / N-6 guard, added by plan 07-02 Task 4.
+     *
+     * `virtualDistanceAirKm` is the number a double application of the air-speed
+     * calibration moves, and it is the ONLY golden number that moves for that
+     * reason: r² and RMSE come from the calculator, which never saw the
+     * multiplier. Plan 01 deferred this row here because the hazard could not
+     * exist until D-05 pre-calibrated the series.
+     *
+     * The literal is the SUM over segments of each segment's final accumulated
+     * air distance, so a change in any one lap moves it. At
+     * GOLDEN_CALIBRATION_PERCENT = 5 a second application would scale it by a
+     * further 1.05.
+     */
+    test('standard / fit / rho present / virtual distance is calibrated exactly once', async () => {
+        const outcome = await runStandardUpdate('fit', true);
+
+        const totalAirKm = outcome.profiles.reduce((sum, profile) => {
+            const series = profile.supplementarySeries.virtualDistanceAirKm;
+            return sum + series[series.length - 1];
+        }, 0);
+        const totalGroundKm = outcome.profiles.reduce((sum, profile) => {
+            const series = profile.supplementarySeries.virtualDistanceGroundKm;
+            return sum + series[series.length - 1];
+        }, 0);
+
+        // The D-21 assertions come FIRST so that a double application is the
+        // first thing this case reports, rather than being masked by the r²
+        // failure a doubled wind series also produces.
+        expect(totalAirKm).toBeCloseTo(VD_AIR_KM_TOTAL, PRECISION);
+        // Ground distance carries no calibration at all, so it must NOT move
+        // when the multiplier is reintroduced — that asymmetry is what makes the
+        // air assertion specific to the double-apply rather than to any change.
+        expect(totalGroundKm).toBeCloseTo(VD_GROUND_KM_TOTAL, PRECISION);
+        // The double-application value, stated so the mutation row is
+        // reproducible: re-adding `1 + pct/100` anywhere in the resolved path
+        // scales the air total by a further 1.05 and this assertion fails.
+        expect(totalAirKm).not.toBeCloseTo(VD_AIR_KM_TOTAL * 1.05, 3);
+
+        expect(outcome.aggregate.r2).toBeCloseTo(
+            GOLDEN['standard / fit / rho present'].r2,
+            PRECISION,
+        );
+        expect(outcome.aggregate.rmse).toBeCloseTo(
+            GOLDEN['standard / fit / rho present'].rmse,
+            PRECISION,
+        );
     });
 
     test('gpsLap / fit / rho present', async () => {
