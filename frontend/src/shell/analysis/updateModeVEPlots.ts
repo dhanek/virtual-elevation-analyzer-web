@@ -82,8 +82,14 @@ export interface ModeUpdateOutcome {
  *
  * Guarded so the primitive stays callable from node, which is what lets the
  * golden harness assert real numbers against it with no browser environment.
+ *
+ * EXPORTED so Standard's `compare` branch can reuse it rather than
+ * re-implementing it. That branch does not go through this primitive until plan
+ * 07-04 (D-20), but it still has to skip inactive tabs, and a second copy of the
+ * class-name check is exactly what D-14 exists to prevent. Importing the one
+ * definition keeps the check spelled out in a single file.
  */
-function defaultIsTabActive(tabId: string): boolean {
+export function isVeTabActive(tabId: string): boolean {
 	if (typeof document === "undefined") {
 		return false;
 	}
@@ -256,7 +262,7 @@ export async function updateModeVEPlots(
 	// is what gives out-and-back its Store Result / Export CSV fix (D-17a, N-1).
 	handler.summarize(appState, profiles, aggregate, inputs);
 
-	const isTabActive = args.isTabActive ?? defaultIsTabActive;
+	const isTabActive = args.isTabActive ?? isVeTabActive;
 
 	await callbacks.renderVe(profiles, aggregate);
 	await callbacks.renderMetrics(aggregate);

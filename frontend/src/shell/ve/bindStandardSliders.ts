@@ -39,7 +39,10 @@ import type {
 	ModeUpdateCallbacks,
 	SegmentVeProfile,
 } from "../../modes/analysis/types";
-import { updateModeVEPlots } from "../analysis/updateModeVEPlots";
+import {
+	isVeTabActive,
+	updateModeVEPlots,
+} from "../analysis/updateModeVEPlots";
 import { setupTabSwitching } from "../dom/tabs";
 import {
 	mapTrimToSegments,
@@ -201,37 +204,15 @@ function createStandardUpdateCallbacks(
 	}
 
 	function drawWind(profiles: SegmentVeProfile[]): void {
-		const fig = buildWindSpeedFigure(
-			buildStandardWindFigureInput(
-				contextFor(profiles),
-				stitched(profiles),
-				windSource,
-			),
-		);
-		Plotly.react("windSpeedPlot", fig.data, fig.layout, fig.config);
+		drawStandardWindPlot(contextFor(profiles), stitched(profiles), windSource);
 	}
 
 	function drawPower(profiles: SegmentVeProfile[]): void {
-		const series = stitched(profiles);
-		const fig = buildSpeedPowerFigure({
-			context: contextFor(profiles),
-			velocity: series.velocity,
-			power: series.power,
-		});
-		Plotly.react("speedPowerPlot", fig.data, fig.layout, fig.config);
+		drawStandardPowerPlot(contextFor(profiles), stitched(profiles));
 	}
 
 	function drawVd(profiles: SegmentVeProfile[]): void {
-		const series = stitched(profiles);
-		const fig = buildVirtualDistanceFigure({
-			context: contextFor(profiles),
-			timestamps: series.timestamps,
-			velocity: series.velocity,
-			// Already offset AND calibrated by resolveWindSeries -- the builder
-			// must not scale it again (D-21).
-			windSpeed: series.apparentWindSpeedMps,
-		});
-		Plotly.react("vdPlot", fig.data, fig.layout, fig.config);
+		drawStandardVdPlot(contextFor(profiles), stitched(profiles));
 	}
 
 	return {
@@ -307,6 +288,21 @@ function createStandardUpdateCallbacks(
 }
 
 /**
+ * The four series every Standard secondary plot needs.
+ *
+ * Structurally a subset of `StitchedStandardSeries`, so the primitive-driven
+ * path passes the stitched output straight in. The `compare` branch, which does
+ * NOT go through the primitive until plan 07-04 (D-20), builds one of these from
+ * the analyze-selection arrays and its own resolved wind series — which is what
+ * lets both paths draw through the SAME three functions instead of the two
+ * divergent copies that produced the 2026-04-19 bug.
+ */
+type StandardSecondarySeries = Pick<
+	StitchedStandardSeries,
+	"timestamps" | "velocity" | "power" | "apparentWindSpeedMps"
+>;
+
+/**
  * The wind figure's two channels are labelled 'Apparent (FIT Air)' and
  * 'Apparent (Constant Wind)', so which one the resolved series belongs in
  * depends on the selected source. Standard used to plot the FIT channel
@@ -315,7 +311,7 @@ function createStandardUpdateCallbacks(
  */
 function buildStandardWindFigureInput(
 	context: ReturnType<typeof createPlotContext>,
-	series: StitchedStandardSeries,
+	series: StandardSecondarySeries,
 	windSource: WindSource,
 ) {
 	const apparent = series.apparentWindSpeedMps;
@@ -339,6 +335,44 @@ function buildStandardWindFigureInput(
 		velocity: series.velocity,
 		fitWindSpeedKmh: hasWind ? apparent.map(toKmh) : blank,
 	};
+}
+
+function drawStandardWindPlot(
+	context: ReturnType<typeof createPlotContext>,
+	series: StandardSecondarySeries,
+	windSource: WindSource,
+): void {
+	const fig = buildWindSpeedFigure(
+		buildStandardWindFigureInput(context, series, windSource),
+	);
+	Plotly.react("windSpeedPlot", fig.data, fig.layout, fig.config);
+}
+
+function drawStandardPowerPlot(
+	context: ReturnType<typeof createPlotContext>,
+	series: StandardSecondarySeries,
+): void {
+	const fig = buildSpeedPowerFigure({
+		context,
+		velocity: series.velocity,
+		power: series.power,
+	});
+	Plotly.react("speedPowerPlot", fig.data, fig.layout, fig.config);
+}
+
+function drawStandardVdPlot(
+	context: ReturnType<typeof createPlotContext>,
+	series: StandardSecondarySeries,
+): void {
+	const fig = buildVirtualDistanceFigure({
+		context,
+		timestamps: series.timestamps,
+		velocity: series.velocity,
+		// Already offset AND calibrated by resolveWindSeries -- the builder must
+		// not scale it again (D-21).
+		windSpeed: series.apparentWindSpeedMps,
+	});
+	Plotly.react("vdPlot", fig.data, fig.layout, fig.config);
 }
 
 /**
@@ -499,6 +533,49 @@ export async function updateVEPlotsWithWindSource(
 			(result1.ve_elevation_diff + result2.ve_elevation_diff) / 2,
 			(result1.actual_elevation_diff + result2.actual_elevation_diff) / 2,
 		);
+
+		// REGRESSION FIX (07-02 Task 4 follow-up). Before this phase the eight
+		// slider handlers called the deleted secondary-plot helper AFTER
+		// `updateVEPlots`, unconditionally — so the Wind, Power and VD tabs
+		// refreshed in `compare` mode too. Task 4 removed that helper and moved
+		// its job into the primitive, but `compare` deliberately does not go
+		// through the primitive (D-20, plan 07-04), so those three tabs silently
+		// stopped updating on ANY interaction in compare mode.
+		// (The deleted helper is not named here: the D-05 acceptance criterion is
+		// a mechanical grep for its name in this file, and plan 07-01's deviation
+		// 2 recorded the same lesson.)
+		//
+		// The three draws are the SAME functions the primitive-driven path uses,
+		// not a fourth copy: re-introducing a private copy here is the failure
+		// class this phase exists to remove.
+		//
+		// The wind series is plotted in the FIT channel because that is what
+		// `calculator2` consumed; `calculator1`'s wind is all-NaN by
+		// construction, so there is nothing to draw for the constant leg.
+		const compareSeries: StandardSecondarySeries = {
+			timestamps: analysisInput.timestamps,
+			velocity: analysisInput.velocity,
+			power: analysisInput.power,
+			apparentWindSpeedMps: calibratedWindSpeed,
+		};
+		const drawCompareWind = () =>
+			drawStandardWindPlot(context, compareSeries, "fit");
+		const drawComparePower = () => drawStandardPowerPlot(context, compareSeries);
+		const drawCompareVd = () => drawStandardVdPlot(context, compareSeries);
+
+		// Without this the tab render map still holds the closures the LAST
+		// non-compare update registered, so activating Wind or VD in compare mode
+		// repainted that stale non-compare data.
+		setupTabSwitching({
+			wind: drawCompareWind,
+			power: drawComparePower,
+			vd: drawCompareVd,
+		});
+
+		// The one tab-active check, imported rather than re-implemented (D-14).
+		if (isVeTabActive("wind-tab")) drawCompareWind();
+		if (isVeTabActive("power-tab")) drawComparePower();
+		if (isVeTabActive("vd-tab")) drawCompareVd();
 	}
 }
 
@@ -571,20 +648,28 @@ export function setupVESliders(
 		return;
 	}
 
-	// `updateSecondaryPlots` USED TO LIVE HERE, and it is the 2026-04-19 bug in
-	// one object: `updateVEPlots` had 16 call sites, this had 6, and the four
-	// that forgot it (the calibration slider among them) left the Wind, Power
-	// and VD tabs showing numbers from a different set of parameters than the VE
-	// tab above them. It also carried its own offset+calibration copy, a third
-	// wind algorithm alongside the other two.
+	// THE SECOND ENTRY POINT USED TO LIVE HERE, and it is the 2026-04-19 bug in
+	// one object: `updateVEPlots` had many call sites, the secondary-plot helper
+	// had eight, and the handlers that forgot it — CdA, Crr, the Crr-temperature
+	// controls and the wind-height controls — left the Wind, Power and VD tabs
+	// showing numbers from a different set of parameters than the VE tab above
+	// them. It also carried its own offset+calibration copy, a third wind
+	// algorithm alongside the other two.
+	//
+	// (Recorded precisely because Task 4's first draft of this comment named the
+	// calibration slider as one of the handlers that forgot it. At `cb2c7f8` the
+	// calibration slider DID call the helper; the four above did not.)
 	//
 	// It is gone. `updateVEPlots` now rebuilds all four plots through
 	// `updateModeVEPlots`, which owns the one active-tab class check left in the
-	// update path (D-14). There is no second entry point left to forget.
+	// update path (D-14). There is no second entry point left to forget — and
+	// the `compare` branch, which does not reach the primitive until plan 07-04,
+	// imports that same check rather than growing a private copy.
 	//
-	// (The class name is deliberately not spelled out above: the D-14 criterion
-	// is a mechanical grep for it across the update path, and a mention in prose
-	// would defeat it. Same lesson as plan 07-01's deviation 2.)
+	// (Neither the class name nor the deleted helper's name is spelled out here:
+	// the D-05 and D-14 criteria are mechanical greps for them in this file, and
+	// a mention in prose would defeat both. Same lesson as plan 07-01's
+	// deviation 2.)
 
 	// Trim-marker repaints must not outlive this panel's lap selection: after
 	// the user switches lap checkboxes, synthetic input dispatches (auto-rho /
