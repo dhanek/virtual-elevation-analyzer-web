@@ -3,26 +3,25 @@
  *
  *   npx vite-node scripts/build-golden-fixture.ts -- <path-to.fit> [options]
  *
- * Options (all optional; every one is recorded in the emitted `_anonymisation`
- * header so a re-cut is reproducible from the artifact alone):
- *   --rotation-deg=<n>   rotation applied to the coordinate cloud (default 137)
- *   --origin-lat=<n>     arbitrary destination centroid latitude  (default 45)
- *   --origin-long=<n>    arbitrary destination centroid longitude (default -30)
- *   --window=<n>         target sample-window length              (default 1600)
- *   --window-start-lap=<n>  start at 1-based SOURCE lap n. Preferred: it is
- *                        lap-aligned by construction and cannot be confused
- *                        with a timestamp.
- *   --window-start=<n>   force the window start RECORD INDEX. Note this is
- *                        neither a lap number nor a time in seconds — on a ride
- *                        with recording gaps all three differ (on this
- *                        project's test ride, lap 8 starts at index 1531 but at
- *                        t = 1603 s). Mutually exclusive with the flag above.
- *                        Default: auto-chosen to maximise lap-boundary and
- *                        dropout coverage.
- *   --out-dir=<path>     scratch output directory (default: os.tmpdir())
+ * See USAGE at the foot of this file for the flags. Two rules worth stating up
+ * front, both learned from defects:
+ *
+ * 1. **Window placement.** `--window-laps=8-14` is the form to prefer: both
+ *    edges land on lap boundaries and the sample count is derived, so no lap is
+ *    clipped. `--window-start-lap` aligns only the start, and a fixed `--window`
+ *    then ends wherever it lands — which silently cut the final lap in half.
+ *    `--window-start` takes a record INDEX, which on a ride with recording gaps
+ *    is neither a lap number nor a time in seconds (on this project's test ride
+ *    lap 8 starts at index 1531 but at t = 1603 s).
+ *
+ * 2. **Transform parameters have no flags, on purpose.** The rotation angle,
+ *    destination origin and altitude offset are drawn per run from a CSPRNG and
+ *    withheld from the fixture, because a transform parameter published beside
+ *    the data it transformed inverts in one line. Choosing them would buy
+ *    nothing. They go to `golden-ride-anonymisation-key.json`, never committed.
  *
  * NOTHING is written into frontend/src/analysis/__fixtures__/ by this script.
- * Both artifacts land in a scratch directory whose paths are printed on exit.
+ * All three artifacts land in a scratch directory whose paths are printed.
  * Promotion into the tracked fixture directory happens only after the blocking
  * D-12 maintainer checkpoint (07-01 Task 4). This separation is threat T-07-03:
  * an un-reviewed intermediate must not be able to reach the repo by accident.
@@ -31,6 +30,7 @@
  * one records its concrete parameter into the `_anonymisation` object.
  */
 
+import { randomInt } from 'node:crypto'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
@@ -76,13 +76,51 @@ export interface GoldenRideFixture {
     params: AnalysisParameters
 }
 
+/**
+ * What the PUBLIC fixture records about its own transform.
+ *
+ * The governing rule, learned the hard way: **a transform parameter that is
+ * published alongside the data it transformed provides no privacy at all.**
+ * The earlier version of this record published the rotation angle and the
+ * altitude offset. Both invert in one line:
+ *
+ *   true_shape     = R(-rotationDegrees) · (published_coords - destinationOrigin)
+ *   true_elevation = published_altitude - altitudeOffsetMetres
+ *
+ * — which handed back the exact two properties those steps existed to remove
+ * (compass orientation, absolute elevation band). Randomising a published
+ * constant fixes nothing; it is published either way.
+ *
+ * So the invertible parameters are no longer in the fixture. They are written
+ * to a separate key file next to the review page, which is never committed.
+ * This costs public byte-reproducibility, and that cost is near-zero: the
+ * source .fit is private and will never be published, so nobody except the
+ * maintainer could ever have reproduced this file, and the maintainer has both
+ * the ride and the key.
+ *
+ * What actually protects the venue is the **centroid subtraction** — the
+ * original centroid is never emitted anywhere in the fixture, so absolute
+ * position is unrecoverable. Rotation and re-origining are defence in depth on
+ * top of that, and only while their parameters stay unpublished.
+ */
 export interface AnonymisationRecord {
     note: string
     steps: string[]
     relativeTimestamps: { subtractedFirstTimestamp: true }
     coordinateTransform: {
+        /** THE control. The original centroid is never emitted. */
         centroidSubtracted: true
-        rotationDegrees: number
+        rotationApplied: true
+        /**
+         * Withheld on purpose: publishing it re-exposes the ride's true compass
+         * orientation, which is precisely what the rotation removes.
+         */
+        rotationDegreesPublished: false
+        /**
+         * Safe to publish: an arbitrary constant chosen at random, not derived
+         * from the ride. It locates nothing — it exists so a reader can see at
+         * a glance that these coordinates are not real.
+         */
         destinationOriginLat: number
         destinationOriginLong: number
     }
@@ -92,34 +130,81 @@ export interface AnonymisationRecord {
         length: number
         sourceRecordCount: number
         /**
-         * How the window start was arrived at. Without this an auto-chosen cut
-         * and a deliberate re-cut are indistinguishable in the artifact, and
-         * the scorer's choice can move if the input ride ever changes.
+         * How the window was arrived at. Without this an auto-chosen cut and a
+         * deliberate re-cut are indistinguishable in the artifact, and the
+         * scorer's choice can move if the input ride ever changes.
          *
-         * Three-way rather than a boolean because 'explicit-lap' additionally
-         * asserts the window is lap-aligned by construction, which
-         * 'explicit-index' does not.
+         * 'explicit-lap-range' is the strongest claim: BOTH edges sit on lap
+         * boundaries, so every emitted range is a whole lap with no clipped
+         * tail. 'explicit-lap' aligns only the start — a fixed window length
+         * then ends wherever it lands, which is what produced a clipped final
+         * lap before this distinction existed.
          */
-        selection: 'explicit-lap' | 'explicit-index' | 'auto'
+        selection: 'explicit-lap-range' | 'explicit-lap' | 'explicit-index' | 'auto'
+        /** Present only for 'explicit-lap-range'. 1-based, inclusive. */
+        sourceLaps?: { first: number; last: number }
     }
-    /**
-     * The exact flag string that reproduces this fixture from the source ride.
-     * The point of the header is that the cut is reproducible from the artifact
-     * alone, which means the defaults have to be written down too — a reader
-     * cannot be expected to know what the defaults were on the day.
-     */
-    reproduceWith: string
     rounding: { coordinatesDecimals: number; altitudeDecimals: number; velocityDecimals: number; powerDecimals: number; otherDecimals: number }
-    altitudeOffsetMetres: number
+    /** @see rotationDegreesPublished — same reasoning, same decision. */
+    altitudeOffsetPublished: false
     droppedArrays: string[]
+    /** Where the maintainer-only inversion key was written, and its status. */
+    reproducibility: string
 }
 
-const DEFAULT_ROTATION_DEG = 137
-const DEFAULT_ORIGIN_LAT = 45
-const DEFAULT_ORIGIN_LONG = -30
+/**
+ * The maintainer-only inversion key. Written next to the review page, NEVER
+ * committed — it contains the source centroid, which is the one value that
+ * would undo the anonymisation completely.
+ */
+export interface AnonymisationKey {
+    WARNING: string
+    reproduceWith: string
+    rotationDegrees: number
+    destinationOriginLat: number
+    destinationOriginLong: number
+    altitudeOffsetMetres: number
+    sourceCentroidLat: number
+    sourceCentroidLong: number
+    sourceFirstTimestamp: number
+    sourceDistanceBase: number
+    sampleWindow: { startIdx: number; endIdx: number }
+}
+
 const DEFAULT_WINDOW = 1600
 const MIN_WINDOW = 1200
 const MAX_WINDOW = 2000
+
+/**
+ * Cryptographically-random transform parameters, drawn fresh per run.
+ *
+ * The previous defaults (137°, 45, −30) were, correctly, called out as "very
+ * normal numbers" — defaults dressed as anonymisation. Randomising them is
+ * necessary but NOT sufficient on its own: a random angle that gets printed in
+ * the fixture is exactly as invertible as a fixed one. Randomisation only earns
+ * its keep because these values are now withheld from the published artifact.
+ *
+ * `randomInt` is CSPRNG-backed (node:crypto), not `Math.random`.
+ */
+function randomRotationDegrees(): number {
+    // Full circle, hundredth-degree resolution — no reason to prefer round numbers.
+    return randomInt(0, 36_000) / 100
+}
+
+function randomDestinationOrigin(): { lat: number; long: number } {
+    // Mid-latitude band so the bearing maths stays in a normal regime (no polar
+    // cos(lat) degeneracy), longitude unrestricted. Hundred-thousandth degree.
+    return {
+        lat: randomInt(-5_500_000, 5_500_000) / 100_000,
+        long: randomInt(-18_000_000, 18_000_000) / 100_000,
+    }
+}
+
+function randomAltitudeOffsetMetres(): number {
+    // Large, random, and unpublished, so the absolute elevation band carries no
+    // location signal. Decimetre resolution matches ALTITUDE_DECIMALS.
+    return randomInt(-20_000, 20_000) / 10
+}
 
 const COORD_DECIMALS = 5
 const ALTITUDE_DECIMALS = 1
@@ -166,9 +251,6 @@ const EXCLUDED_IDENTITY_FIELDS = [
 
 export interface Options {
     fitPath: string
-    rotationDeg: number
-    originLat: number
-    originLong: number
     windowLength: number
     windowStart: number | null
     /**
@@ -180,6 +262,16 @@ export interface Options {
      * 72 records into lap 8 instead of at its boundary.
      */
     windowStartLap: number | null
+    /**
+     * Inclusive 1-based SOURCE lap range. Unlike `windowStartLap`, this aligns
+     * BOTH edges: the sample count is derived from the laps rather than imposed,
+     * so no lap is clipped. `windowStartLap` alone only aligned the start — the
+     * fixed `--window` length then ended wherever it landed, silently cutting
+     * the final lap in half.
+     */
+    windowLaps: { first: number; last: number } | null
+    /** True when --window was passed explicitly, so a lap range can reject it. */
+    windowLengthExplicit: boolean
     outDir: string
 }
 
@@ -210,18 +302,21 @@ async function main(): Promise<void> {
         temperature: Array.from(fitData.temperature),
     }
 
-    const fixture = anonymise(source, rawLaps, options)
+    const { fixture, key } = anonymise(source, rawLaps, options)
 
     await mkdir(options.outDir, { recursive: true })
     const jsonPath = join(options.outDir, 'golden-ride.json')
     const htmlPath = join(options.outDir, 'golden-ride-review.html')
+    const keyPath = join(options.outDir, 'golden-ride-anonymisation-key.json')
 
     await writeFile(jsonPath, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8')
     await writeFile(htmlPath, buildReviewHtml(fixture), 'utf8')
+    await writeFile(keyPath, `${JSON.stringify(key, null, 2)}\n`, 'utf8')
 
     process.stdout.write('\nD-12 candidate fixture written to a SCRATCH path (not the repo):\n')
     process.stdout.write(`  candidate JSON : ${jsonPath}\n`)
-    process.stdout.write(`  review page    : ${htmlPath}\n\n`)
+    process.stdout.write(`  review page    : ${htmlPath}\n`)
+    process.stdout.write(`  inversion key  : ${keyPath}   <-- NEVER COMMIT\n\n`)
     process.stdout.write('Summary:\n')
     process.stdout.write(`  samples       : ${fixture.record_count}\n`)
     process.stdout.write(`  duration      : ${fixture.timestamps[fixture.record_count - 1].toFixed(0)} s\n`)
@@ -248,19 +343,25 @@ export interface SourceArrays {
 }
 
 /**
- * The seven anonymisation steps, in order. Each one writes its concrete
- * parameter into the returned `_anonymisation` record — the transform must be
- * legible as deliberate, not mistakable for a bug.
+ * The seven anonymisation steps, in order.
+ *
+ * Returns BOTH the public fixture and the maintainer-only inversion key. The
+ * split is the point: every parameter that would undo a step lives in the key,
+ * never in the fixture. See `AnonymisationRecord` for why.
  */
 export function anonymise(
     source: SourceArrays,
     rawLaps: Array<{ start_time: number; end_time: number }>,
     options: Options,
-): GoldenRideFixture {
+): { fixture: GoldenRideFixture; key: AnonymisationKey } {
     const sourceCount = source.timestamps.length
     if (sourceCount === 0) {
         throw new Error('The parsed ride has no records.')
     }
+
+    // Drawn fresh, from a CSPRNG, per run — and then withheld from the fixture.
+    const rotationDeg = randomRotationDegrees()
+    const origin = randomDestinationOrigin()
 
     // Step 3 (applied first so every later step operates on the window only):
     // trim to a fragment. A fragment is not a recognisable loop; a full ride is.
@@ -277,12 +378,17 @@ export function anonymise(
     const t0 = timestampsRaw[0]
     const timestamps = timestampsRaw.map(t => round(t - t0, OTHER_DECIMALS))
 
-    // Step 2: translate AND rotate. Translation alone leaves compass
-    // orientation and route shape intact, and route shape is the real
-    // re-identification vector for a repeated training venue.
+    // Step 2: translate AND rotate.
+    //
+    // The centroid subtraction is THE control — `centroidLat`/`centroidLong` are
+    // computed here, used here, and never emitted into the fixture, so absolute
+    // position is destroyed rather than merely displaced. The rotation is
+    // defence in depth against compass orientation, and it only works because
+    // `rotationDeg` also stays out of the fixture: a published angle inverts in
+    // one line and hands the orientation straight back.
     const centroidLat = mean(positionLatRaw)
     const centroidLong = mean(positionLongRaw)
-    const theta = (options.rotationDeg * Math.PI) / 180
+    const theta = (rotationDeg * Math.PI) / 180
     const cosT = Math.cos(theta)
     const sinT = Math.sin(theta)
 
@@ -292,14 +398,18 @@ export function anonymise(
         const dLat = positionLatRaw[i] - centroidLat
         const dLong = positionLongRaw[i] - centroidLong
         // Step 4 (coordinates): round to 5 dp ≈ 1 m, killing LSB fingerprints.
-        position_lat.push(round(options.originLat + dLat * cosT - dLong * sinT, COORD_DECIMALS))
-        position_long.push(round(options.originLong + dLat * sinT + dLong * cosT, COORD_DECIMALS))
+        position_lat.push(round(origin.lat + dLat * cosT - dLong * sinT, COORD_DECIMALS))
+        position_long.push(round(origin.long + dLat * sinT + dLong * cosT, COORD_DECIMALS))
     }
 
-    // Step 5: constant altitude offset. The absolute elevation band carries a
-    // location signal; the *shape* is exactly the real-world character D-12
-    // wants, so it is never distorted non-linearly.
-    const altitudeOffset = round(100 - mean(altitudeRaw), ALTITUDE_DECIMALS)
+    // Step 5: constant altitude offset, random and unpublished.
+    //
+    // Previously this was `100 - mean(altitude)` and the offset was printed in
+    // the header, so `published - offset` recovered the true elevation band
+    // exactly — the same self-defeating mistake as publishing the rotation. A
+    // ~40 m ASL band is a real geographic filter. The profile *shape* is never
+    // distorted non-linearly; that is the real-world character D-12 wants.
+    const altitudeOffset = randomAltitudeOffsetMetres() - round(mean(altitudeRaw), ALTITUDE_DECIMALS)
     const altitude = altitudeRaw.map(a => round(a + altitudeOffset, ALTITUDE_DECIMALS))
 
     // Step 4 (everything else): round to the sensor's own precision.
@@ -330,29 +440,38 @@ export function anonymise(
     const indexRanges = buildIndexRanges(timestamps, laps)
     const sections = buildSections(indexRanges)
 
-    // Step 7: record steps 1-6 in a header field.
+    const reproduceWith = options.windowLaps !== null
+        ? `--window-laps=${options.windowLaps.first}-${options.windowLaps.last}`
+        : `--window=${count} --window-start=${window.startIdx}`
+
+    // Step 7: record steps 1-6 — WITHOUT the values that would undo them.
     const _anonymisation: AnonymisationRecord = {
         note:
-            'Derived from one real ride, then deliberately transformed. Every number below ' +
-            'is a transform parameter, not a bug. Residual risk is stated in ' +
+            'Derived from one real ride, then deliberately transformed. The transform is ' +
+            'deliberate, not a bug. Note what is NOT here: the source centroid, the rotation ' +
+            'angle and the altitude offset are all withheld, because a transform parameter ' +
+            'published next to the data it transformed provides no privacy — it inverts in ' +
+            'one line. Residual risk is stated in ' +
             '.planning/phases/07-mode-pipeline-unification/07-GOLDEN-BASELINE.md: route ' +
             'topology and terrain relief survive every transform here, which is why a ' +
             'blocking maintainer checkpoint (D-12) gates this file, not an automated rule.',
         steps: [
             '1. timestamps made relative (t - t[0]); ride date and time of day removed',
-            '2. coordinates centroid-subtracted, rotated, re-origined at an arbitrary point',
+            '2. coordinates centroid-subtracted (THE control: the centroid is never emitted), ' +
+                'then rotated by a random unpublished angle and re-origined',
             '3. trimmed to a sub-window fragment retaining lap boundaries and dropouts',
             '4. coordinates rounded to 5 dp; other series rounded to sensor precision',
-            '5. altitude offset by a constant (profile shape preserved exactly)',
+            '5. altitude offset by a random unpublished constant (profile shape preserved exactly)',
             '6. humidity and pressure dropped; folded into rhoArray instead',
             '7. this record written so the transform reads as deliberate',
         ],
         relativeTimestamps: { subtractedFirstTimestamp: true },
         coordinateTransform: {
             centroidSubtracted: true,
-            rotationDegrees: options.rotationDeg,
-            destinationOriginLat: options.originLat,
-            destinationOriginLong: options.originLong,
+            rotationApplied: true,
+            rotationDegreesPublished: false,
+            destinationOriginLat: origin.lat,
+            destinationOriginLong: origin.long,
         },
         sampleWindow: {
             startIdx: window.startIdx,
@@ -360,16 +479,17 @@ export function anonymise(
             length: count,
             sourceRecordCount: sourceCount,
             selection:
-                options.windowStartLap !== null
-                    ? 'explicit-lap'
-                    : options.windowStart !== null
-                        ? 'explicit-index'
-                        : 'auto',
+                options.windowLaps !== null
+                    ? 'explicit-lap-range'
+                    : options.windowStartLap !== null
+                        ? 'explicit-lap'
+                        : options.windowStart !== null
+                            ? 'explicit-index'
+                            : 'auto',
+            ...(options.windowLaps !== null
+                ? { sourceLaps: { first: options.windowLaps.first, last: options.windowLaps.last } }
+                : {}),
         },
-        reproduceWith:
-            `--window=${count} --window-start=${window.startIdx} ` +
-            `--rotation-deg=${options.rotationDeg} ` +
-            `--origin-lat=${options.originLat} --origin-long=${options.originLong}`,
         rounding: {
             coordinatesDecimals: COORD_DECIMALS,
             altitudeDecimals: ALTITUDE_DECIMALS,
@@ -377,28 +497,55 @@ export function anonymise(
             powerDecimals: POWER_DECIMALS,
             otherDecimals: OTHER_DECIMALS,
         },
-        altitudeOffsetMetres: altitudeOffset,
+        altitudeOffsetPublished: false,
         droppedArrays: ['humidity', 'pressure', 'wind_speed', 'air_density_data', 'road_speed'],
+        reproducibility:
+            `Not byte-reproducible from this file alone, by design: the rotation angle and ` +
+            `altitude offset are random per run and withheld. They are written to ` +
+            `golden-ride-anonymisation-key.json beside the review page, which is never ` +
+            `committed. The window is reproducible: \`${reproduceWith}\`. This costs nothing ` +
+            `in practice — the source ride is private, so only the maintainer could ever ` +
+            `regenerate this file, and the maintainer holds the key.`,
+    }
+
+    const key: AnonymisationKey = {
+        WARNING:
+            'NEVER COMMIT THIS FILE. It contains the source centroid, which undoes the ' +
+            'anonymisation of golden-ride.json completely. Keep it only if you want to be ' +
+            'able to regenerate the fixture; otherwise delete it with the review page.',
+        reproduceWith,
+        rotationDegrees: rotationDeg,
+        destinationOriginLat: origin.lat,
+        destinationOriginLong: origin.long,
+        altitudeOffsetMetres: altitudeOffset,
+        sourceCentroidLat: centroidLat,
+        sourceCentroidLong: centroidLong,
+        sourceFirstTimestamp: t0,
+        sourceDistanceBase: distanceBase,
+        sampleWindow: { startIdx: window.startIdx, endIdx: window.endIdx },
     }
 
     return {
-        _anonymisation,
-        record_count: count,
-        timestamps,
-        power,
-        velocity,
-        position_lat,
-        position_long,
-        altitude,
-        distance,
-        air_speed,
-        wind_yaw,
-        temperature,
-        rhoArray,
-        laps,
-        indexRanges,
-        sections,
-        params: FIXTURE_PARAMS,
+        fixture: {
+            _anonymisation,
+            record_count: count,
+            timestamps,
+            power,
+            velocity,
+            position_lat,
+            position_long,
+            altitude,
+            distance,
+            air_speed,
+            wind_yaw,
+            temperature,
+            rhoArray,
+            laps,
+            indexRanges,
+            sections,
+            params: FIXTURE_PARAMS,
+        },
+        key,
     }
 }
 
@@ -448,6 +595,37 @@ function chooseWindow(
 ): { startIdx: number; endIdx: number } {
     const sourceCount = source.timestamps.length
     const length = Math.min(options.windowLength, sourceCount)
+
+    // Lap RANGE: both edges on lap boundaries, length derived not imposed.
+    if (options.windowLaps !== null) {
+        const { first, last } = options.windowLaps
+        const firstLap = rawLaps[first - 1]
+        const lastLap = rawLaps[last - 1]
+        if (!firstLap || !lastLap) {
+            throw new Error(
+                `--window-laps=${first}-${last} is out of range: the ride has ${rawLaps.length} ` +
+                'laps (1-based, inclusive).',
+            )
+        }
+        const startIdx = nearestIndex(source.timestamps, firstLap.start_time)
+        const endIdx = nearestIndex(source.timestamps, lastLap.end_time)
+        if (endIdx <= startIdx) {
+            throw new Error(
+                `--window-laps=${first}-${last} resolves to an empty window ` +
+                `(records ${startIdx}…${endIdx}).`,
+            )
+        }
+        const derivedLength = endIdx - startIdx + 1
+        if (derivedLength < MIN_WINDOW || derivedLength > MAX_WINDOW) {
+            // Advisory, not fatal: the lap range is the maintainer's explicit
+            // instruction and must not be silently overridden by a size rule.
+            process.stderr.write(
+                `NOTE: laps ${first}-${last} derive a ${derivedLength}-sample window, outside the ` +
+                `${MIN_WINDOW}-${MAX_WINDOW} guidance. Honouring the lap range as given.\n`,
+            )
+        }
+        return { startIdx, endIdx }
+    }
 
     // Lap-relative selection resolves to an index here, so the emitted header
     // and `reproduceWith` always carry the concrete index regardless of how the
@@ -641,10 +819,16 @@ export function buildReviewHtml(fixture: GoldenRideFixture): string {
         ['Index ranges (GPS-lap)', String(fixture.indexRanges.length)],
         ['Sections (out-and-back)', String(fixture.sections.length)],
         ['Dropout samples', String(countDropouts(fixture))],
-        ['Rotation applied (°)', String(fixture._anonymisation.coordinateTransform.rotationDegrees)],
-        ['Altitude offset (m)', String(fixture._anonymisation.altitudeOffsetMetres)],
+        ['Rotation', 'applied, random, angle withheld from the fixture'],
+        ['Altitude offset', 'applied, random, value withheld from the fixture'],
         ['Source window', `${fixture._anonymisation.sampleWindow.startIdx}…${fixture._anonymisation.sampleWindow.endIdx} of ${fixture._anonymisation.sampleWindow.sourceRecordCount} (${fixture._anonymisation.sampleWindow.selection})`],
-        ['Reproduce with', fixture._anonymisation.reproduceWith],
+        [
+            'Source laps',
+            fixture._anonymisation.sampleWindow.sourceLaps
+                ? `${fixture._anonymisation.sampleWindow.sourceLaps.first}-${fixture._anonymisation.sampleWindow.sourceLaps.last} inclusive, both edges on lap boundaries`
+                : 'not lap-range selected',
+        ],
+        ['Reproducibility', fixture._anonymisation.reproducibility],
     ]
 
     const tableRows = rows
@@ -713,6 +897,20 @@ ${EXCLUDED_IDENTITY_FIELDS.map(escapeHtml).join(', ')}.</p>
 
 <h2>Recorded transform steps</h2>
 <ol>${fixture._anonymisation.steps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ol>
+
+<h2>What is actually protecting the venue</h2>
+<p>The <strong>centroid subtraction</strong>, and only that. The original centroid is
+never written into the fixture, so absolute position is unrecoverable.</p>
+<p>The rotation and the altitude offset are defence in depth, and they only count
+because their parameters are <em>withheld</em>: a transform parameter printed next to
+the data it transformed inverts in one line and gives back exactly what it removed.
+Both are drawn per run from a CSPRNG and written to
+<code>golden-ride-anonymisation-key.json</code>, which is never committed.</p>
+<p><strong>The honest limit:</strong> withholding the rotation angle stops orientation
+being volunteered to a reader; it does not stop someone who already suspects a venue
+from fitting the single unknown angle by shape-matching. Route shape survives every
+transform. That residual is the whole reason this page exists and the reason this
+decision is yours.</p>
 </body>
 </html>
 `
@@ -788,43 +986,84 @@ function parseArgs(argv: string[]): Options {
         throw new Error(USAGE)
     }
 
-    const windowLength = Number(flag('window') ?? DEFAULT_WINDOW)
-    if (!Number.isFinite(windowLength) || windowLength < MIN_WINDOW || windowLength > MAX_WINDOW) {
-        throw new Error(`--window must be between ${MIN_WINDOW} and ${MAX_WINDOW} (got ${windowLength}).`)
-    }
-
+    const windowRaw = flag('window')
     const windowStartRaw = flag('window-start')
     const windowStartLapRaw = flag('window-start-lap')
+    const windowLapsRaw = flag('window-laps')
 
-    if (windowStartRaw !== null && windowStartLapRaw !== null) {
+    const starts = [
+        windowStartRaw !== null && '--window-start',
+        windowStartLapRaw !== null && '--window-start-lap',
+        windowLapsRaw !== null && '--window-laps',
+    ].filter(Boolean) as string[]
+
+    if (starts.length > 1) {
         throw new Error(
-            '--window-start and --window-start-lap are mutually exclusive: one is a record ' +
-            'index, the other a lap number, and on a ride with recording gaps they are not ' +
-            'interchangeable. Pass exactly one.',
+            `${starts.join(', ')} are mutually exclusive — they are three different ways to ` +
+            'say where the window goes (a record index, a lap number, a lap range), and on a ' +
+            'ride with recording gaps they are not interchangeable. Pass exactly one.',
         )
+    }
+
+    // A lap RANGE derives its own length. Accepting --window alongside it would
+    // silently re-clip the very tail the lap range exists to keep whole, which
+    // is the defect this flag was added to fix — so refuse rather than pick.
+    if (windowLapsRaw !== null && windowRaw !== null) {
+        throw new Error(
+            '--window-laps and --window are mutually exclusive: a lap range derives its sample ' +
+            'count from the lap boundaries, so imposing a fixed length would clip the final ' +
+            'lap. Drop --window.',
+        )
+    }
+
+    let windowLaps: { first: number; last: number } | null = null
+    if (windowLapsRaw !== null) {
+        const match = /^(\d+)-(\d+)$/.exec(windowLapsRaw.trim())
+        if (!match) {
+            throw new Error(`--window-laps must look like "8-14" (got "${windowLapsRaw}").`)
+        }
+        const first = Number(match[1])
+        const last = Number(match[2])
+        if (first < 1 || last < first) {
+            throw new Error(`--window-laps=${windowLapsRaw} is not a valid 1-based inclusive range.`)
+        }
+        windowLaps = { first, last }
+    }
+
+    const windowLength = Number(windowRaw ?? DEFAULT_WINDOW)
+    if (windowLaps === null && (!Number.isFinite(windowLength) || windowLength < MIN_WINDOW || windowLength > MAX_WINDOW)) {
+        throw new Error(`--window must be between ${MIN_WINDOW} and ${MAX_WINDOW} (got ${windowLength}).`)
     }
 
     return {
         fitPath: resolvePath(positional[0]),
-        rotationDeg: Number(flag('rotation-deg') ?? DEFAULT_ROTATION_DEG),
-        originLat: Number(flag('origin-lat') ?? DEFAULT_ORIGIN_LAT),
-        originLong: Number(flag('origin-long') ?? DEFAULT_ORIGIN_LONG),
         windowLength,
+        windowLengthExplicit: windowRaw !== null,
         windowStart: windowStartRaw === null ? null : Number(windowStartRaw),
         windowStartLap: windowStartLapRaw === null ? null : Number(windowStartLapRaw),
+        windowLaps,
         outDir: flag('out-dir') ?? join(tmpdir(), 'golden-fixture-candidate'),
     }
 }
 
 const USAGE =
     'Usage: npx vite-node scripts/build-golden-fixture.ts -- <path-to.fit>\n' +
-    '  --window-start-lap=<n>  start the window at 1-based SOURCE lap n (recommended:\n' +
-    '                          lap-aligned, and immune to the index-vs-seconds confusion)\n' +
-    '  --window-start=<n>      start the window at record INDEX n (not seconds, not a lap)\n' +
-    '  --window=<n>            window length, 1200-2000 (default 1600)\n' +
-    '  --rotation-deg=<n>      coordinate rotation (default 137)\n' +
-    '  --origin-lat=<n> --origin-long=<n>   destination centroid (default 45 / -30)\n' +
-    '  --out-dir=<path>        scratch output dir'
+    '\n' +
+    'Window placement (pass at most one):\n' +
+    '  --window-laps=<a>-<b>   RECOMMENDED. Inclusive 1-based SOURCE lap range. Both edges\n' +
+    '                          land on lap boundaries and the sample count is derived, so\n' +
+    '                          no lap is clipped. Cannot be combined with --window.\n' +
+    '  --window-start-lap=<n>  start at 1-based SOURCE lap n; a fixed --window length then\n' +
+    '                          ends wherever it lands, which CLIPS the final lap.\n' +
+    '  --window-start=<n>      start at record INDEX n (not seconds, not a lap number).\n' +
+    '  (omit all three)        auto-score a window for lap-boundary + dropout coverage.\n' +
+    '\n' +
+    '  --window=<n>            window length, 1200-2000 (default 1600). Not with --window-laps.\n' +
+    '  --out-dir=<path>        scratch output dir\n' +
+    '\n' +
+    'The coordinate rotation, destination origin and altitude offset are drawn per run\n' +
+    'from a CSPRNG and deliberately have no flags: they are withheld from the fixture, so\n' +
+    'choosing them buys nothing. They are written to golden-ride-anonymisation-key.json.'
 
 /**
  * Self-execute only when invoked with a ride path. `anonymise` and

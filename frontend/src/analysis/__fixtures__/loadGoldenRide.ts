@@ -25,8 +25,15 @@ export interface GoldenRideAnonymisation {
     note: string;
     steps: string[];
     coordinateTransform: {
+        /**
+         * The control that actually protects the venue: the source centroid is
+         * never emitted, so absolute position is unrecoverable. The rotation
+         * angle and the altitude offset are withheld for the same reason a key
+         * is not published beside a ciphertext — see the generator script.
+         */
         centroidSubtracted: boolean;
-        rotationDegrees: number;
+        rotationApplied: boolean;
+        rotationDegreesPublished: false;
         destinationOriginLat: number;
         destinationOriginLong: number;
     };
@@ -35,12 +42,12 @@ export interface GoldenRideAnonymisation {
         endIdx: number;
         length: number;
         sourceRecordCount: number;
-        selection: 'explicit-lap' | 'explicit-index' | 'auto';
+        selection: 'explicit-lap-range' | 'explicit-lap' | 'explicit-index' | 'auto';
+        sourceLaps?: { first: number; last: number };
     };
-    /** Flag string that reproduces this fixture from the source ride. */
-    reproduceWith: string;
-    altitudeOffsetMetres: number;
+    altitudeOffsetPublished: false;
     droppedArrays: string[];
+    reproducibility: string;
 }
 
 export interface GoldenRideLap {
