@@ -5,10 +5,16 @@ import { initSync } from '@wasm/virtual_elevation_analyzer.js';
 
 import { getNormalizedActivityArrays } from './ActivityArrayCache';
 import { createVeCalculator } from './VeCalculatorFactory';
-import { applyAirSpeedOffset, resolveWindSeries } from './WindSourceResolver';
-import { buildSegmentSupplementarySeries } from './SegmentSupplementarySeries';
-import { extractSegmentData } from './SegmentExtractor';
+// NOTE: `resolveWindSeries`, `buildSegmentSupplementarySeries` and
+// `extractSegmentData` used to be imported here so this harness could
+// RE-IMPLEMENT the segment spine. They are gone because the two segment-mode
+// runners now call the real `updateModeVEPlots` instead of mirroring it. Only
+// the Standard runner still composes by hand, until plan 07-02 Task 4.
+import { applyAirSpeedOffset } from './WindSourceResolver';
 import { prepareAnalysisPayload } from '../shell/analysis/prepareAnalysisPayload';
+import { updateModeVEPlots } from '../shell/analysis/updateModeVEPlots';
+import { getAnalysisModeHandler } from '../modes/analysis/AnalysisModes';
+import type { ModeUpdateCallbacks, SegmentVeProfile } from '../modes/analysis/types';
 import {
     calculateGpsLapStats,
     calculateMeanElevationProfile,
@@ -178,6 +184,66 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         } as unknown as AppState;
     }
 
+    /**
+     * AppState stand-in for the UPDATE path. Same principle as `makeAppState`:
+     * only the fields `updateModeVEPlots` and the handlers actually read, so a
+     * field this harness forgets fails loudly.
+     */
+    function makeUpdateAppState(ride: ReturnType<typeof loadGoldenRide>): AppState {
+        return {
+            ...(makeAppState() as unknown as Record<string, unknown>),
+            currentFitData: ride.fitData,
+            currentParameters: ride.params,
+            airSpeedCalibrationPercent: GOLDEN_CALIBRATION_PERCENT,
+            currentRhoArray: null,
+            currentGpsLapIndexRanges: null,
+            currentOverlayLapNumbers: null,
+            currentAnalyzedLaps: [],
+            currentFilteredData: null,
+            currentVEResult: null,
+            currentWindSource: 'none',
+            outAndBackSections: [],
+            outAndBackSelectedSections: [],
+            gpsDetectedLaps: [],
+            gpsSelectedLaps: [],
+        } as unknown as AppState;
+    }
+
+    /**
+     * The injected renderer is a no-op: these cases assert per-segment numbers,
+     * so nothing needs to be drawn. `aggregate` returns the per-segment means,
+     * which is only used by `summarize`'s AppState write here.
+     */
+    function noopCallbacks(): ModeUpdateCallbacks {
+        return {
+            aggregate: profiles => ({
+                r2: profiles.reduce((s, p) => s + p.result.r2, 0) / profiles.length,
+                rmse: profiles.reduce((s, p) => s + p.result.rmse, 0) / profiles.length,
+                veGain: profiles.reduce((s, p) => s + p.result.ve_elevation_diff, 0) / profiles.length,
+                actualGain: profiles.reduce((s, p) => s + p.result.actual_elevation_diff, 0) / profiles.length,
+                segmentCount: profiles.length,
+            }),
+            renderVe: () => {},
+            renderWind: () => {},
+            renderPower: () => {},
+            renderVd: () => {},
+            renderMetrics: () => {},
+        };
+    }
+
+    /** Adapt a SegmentVeProfile to the LapVEProfile shape the stat helpers take. */
+    function toLapProfile(profile: SegmentVeProfile) {
+        return {
+            lapNumber: 0,
+            distances: profile.distancesKm,
+            virtualElevation: profile.virtualElevation,
+            actualElevation: profile.actualElevation,
+            supplementarySeries: profile.supplementarySeries,
+            duration: 0,
+            totalDistance: 0,
+        };
+    }
+
     // ── Standard ────────────────────────────────────────────────────────────
     /**
      * Mirrors the Standard ANALYZE leg by calling the real
@@ -310,164 +376,77 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
     }
 
     // ── GPS-lap ─────────────────────────────────────────────────────────────
-    /** Mirrors updateGpsLap.ts:59-190. */
-    function runGpsLap(wind: WindMode, withRho: boolean): GoldenCase {
+    /**
+     * RE-POINTED at the real `updateModeVEPlots` (plan 07-02 Task 3).
+     *
+     * This function used to RE-IMPLEMENT the slice-and-loop spine, which is the
+     * trap 07-VALIDATION.md flags in `parameterChangeHandler.test.ts`: a mirror
+     * stays green if production is replaced with junk. It now drives the actual
+     * primitive with an injected no-op renderer, so the eight segment-mode
+     * literals holding IS the proof the mirror was faithful.
+     *
+     * The literals must hold UNCHANGED: the fixture carries no DEM profile, so
+     * `resolveElevationProfile` returns 'fit-raw' and change-list entry (d)
+     * cannot fire here. Movement would be a defect, not a change-list entry.
+     */
+    async function runGpsLap(wind: WindMode, withRho: boolean): Promise<GoldenCase> {
         const ride = loadGoldenRide();
-        const normalized = getNormalizedActivityArrays(ride.fitData);
+        const appState = makeUpdateAppState(ride);
+        appState.currentGpsLapIndexRanges = ride.indexRanges;
 
-        // updateGpsLap.ts:68-73 — wind resolved ONCE over the full series.
-        const resolution = resolveWindSeries({
-            fitData: ride.fitData,
+        const outcome = await updateModeVEPlots({
+            appState,
+            handler: getAnalysisModeHandler('GPS based lap splitting'),
+            callbacks: noopCallbacks(),
             windSource: wind,
-            params: ride.params,
-            airSpeedCalibrationPercent: GOLDEN_CALIBRATION_PERCENT,
+            cda: GOLDEN_CDA,
+            crr: GOLDEN_CRR,
+            isTabActive: () => false,
+            resolveRho: withRho ? () => ride.rhoArray : () => null,
         });
 
-        const perLap = ride.indexRanges.map(range => {
-            // updateGpsLap.ts:99-112 hand-rolls this loop; extractSegmentData is
-            // the same slice (07-RESEARCH "Don't Hand-Roll" recommends unifying).
-            const segment = extractSegmentData({
-                startIdx: range.startIdx,
-                endIdx: range.endIdx,
-                allTimestamps: normalized.timestamps,
-                allPower: normalized.power,
-                allVelocity: normalized.velocity,
-                allPositionLat: normalized.positionLat,
-                allPositionLong: normalized.positionLong,
-                allAltitude: normalized.altitude,
-                allDistance: normalized.distance,
-                allWindSpeed: resolution.windSpeed,
-            });
+        expect(outcome).not.toBeNull();
 
-            // updateGpsLap.ts:120-130 — real production helper.
-            const supplementary = buildSegmentSupplementarySeries({
-                timestamps: segment.timestamps,
-                power: segment.power,
-                velocity: segment.velocity,
-                positionLat: segment.positionLat,
-                positionLong: segment.positionLong,
-                distance: segment.distance,
-                windSpeed: segment.windSpeed,
-                params: ride.params,
-                selectedWindSource: resolution.selectedWindSource,
-            });
-
-            const calculator = createVeCalculator({
-                timestamps: segment.timestamps,
-                power: segment.power,
-                velocity: segment.velocity,
-                positionLat: segment.positionLat,
-                positionLong: segment.positionLong,
-                altitude: segment.altitude,
-                distance: segment.distance,
-                windSpeed: segment.windSpeed,
-                rhoArray: withRho ? ride.rhoArray.slice(range.startIdx, range.endIdx + 1) : null,
-                params: ride.params,
-                cda: GOLDEN_CDA,
-                crr: GOLDEN_CRR,
-            });
-            const result = calculator.calculate_virtual_elevation(
-                GOLDEN_CDA,
-                GOLDEN_CRR,
-                0,
-                segment.timestamps.length - 1,
-            );
-
-            return {
-                summary: summarise(result),
-                profile: {
-                    lapNumber: 0,
-                    distances: supplementary.distancesKm,
-                    virtualElevation: Array.from(result.virtual_elevation),
-                    actualElevation: segment.altitude,
-                    supplementarySeries: supplementary,
-                    duration: 0,
-                    totalDistance: 0,
-                },
-            };
-        });
-
-        // updateGpsLap.ts:186-190 — the REAL aggregation helpers, not a mirror.
-        const meanElevation = calculateMeanElevationProfile(perLap.map(l => l.profile) as never);
-        const stats = calculateGpsLapStats(perLap.map(l => l.profile) as never, meanElevation);
+        // The REAL aggregation helpers, exercised on the primitive's output.
+        const profiles = outcome!.profiles.map(toLapProfile);
+        const meanElevation = calculateMeanElevationProfile(profiles as never);
+        const stats = calculateGpsLapStats(profiles as never, meanElevation);
         expect(Number.isFinite(stats.meanR2)).toBe(true);
 
-        return summariseSegments(perLap.map(l => l.summary));
+        return summariseSegments(outcome!.profiles.map(p => summarise(p.result)));
     }
 
     // ── Out-and-back ────────────────────────────────────────────────────────
     /** Mirrors updateOutAndBack.ts:68-289 (outbound then inbound per section). */
-    function runOutAndBack(wind: WindMode, withRho: boolean): GoldenCase {
+    async function runOutAndBack(wind: WindMode, withRho: boolean): Promise<GoldenCase> {
         const ride = loadGoldenRide();
-        const normalized = getNormalizedActivityArrays(ride.fitData);
+        const appState = makeUpdateAppState(ride);
+        // The fixture carries only the index fields; the direction/duration
+        // fields OutAndBackSection also declares are not read by the segment
+        // builder, so the narrower fixture type is widened here deliberately.
+        appState.outAndBackSections = ride.sections as unknown as AppState['outAndBackSections'];
+        appState.outAndBackSelectedSections = ride.sections.map(s => s.sectionNumber);
 
-        const resolution = resolveWindSeries({
-            fitData: ride.fitData,
+        const outcome = await updateModeVEPlots({
+            appState,
+            handler: getAnalysisModeHandler('GPS based out and back'),
+            callbacks: noopCallbacks(),
             windSource: wind,
-            params: ride.params,
-            airSpeedCalibrationPercent: GOLDEN_CALIBRATION_PERCENT,
+            cda: GOLDEN_CDA,
+            crr: GOLDEN_CRR,
+            isTabActive: () => false,
+            resolveRho: withRho ? () => ride.rhoArray : () => null,
         });
 
-        const summaries: GoldenCase[] = [];
-        for (const section of ride.sections) {
-            const legs = [
-                { startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
-                { startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
-            ];
-            for (const leg of legs) {
-                const segment = extractSegmentData({
-                    startIdx: leg.startIdx,
-                    endIdx: leg.endIdx,
-                    allTimestamps: normalized.timestamps,
-                    allPower: normalized.power,
-                    allVelocity: normalized.velocity,
-                    allPositionLat: normalized.positionLat,
-                    allPositionLong: normalized.positionLong,
-                    allAltitude: normalized.altitude,
-                    allDistance: normalized.distance,
-                    allWindSpeed: resolution.windSpeed,
-                });
+        expect(outcome).not.toBeNull();
+        // 2N segments, outbound then inbound. This is the section-to-leg
+        // mapping plan 07-01 had to leave UNGUARDED because the production
+        // function was Plotly-coupled and could only be mirrored; re-pointing
+        // brings it under the literals, which is what makes D-10 mutation (b)
+        // observable at its specified site for the first time.
+        expect(outcome!.profiles).toHaveLength(ride.sections.length * 2);
 
-                buildSegmentSupplementarySeries({
-                    timestamps: segment.timestamps,
-                    power: segment.power,
-                    velocity: segment.velocity,
-                    positionLat: segment.positionLat,
-                    positionLong: segment.positionLong,
-                    distance: segment.distance,
-                    windSpeed: segment.windSpeed,
-                    params: ride.params,
-                    selectedWindSource: resolution.selectedWindSource,
-                });
-
-                const calculator = createVeCalculator({
-                    timestamps: segment.timestamps,
-                    power: segment.power,
-                    velocity: segment.velocity,
-                    positionLat: segment.positionLat,
-                    positionLong: segment.positionLong,
-                    altitude: segment.altitude,
-                    distance: segment.distance,
-                    windSpeed: segment.windSpeed,
-                    rhoArray: withRho ? ride.rhoArray.slice(leg.startIdx, leg.endIdx + 1) : null,
-                    params: ride.params,
-                    cda: GOLDEN_CDA,
-                    crr: GOLDEN_CRR,
-                });
-                summaries.push(
-                    summarise(
-                        calculator.calculate_virtual_elevation(
-                            GOLDEN_CDA,
-                            GOLDEN_CRR,
-                            0,
-                            segment.timestamps.length - 1,
-                        ),
-                    ),
-                );
-            }
-        }
-
-        return summariseSegments(summaries);
+        return summariseSegments(outcome!.profiles.map(p => summarise(p.result)));
     }
 
     // ═══════════════════════════ THE 14 LITERALS ═══════════════════════════
@@ -622,30 +601,30 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         expectGolden(runStandard('compare', false), GOLDEN['standard / compare / rho absent']);
     });
 
-    test('gpsLap / fit / rho present', () => {
-        expectGolden(runGpsLap('fit', true), GOLDEN['gpsLap / fit / rho present']);
+    test('gpsLap / fit / rho present', async () => {
+        expectGolden(await runGpsLap('fit', true), GOLDEN['gpsLap / fit / rho present']);
     });
-    test('gpsLap / fit / rho absent', () => {
-        expectGolden(runGpsLap('fit', false), GOLDEN['gpsLap / fit / rho absent']);
+    test('gpsLap / fit / rho absent', async () => {
+        expectGolden(await runGpsLap('fit', false), GOLDEN['gpsLap / fit / rho absent']);
     });
-    test('gpsLap / constant / rho present', () => {
-        expectGolden(runGpsLap('constant', true), GOLDEN['gpsLap / constant / rho present']);
+    test('gpsLap / constant / rho present', async () => {
+        expectGolden(await runGpsLap('constant', true), GOLDEN['gpsLap / constant / rho present']);
     });
-    test('gpsLap / constant / rho absent', () => {
-        expectGolden(runGpsLap('constant', false), GOLDEN['gpsLap / constant / rho absent']);
+    test('gpsLap / constant / rho absent', async () => {
+        expectGolden(await runGpsLap('constant', false), GOLDEN['gpsLap / constant / rho absent']);
     });
 
-    test('outAndBack / fit / rho present', () => {
-        expectGolden(runOutAndBack('fit', true), GOLDEN['outAndBack / fit / rho present']);
+    test('outAndBack / fit / rho present', async () => {
+        expectGolden(await runOutAndBack('fit', true), GOLDEN['outAndBack / fit / rho present']);
     });
-    test('outAndBack / fit / rho absent', () => {
-        expectGolden(runOutAndBack('fit', false), GOLDEN['outAndBack / fit / rho absent']);
+    test('outAndBack / fit / rho absent', async () => {
+        expectGolden(await runOutAndBack('fit', false), GOLDEN['outAndBack / fit / rho absent']);
     });
-    test('outAndBack / constant / rho present', () => {
-        expectGolden(runOutAndBack('constant', true), GOLDEN['outAndBack / constant / rho present']);
+    test('outAndBack / constant / rho present', async () => {
+        expectGolden(await runOutAndBack('constant', true), GOLDEN['outAndBack / constant / rho present']);
     });
-    test('outAndBack / constant / rho absent', () => {
-        expectGolden(runOutAndBack('constant', false), GOLDEN['outAndBack / constant / rho absent']);
+    test('outAndBack / constant / rho absent', async () => {
+        expectGolden(await runOutAndBack('constant', false), GOLDEN['outAndBack / constant / rho absent']);
     });
 
     /**
