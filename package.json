@@ -7,7 +7,7 @@
     "dev": "cd frontend && npm run dev",
     "preview": "cd frontend && npm run preview",
     "install:deps": "cd frontend && npm install",
-    "build:wasm": "cd backend && wasm-pack build --target web --out-dir pkg",
+    "build:wasm": "cd backend && wasm-pack build --target web --out-dir ../frontend/pkg",
     "build:frontend": "cd frontend && npm run build",
     "check:rust": "cd backend && cargo check",
     "check:frontend": "cd frontend && npm run check"
