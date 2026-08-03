@@ -35,7 +35,7 @@ export interface GoldenRideAnonymisation {
         endIdx: number;
         length: number;
         sourceRecordCount: number;
-        selection: 'explicit' | 'auto';
+        selection: 'explicit-lap' | 'explicit-index' | 'auto';
     };
     /** Flag string that reproduces this fixture from the source ride. */
     reproduceWith: string;

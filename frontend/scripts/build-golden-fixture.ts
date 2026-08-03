@@ -9,8 +9,16 @@
  *   --origin-lat=<n>     arbitrary destination centroid latitude  (default 45)
  *   --origin-long=<n>    arbitrary destination centroid longitude (default -30)
  *   --window=<n>         target sample-window length              (default 1600)
- *   --window-start=<n>   force the window start index (default: auto-chosen to
- *                        maximise lap-boundary and dropout coverage)
+ *   --window-start-lap=<n>  start at 1-based SOURCE lap n. Preferred: it is
+ *                        lap-aligned by construction and cannot be confused
+ *                        with a timestamp.
+ *   --window-start=<n>   force the window start RECORD INDEX. Note this is
+ *                        neither a lap number nor a time in seconds — on a ride
+ *                        with recording gaps all three differ (on this
+ *                        project's test ride, lap 8 starts at index 1531 but at
+ *                        t = 1603 s). Mutually exclusive with the flag above.
+ *                        Default: auto-chosen to maximise lap-boundary and
+ *                        dropout coverage.
  *   --out-dir=<path>     scratch output directory (default: os.tmpdir())
  *
  * NOTHING is written into frontend/src/analysis/__fixtures__/ by this script.
@@ -84,12 +92,15 @@ export interface AnonymisationRecord {
         length: number
         sourceRecordCount: number
         /**
-         * Whether the window start was supplied by the maintainer or chosen by
-         * the scorer. Without this an auto-chosen cut and a deliberate re-cut
-         * are indistinguishable in the artifact, and the scorer's choice can
-         * move if the input ride ever changes.
+         * How the window start was arrived at. Without this an auto-chosen cut
+         * and a deliberate re-cut are indistinguishable in the artifact, and
+         * the scorer's choice can move if the input ride ever changes.
+         *
+         * Three-way rather than a boolean because 'explicit-lap' additionally
+         * asserts the window is lap-aligned by construction, which
+         * 'explicit-index' does not.
          */
-        selection: 'explicit' | 'auto'
+        selection: 'explicit-lap' | 'explicit-index' | 'auto'
     }
     /**
      * The exact flag string that reproduces this fixture from the source ride.
@@ -160,6 +171,15 @@ export interface Options {
     originLong: number
     windowLength: number
     windowStart: number | null
+    /**
+     * 1-based SOURCE lap number to start the window at. Exists because
+     * `--window-start` takes a record index while humans reason about rides in
+     * laps and seconds, and on a ride with recording gaps those three numbers
+     * all differ. On this project's own test ride source lap 8 starts at record
+     * index 1531 but at t = 1603 s, and passing 1603 as an index silently cut
+     * 72 records into lap 8 instead of at its boundary.
+     */
+    windowStartLap: number | null
     outDir: string
 }
 
@@ -339,7 +359,12 @@ export function anonymise(
             endIdx: window.endIdx,
             length: count,
             sourceRecordCount: sourceCount,
-            selection: options.windowStart === null ? 'auto' : 'explicit',
+            selection:
+                options.windowStartLap !== null
+                    ? 'explicit-lap'
+                    : options.windowStart !== null
+                        ? 'explicit-index'
+                        : 'auto',
         },
         reproduceWith:
             `--window=${count} --window-start=${window.startIdx} ` +
@@ -423,6 +448,29 @@ function chooseWindow(
 ): { startIdx: number; endIdx: number } {
     const sourceCount = source.timestamps.length
     const length = Math.min(options.windowLength, sourceCount)
+
+    // Lap-relative selection resolves to an index here, so the emitted header
+    // and `reproduceWith` always carry the concrete index regardless of how the
+    // caller expressed the request.
+    if (options.windowStartLap !== null) {
+        const lap = rawLaps[options.windowStartLap - 1]
+        if (!lap) {
+            throw new Error(
+                `--window-start-lap=${options.windowStartLap} is out of range: the ride has ` +
+                `${rawLaps.length} laps (1-based).`,
+            )
+        }
+        const lapStartIdx = nearestIndex(source.timestamps, lap.start_time)
+        const startIdx = Math.max(0, Math.min(lapStartIdx, sourceCount - length))
+        if (startIdx !== lapStartIdx) {
+            process.stderr.write(
+                `WARNING: lap ${options.windowStartLap} starts at record ${lapStartIdx}, but a ` +
+                `${length}-sample window from there would overrun the ride; clamped to ${startIdx}. ` +
+                'The window is no longer lap-aligned.\n',
+            )
+        }
+        return { startIdx, endIdx: startIdx + length - 1 }
+    }
 
     if (options.windowStart !== null) {
         const startIdx = Math.max(0, Math.min(options.windowStart, sourceCount - length))
@@ -737,11 +785,7 @@ function parseArgs(argv: string[]): Options {
     }
 
     if (positional.length === 0) {
-        throw new Error(
-            'Usage: npx vite-node scripts/build-golden-fixture.ts -- <path-to.fit> ' +
-            '[--rotation-deg=n] [--origin-lat=n] [--origin-long=n] [--window=n] ' +
-            '[--window-start=n] [--out-dir=path]',
-        )
+        throw new Error(USAGE)
     }
 
     const windowLength = Number(flag('window') ?? DEFAULT_WINDOW)
@@ -750,6 +794,15 @@ function parseArgs(argv: string[]): Options {
     }
 
     const windowStartRaw = flag('window-start')
+    const windowStartLapRaw = flag('window-start-lap')
+
+    if (windowStartRaw !== null && windowStartLapRaw !== null) {
+        throw new Error(
+            '--window-start and --window-start-lap are mutually exclusive: one is a record ' +
+            'index, the other a lap number, and on a ride with recording gaps they are not ' +
+            'interchangeable. Pass exactly one.',
+        )
+    }
 
     return {
         fitPath: resolvePath(positional[0]),
@@ -758,9 +811,20 @@ function parseArgs(argv: string[]): Options {
         originLong: Number(flag('origin-long') ?? DEFAULT_ORIGIN_LONG),
         windowLength,
         windowStart: windowStartRaw === null ? null : Number(windowStartRaw),
+        windowStartLap: windowStartLapRaw === null ? null : Number(windowStartLapRaw),
         outDir: flag('out-dir') ?? join(tmpdir(), 'golden-fixture-candidate'),
     }
 }
+
+const USAGE =
+    'Usage: npx vite-node scripts/build-golden-fixture.ts -- <path-to.fit>\n' +
+    '  --window-start-lap=<n>  start the window at 1-based SOURCE lap n (recommended:\n' +
+    '                          lap-aligned, and immune to the index-vs-seconds confusion)\n' +
+    '  --window-start=<n>      start the window at record INDEX n (not seconds, not a lap)\n' +
+    '  --window=<n>            window length, 1200-2000 (default 1600)\n' +
+    '  --rotation-deg=<n>      coordinate rotation (default 137)\n' +
+    '  --origin-lat=<n> --origin-long=<n>   destination centroid (default 45 / -30)\n' +
+    '  --out-dir=<path>        scratch output dir'
 
 /**
  * Self-execute only when invoked with a ride path. `anonymise` and
@@ -787,11 +851,6 @@ if (positionalArgs.length > 0) {
 } else if (process.argv[1]?.includes('vite-node') || process.argv[1]?.includes('build-golden-fixture')) {
     // Launched directly but given nothing to do. Never exit 0 in silence — that
     // is precisely the failure the guard above is written against.
-    process.stderr.write(
-        'build-golden-fixture: no ride path given.\n' +
-        'Usage: npx vite-node scripts/build-golden-fixture.ts -- <path-to.fit> ' +
-        '[--rotation-deg=n] [--origin-lat=n] [--origin-long=n] [--window=n] ' +
-        '[--window-start=n] [--out-dir=path]\n',
-    )
+    process.stderr.write(`build-golden-fixture: no ride path given.\n${USAGE}\n`)
     process.exitCode = 1
 }
