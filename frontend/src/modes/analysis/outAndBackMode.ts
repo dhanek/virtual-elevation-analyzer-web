@@ -1,4 +1,5 @@
-import type { AnalysisModeHandler, ModeRenderArgs, PreparedAnalysisSelection } from './types';
+import { writeSegmentModeResultState } from './segmentSummary';
+import type { AnalysisModeHandler, ModeRenderArgs, ModeSegment, PreparedAnalysisSelection } from './types';
 
 const EMPTY_SELECTION_MESSAGE = 'Please select sections and set parameters first.';
 
@@ -52,5 +53,50 @@ export const outAndBackMode: AnalysisModeHandler = {
             params: args.params,
             defaultAirSpeedOffset: args.defaultAirSpeedOffset,
         });
+    },
+
+    /**
+     * Two segments per selected section, OUTBOUND THEN INBOUND, from the same
+     * {startIdx, endIdx} pairs `prepareSelection` already builds. The order is
+     * load-bearing: D-10 mutation (b) swaps them and a section VE assertion
+     * must fail.
+     */
+    getUpdateSegments(appState): ModeSegment[] {
+        const selectedItems = appState.outAndBackSelectedSections;
+        return appState.outAndBackSections
+            .filter(section => selectedItems.includes(section.sectionNumber))
+            .flatMap(section => ([
+                {
+                    key: `s${section.sectionNumber}-out`,
+                    label: `Section ${section.sectionNumber} outbound`,
+                    range: { startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
+                },
+                {
+                    key: `s${section.sectionNumber}-in`,
+                    label: `Section ${section.sectionNumber} inbound`,
+                    range: { startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
+                },
+            ]));
+    },
+
+    /**
+     * N-1 / D-17a: out-and-back wrote NONE of `currentVEResult`,
+     * `currentFilteredData` or `currentWindSource` after the initial analyze,
+     * so Store Result and Export CSV persisted analyze-time numbers instead of
+     * what was on screen. It now writes the same combined shape as GPS-lap.
+     *
+     * Note on `r2`: `calculateOutAndBackStats` has no r2 at all, so the
+     * aggregate's r2 is the mean of the per-segment `result.r2`. That is a
+     * deliberate choice — it is a value the OAB screen never displayed before,
+     * and it is now what Store Result persists.
+     */
+    summarize(appState, profiles, aggregate, inputs) {
+        writeSegmentModeResultState(
+            appState,
+            profiles,
+            aggregate,
+            inputs,
+            appState.outAndBackSelectedSections,
+        );
     },
 };

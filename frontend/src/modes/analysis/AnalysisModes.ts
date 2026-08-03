@@ -1,7 +1,11 @@
-import type { AnalysisModeHandler, AnalysisModeId, PreparedAnalysisSelection } from './types';
+import type { AnalysisModeHandler, AnalysisModeId } from './types';
 import { gpsLapMode } from './gpsLapMode';
 import { outAndBackMode } from './outAndBackMode';
 import { standardMode } from './standardMode';
+
+// Re-exported from its own module so `standardMode` can import it without
+// closing an import cycle through this file. See `selectionIndices.ts`.
+export { collectSelectionIndices } from './selectionIndices';
 
 const ANALYSIS_MODES: Record<AnalysisModeId, AnalysisModeHandler> = {
     standard: standardMode,
@@ -25,27 +29,3 @@ export function getAnalysisModeHandler(lapDetectionMode: string | null | undefin
     return ANALYSIS_MODES[getAnalysisModeId(lapDetectionMode)];
 }
 
-export function collectSelectionIndices(selection: PreparedAnalysisSelection, allTimestamps: ArrayLike<number>): number[] {
-    if (selection.indexRanges) {
-        const indices: number[] = [];
-        for (const range of selection.indexRanges) {
-            for (let i = range.startIdx; i <= range.endIdx && i < allTimestamps.length; i++) {
-                indices.push(i);
-            }
-        }
-        return indices;
-    }
-
-    if (selection.timeRanges) {
-        const indices: number[] = [];
-        for (let i = 0; i < allTimestamps.length; i++) {
-            const timestamp = allTimestamps[i];
-            if (selection.timeRanges.some(range => timestamp >= range.start && timestamp <= range.end)) {
-                indices.push(i);
-            }
-        }
-        return indices;
-    }
-
-    return [];
-}
