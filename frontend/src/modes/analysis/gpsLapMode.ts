@@ -1,8 +1,15 @@
-import { resolveActiveGpsLapRanges } from './activeGpsLapRanges';
+import { resolveActiveGpsLapRanges, resolveGpsLapNumber } from './activeGpsLapRanges';
 import { writeSegmentModeResultState } from './segmentSummary';
+import type { AppState, LapIndexRange } from '../../state/AppState';
 import type { AnalysisModeHandler, ModeRenderArgs, ModeSegment, PreparedAnalysisSelection } from './types';
 
 const EMPTY_SELECTION_MESSAGE = 'Please select laps and set parameters first.';
+
+/** Overlay number, else the detected lap number for the range, else the ordinal. */
+function gpsLapNumberAt(appState: AppState, range: LapIndexRange, index: number): number {
+    return appState.currentOverlayLapNumbers?.[index]
+        ?? resolveGpsLapNumber(appState, range, index + 1);
+}
 
 export const gpsLapMode: AnalysisModeHandler = {
     id: 'gpsLap',
@@ -64,29 +71,30 @@ export const gpsLapMode: AnalysisModeHandler = {
      * stashes its ranges on `currentGpsLapIndexRanges`; reading the detected laps
      * here would silently break it (07-RESEARCH.md Priority 5, item 5).
      *
-     * Labels: `getGpsLapNumberForRange` lives in `shell/gpsLap/renderGpsLap.ts`
-     * and cannot be imported from this DOM-free layer, so the fallback label is
-     * the ordinal and the shell adapter relabels from the real lap number.
+     * Labels come from the stacked-from-standard overlay numbers when present,
+     * otherwise from the DETECTED lap number for that range (`resolveGpsLapNumber`),
+     * with the ordinal only as a last resort. That ordering reproduces
+     * `updateGpsLap.ts:85-87` exactly; using the ordinal directly would mislabel
+     * any selection that is not laps 1..N and would corrupt `currentAnalyzedLaps`.
      */
     getUpdateSegments(appState): ModeSegment[] {
-        return resolveActiveGpsLapRanges(appState).map((range, i) => {
-            const lapNumber = appState.currentOverlayLapNumbers?.[i] ?? i + 1;
-            return {
-                key: `gpsLap-${i}`,
-                label: `Lap ${lapNumber}`,
-                range,
-            };
-        });
+        return resolveActiveGpsLapRanges(appState).map((range, i) => ({
+            key: `gpsLap-${i}`,
+            label: `Lap ${gpsLapNumberAt(appState, range, i)}`,
+            range,
+        }));
     },
 
-    /** Reproduces the synthesis at `updateGpsLap.ts:205-247` exactly. */
+    /** Reproduces the synthesis at `updateGpsLap.ts:205-250` exactly. */
     summarize(appState, profiles, aggregate, inputs) {
         writeSegmentModeResultState(
             appState,
             profiles,
             aggregate,
             inputs,
-            profiles.map((_profile, i) => appState.currentOverlayLapNumbers?.[i] ?? i + 1),
+            // The REAL lap numbers of the SURVIVING profiles, matching
+            // `updateGpsLap.ts:250`.
+            profiles.map((profile, i) => gpsLapNumberAt(appState, profile.segment.range, i)),
         );
     },
 };

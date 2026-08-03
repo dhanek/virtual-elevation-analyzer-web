@@ -1,3 +1,4 @@
+import { resolveActiveOutAndBackSections, sectionsCoveredByProfiles } from './activeOutAndBackSections';
 import { writeSegmentModeResultState } from './segmentSummary';
 import type { AnalysisModeHandler, ModeRenderArgs, ModeSegment, PreparedAnalysisSelection } from './types';
 
@@ -56,15 +57,19 @@ export const outAndBackMode: AnalysisModeHandler = {
     },
 
     /**
-     * Two segments per selected section, OUTBOUND THEN INBOUND, from the same
+     * Two segments per ON-SCREEN section, OUTBOUND THEN INBOUND, from the same
      * {startIdx, endIdx} pairs `prepareSelection` already builds. The order is
      * load-bearing: D-10 mutation (b) swaps them and a section VE assertion
      * must fail.
+     *
+     * Sections come from `resolveActiveOutAndBackSections`, NOT from the
+     * detection list filtered by the checkbox state. The pre-primitive update
+     * path looped `currentOutAndBackSections` (`updateOutAndBack.ts:100`); see
+     * that resolver for why reading the detection list would be a silent
+     * behaviour change.
      */
     getUpdateSegments(appState): ModeSegment[] {
-        const selectedItems = appState.outAndBackSelectedSections;
-        return appState.outAndBackSections
-            .filter(section => selectedItems.includes(section.sectionNumber))
+        return resolveActiveOutAndBackSections(appState)
             .flatMap(section => ([
                 {
                     key: `s${section.sectionNumber}-out`,
@@ -96,7 +101,10 @@ export const outAndBackMode: AnalysisModeHandler = {
             profiles,
             aggregate,
             inputs,
-            appState.outAndBackSelectedSections,
+            // Only sections that actually produced a segment, matching
+            // GPS-lap's surviving-profiles semantics.
+            sectionsCoveredByProfiles(resolveActiveOutAndBackSections(appState), profiles)
+                .map(section => section.sectionNumber),
         );
     },
 };
