@@ -31,7 +31,7 @@ import { windHeightControlsMarkup } from "./windHeightControls";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { applyAirSpeedOffset } from "../../analysis/WindSourceResolver";
+import { resolveSelectionWindSeries } from "./standardSegments";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 
@@ -53,7 +53,7 @@ export interface StandardVeCallbacks {
 export async function initializeVEAnalysis(
 	appState: AppState,
 	analysisInput: AnalysisInput,
-	defaultAirSpeedOffset: number,
+	selectedIndices: number[],
 ) {
 	const trimStart = appState.presetTrimStart;
 	const trimEnd = appState.presetTrimEnd ?? analysisInput.timestamps.length - 1;
@@ -105,15 +105,25 @@ export async function initializeVEAnalysis(
 		crrLabel: appliedInitialCrr.toFixed(4),
 	});
 
-	const hasWindSpeed = analysisInput.windSpeed.some(
+	// D-05: the last of the five inline wind copies is gone from here too. This
+	// one applied the offset but NOT the calibration, so the initial Standard
+	// wind plot disagreed with the VE fit above it whenever the calibration
+	// slider was non-zero -- and disagreed with `updateSecondaryPlots`, which
+	// applied both. All three now read one resolved series.
+	//
+	// The series is resolved over the FULL activity and sliced afterwards, which
+	// is the ordering that keeps the offset from crossing a lap boundary in a
+	// multi-lap selection (D-09 change-list entry c).
+	const resolvedWindSpeed = resolveSelectionWindSeries(
+		appState,
+		selectedIndices,
+		initialWindSource === "fit" ? "fit" : "constant",
+	);
+	const hasWindSpeed = resolvedWindSpeed.some(
 		(value) => !isNaN(value) && value !== 0,
 	);
-	const windSpeedOffset =
-		appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
 	const fitWindSpeedKmh = hasWindSpeed
-		? applyAirSpeedOffset(analysisInput.windSpeed, windSpeedOffset).map(
-				(value) => (isNaN(value) ? null : value * 3.6),
-			)
+		? resolvedWindSpeed.map((value) => (isNaN(value) ? null : value * 3.6))
 		: new Array<number | null>(analysisInput.velocity.length).fill(null);
 
 	const windSpeedFigure = buildWindSpeedFigure({
@@ -128,12 +138,14 @@ export async function initializeVEAnalysis(
 		power: analysisInput.power,
 	});
 
+	// D-21: the builder no longer takes (or applies) a calibration percentage.
+	// It integrates exactly the series it is handed, which is already offset and
+	// calibrated. A second application is now a compile error.
 	const virtualDistanceFigure = buildVirtualDistanceFigure({
 		context,
 		timestamps: analysisInput.timestamps,
 		velocity: analysisInput.velocity,
-		windSpeed: analysisInput.windSpeed,
-		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+		windSpeed: resolvedWindSpeed,
 	});
 
 	Plotly.newPlot(
@@ -398,7 +410,7 @@ export async function showVirtualElevationAnalysisInline(
 
 	// Create empty placeholder plots first (so Plotly divs exist)
 	// The actual VE calculation will happen after sliders are set up
-	await initializeVEAnalysis(appState, analysisInput, defaultAirSpeedOffset);
+	await initializeVEAnalysis(appState, analysisInput, selectedIndices);
 
 	// Now set up sliders - this binds event handlers that read from sliders
 	// and recalculate VE with the correct parameter values

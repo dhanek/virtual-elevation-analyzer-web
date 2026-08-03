@@ -123,20 +123,28 @@ describe('standardMode.getUpdateSegments (D-19 Option B)', () => {
         return appState;
     }
 
-    it('emits ONE segment per contiguous run, with full-activity indices', () => {
+    it('emits one segment per SELECTED LAP even when the laps are ADJACENT', () => {
         const handler = getAnalysisModeHandler(null);
         const segments = handler.getUpdateSegments(standardState([1, 2]));
 
-        // Laps 1 and 2 are adjacent, so they form a single contiguous run.
-        expect(segments).toHaveLength(1);
-        expect(segments[0].range).toEqual({ startIdx: 0, endIdx: 19 });
+        // The heart of D-19 Option B as the maintainer reaffirmed it: adjacency
+        // does NOT merge. Two selected laps mean two independent calculator runs
+        // and therefore a VE discontinuity at their shared boundary (D-09 entry
+        // f), and N = 2 in "the mean of N per-lap fits" (entry g). Folding these
+        // into one range would silently suppress both accepted consequences,
+        // which is what an earlier revision of this handler did.
+        expect(segments).toHaveLength(2);
+        expect(segments.map(s => s.range)).toEqual([
+            { startIdx: 0, endIdx: 9 },
+            { startIdx: 10, endIdx: 19 },
+        ]);
+        expect(segments.map(s => s.label)).toEqual(['Lap 1', 'Lap 2']);
     });
 
-    it('emits one INDEPENDENT segment per run for a NON-CONTIGUOUS multi-lap selection', () => {
+    it('emits one INDEPENDENT segment per lap for a NON-CONTIGUOUS multi-lap selection', () => {
         const handler = getAnalysisModeHandler(null);
         const segments = handler.getUpdateSegments(standardState([1, 4]));
 
-        // This is the D-19 Option B shape: laps 1 and 4 integrate separately.
         expect(segments).toHaveLength(2);
         expect(segments.map(s => s.range)).toEqual([
             { startIdx: 0, endIdx: 9 },
@@ -144,6 +152,16 @@ describe('standardMode.getUpdateSegments (D-19 Option B)', () => {
         ]);
         // Full-activity indices, not lap-local ones.
         expect(segments[1].range.startIdx).toBe(30);
+    });
+
+    it('orders segments by index, not by the order the checkboxes were ticked', () => {
+        const handler = getAnalysisModeHandler(null);
+        // Lap 4 ticked before lap 1. The stitched output must still run in
+        // ascending index order, because that is the order the analyze-time
+        // selection (and therefore the trim slider's index space) is built in.
+        const segments = handler.getUpdateSegments(standardState([4, 1]));
+
+        expect(segments.map(s => s.range.startIdx)).toEqual([0, 30]);
     });
 
     it('summarize writes all three AppState result fields', () => {
