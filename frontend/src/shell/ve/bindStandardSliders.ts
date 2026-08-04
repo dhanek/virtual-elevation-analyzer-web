@@ -54,11 +54,35 @@ const MIN_TRIM_WINDOW_SAMPLES = 30;
 // Plotly.js type declaration
 declare const Plotly: any;
 
+/**
+ * How the covered-lap count reads (maintainer ruling, plan 07-03).
+ *
+ * D-19 Option B makes the headline numbers the MEAN OF N PER-LAP FITS, and the
+ * primitive drops any lap the trim window leaves under `MIN_TRIMMED_SEGMENT_SAMPLES`
+ * samples. The maintainer accepted that exclusion — and with it the consequence
+ * that the mean can cover fewer laps than the user has ticked. Accepted is not
+ * the same as invisible: before this, a trim that silently dropped two of three
+ * laps changed the numbers with nothing on screen saying so.
+ *
+ * So the span says "3" when every ticked lap is covered and "2 of 3" when it is
+ * not. The bare number in the common case keeps the header quiet; the "of M"
+ * appears exactly when there is something to notice.
+ */
+export function formatCoveredLapCount(
+	covered: number,
+	selected: number,
+): string {
+	return covered === selected
+		? `${covered}`
+		: `${covered} of ${selected}`;
+}
+
 function updateMetricsDisplay(
 	r2: number,
 	rmse: number,
 	veGain: number,
 	actualGain: number,
+	coveredLaps: { covered: number; selected: number } | null,
 ): void {
 	const r2ValueSpan = document.getElementById("r2Value");
 	if (r2ValueSpan) r2ValueSpan.textContent = r2.toFixed(4);
@@ -72,6 +96,14 @@ function updateMetricsDisplay(
 	const actualGainValueSpan = document.getElementById("actualGainValue");
 	if (actualGainValueSpan)
 		actualGainValueSpan.textContent = actualGain.toFixed(2) + "m";
+
+	const lapsCoveredSpan = document.getElementById("lapsCoveredValue");
+	if (lapsCoveredSpan && coveredLaps) {
+		lapsCoveredSpan.textContent = formatCoveredLapCount(
+			coveredLaps.covered,
+			coveredLaps.selected,
+		);
+	}
 }
 
 function isValidSelectionProfile(
@@ -261,6 +293,12 @@ function createStandardUpdateCallbacks(
 				aggregate.rmse,
 				aggregate.veGain,
 				aggregate.actualGain,
+				// `segmentCount` is how many per-lap fits the mean is actually over,
+				// AFTER the primitive dropped any lap the trim left too short.
+				{
+					covered: aggregate.segmentCount,
+					selected: selectedLapCount(appState),
+				},
 			);
 		},
 	};
@@ -505,6 +543,15 @@ export async function updateStandardComparePlots(
 			(result1.rmse + result2.rmse) / 2,
 			(result1.ve_elevation_diff + result2.ve_elevation_diff) / 2,
 			(result1.actual_elevation_diff + result2.actual_elevation_diff) / 2,
+			// compare integrates the WHOLE concatenated selection in ONE pass rather
+			// than one fit per lap, so no lap can be dropped for being too short and
+			// the covered count is the selection itself. Passing it explicitly rather
+			// than null keeps the span from carrying a stale count over from the last
+			// non-compare render.
+			{
+				covered: selectedLapCount(appState),
+				selected: selectedLapCount(appState),
+			},
 		);
 
 		// REGRESSION FIX (07-02 Task 4 follow-up). Before this phase the eight

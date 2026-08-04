@@ -28,6 +28,7 @@ import { setupVESliders } from "./bindStandardSliders";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "./crrTempControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
+import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -383,7 +384,8 @@ export async function showVirtualElevationAnalysisInline(
                                 R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
                                 RMSE:<span id="rmseValue">${initialResult.rmse.toFixed(2)}m</span> |
                                 VE:<span id="veGainValue">${initialResult.ve_elevation_diff.toFixed(2)}m</span> |
-                                Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span>
+                                Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span> |
+                                Laps:<span id="lapsCoveredValue">${analyzedLaps.length}</span>
                             </div>
                             <div id="vePlot" class="ve-plot-container"></div>
                             <div id="veResidualsPlot" class="ve-plot-container"></div>
@@ -400,6 +402,25 @@ export async function showVirtualElevationAnalysisInline(
 												}
                         <div class="ve-tab-content" id="wind-tab">
                             <div id="windSpeedPlot" class="ve-plot-container"></div>
+                            ${
+															/*
+															 * N-3 (maintainer ruling, plan 07-03): Standard gains
+															 * the offset control the two GPS sidebars already had,
+															 * from the one shared markup helper so it reads as the
+															 * same control. Gated on hasWindSpeed only -- the offset
+															 * shifts the FIT air-speed channel, so with no such
+															 * channel there is nothing to shift -- and deliberately
+															 * NOT on the selected wind source: this template is not
+															 * rebuilt when the source changes, so a source-gated
+															 * control would be absent at bind time and stay unbound.
+															 */
+															hasWindSpeed
+																? airSpeedOffsetControlMarkup(
+																		appState.currentParameters?.air_speed_offset,
+																		defaultAirSpeedOffset,
+																	)
+																: ""
+														}
                         </div>
                         <div class="ve-tab-content" id="power-tab">
                             <div id="speedPowerPlot" class="ve-plot-container"></div>
