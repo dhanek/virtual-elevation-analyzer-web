@@ -338,8 +338,13 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
                 hovermode: 'closest',
+                // Must match buildVirtualElevationFigures. `.ve-plot-container`
+                // is flex:1 inside a display:block tab pane with no height, so a
+                // responsive figure with no layout.height collapses to unreadable.
+                margin: { l: 60, r: 20, t: 40, b: 5 },
+                height: 350,
             },
-            config: { responsive: true },
+            config: getDefaultPlotConfig(),
         },
         residuals: {
             data: [
@@ -374,8 +379,11 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 yaxis: { title: 'Residual (m)' },
                 showlegend: true,
                 hovermode: 'closest',
+                // Must match buildVirtualElevationFigures' residuals sizing.
+                margin: { l: 60, r: 20, t: 30, b: 60 },
+                height: 200,
             },
-            config: { responsive: true },
+            config: getDefaultPlotConfig(),
         },
     };
 }
