@@ -430,6 +430,35 @@
 	margin-bottom: var(--space-lg);
 }
 
+/* Virtual-distance header. Under D-19 Option B each selected lap is integrated
+   independently, so a multi-lap selection has N virtual distances and the header
+   carries one line per lap rather than one invented total. Capped in height so a
+   long GPS-lap selection scrolls instead of pushing the plot off-screen. */
+.ve-vd-header {
+	max-height: 7.5rem;
+	overflow: auto;
+}
+
+.ve-metrics-compact__line + .ve-metrics-compact__line {
+	margin-top: 0.15rem;
+}
+
+/* The "Lap 3:" prefix is a label, not a value -- keep it out of the value
+   weight/colour the bare-span rule above applies. */
+.ve-metrics-compact__segment.ve-metrics-compact__segment {
+	font-weight: 400;
+	color: var(--color-text-muted);
+	margin-left: 0;
+}
+
+/* Says what the combined integral is, on the two paths that have no per-lap
+   decomposition. It must never look like a per-lap figure. */
+.ve-metrics-compact__caveat {
+	font-style: italic;
+	margin-bottom: 0.15rem;
+	white-space: normal;
+}
+
 /* VD difference sign colors (D-07 discrete states, de-inlined from
    renderStandardVe.ts). Doubled class (0,2,0) out-ranks the
    .ve-metrics-compact span color (0,1,1). Off-palette green/red kept

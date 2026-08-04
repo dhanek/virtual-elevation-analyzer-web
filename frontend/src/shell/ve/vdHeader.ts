@@ -1,96 +1,263 @@
 /**
- * The three readouts above the Virtual Distance plot.
+ * The virtual-distance readouts above the VD plot, for every mode that has one.
  *
- * These spans used to be written in exactly one place ever -- the
- * `renderStandardVe` template, interpolating the analyze-time VE result -- so
- * they were frozen from the moment the tab was built. Moving a trim slider
- * redrew the curve underneath them and left the numbers untouched.
+ * Two defects live in this file's history and both are worth stating, because
+ * the shape of the module follows from them.
  *
- * They are now written from `computeVirtualDistanceTotals`, i.e. from the same
- * integration that draws the curve, on every VD draw.
+ * 1. The three spans used to be written in exactly one place ever -- the
+ *    `renderStandardVe` template, interpolating the analyze-time VE result -- so
+ *    they were frozen from the moment the tab was built. Moving a trim slider
+ *    redrew the curve underneath them and left the numbers untouched. They are
+ *    now written from the SAME integration that draws the curve, on every draw.
  *
- * ## Why a multi-lap selection shows no number
+ * 2. Only Standard ever had the markup at all. The GPS-lap sidebar -- which the
+ *    Standard "Stacked" view also reuses -- rendered a bare `#gpsLapVdPlot` with
+ *    no header above it, so in stacked mode and in GPS lap splitting mode the
+ *    label was missing outright, not merely stale. The markup is therefore owned
+ *    here (`virtualDistanceHeaderMarkup`) rather than copied into each template.
  *
- * Under D-19 Option B each selected lap is fitted and integrated INDEPENDENTLY.
- * There is no single virtual distance for a multi-lap selection:
+ * ## The multi-lap answer: per lap, not one number
  *
- * - the VD plot draws ONE curve over the laps concatenated end to end, so it
- *   accumulates across the wall-clock gap between lap N's end and lap N+1's
- *   start, and across the parts of intermediate laps the trim window excludes;
- * - `virtual_distance_air` / `virtual_distance_ground` on the stored result are
- *   ZEROS for multi-lap Standard, precisely because the figure is not defined
- *   (plan 07-02 change-list entry (h)).
+ * Under D-19 Option B each selected lap is fitted and integrated INDEPENDENTLY,
+ * so a multi-lap selection has N virtual distances and no single one:
  *
- * Displaying the concatenated integral would put a number on screen that is not
- * the distance of anything the rider actually rode, and displaying the stored
- * zeros would show `0.000 km`. Both are false. So for more than one segment the
- * header says so in words instead.
+ * - the stitched VD plot draws ONE curve over the laps concatenated end to end,
+ *   so its endpoint accumulates across the wall-clock gap between lap N's end
+ *   and lap N+1's start, and across the parts of intermediate laps the trim
+ *   window excludes. It is not the distance of anything the rider rode;
+ * - `virtual_distance_air` / `virtual_distance_ground` on the STORED result are
+ *   ZEROS for multi-lap Standard for the same reason (plan 07-02 change-list
+ *   entry (h)), so reading those would print `0.000 km`.
+ *
+ * An earlier pass showed `n/a` rather than either falsehood. The maintainer
+ * rejected that: the per-lap figures are real, they are what the computation
+ * actually produces, and they are what the header now shows -- one row per lap.
+ *
+ * The concatenated integral survives ONLY as a fallback for the two paths that
+ * genuinely have no per-segment decomposition (the transient initial paint, and
+ * `compare`, which integrates the whole selection in one pass until plan 07-04
+ * lands D-20). It is never shown unlabelled: the row says how many laps it spans
+ * and that it includes the gaps between them.
  */
 import {
-	computeVirtualDistanceTotals,
-	type VirtualDistancePlotInput,
+	computeVirtualDistanceWindowTotals,
+	virtualDistanceDifferencePercent,
 	type VirtualDistanceTotals,
+	type VirtualDistancePlotInput,
 } from "../../plots/StandardPlotBuilders";
+import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
+import type { SegmentVeProfile } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 
-/** Shown instead of a number when virtual distance is not well defined. */
-export const VD_NOT_APPLICABLE = "n/a";
+/** Container the header owns outright. Empty in the templates on purpose. */
+export const VD_HEADER_ID = "vdHeader";
 
-/** Shown in place of the percentage difference for the same reason. */
-export const VD_MULTI_SEGMENT_NOTE = "n/a (per-lap, see plot)";
+/** Shown when there is nothing at all to integrate (an empty selection). */
+export const VD_NOT_APPLICABLE = "n/a";
 
 const POSITIVE_CLASS = "ve-metrics-compact__value--positive";
 const NEGATIVE_CLASS = "ve-metrics-compact__value--negative";
 
-function setText(id: string, text: string): void {
-	const span = document.getElementById(id);
-	if (span) span.textContent = text;
+/** One independently-integrated segment's virtual distance. */
+export interface VirtualDistanceRow {
+	/** e.g. "Lap 3". Null for a single-segment selection, which needs no label. */
+	label: string | null;
+	totals: VirtualDistanceTotals;
 }
 
 /**
- * Write the three spans from already-computed totals, or blank them out with an
- * explicit "n/a" when `totals` is null.
+ * The header container, for interpolation into a mode's VD tab.
+ *
+ * Deliberately empty: its content is data, written by
+ * `renderVirtualDistanceHeader` from the same integration that draws the curve.
+ * Baking numbers into the template is defect 1 above.
  */
-export function renderVirtualDistanceHeader(
-	totals: VirtualDistanceTotals | null,
-): void {
-	const diffSpan = document.getElementById("vdDiffValue");
+export function virtualDistanceHeaderMarkup(): string {
+	return `<div class="ve-metrics-compact ve-metrics-compact--spaced ve-vd-header" id="${VD_HEADER_ID}"></div>`;
+}
 
-	if (!totals) {
-		setText("vdAirValue", VD_NOT_APPLICABLE);
-		setText("vdGroundValue", VD_NOT_APPLICABLE);
-		setText("vdDiffValue", VD_MULTI_SEGMENT_NOTE);
-		diffSpan?.classList.remove(POSITIVE_CLASS, NEGATIVE_CLASS);
+function span(id: string | null, text: string, className?: string): HTMLElement {
+	const element = document.createElement("span");
+	if (id) element.id = id;
+	if (className) element.className = className;
+	element.textContent = text;
+	return element;
+}
+
+function formatKm(km: number): string {
+	return `${km.toFixed(3)} km`;
+}
+
+function formatPercent(value: number): string {
+	return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+/**
+ * One `Air | Ground | Difference` line.
+ *
+ * `ids` is set only for the single-segment line, which keeps the three span ids
+ * the Standard single-lap case has always exposed. Per-lap lines carry a
+ * `data-vd-segment` attribute instead -- N elements cannot share one id.
+ */
+function buildRow(row: VirtualDistanceRow, withIds: boolean): HTMLElement {
+	const line = document.createElement("div");
+	line.className = "ve-metrics-compact__line";
+	if (row.label !== null) {
+		line.dataset.vdSegment = row.label;
+		line.append(span(null, `${row.label}: `, "ve-metrics-compact__segment"));
+	}
+
+	line.append(
+		document.createTextNode("VD (Air):"),
+		span(withIds ? "vdAirValue" : null, formatKm(row.totals.airKm)),
+		document.createTextNode(" | VD (Ground):"),
+		span(withIds ? "vdGroundValue" : null, formatKm(row.totals.groundKm)),
+		document.createTextNode(" | Difference:"),
+	);
+
+	const positive = row.totals.differencePercent >= 0;
+	const diff = span(
+		withIds ? "vdDiffValue" : null,
+		formatPercent(row.totals.differencePercent),
+		`ve-metrics-compact__value ${positive ? POSITIVE_CLASS : NEGATIVE_CLASS}`,
+	);
+	line.append(diff);
+	return line;
+}
+
+function fillHeader(children: Node[]): void {
+	const container = document.getElementById(VD_HEADER_ID);
+	if (!container) return;
+	container.replaceChildren(...children);
+}
+
+/**
+ * Write one line per independently-integrated segment.
+ *
+ * A single segment renders exactly the line Standard has always shown, with the
+ * same three span ids and no lap prefix.
+ */
+export function renderVirtualDistanceHeader(rows: VirtualDistanceRow[]): void {
+	if (rows.length === 0) {
+		fillHeader([
+			document.createTextNode(`VD (Air):${VD_NOT_APPLICABLE} | `),
+			document.createTextNode(`VD (Ground):${VD_NOT_APPLICABLE} | `),
+			document.createTextNode(`Difference:${VD_NOT_APPLICABLE}`),
+		]);
 		return;
 	}
 
-	setText("vdAirValue", `${totals.airKm.toFixed(3)} km`);
-	setText("vdGroundValue", `${totals.groundKm.toFixed(3)} km`);
-
-	const positive = totals.differencePercent >= 0;
-	setText(
-		"vdDiffValue",
-		`${positive ? "+" : ""}${totals.differencePercent.toFixed(2)}%`,
-	);
-	if (diffSpan) {
-		diffSpan.classList.toggle(POSITIVE_CLASS, positive);
-		diffSpan.classList.toggle(NEGATIVE_CLASS, !positive);
+	if (rows.length === 1) {
+		fillHeader([buildRow({ ...rows[0], label: null }, true)]);
+		return;
 	}
+
+	fillHeader(rows.map((row) => buildRow(row, false)));
 }
 
 /**
- * Recompute the header from the same input the VD figure was built from.
+ * Fallback for the paths with no per-segment decomposition.
  *
- * `segmentCount` is the number of independently-integrated segments the figure
- * covers: 1 for a single lap, more for a multi-lap selection. Only the
- * single-segment case yields a defined virtual distance -- see the module note.
+ * A single-lap selection is well defined, so it renders as the ordinary line.
+ * Anything wider is the concatenated integral, and is labelled as exactly that
+ * -- it is not the distance of anything the rider rode (see the module note), so
+ * it must never appear as if it were a per-lap figure.
  */
-export function updateVirtualDistanceHeader(
+export function renderCombinedVirtualDistanceHeader(
+	totals: VirtualDistanceTotals,
+	segmentCount: number,
+): void {
+	if (segmentCount === 1) {
+		renderVirtualDistanceHeader([{ label: null, totals }]);
+		return;
+	}
+	if (segmentCount < 1) {
+		renderVirtualDistanceHeader([]);
+		return;
+	}
+
+	const caveat = document.createElement("div");
+	caveat.className = "ve-metrics-compact__caveat";
+	caveat.textContent = `All ${segmentCount} laps combined, including the gaps between them — not a per-lap distance`;
+
+	fillHeader([caveat, buildRow({ label: null, totals }, true)]);
+}
+
+/**
+ * Per-segment rows for the primitive-driven paths, integrated the same way the
+ * stitched Standard curve is (`computeVirtualDistanceWindowTotals`), one segment
+ * at a time and each over its OWN trim window.
+ */
+export function segmentVirtualDistanceRows(
+	profiles: SegmentVeProfile[],
+	normalized: { timestamps: number[]; velocity: number[] },
+): VirtualDistanceRow[] {
+	return profiles.map((profile, index) => {
+		const timestamps = profile.indices.map((i) => normalized.timestamps[i]);
+		const velocity = profile.indices.map((i) => normalized.velocity[i]);
+		const windSpeed = profile.supplementarySeries.apparentWindSpeedMps;
+		const lastIndex = Math.max(0, timestamps.length - 1);
+
+		return {
+			label: profile.segment.label ?? `Lap ${index + 1}`,
+			totals: computeVirtualDistanceWindowTotals({
+				timestamps,
+				velocity,
+				windSpeed,
+				trimStart: profile.segment.trim?.start ?? 0,
+				trimEnd: profile.segment.trim?.end ?? lastIndex,
+			}),
+		};
+	});
+}
+
+/**
+ * Per-lap rows for the stacked / GPS-lap plot, read off the SAME cumulative
+ * series that plot draws (`SegmentSupplementarySeries.virtualDistance*Km`)
+ * rather than re-integrated here.
+ *
+ * That is the same principle as the Standard path, applied to a different curve:
+ * the header must come from whatever produced the picture it sits above, or the
+ * two drift the moment either changes.
+ */
+export function lapVirtualDistanceRows(
+	laps: { label: string; metrics: SegmentSupplementarySeries }[],
+): VirtualDistanceRow[] {
+	return laps.map((lap) => {
+		const airKm = lastOrZero(lap.metrics.virtualDistanceAirKm);
+		const groundKm = lastOrZero(lap.metrics.virtualDistanceGroundKm);
+		return {
+			label: lap.label,
+			totals: {
+				airKm,
+				groundKm,
+				differencePercent: virtualDistanceDifferencePercent(airKm, groundKm),
+			},
+		};
+	});
+}
+
+function lastOrZero(values: number[]): number {
+	return values.length > 0 ? values[values.length - 1] : 0;
+}
+
+/**
+ * Recompute and write the header from the input a whole-selection VD figure was
+ * built from. Used by the two paths that integrate in one pass.
+ */
+export function updateCombinedVirtualDistanceHeader(
 	input: VirtualDistancePlotInput,
 	segmentCount: number,
 ): void {
-	renderVirtualDistanceHeader(
-		segmentCount === 1 ? computeVirtualDistanceTotals(input) : null,
+	renderCombinedVirtualDistanceHeader(
+		computeVirtualDistanceWindowTotals({
+			timestamps: input.timestamps,
+			velocity: input.velocity,
+			windSpeed: input.windSpeed,
+			trimStart: input.context.trimStart,
+			trimEnd: input.context.trimEnd,
+		}),
+		segmentCount,
 	);
 }
 
@@ -98,8 +265,6 @@ export function updateVirtualDistanceHeader(
  * Segment count for the two Standard paths that integrate the whole
  * concatenated selection in one pass and so have no per-segment profiles to
  * count: the initial render, and the `compare` branch (D-20, until plan 07-04).
- *
- * An empty selection yields 0, which is correctly NOT 1 and so shows n/a.
  */
 export function selectedLapCount(appState: AppState): number {
 	return appState.selectedLaps.length;

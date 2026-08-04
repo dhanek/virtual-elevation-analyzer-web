@@ -10,6 +10,7 @@ import {
     buildMultiSegmentVirtualDistanceFigure,
 } from '../../plots/MultiSegmentPlotBuilders';
 import { formatLapDuration } from '../../utils/GpsLapDetection';
+import { lapVirtualDistanceRows, renderVirtualDistanceHeader } from '../ve/vdHeader';
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -441,7 +442,13 @@ export function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
 }
 
 /**
- * Render stacked VD plot for GPS lap mode
+ * Render stacked VD plot for GPS lap mode, and the per-lap readouts above it.
+ *
+ * This sidebar is shared by genuine GPS lap splitting and the Standard "Stacked"
+ * view, and it used to render the plot with NO header -- so in both modes the
+ * label was missing outright rather than merely stale. Header and plot are
+ * written from the SAME per-lap cumulative series, which is what stops the two
+ * drifting apart the way Standard's did.
  */
 export function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
     const PlotlyGlobal = (window as any).Plotly;
@@ -450,14 +457,17 @@ export function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
     const plotDiv = document.getElementById('gpsLapVdPlot');
     if (!plotDiv) return;
 
+    const series = lapProfiles.map((lap, index) => ({
+        label: `Lap ${lap.lapNumber}`,
+        color: stackedLapColor(index),
+        metrics: lap.supplementarySeries,
+    }));
+
     const figure = buildMultiSegmentVirtualDistanceFigure({
         title: 'Virtual Distance Difference by Lap',
-        series: lapProfiles.map((lap, index) => ({
-            label: `Lap ${lap.lapNumber}`,
-            color: stackedLapColor(index),
-            metrics: lap.supplementarySeries,
-        })),
+        series,
     });
 
     PlotlyGlobal.newPlot('gpsLapVdPlot', figure.data, figure.layout, figure.config);
+    renderVirtualDistanceHeader(lapVirtualDistanceRows(series));
 }

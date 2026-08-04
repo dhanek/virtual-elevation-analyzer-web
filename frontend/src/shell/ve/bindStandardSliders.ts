@@ -50,7 +50,12 @@ import {
 	stitchStandardProfiles,
 	type StitchedStandardSeries,
 } from "./standardSegments";
-import { selectedLapCount, updateVirtualDistanceHeader } from "./vdHeader";
+import {
+	renderVirtualDistanceHeader,
+	segmentVirtualDistanceRows,
+	selectedLapCount,
+	updateCombinedVirtualDistanceHeader,
+} from "./vdHeader";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -213,13 +218,13 @@ function createStandardUpdateCallbacks(
 	}
 
 	function drawVd(profiles: SegmentVeProfile[]): void {
-		// `profiles.length` is the number of laps actually integrated after the
-		// trim window dropped any it no longer covers -- not the number of ticked
-		// checkboxes. Virtual distance is only defined when that is exactly 1.
-		drawStandardVdPlot(
-			contextFor(profiles),
-			stitched(profiles),
-			profiles.length,
+		// `profiles` is what the trim window actually still covers -- not the
+		// ticked checkboxes -- so a lap the window has dropped contributes no row,
+		// exactly as it contributes no fit to the headline mean.
+		drawStandardVdPlot(contextFor(profiles), stitched(profiles), () =>
+			renderVirtualDistanceHeader(
+				segmentVirtualDistanceRows(profiles, normalized),
+			),
 		);
 	}
 
@@ -368,24 +373,34 @@ function drawStandardPowerPlot(
 	Plotly.react("speedPowerPlot", fig.data, fig.layout, fig.config);
 }
 
+/**
+ * Draw the stitched VD curve and its header.
+ *
+ * The readouts above the plot are part of the plot -- drawing one without the
+ * other is what left them frozen at analyze time -- so this is the only place
+ * either happens.
+ *
+ * `header` is what differs between the two Standard paths. The primitive-driven
+ * path hands over per-lap rows, each integrated over its own trim window, which
+ * is the honest reading under D-19 Option B. `compare` has no per-segment
+ * decomposition (D-20, until plan 07-04), so it hands over the concatenated
+ * integral and `renderCombinedVirtualDistanceHeader` labels it as such.
+ */
 function drawStandardVdPlot(
 	context: ReturnType<typeof createPlotContext>,
 	series: StandardSecondarySeries,
-	segmentCount: number,
+	header: () => void,
 ): void {
-	const input = {
+	const fig = buildVirtualDistanceFigure({
 		context,
 		timestamps: series.timestamps,
 		velocity: series.velocity,
 		// Already offset AND calibrated by resolveWindSeries -- the builder must
 		// not scale it again (D-21).
 		windSpeed: series.apparentWindSpeedMps,
-	};
-	const fig = buildVirtualDistanceFigure(input);
+	});
 	Plotly.react("vdPlot", fig.data, fig.layout, fig.config);
-	// The three readouts above the plot are part of the plot. Drawing one
-	// without the other is what left them frozen at analyze time.
-	updateVirtualDistanceHeader(input, segmentCount);
+	header();
 }
 
 /**
@@ -574,12 +589,23 @@ export async function updateVEPlotsWithWindSource(
 		const drawCompareWind = () =>
 			drawStandardWindPlot(context, compareSeries, "fit");
 		const drawComparePower = () => drawStandardPowerPlot(context, compareSeries);
-		// compare integrates the WHOLE concatenated selection in one pass, so the
-		// number is only defined when that selection is a single lap. The lap
-		// count is the honest discriminator here -- unlike the primitive path
-		// there are no per-segment profiles to count.
+		// compare integrates the WHOLE concatenated selection in one pass, so
+		// there are no per-lap figures to show here -- unlike the primitive path
+		// there are no per-segment profiles to decompose. A single-lap selection
+		// is well defined and renders normally; anything wider renders the
+		// combined integral with the caveat that says what it is.
 		const drawCompareVd = () =>
-			drawStandardVdPlot(context, compareSeries, selectedLapCount(appState));
+			drawStandardVdPlot(context, compareSeries, () =>
+				updateCombinedVirtualDistanceHeader(
+					{
+						context,
+						timestamps: compareSeries.timestamps,
+						velocity: compareSeries.velocity,
+						windSpeed: compareSeries.apparentWindSpeedMps,
+					},
+					selectedLapCount(appState),
+				),
+			);
 
 		// Without this the tab render map still holds the closures the LAST
 		// non-compare update registered, so activating Wind or VD in compare mode

@@ -668,17 +668,22 @@ export interface VirtualDistanceTotals {
  * Shared by the figure and by `computeVirtualDistanceTotals` so the numbers in
  * the VD header can never disagree with the curve they sit above.
  */
-function integrateVirtualDistance(input: VirtualDistancePlotInput): VirtualDistanceIntegration {
-    const air: number[] = new Array(input.timestamps.length).fill(0);
-    const ground: number[] = new Array(input.timestamps.length).fill(0);
+function integrateVirtualDistance(
+    timestamps: number[],
+    velocity: number[],
+    windSpeed: number[],
+    trimStart: number,
+): VirtualDistanceIntegration {
+    const air: number[] = new Array(timestamps.length).fill(0);
+    const ground: number[] = new Array(timestamps.length).fill(0);
 
-    for (let i = input.context.trimStart + 1; i < input.timestamps.length; i++) {
-        const dt = input.timestamps[i] - input.timestamps[i - 1];
+    for (let i = trimStart + 1; i < timestamps.length; i++) {
+        const dt = timestamps[i] - timestamps[i - 1];
 
-        const apparentSpeed = !isNaN(input.windSpeed[i]) ? input.windSpeed[i] : 0;
+        const apparentSpeed = !isNaN(windSpeed[i]) ? windSpeed[i] : 0;
         air[i] = air[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
 
-        const groundSpeed = !isNaN(input.velocity[i]) && input.velocity[i] > 0 ? input.velocity[i] : 0;
+        const groundSpeed = !isNaN(velocity[i]) && velocity[i] > 0 ? velocity[i] : 0;
         ground[i] = ground[i - 1] + groundSpeed * dt;
     }
 
@@ -694,8 +699,45 @@ function integrateVirtualDistance(input: VirtualDistancePlotInput): VirtualDista
  * anywhere else drifts away from it the moment a trim slider moves.
  */
 export function computeVirtualDistanceTotals(input: VirtualDistancePlotInput): VirtualDistanceTotals {
-    const { air, ground } = integrateVirtualDistance(input);
-    const endIndex = Math.min(input.context.trimEnd, air.length - 1);
+    return computeVirtualDistanceWindowTotals({
+        timestamps: input.timestamps,
+        velocity: input.velocity,
+        windSpeed: input.windSpeed,
+        trimStart: input.context.trimStart,
+        trimEnd: input.context.trimEnd,
+    });
+}
+
+export interface VirtualDistanceWindow {
+    timestamps: number[];
+    velocity: number[];
+    /** Already offset AND calibrated, as for VirtualDistancePlotInput. */
+    windSpeed: number[];
+    trimStart: number;
+    trimEnd: number;
+}
+
+/**
+ * The same endpoint reading, over an explicit window rather than a PlotContext.
+ *
+ * This exists so ONE SEGMENT of a multi-lap selection can be integrated on its
+ * own. Under D-19 Option B each lap is fitted and integrated independently, so
+ * the honest virtual distance of a multi-lap selection is N per-lap figures --
+ * NOT the endpoint of the concatenated curve, which accumulates across the
+ * wall-clock gap between lap N's end and lap N+1's start, and across the parts
+ * of intermediate laps the trim window excludes.
+ *
+ * Same arithmetic as the whole-selection case, so a single-lap selection is
+ * bit-identical to what it produced before this helper existed.
+ */
+export function computeVirtualDistanceWindowTotals(window: VirtualDistanceWindow): VirtualDistanceTotals {
+    const { air, ground } = integrateVirtualDistance(
+        window.timestamps,
+        window.velocity,
+        window.windSpeed,
+        window.trimStart,
+    );
+    const endIndex = Math.min(window.trimEnd, air.length - 1);
 
     if (endIndex < 0) {
         return { airKm: 0, groundKm: 0, differencePercent: 0 };
@@ -711,8 +753,18 @@ export function computeVirtualDistanceTotals(input: VirtualDistancePlotInput): V
     };
 }
 
+/** ((air - ground) / ground) * 100, the Rust reference definition, on km inputs. */
+export function virtualDistanceDifferencePercent(airKm: number, groundKm: number): number {
+    return groundKm > 0 ? ((airKm - groundKm) / groundKm) * 100 : 0;
+}
+
 export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {
-    const { air: vdAir, ground: vdGround } = integrateVirtualDistance(input);
+    const { air: vdAir, ground: vdGround } = integrateVirtualDistance(
+        input.timestamps,
+        input.velocity,
+        input.windSpeed,
+        input.context.trimStart,
+    );
 
     const airSlices = createContextSlices(vdAir.map(value => value / 1000), input.context);
     const groundSlices = createContextSlices(vdGround.map(value => value / 1000), input.context);
