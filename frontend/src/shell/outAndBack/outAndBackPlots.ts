@@ -11,6 +11,7 @@ import {
     buildMultiSegmentPowerFigure,
     buildMultiSegmentVirtualDistanceFigure,
 } from '../../plots/MultiSegmentPlotBuilders';
+import { renderVirtualDistanceHeader, sectionVirtualDistanceRows } from '../ve/vdHeader';
 
 /**
  * Calculate mean actual elevation profile for Out and Back (with inbound mirrored)
@@ -162,6 +163,20 @@ export function renderOutAndBackPowerPlot(profiles: OutAndBackVEProfile[]) {
 /**
  * Render stacked VD plot for Out and Back mode
  */
+/**
+ * Render the stacked VD plot for out-and-back, and the per-section readouts
+ * above it.
+ *
+ * This tab used to render a bare plot with no header at all -- the same hole
+ * that was fixed for the GPS-lap sidebar, left open here because the shape was
+ * a real design question: two legs per section means per-segment would be 2N
+ * lines. The maintainer ruled per-section total, so there is one labelled line
+ * per section combining both its legs.
+ *
+ * As in the other two modes, the header is filled from the SAME cumulative
+ * series the plot below draws, so the numbers cannot drift from the curve they
+ * label -- which was the original defect.
+ */
 export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
@@ -175,6 +190,15 @@ export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
     });
 
     Plotly.newPlot('oabVdPlot', figure.data, figure.layout, figure.config);
+    renderVirtualDistanceHeader(
+        sectionVirtualDistanceRows(
+            profiles.map(profile => ({
+                label: `Section ${profile.sectionNumber}`,
+                outbound: profile.outboundSeries,
+                inbound: profile.inboundSeries,
+            })),
+        ),
+    );
 }
 
 /**

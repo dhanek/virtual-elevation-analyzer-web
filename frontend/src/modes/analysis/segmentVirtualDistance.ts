@@ -26,7 +26,8 @@
  *   entry, the same rule that keeps it out of the headline mean.
  * - **GPS-lap** (and the Standard "Stacked" view, which shares that sidebar)
  *   reads the endpoint of the per-lap cumulative series the stacked plot draws.
- *   Out-and-back goes through the same reading; its segments are legs.
+ * - **Out-and-back** reads those same endpoints, then combines a section's two
+ *   legs into ONE section total — see `sectionVirtualDistances`.
  *
  * ## The representation, and why it is not one number
  *
@@ -43,6 +44,7 @@
  * without this layer having to know how many callers there are.
  */
 import {
+	addVirtualDistanceTotals,
 	computeVirtualDistanceWindowTotals,
 	virtualDistanceDifferencePercent,
 	type SegmentVirtualDistance,
@@ -111,6 +113,59 @@ export function stackedVirtualDistances(
 		label: segment.label,
 		...supplementaryTotals(segment.metrics),
 	}));
+}
+
+/** One section's two legs, either of which may be absent. */
+export interface OutAndBackSectionLegs {
+	label: string;
+	outbound: SegmentSupplementarySeries | null;
+	inbound: SegmentSupplementarySeries | null;
+}
+
+/**
+ * Out-and-back: ONE entry per section, combining its outbound and inbound legs.
+ *
+ * Out-and-back has two segments per on-screen section, so per-segment would mean
+ * 2N lines. The maintainer ruled per-section total: one line per section,
+ * combining both legs, explicitly not per-leg.
+ *
+ * **Why that total is well defined here and the concatenated multi-lap integral
+ * is not.** The multi-lap case was refused because integrating laps end to end
+ * charges the wall-clock gap between them as distance, producing a number that
+ * is not the length of anything the rider rode. Summing does not do that. A
+ * section total is `outbound + inbound`, two distances each actually ridden; the
+ * turnaround between them contributes zero rather than being counted. So the
+ * objection that killed the concatenated integral does not reach this, and there
+ * is no reason to refuse a number that is true. `addVirtualDistanceTotals` holds
+ * that argument next to the arithmetic.
+ *
+ * The difference percentage is recomputed from the summed air and ground
+ * distances rather than averaged from the legs' percentages: it is a ratio, and
+ * the mean of two ratios is not the ratio of the sums unless the legs happen to
+ * be the same length.
+ *
+ * A section whose legs both failed to produce a series is dropped rather than
+ * shown as zero — the same rule that keeps a trimmed-out Standard lap off the
+ * header, and the same rule `sectionsCoveredByProfiles` applies to
+ * `currentAnalyzedLaps`.
+ */
+export function sectionVirtualDistances(
+	sections: OutAndBackSectionLegs[],
+): SegmentVirtualDistance[] {
+	const covered = sections.filter(
+		(section) => section.outbound !== null || section.inbound !== null,
+	);
+
+	return covered.map((section) => {
+		const legs = [section.outbound, section.inbound]
+			.filter((leg): leg is SegmentSupplementarySeries => leg !== null)
+			.map(supplementaryTotals);
+
+		return {
+			label: section.label,
+			...legs.reduce(addVirtualDistanceTotals),
+		};
+	});
 }
 
 function lastOrZero(values: number[]): number {

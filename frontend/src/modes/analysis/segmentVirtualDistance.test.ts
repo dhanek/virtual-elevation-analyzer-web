@@ -267,4 +267,89 @@ describe("the segment modes store per-segment figures too", () => {
 		expect(appState.currentVirtualDistances[1].airKm).toBe(3.0);
 		expect(appState.currentVirtualDistances[1].differencePercent).toBeCloseTo(20, 8);
 	});
+
+	/**
+	 * Out-and-back's profiles are LEGS, two per section. The header shows one
+	 * line per SECTION, so the export must too — otherwise the mode that just
+	 * gained a header immediately disagrees with what it stores, which is the
+	 * defect entry (h) exists to close.
+	 */
+	it("outAndBack summarize writes one entry per SECTION, not per leg", () => {
+		const appState = new AppState();
+		appState.currentOutAndBackSections = [
+			{
+				sectionNumber: 1,
+				outboundStartIdx: 0,
+				outboundEndIdx: 9,
+				inboundStartIdx: 10,
+				inboundEndIdx: 19,
+			},
+			{
+				sectionNumber: 2,
+				outboundStartIdx: 20,
+				outboundEndIdx: 29,
+				inboundStartIdx: 30,
+				inboundEndIdx: 39,
+			},
+		] as never;
+
+		handlerFor("GPS based out and back", "outAndBack").summarize(
+			appState,
+			[
+				makeStackedProfile("Section 1 outbound", 0, [0, 1.0]),
+				makeStackedProfile("Section 1 inbound", 10, [0, 1.5]),
+				makeStackedProfile("Section 2 outbound", 20, [0, 2.0]),
+				makeStackedProfile("Section 2 inbound", 30, [0, 2.0]),
+			],
+			AGGREGATE,
+			makeInputs(),
+		);
+
+		// Four legs in, TWO entries out.
+		expect(appState.currentVirtualDistances).toHaveLength(2);
+		expect(appState.currentVirtualDistances.map((entry) => entry.label)).toEqual([
+			"Section 1",
+			"Section 2",
+		]);
+		// Section 1 is 1.0 + 1.5 of air; section 2 is 2.0 + 2.0.
+		expect(appState.currentVirtualDistances[0].airKm).toBeCloseTo(2.5, 10);
+		expect(appState.currentVirtualDistances[1].airKm).toBeCloseTo(4.0, 10);
+	});
+
+	it("pairs legs to sections by range, not by position in the array", () => {
+		const appState = new AppState();
+		appState.currentOutAndBackSections = [
+			{
+				sectionNumber: 1,
+				outboundStartIdx: 0,
+				outboundEndIdx: 9,
+				inboundStartIdx: 10,
+				inboundEndIdx: 19,
+			},
+			{
+				sectionNumber: 2,
+				outboundStartIdx: 20,
+				outboundEndIdx: 29,
+				inboundStartIdx: 30,
+				inboundEndIdx: 39,
+			},
+		] as never;
+
+		// Section 1's inbound leg was too short and the primitive skipped it.
+		// Pairing by position would shift every later leg by one and hang
+		// section 2's outbound onto section 1.
+		handlerFor("GPS based out and back", "outAndBack").summarize(
+			appState,
+			[
+				makeStackedProfile("Section 1 outbound", 0, [0, 1.0]),
+				makeStackedProfile("Section 2 outbound", 20, [0, 2.0]),
+				makeStackedProfile("Section 2 inbound", 30, [0, 2.0]),
+			],
+			AGGREGATE,
+			makeInputs(),
+		);
+
+		expect(appState.currentVirtualDistances[0].airKm).toBeCloseTo(1.0, 10);
+		expect(appState.currentVirtualDistances[1].airKm).toBeCloseTo(4.0, 10);
+	});
 });

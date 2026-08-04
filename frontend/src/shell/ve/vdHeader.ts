@@ -47,8 +47,10 @@ import {
 import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import type { SegmentVirtualDistance } from "../../analysis/VirtualDistance";
 import {
+	sectionVirtualDistances,
 	stackedVirtualDistances,
 	standardVirtualDistances,
+	type OutAndBackSectionLegs,
 } from "../../modes/analysis/segmentVirtualDistance";
 import type { SegmentVeProfile } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
@@ -227,6 +229,26 @@ export function lapVirtualDistanceRows(
 	laps: { label: string; metrics: SegmentSupplementarySeries }[],
 ): VirtualDistanceRow[] {
 	return toRows(stackedVirtualDistances(laps));
+}
+
+/**
+ * Per-SECTION rows for out-and-back: one line per section, combining its
+ * outbound and inbound legs.
+ *
+ * Out-and-back was the third mode with no VD header at all. It was left alone
+ * when the other two were fixed because its shape was a genuine question rather
+ * than a copy — two legs per section means per-leg would be 2N lines — and the
+ * maintainer has now ruled: per-section total, explicitly not per-leg.
+ *
+ * Same presentation as the other two modes, one labelled line per unit, so the
+ * three read consistently; the unit here is the section rather than the lap.
+ * See `sectionVirtualDistances` for why combining the legs is well defined where
+ * the concatenated multi-lap integral was not.
+ */
+export function sectionVirtualDistanceRows(
+	sections: OutAndBackSectionLegs[],
+): VirtualDistanceRow[] {
+	return toRows(sectionVirtualDistances(sections));
 }
 
 /**

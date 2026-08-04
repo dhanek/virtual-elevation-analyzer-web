@@ -127,3 +127,36 @@ export function virtualDistanceDifferencePercent(
 ): number {
 	return groundKm > 0 ? ((airKm - groundKm) / groundKm) * 100 : 0;
 }
+
+/**
+ * Add two independently-integrated segments' virtual distances together.
+ *
+ * The distinction this function exists to make explicit: ADDING two segment
+ * totals is not the same operation as INTEGRATING across both segments, and
+ * only one of them is honest.
+ *
+ * Integrating a concatenated selection charges whatever happened between the
+ * segments — the wall-clock gap between one lap's end and the next lap's start —
+ * as though the rider had ridden it. That is why the multi-lap header refuses
+ * the concatenated integral. Adding charges the gap nothing: it is the sum of
+ * two distances that were each actually ridden, and it is a distance actually
+ * ridden.
+ *
+ * So this is legitimate for an out-and-back section's outbound + inbound total
+ * (the turnaround between the legs contributes zero) and would be equally
+ * legitimate for a multi-lap total. The multi-lap case is not summed anyway, but
+ * for a different reason: the maintainer wants the laps individually, not
+ * because a sum would be false.
+ */
+export function addVirtualDistanceTotals(
+	a: VirtualDistanceTotals,
+	b: VirtualDistanceTotals,
+): VirtualDistanceTotals {
+	const airKm = a.airKm + b.airKm;
+	const groundKm = a.groundKm + b.groundKm;
+	return {
+		airKm,
+		groundKm,
+		differencePercent: virtualDistanceDifferencePercent(airKm, groundKm),
+	};
+}
