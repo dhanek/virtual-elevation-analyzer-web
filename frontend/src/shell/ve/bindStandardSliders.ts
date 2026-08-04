@@ -31,7 +31,10 @@ import type {
 } from "../../modes/analysis/types";
 import { isVeTabActive } from "../analysis/updateModeVEPlots";
 import { bindModeControls } from "../analysis/bindModeControls";
-import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import {
+	registerModeUpdateCallbacks,
+	registerModeWindSourceOverride,
+} from "../analysis/modeUpdateCallbacks";
 import { configureModeUpdateRequests } from "../analysis/requestModeUpdate";
 import { setupTabSwitching } from "../dom/tabs";
 import {
@@ -681,6 +684,27 @@ export function setupVESliders(
 			context.appliedCrr,
 		),
 	);
+	// Standard renders `compare` itself, for every control and not just for the
+	// radio that selects it. Registered as a property of the SOURCE so the funnel
+	// routes there whatever the user touched — dragging k, CdA or the trim under
+	// "Compare both methods" recomputes the comparison rather than painting a
+	// single-source figure over it.
+	//
+	// Temporary: plan 07-04 (D-07/D-20) generalises compare into the primitive and
+	// deletes this registration along with `updateStandardComparePlots`.
+	registerModeWindSourceOverride("standard", (windSource) => {
+		if (windSource !== "compare") return null;
+		return () => {
+			const { start, end } = currentTrim();
+			return updateStandardComparePlots(
+				appState,
+				analysisInput,
+				selectedIndices,
+				start,
+				end,
+			);
+		};
+	});
 	configureModeUpdateRequests({ appState });
 
 	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -797,20 +821,6 @@ export function setupVESliders(
 					endIndex: end,
 				},
 			]);
-		},
-		// Temporary: plan 07-04 (D-07/D-20) generalises compare into the primitive
-		// and deletes this branch.
-		onWindSourceSelected: (windSource) => {
-			if (windSource !== "compare") return false;
-			const { start, end } = currentTrim();
-			void updateStandardComparePlots(
-				appState,
-				analysisInput,
-				selectedIndices,
-				start,
-				end,
-			);
-			return true;
 		},
 	});
 

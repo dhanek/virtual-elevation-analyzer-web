@@ -32,7 +32,7 @@ import type { AnalysisModeId } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
 import { syncRangeAndNumber } from "../dom/rangeNumberPair";
-import { bindWindSourceRadios, getSelectedWindSource } from "../dom/windSource";
+import { bindWindSourceRadios } from "../dom/windSource";
 import { bindCrrTempControls } from "../ve/crrTempControls";
 import { bindWindHeightControls } from "../ve/windHeightControls";
 import { bindElevationSmoothingToggle } from "./elevationProfileCycle";
@@ -91,13 +91,6 @@ export interface BindModeControlsOptions {
 	 * mode. Returning null means "no usable answer" and the control does nothing.
 	 */
 	getAutoCalibrationPercent?: () => number | null;
-	/**
-	 * Escape hatch for a wind source a mode still handles itself. Returning true
-	 * means the mode took over and the funnel must not also be asked.
-	 *
-	 * Exactly one caller: Standard's `compare`. Plan 07-04 (D-07/D-20) deletes it.
-	 */
-	onWindSourceSelected?: (windSource: string) => boolean;
 }
 
 function element(id: string | undefined): HTMLElement | null {
@@ -357,14 +350,11 @@ export function bindModeControls(options: BindModeControlsOptions): void {
 				break;
 
 			case "radioGroup":
-				bindWindSourceRadios(() => {
-					const windSource = getSelectedWindSource();
-					if (options.onWindSourceSelected?.(windSource)) {
-						// The mode handled it (Standard's compare branch).
-						return;
-					}
-					finish(spec);
-				});
+				// No special case for a mode-owned source. Which RENDERER serves the
+				// selected source is the funnel's business (see
+				// `getModeWindSourceOverride`), and it has to be, because every other
+				// row reaches that renderer too.
+				bindWindSourceRadios(() => finish(spec));
 				break;
 
 			case "toggle":

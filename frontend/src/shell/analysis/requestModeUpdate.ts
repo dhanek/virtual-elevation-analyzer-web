@@ -31,7 +31,10 @@ import { getSelectedWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
-import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
+import {
+	getModeUpdateCallbacks,
+	getModeWindSourceOverride,
+} from "./modeUpdateCallbacks";
 import { scheduleRecompute, type RecomputeMode } from "./recomputeRunner";
 import { updateModeVEPlots } from "./updateModeVEPlots";
 
@@ -185,6 +188,24 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	const cda = readNumber("cdaSlider", "cdaValue", FALLBACK_CDA);
 	const crr = readNumber("crrSlider", "crrValue", FALLBACK_CRR);
 	const windSource = getSelectedWindSource() as WindSource;
+
+	// Does the mode render this source itself? Asked for EVERY reason, not only
+	// for a wind-source change: the selected source outlives the interaction that
+	// selected it, so a control moved afterwards has to reach the same renderer.
+	// Scheduled like any other update rather than run inline, so a drag under
+	// Standard's `compare` stays latest-input-wins instead of composing two
+	// calculators per pointer event.
+	const override = getModeWindSourceOverride(handler.id, windSource);
+	if (override) {
+		log.debug(`requestModeUpdate(${reason}) -> ${handler.id}/${windSource} own`);
+		scheduleRecompute({
+			mode: recomputeModeFor(handler.id),
+			run: async () => {
+				await override();
+			},
+		});
+		return;
+	}
 
 	const callbacks = getModeUpdateCallbacks(handler.id, {
 		windSource,
