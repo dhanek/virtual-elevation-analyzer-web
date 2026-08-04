@@ -244,6 +244,11 @@ function rerenderSection3(): void {
 				);
 			}
 			deps.setupAnalyzeButton();
+			// The template hard-codes the Analyze button as `disabled`, but the FIT
+			// lap selection survives the re-render. Re-evaluate it against the
+			// retained selection, or a mode switch leaves a valid selection
+			// un-analysable until the user toggles a checkbox.
+			deps.updateAnalyzeButton();
 		} catch (error) {
 			log.error("Error re-rendering section 3:", error);
 		}
@@ -1284,6 +1289,9 @@ export function initializeSection3(): void {
 				);
 			}
 			deps.setupAnalyzeButton();
+			// Same reason as the re-render path: reflect any retained selection
+			// rather than leaving the template's hard-coded `disabled` in place.
+			deps.updateAnalyzeButton();
 
 			log.debug(
 				"Section 3 initialized (GPS:",

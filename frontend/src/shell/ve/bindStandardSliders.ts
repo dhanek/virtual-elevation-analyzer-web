@@ -50,6 +50,7 @@ import {
 	stitchStandardProfiles,
 	type StitchedStandardSeries,
 } from "./standardSegments";
+import { selectedLapCount, updateVirtualDistanceHeader } from "./vdHeader";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -212,7 +213,14 @@ function createStandardUpdateCallbacks(
 	}
 
 	function drawVd(profiles: SegmentVeProfile[]): void {
-		drawStandardVdPlot(contextFor(profiles), stitched(profiles));
+		// `profiles.length` is the number of laps actually integrated after the
+		// trim window dropped any it no longer covers -- not the number of ticked
+		// checkboxes. Virtual distance is only defined when that is exactly 1.
+		drawStandardVdPlot(
+			contextFor(profiles),
+			stitched(profiles),
+			profiles.length,
+		);
 	}
 
 	return {
@@ -363,16 +371,21 @@ function drawStandardPowerPlot(
 function drawStandardVdPlot(
 	context: ReturnType<typeof createPlotContext>,
 	series: StandardSecondarySeries,
+	segmentCount: number,
 ): void {
-	const fig = buildVirtualDistanceFigure({
+	const input = {
 		context,
 		timestamps: series.timestamps,
 		velocity: series.velocity,
 		// Already offset AND calibrated by resolveWindSeries -- the builder must
 		// not scale it again (D-21).
 		windSpeed: series.apparentWindSpeedMps,
-	});
+	};
+	const fig = buildVirtualDistanceFigure(input);
 	Plotly.react("vdPlot", fig.data, fig.layout, fig.config);
+	// The three readouts above the plot are part of the plot. Drawing one
+	// without the other is what left them frozen at analyze time.
+	updateVirtualDistanceHeader(input, segmentCount);
 }
 
 /**
@@ -561,7 +574,12 @@ export async function updateVEPlotsWithWindSource(
 		const drawCompareWind = () =>
 			drawStandardWindPlot(context, compareSeries, "fit");
 		const drawComparePower = () => drawStandardPowerPlot(context, compareSeries);
-		const drawCompareVd = () => drawStandardVdPlot(context, compareSeries);
+		// compare integrates the WHOLE concatenated selection in one pass, so the
+		// number is only defined when that selection is a single lap. The lap
+		// count is the honest discriminator here -- unlike the primitive path
+		// there are no per-segment profiles to count.
+		const drawCompareVd = () =>
+			drawStandardVdPlot(context, compareSeries, selectedLapCount(appState));
 
 		// Without this the tab render map still holds the closures the LAST
 		// non-compare update registered, so activating Wind or VD in compare mode

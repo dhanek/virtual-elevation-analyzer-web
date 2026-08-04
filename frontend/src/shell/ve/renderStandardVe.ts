@@ -32,6 +32,7 @@ import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveSelectionWindSeries } from "./standardSegments";
+import { selectedLapCount, updateVirtualDistanceHeader } from "./vdHeader";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 
@@ -141,12 +142,15 @@ export async function initializeVEAnalysis(
 	// D-21: the builder no longer takes (or applies) a calibration percentage.
 	// It integrates exactly the series it is handed, which is already offset and
 	// calibrated. A second application is now a compile error.
-	const virtualDistanceFigure = buildVirtualDistanceFigure({
+	const virtualDistanceInput = {
 		context,
 		timestamps: analysisInput.timestamps,
 		velocity: analysisInput.velocity,
 		windSpeed: resolvedWindSpeed,
-	});
+	};
+	const virtualDistanceFigure = buildVirtualDistanceFigure(
+		virtualDistanceInput,
+	);
 
 	Plotly.newPlot(
 		"vePlot",
@@ -178,6 +182,10 @@ export async function initializeVEAnalysis(
 		virtualDistanceFigure.layout,
 		virtualDistanceFigure.config,
 	);
+	// The template leaves the three VD spans empty on purpose; fill them from the
+	// same integration that just drew the curve, so the first paint and every
+	// later slider-driven redraw agree.
+	updateVirtualDistanceHeader(virtualDistanceInput, selectedLapCount(appState));
 
 	appState.filteredVEData = {
 		positionLat: analysisInput.positionLat,
@@ -384,10 +392,19 @@ export async function showVirtualElevationAnalysisInline(
                             <div id="speedPowerPlot" class="ve-plot-container"></div>
                         </div>
                         <div class="ve-tab-content" id="vd-tab">
+                             <!--
+                                Deliberately EMPTY. These three spans used to be
+                                interpolated here from the analyze-time result and
+                                never written again, so they stayed frozen while
+                                the trim sliders moved the curve below them. They
+                                are now owned by vdHeader.ts and written from the
+                                same integration that draws that curve, on every
+                                VD draw including the first.
+                             -->
                              <div class="ve-metrics-compact ve-metrics-compact--spaced">
-                                VD (Air):<span id="vdAirValue">${(initialResult.virtual_distance_air / 1000).toFixed(3)} km</span> |
-                                VD (Ground):<span id="vdGroundValue">${(initialResult.virtual_distance_ground / 1000).toFixed(3)} km</span> |
-                                Difference:<span id="vdDiffValue" class="ve-metrics-compact__value ${initialResult.vd_difference_percent >= 0 ? "ve-metrics-compact__value--positive" : "ve-metrics-compact__value--negative"}">${initialResult.vd_difference_percent >= 0 ? "+" : ""}${initialResult.vd_difference_percent.toFixed(2)}%</span>
+                                VD (Air):<span id="vdAirValue"></span> |
+                                VD (Ground):<span id="vdGroundValue"></span> |
+                                Difference:<span id="vdDiffValue" class="ve-metrics-compact__value"></span>
                             </div>
                             <div id="vdPlot" class="ve-plot-container"></div>
                         </div>
