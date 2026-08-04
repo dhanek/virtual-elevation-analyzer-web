@@ -117,21 +117,84 @@ const WIND_HEIGHT_INFO_TOOLTIP =
 	"wind was measured, not by whichever value flattens the curve.";
 
 /**
+ * Whether the height factor has any job under the given wind source.
+ *
+ * The factor transfers a wind reported at the model's 10 m reference height
+ * down to the rider (D-03/D-04), so it is meaningful exactly when the wind
+ * series is *modelled* from that reference:
+ *
+ * - "constant" — a weather-API or hand-entered wind. The whole point of k.
+ * - "compare"  — resolves a constant-wind branch alongside the FIT branch, so
+ *   the factor stays live. Hiding on "not constant" would be wrong here.
+ * - "fit"      — the recorded air speed is already measured at the rider
+ *   (D-01), so there is no height to transfer from and the control is inert:
+ *   visible, draggable, and unable to change a number.
+ *
+ * Anything else (no radios rendered at all, an unrecognised value) is treated
+ * as "no transfer applies", matching getSelectedWindSource's "fit" fallback.
+ */
+export function windHeightAppliesTo(
+	windSource: string | null | undefined,
+): boolean {
+	return windSource === "constant" || windSource === "compare";
+}
+
+/**
+ * Show or hide the control block to match the selected wind source.
+ *
+ * VISIBILITY ONLY, and that is a load-bearing claim rather than a comment: the
+ * element stays in the DOM with both inputs holding their values, and
+ * `wind_height_factor` lives in AnalysisParameters. Every consumer reads the
+ * model — resolveWindHeightFactor(params), and through it the single
+ * effectiveWindSpeed hoist in VeCalculatorFactory.createVeCalculator — and
+ * nothing outside this module's own handlers reads `#windHeightSlider`. So a
+ * hidden control changes nothing that is computed, and toggling the source back
+ * and forth returns the same k that was there before.
+ *
+ * Called from bindWindSourceRadios (shell/dom/windSource.ts) so that all three
+ * sidebars get it from the one binder they already share, at bind time and on
+ * every change, rather than from three parallel handlers.
+ */
+export function syncWindHeightControlsVisibility(
+	windSource: string | null | undefined,
+): void {
+	const controls = document.getElementById("windHeightControls");
+	if (!controls) return;
+	controls.hidden = !windHeightAppliesTo(windSource);
+}
+
+/**
  * The control block's markup, for the sidebars to interpolate.
  *
  * T-08-02: every interpolated value is a number produced by toFixed or one of
  * the exported numeric constants, plus the readout string this module builds
  * from those same numbers. No user-controlled string reaches the template.
+ *
+ * `windSource` is optional and only decides the block's INITIAL hidden state.
+ * bindWindSourceRadios re-syncs it the moment it binds, so a caller that omits
+ * it still ends up correct — it just risks one frame of a visible control on
+ * paths that await between innerHTML and the bind (Standard awaits
+ * initializeVEAnalysis). Passing it is the difference between no flash and a
+ * flash, never between right and wrong.
  */
-export function windHeightControlsMarkup(params: AnalysisParameters): string {
+export function windHeightControlsMarkup(
+	params: AnalysisParameters,
+	windSource?: string | null,
+): string {
 	const factor = resolveWindHeightFactor(params).toFixed(2);
 	// D-02: bounds come from the constants, never re-literalled here.
 	const min = WIND_HEIGHT_FACTOR_MIN;
 	const max = WIND_HEIGHT_FACTOR_MAX;
 	const step = WIND_HEIGHT_FACTOR_STEP;
+	// Undefined means "the caller has not decided" — stay visible and let the
+	// bind-time sync settle it. An explicit source hides immediately.
+	const hidden =
+		windSource !== undefined && windSource !== null
+			? !windHeightAppliesTo(windSource)
+			: false;
 
 	return `
-        <div class="ve-control-group wind-height-controls" id="windHeightControls">
+        <div class="ve-control-group wind-height-controls" id="windHeightControls"${hidden ? " hidden" : ""}>
             <label class="wind-height-controls__label" for="windHeightSlider">
                 Wind height factor (k):
                 <span id="windHeightInfo" class="wind-height-controls__info" title="${WIND_HEIGHT_INFO_TOOLTIP}">i</span>

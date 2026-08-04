@@ -293,6 +293,16 @@
    analysis-params.css imports BEFORE ve-results.css, so rules that must
    out-rank .ve-control-group label/span (0,1,1) repeat their own class (0,2,0);
    no descendant class selectors, per the pass-3 flatten rule. */
+/* The block is hidden under FIT wind, where the factor has nothing to transfer
+   from (D-01). The UA default [hidden] { display: none } already covers this
+   because .ve-control-group sets no display, but that is an accident of the
+   current cascade — stating it explicitly means adding a display to
+   .ve-control-group later cannot silently un-hide the control. Repeated class
+   for the same specificity reason as the block above. */
+.wind-height-controls[hidden].wind-height-controls[hidden] {
+	display: none;
+}
+
 .wind-height-controls__label.wind-height-controls__label {
 	display: flex;
 	align-items: center;
