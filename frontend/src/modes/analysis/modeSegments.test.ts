@@ -94,6 +94,13 @@ function makeInputs(): ResolvedUpdateInputs {
     return {
         wind: { selectedWindSource: 'fit' },
         windSource: 'fit',
+        // `summarize` reads these to build the per-segment virtual distances it
+        // now writes to AppState (change-list entry (h)). Indexed by
+        // `profile.indices`, i.e. the full activity.
+        normalized: {
+            timestamps: Array.from({ length: SAMPLE_COUNT }, (_, i) => i),
+            velocity: Array.from({ length: SAMPLE_COUNT }, () => 10),
+        },
     } as unknown as ResolvedUpdateInputs;
 }
 

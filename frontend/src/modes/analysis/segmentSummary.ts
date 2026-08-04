@@ -10,13 +10,20 @@
  *
  * Factoring it here means the two modes cannot drift apart again.
  *
- * The zeroed virtual-distance fields are reproduced DELIBERATELY and must not
- * be "improved" here: populating them is a listed Deferred Idea in 07-CONTEXT.md
- * and would move stored output with no D-09 change-list entry.
+ * The three scalar virtual-distance fields on the combined shape stay ZEROED,
+ * and that is now a narrower statement than it used to be. There is still no
+ * single virtual distance for a multi-segment analysis — the concatenated
+ * integral spans the gaps between segments and is not a distance anyone rode —
+ * so no number is invented here. What changed under change-list entry (h) is
+ * that the per-segment figures are no longer discarded: `summarize` writes them
+ * to `appState.currentVirtualDistances`, one per segment, and Store Result and
+ * Export CSV persist THOSE. See `segmentVirtualDistance.ts`.
  */
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import type { SegmentVirtualDistance } from "../../analysis/VirtualDistance";
 import type { AppState, WindSource } from "../../state/AppState";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
+import { stackedVirtualDistances } from "./segmentVirtualDistance";
 import type {
 	ModeAggregateStats,
 	ResolvedUpdateInputs,
@@ -38,7 +45,10 @@ export function buildCombinedSegmentResult(
 		ve_elevation_diff: aggregate.veGain,
 		actual_elevation_diff: aggregate.actualGain,
 		virtual_elevation: new Float64Array(combinedVE),
-		// Deliberately zeroed — see the file header.
+		// Deliberately zeroed — see the file header. The real per-segment
+		// figures live on `appState.currentVirtualDistances`; nothing reads
+		// these three scalars, and filling them with a total would be the
+		// invented single number entry (h) exists to refuse.
 		virtual_distance_air: 0,
 		virtual_distance_ground: 0,
 		vd_difference_percent: 0,
@@ -99,6 +109,11 @@ export function resolveRecordedWindSource(
 
 /**
  * The whole segment-mode AppState write, in one place.
+ *
+ * `virtualDistances` defaults to one entry per profile, read off the same
+ * cumulative series the mode's stacked VD plot draws. Out-and-back overrides it
+ * because its profiles are LEGS, two per section, and the maintainer ruled that
+ * both the header and the export carry one section total rather than 2N lines.
  */
 export function writeSegmentModeResultState(
 	appState: AppState,
@@ -106,8 +121,15 @@ export function writeSegmentModeResultState(
 	aggregate: ModeAggregateStats,
 	inputs: ResolvedUpdateInputs,
 	analyzedItems: number[],
+	virtualDistances: SegmentVirtualDistance[] = stackedVirtualDistances(
+		profiles.map((profile) => ({
+			label: profile.segment.label,
+			metrics: profile.supplementarySeries,
+		})),
+	),
 ): void {
 	appState.currentVEResult = buildCombinedSegmentResult(profiles, aggregate);
+	appState.currentVirtualDistances = virtualDistances;
 	appState.currentFilteredData = buildFilteredDataFromProfiles(
 		appState,
 		profiles,

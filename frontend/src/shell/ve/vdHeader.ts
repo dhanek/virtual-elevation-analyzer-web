@@ -41,11 +41,15 @@
  */
 import {
 	computeVirtualDistanceWindowTotals,
-	virtualDistanceDifferencePercent,
 	type VirtualDistanceTotals,
 	type VirtualDistancePlotInput,
 } from "../../plots/StandardPlotBuilders";
 import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
+import type { SegmentVirtualDistance } from "../../analysis/VirtualDistance";
+import {
+	stackedVirtualDistances,
+	standardVirtualDistances,
+} from "../../modes/analysis/segmentVirtualDistance";
 import type { SegmentVeProfile } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 
@@ -184,31 +188,30 @@ export function renderCombinedVirtualDistanceHeader(
 }
 
 /**
- * Per-segment rows for the primitive-driven paths, integrated the same way the
- * stitched Standard curve is (`computeVirtualDistanceWindowTotals`), one segment
- * at a time and each over its OWN trim window.
+ * Adapt the stored/exported shape to a header row.
+ *
+ * `renderVirtualDistanceHeader` strips the label from a lone row itself, so a
+ * single-segment analysis renders exactly as before whichever side the null
+ * comes from.
+ */
+function toRows(distances: SegmentVirtualDistance[]): VirtualDistanceRow[] {
+	return distances.map(({ label, ...totals }) => ({ label, totals }));
+}
+
+/**
+ * Per-segment rows for the primitive-driven paths, integrated one segment at a
+ * time and each over its OWN trim window.
+ *
+ * Delegates to the function `summarize` uses to build what Store Result and
+ * Export CSV persist (change-list entry (h)). Sharing the call, rather than
+ * matching two implementations, is what makes "the export agrees with the
+ * screen" a property of the code instead of a coincidence.
  */
 export function segmentVirtualDistanceRows(
 	profiles: SegmentVeProfile[],
 	normalized: { timestamps: number[]; velocity: number[] },
 ): VirtualDistanceRow[] {
-	return profiles.map((profile, index) => {
-		const timestamps = profile.indices.map((i) => normalized.timestamps[i]);
-		const velocity = profile.indices.map((i) => normalized.velocity[i]);
-		const windSpeed = profile.supplementarySeries.apparentWindSpeedMps;
-		const lastIndex = Math.max(0, timestamps.length - 1);
-
-		return {
-			label: profile.segment.label ?? `Lap ${index + 1}`,
-			totals: computeVirtualDistanceWindowTotals({
-				timestamps,
-				velocity,
-				windSpeed,
-				trimStart: profile.segment.trim?.start ?? 0,
-				trimEnd: profile.segment.trim?.end ?? lastIndex,
-			}),
-		};
-	});
+	return toRows(standardVirtualDistances(profiles, normalized));
 }
 
 /**
@@ -223,22 +226,7 @@ export function segmentVirtualDistanceRows(
 export function lapVirtualDistanceRows(
 	laps: { label: string; metrics: SegmentSupplementarySeries }[],
 ): VirtualDistanceRow[] {
-	return laps.map((lap) => {
-		const airKm = lastOrZero(lap.metrics.virtualDistanceAirKm);
-		const groundKm = lastOrZero(lap.metrics.virtualDistanceGroundKm);
-		return {
-			label: lap.label,
-			totals: {
-				airKm,
-				groundKm,
-				differencePercent: virtualDistanceDifferencePercent(airKm, groundKm),
-			},
-		};
-	});
-}
-
-function lastOrZero(values: number[]): number {
-	return values.length > 0 ? values[values.length - 1] : 0;
+	return toRows(stackedVirtualDistances(laps));
 }
 
 /**
