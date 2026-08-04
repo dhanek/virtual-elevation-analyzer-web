@@ -297,6 +297,21 @@
 	font-weight: 500;
 }
 
+/*
+ * Readout under the air-speed offset control: the ground/air speed sync error
+ * the offset is tuned to minimise (N-3). Secondary to the control itself, so it
+ * is smaller and muted rather than competing with the slider value.
+ */
+.ve-parameter__metric {
+	font-size: 0.85em;
+	color: var(--color-text-muted, #666);
+}
+
+.ve-parameter__metric span {
+	font-weight: 600;
+	margin-left: var(--space-xs, 4px);
+}
+
 /* Sidebar footer action buttons (de-inlined from renderStandardVe.ts) */
 .ve-sidebar-footer__btn {
 	width: 100%;

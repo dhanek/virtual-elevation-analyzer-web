@@ -31,7 +31,10 @@ import type {
 } from "../../modes/analysis/types";
 import { isVeTabActive } from "../analysis/updateModeVEPlots";
 import { bindModeControls } from "../analysis/bindModeControls";
-import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import {
+	registerModeUpdateCallbacks,
+	registerModeWindSourceOverride,
+} from "../analysis/modeUpdateCallbacks";
 import { configureModeUpdateRequests } from "../analysis/requestModeUpdate";
 import { setupTabSwitching } from "../dom/tabs";
 import {
@@ -51,11 +54,35 @@ const MIN_TRIM_WINDOW_SAMPLES = 30;
 // Plotly.js type declaration
 declare const Plotly: any;
 
+/**
+ * How the covered-lap count reads (maintainer ruling, plan 07-03).
+ *
+ * D-19 Option B makes the headline numbers the MEAN OF N PER-LAP FITS, and the
+ * primitive drops any lap the trim window leaves under `MIN_TRIMMED_SEGMENT_SAMPLES`
+ * samples. The maintainer accepted that exclusion — and with it the consequence
+ * that the mean can cover fewer laps than the user has ticked. Accepted is not
+ * the same as invisible: before this, a trim that silently dropped two of three
+ * laps changed the numbers with nothing on screen saying so.
+ *
+ * So the span says "3" when every ticked lap is covered and "2 of 3" when it is
+ * not. The bare number in the common case keeps the header quiet; the "of M"
+ * appears exactly when there is something to notice.
+ */
+export function formatCoveredLapCount(
+	covered: number,
+	selected: number,
+): string {
+	return covered === selected
+		? `${covered}`
+		: `${covered} of ${selected}`;
+}
+
 function updateMetricsDisplay(
 	r2: number,
 	rmse: number,
 	veGain: number,
 	actualGain: number,
+	coveredLaps: { covered: number; selected: number } | null,
 ): void {
 	const r2ValueSpan = document.getElementById("r2Value");
 	if (r2ValueSpan) r2ValueSpan.textContent = r2.toFixed(4);
@@ -69,6 +96,14 @@ function updateMetricsDisplay(
 	const actualGainValueSpan = document.getElementById("actualGainValue");
 	if (actualGainValueSpan)
 		actualGainValueSpan.textContent = actualGain.toFixed(2) + "m";
+
+	const lapsCoveredSpan = document.getElementById("lapsCoveredValue");
+	if (lapsCoveredSpan && coveredLaps) {
+		lapsCoveredSpan.textContent = formatCoveredLapCount(
+			coveredLaps.covered,
+			coveredLaps.selected,
+		);
+	}
 }
 
 function isValidSelectionProfile(
@@ -258,6 +293,12 @@ function createStandardUpdateCallbacks(
 				aggregate.rmse,
 				aggregate.veGain,
 				aggregate.actualGain,
+				// `segmentCount` is how many per-lap fits the mean is actually over,
+				// AFTER the primitive dropped any lap the trim left too short.
+				{
+					covered: aggregate.segmentCount,
+					selected: selectedLapCount(appState),
+				},
 			);
 		},
 	};
@@ -502,6 +543,15 @@ export async function updateStandardComparePlots(
 			(result1.rmse + result2.rmse) / 2,
 			(result1.ve_elevation_diff + result2.ve_elevation_diff) / 2,
 			(result1.actual_elevation_diff + result2.actual_elevation_diff) / 2,
+			// compare integrates the WHOLE concatenated selection in ONE pass rather
+			// than one fit per lap, so no lap can be dropped for being too short and
+			// the covered count is the selection itself. Passing it explicitly rather
+			// than null keeps the span from carrying a stale count over from the last
+			// non-compare render.
+			{
+				covered: selectedLapCount(appState),
+				selected: selectedLapCount(appState),
+			},
 		);
 
 		// REGRESSION FIX (07-02 Task 4 follow-up). Before this phase the eight
@@ -681,6 +731,27 @@ export function setupVESliders(
 			context.appliedCrr,
 		),
 	);
+	// Standard renders `compare` itself, for every control and not just for the
+	// radio that selects it. Registered as a property of the SOURCE so the funnel
+	// routes there whatever the user touched — dragging k, CdA or the trim under
+	// "Compare both methods" recomputes the comparison rather than painting a
+	// single-source figure over it.
+	//
+	// Temporary: plan 07-04 (D-07/D-20) generalises compare into the primitive and
+	// deletes this registration along with `updateStandardComparePlots`.
+	registerModeWindSourceOverride("standard", (windSource) => {
+		if (windSource !== "compare") return null;
+		return () => {
+			const { start, end } = currentTrim();
+			return updateStandardComparePlots(
+				appState,
+				analysisInput,
+				selectedIndices,
+				start,
+				end,
+			);
+		};
+	});
 	configureModeUpdateRequests({ appState });
 
 	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -797,20 +868,6 @@ export function setupVESliders(
 					endIndex: end,
 				},
 			]);
-		},
-		// Temporary: plan 07-04 (D-07/D-20) generalises compare into the primitive
-		// and deletes this branch.
-		onWindSourceSelected: (windSource) => {
-			if (windSource !== "compare") return false;
-			const { start, end } = currentTrim();
-			void updateStandardComparePlots(
-				appState,
-				analysisInput,
-				selectedIndices,
-				start,
-				end,
-			);
-			return true;
 		},
 	});
 
