@@ -152,14 +152,21 @@ function rerenderSection3(): void {
 		resultsDiv.classList.remove("hidden");
 	}
 
-	// Re-setup handlers after re-render
+	// Re-setup handlers after re-render.
+	//
+	// Section 3's own controls are restored FIRST and in their own try, before any
+	// of the fallible map work. They used to sit at the tail of a single try that
+	// began by tearing down and re-awaiting a Leaflet map against DOM that had just
+	// been replaced underneath it; any throw there aborted the whole hook and left
+	// Section 3 inert -- the mode dropdown unbound, the Analyze button stuck at the
+	// template's hard-coded `disabled`, and the trim sliders stuck at the
+	// template's hard-coded `hidden`. Nothing about re-binding a checkbox handler
+	// depends on the map succeeding, so nothing about it should be sequenced behind
+	// the map.
 	setTimeout(async () => {
-		try {
-			// Setup GPS mode selector handler
-			if (hasGpsData) {
-				bindGpsModeSelector();
-			}
+		restoreSection3Controls(hasGpsData);
 
+		try {
 			// Setup map visualization if GPS data available
 			if (hasGpsData) {
 				const mapViz = deps.getMapVisualization();
@@ -235,24 +242,48 @@ function rerenderSection3(): void {
 				}
 			}
 
-			// Setup lap selection handlers
-			const lapListEl = document.getElementById("lapList");
-			if (lapListEl) {
-				bindLapSelection(lapListEl, () => updateSelectedLaps());
-				bindSelectAllButton("selectAllLaps", "lapList", () =>
-					updateSelectedLaps(),
-				);
-			}
-			deps.setupAnalyzeButton();
-			// The template hard-codes the Analyze button as `disabled`, but the FIT
-			// lap selection survives the re-render. Re-evaluate it against the
-			// retained selection, or a mode switch leaves a valid selection
-			// un-analysable until the user toggles a checkbox.
-			deps.updateAnalyzeButton();
 		} catch (error) {
-			log.error("Error re-rendering section 3:", error);
+			log.error("Error re-initializing the section 3 map:", error);
 		}
 	}, 100);
+}
+
+/**
+ * Re-bind everything Section 3 owns after its DOM has been replaced.
+ *
+ * `renderSection3Template` emits the Analyze button hard-coded `disabled` and the
+ * map trim controls hard-coded `hidden`, while re-rendering the FIT lap
+ * checkboxes *checked* from `appState.selectedLaps`. So a re-render always leaves
+ * the markup disagreeing with the retained selection, and only
+ * `updateSelectedLaps()` reconciles the two: it re-derives the selection from the
+ * checkboxes, shows and initialises the trim controls when the mode allows them,
+ * and re-evaluates the Analyze button. That is precisely what the user's
+ * deselect-and-reselect workaround was triggering by hand.
+ *
+ * Deliberately free of any map dependency and wrapped in its own try, so a
+ * failure in the map teardown/re-init cannot take Section 3's controls with it.
+ */
+function restoreSection3Controls(hasGpsData: boolean): void {
+	const deps = getDependencies();
+
+	try {
+		// The mode dropdown first: losing it means the user cannot even switch back.
+		if (hasGpsData) {
+			bindGpsModeSelector();
+		}
+
+		const lapListEl = document.getElementById("lapList");
+		if (lapListEl) {
+			bindLapSelection(lapListEl, () => updateSelectedLaps());
+			bindSelectAllButton("selectAllLaps", "lapList", () =>
+				updateSelectedLaps(),
+			);
+		}
+		deps.setupAnalyzeButton();
+		updateSelectedLaps();
+	} catch (error) {
+		log.error("Error re-binding section 3 controls:", error);
+	}
 }
 
 interface Section3Dependencies {
@@ -1233,8 +1264,12 @@ export function initializeSection3(): void {
 		resultsDiv.classList.remove("hidden");
 	}
 
-	// Initialize map visualization only if GPS data is available
+	// Initialize map visualization only if GPS data is available.
+	// Controls first, map second, separate trys -- same reasoning as
+	// rerenderSection3: a map failure must not leave Section 3 inert.
 	setTimeout(async () => {
+		restoreSection3Controls(hasGpsData);
+
 		try {
 			if (hasGpsData) {
 				const mapVisualization = new MapVisualization("mapView");
@@ -1274,24 +1309,6 @@ export function initializeSection3(): void {
 				log.debug("No GPS data - skipping map initialization");
 				deps.setMapVisualization(null);
 			}
-
-			// Setup GPS mode selector handler (if GPS data available)
-			if (hasGpsData) {
-				bindGpsModeSelector();
-			}
-
-			// Setup lap selection handlers using shell helpers
-			const lapListEl = document.getElementById("lapList");
-			if (lapListEl) {
-				bindLapSelection(lapListEl, () => updateSelectedLaps());
-				bindSelectAllButton("selectAllLaps", "lapList", () =>
-					updateSelectedLaps(),
-				);
-			}
-			deps.setupAnalyzeButton();
-			// Same reason as the re-render path: reflect any retained selection
-			// rather than leaving the template's hard-coded `disabled` in place.
-			deps.updateAnalyzeButton();
 
 			log.debug(
 				"Section 3 initialized (GPS:",
