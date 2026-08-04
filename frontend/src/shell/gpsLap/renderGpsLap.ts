@@ -725,7 +725,7 @@ export function buildGpsLapVeAnalysisTemplate(
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(params)}
-                                ${windHeightControlsMarkup(params)}
+                                ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>
 
                             ${
