@@ -1,4 +1,26 @@
 import { buildTrimBoundaryShapes, createContextSlices, type PlotContext } from './PlotContext';
+import {
+    computeVirtualDistanceWindowTotals,
+    integrateVirtualDistance,
+    type VirtualDistanceTotals,
+} from '../analysis/VirtualDistance';
+
+// The integration itself moved to analysis/VirtualDistance.ts once Store Result
+// and Export CSV started persisting these numbers (change-list entry (h)): the
+// `summarize` seam that writes them lives in modes/analysis/ and must not reach
+// into this layer. Re-exported here so every existing import site keeps working
+// and there is still exactly ONE integration.
+export {
+    computeVirtualDistanceWindowTotals,
+    integrateVirtualDistance,
+    virtualDistanceDifferencePercent,
+} from '../analysis/VirtualDistance';
+export type {
+    VirtualDistanceIntegration,
+    VirtualDistanceTotals,
+    VirtualDistanceWindow,
+    SegmentVirtualDistance,
+} from '../analysis/VirtualDistance';
 
 export type PlotTrace = Record<string, unknown>;
 export type PlotLayout = Record<string, unknown>;
@@ -647,49 +669,6 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
     };
 }
 
-/** Cumulative air / ground virtual distance in metres, indexed like the input. */
-export interface VirtualDistanceIntegration {
-    air: number[];
-    ground: number[];
-}
-
-/** The two virtual distances over the trim window, plus their relative gap. */
-export interface VirtualDistanceTotals {
-    airKm: number;
-    groundKm: number;
-    /** ((air - ground) / ground) * 100, matching the Rust reference definition. */
-    differencePercent: number;
-}
-
-/**
- * D-21: integrate the series exactly as given. No calibration multiplier lives
- * here any more; see VirtualDistancePlotInput.
- *
- * Shared by the figure and by `computeVirtualDistanceTotals` so the numbers in
- * the VD header can never disagree with the curve they sit above.
- */
-function integrateVirtualDistance(
-    timestamps: number[],
-    velocity: number[],
-    windSpeed: number[],
-    trimStart: number,
-): VirtualDistanceIntegration {
-    const air: number[] = new Array(timestamps.length).fill(0);
-    const ground: number[] = new Array(timestamps.length).fill(0);
-
-    for (let i = trimStart + 1; i < timestamps.length; i++) {
-        const dt = timestamps[i] - timestamps[i - 1];
-
-        const apparentSpeed = !isNaN(windSpeed[i]) ? windSpeed[i] : 0;
-        air[i] = air[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
-
-        const groundSpeed = !isNaN(velocity[i]) && velocity[i] > 0 ? velocity[i] : 0;
-        ground[i] = ground[i - 1] + groundSpeed * dt;
-    }
-
-    return { air, ground };
-}
-
 /**
  * The endpoint of each plotted curve at the trim end, in km.
  *
@@ -706,56 +685,6 @@ export function computeVirtualDistanceTotals(input: VirtualDistancePlotInput): V
         trimStart: input.context.trimStart,
         trimEnd: input.context.trimEnd,
     });
-}
-
-export interface VirtualDistanceWindow {
-    timestamps: number[];
-    velocity: number[];
-    /** Already offset AND calibrated, as for VirtualDistancePlotInput. */
-    windSpeed: number[];
-    trimStart: number;
-    trimEnd: number;
-}
-
-/**
- * The same endpoint reading, over an explicit window rather than a PlotContext.
- *
- * This exists so ONE SEGMENT of a multi-lap selection can be integrated on its
- * own. Under D-19 Option B each lap is fitted and integrated independently, so
- * the honest virtual distance of a multi-lap selection is N per-lap figures --
- * NOT the endpoint of the concatenated curve, which accumulates across the
- * wall-clock gap between lap N's end and lap N+1's start, and across the parts
- * of intermediate laps the trim window excludes.
- *
- * Same arithmetic as the whole-selection case, so a single-lap selection is
- * bit-identical to what it produced before this helper existed.
- */
-export function computeVirtualDistanceWindowTotals(window: VirtualDistanceWindow): VirtualDistanceTotals {
-    const { air, ground } = integrateVirtualDistance(
-        window.timestamps,
-        window.velocity,
-        window.windSpeed,
-        window.trimStart,
-    );
-    const endIndex = Math.min(window.trimEnd, air.length - 1);
-
-    if (endIndex < 0) {
-        return { airKm: 0, groundKm: 0, differencePercent: 0 };
-    }
-
-    const airMeters = air[endIndex];
-    const groundMeters = ground[endIndex];
-
-    return {
-        airKm: airMeters / 1000,
-        groundKm: groundMeters / 1000,
-        differencePercent: groundMeters > 0 ? ((airMeters - groundMeters) / groundMeters) * 100 : 0,
-    };
-}
-
-/** ((air - ground) / ground) * 100, the Rust reference definition, on km inputs. */
-export function virtualDistanceDifferencePercent(airKm: number, groundKm: number): number {
-    return groundKm > 0 ? ((airKm - groundKm) / groundKm) * 100 : 0;
 }
 
 export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {

@@ -61,6 +61,7 @@ import {
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
+import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import {
 	bindWindHeightControls,
 	windHeightControlsMarkup,
@@ -325,6 +326,27 @@ export async function showOutAndBackVEAnalysis(
 /**
  * Show the Out and Back VE stacked plot with full controls (matching normal mode)
  */
+/**
+ * The VD tab, container and plot.
+ *
+ * Exported, and separate from the surrounding template, so a test can assert
+ * that the header CONTAINER is actually emitted. Out-and-back rendered a bare
+ * `#oabVdPlot` with nothing above it, so the label was missing outright rather
+ * than stale — and a renderer writing into a container that does not exist
+ * fails silently, which makes an assertion on the renderer alone vacuous. Both
+ * halves are guarded, the same way `gpsLapVdHeader.test.ts` guards the sidebar
+ * this one was modelled on.
+ */
+export function outAndBackVdTabMarkup(show: boolean): string {
+	if (!show) return "";
+	return `
+                        <div class="ve-tab-content" id="vd-tab">
+                            ${virtualDistanceHeaderMarkup()}
+                            <div id="oabVdPlot" class="ve-plot ve-plot--tall"></div>
+                        </div>
+                        `;
+}
+
 export async function showOutAndBackVEPlot(
 	services: ShellServices,
 	parameterStorage: ParameterStorage,
@@ -518,15 +540,7 @@ export async function showOutAndBackVEPlot(
                             <div id="oabPowerPlot" class="ve-plot ve-plot--tall"></div>
                         </div>
 
-                        ${
-													showVirtualDistanceTab
-														? `
-                        <div class="ve-tab-content" id="vd-tab">
-                            <div id="oabVdPlot" class="ve-plot ve-plot--tall"></div>
-                        </div>
-                        `
-														: ""
-												}
+                        ${outAndBackVdTabMarkup(showVirtualDistanceTab)}
                     </div>
                 </div>
             </div>

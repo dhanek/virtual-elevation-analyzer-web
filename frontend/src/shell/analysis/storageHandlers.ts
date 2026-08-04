@@ -182,6 +182,11 @@ export async function handleStoreResult(
             windSource: appState.currentWindSource,
             parameters: appState.currentParameters,
             result: appState.currentVEResult,
+            // Entry (h): the per-segment virtual distances the VD header is
+            // showing, written by the same `summarize` seam that wrote
+            // `currentVEResult`. Multi-lap Standard used to persist nothing but
+            // the combined result's zeros here.
+            virtualDistances: appState.currentVirtualDistances,
             timestamp: new Date(),
             recordingDate: recordingDate,
             avgPower: avgPower,

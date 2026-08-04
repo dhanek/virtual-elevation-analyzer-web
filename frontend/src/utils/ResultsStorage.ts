@@ -1,5 +1,6 @@
 import { fileSave } from 'browser-fs-access';
 import { AnalysisParameters } from '../components/AnalysisParameters';
+import type { SegmentVirtualDistance } from '../analysis/VirtualDistance';
 import { log } from './log';
 
 // Shape of a VE analysis result kept in IndexedDB.
@@ -42,6 +43,15 @@ export interface SaveResultData {
     windSource: 'constant' | 'fit' | 'compare' | 'none';
     parameters: AnalysisParameters;
     result: VEAnalysisResult;
+    /**
+     * One virtual distance per independently-integrated segment, in analysis
+     * order — the same figures the VD header shows (change-list entry (h)).
+     *
+     * Optional so a caller that has not run through the `summarize` seam still
+     * stores a valid record; it then carries no virtual distances rather than a
+     * wrong one.
+     */
+    virtualDistances?: SegmentVirtualDistance[];
     timestamp: Date;
     recordingDate: string; // yyyy-mm-dd format from FIT file
     avgPower: number;
@@ -50,7 +60,7 @@ export interface SaveResultData {
     notes: string;
 }
 
-interface StoredVEResult {
+export interface StoredVEResult {
     fileName: string;
     lapKey: string; // e.g., "1", "2", "1,2"
     trimStart: number;
@@ -71,12 +81,122 @@ interface StoredVEResult {
     rmse: number;
     veGain: number;
     actualGain: number;
+    /**
+     * Added with change-list entry (h). ABSENT on every record written before
+     * it, which is why every read of it is guarded — an old record must still
+     * load and export, just with these three columns empty.
+     */
+    virtualDistances?: SegmentVirtualDistance[];
     avgPower: number;
     avgSpeed: number;
     avgTemperature: number;
     notes: string;
     recordingDate: string; // yyyy-mm-dd
     timestamp: string; // ISO timestamp when entry was added to DB
+}
+
+export const CSV_HEADERS = [
+    'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
+    'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
+    'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
+    'R2', 'RMSE', 'VEGain', 'ActualGain',
+    // Entry (h). One value per independently-integrated segment, ';'-separated
+    // in analysis order, aligned position-for-position with VDSegments.
+    'VDSegments', 'VDAirKm', 'VDGroundKm', 'VDDiffPercent',
+    'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
+];
+
+/**
+ * How N virtual distances fit a format shaped for one value per analysis.
+ *
+ * A multi-segment analysis has N virtual distances and no single one, so the
+ * export does not invent a total. Each of the three quantities gets ONE column
+ * holding one value per segment, ';'-separated in analysis order, and a fourth
+ * column names the segments in that same order so the mapping is stated rather
+ * than inferred from the Laps column:
+ *
+ *     VDSegments        VDAirKm        VDGroundKm     VDDiffPercent
+ *     Lap 2;Lap 3       2.476;2.481    2.702;2.699    -8.36;-8.08
+ *
+ * A SINGLE-segment analysis is unchanged in shape from what it has always shown
+ * on screen: no segment label, and a bare number in each value column —
+ *
+ *     VDSegments        VDAirKm        VDGroundKm     VDDiffPercent
+ *     (empty)           2.476          2.702          -8.36
+ *
+ * ';' is used rather than ',' because these are single CSV cells. A record
+ * written before entry (h) has no virtual distances at all and yields four
+ * empty cells; it must still export, which is the point of the `?? []`.
+ */
+export function virtualDistanceCsvCells(
+    distances: SegmentVirtualDistance[] | undefined
+): [string, string, string, string] {
+    const entries = distances ?? [];
+    return [
+        // A lone segment needs no name: the row already says which laps it
+        // covers, and this is the shape single-lap Standard has always had.
+        entries.length > 1 ? entries.map(entry => entry.label).join(';') : '',
+        entries.map(entry => entry.airKm.toFixed(3)).join(';'),
+        entries.map(entry => entry.groundKm.toFixed(3)).join(';'),
+        entries.map(entry => entry.differencePercent.toFixed(2)).join(';'),
+    ];
+}
+
+/**
+ * Generate CSV from stored results.
+ *
+ * Module-level and exported so the row shape can be asserted directly; the
+ * class method delegates here.
+ */
+export function generateCSVFromResults(results: StoredVEResult[]): string {
+    let csv = CSV_HEADERS.join(',') + '\n';
+
+    // Sort by recording date (descending), then fileName, then by lapKey
+    results.sort((a, b) => {
+        if (a.recordingDate !== b.recordingDate) {
+            return b.recordingDate.localeCompare(a.recordingDate); // Descending
+        }
+        if (a.fileName !== b.fileName) {
+            return a.fileName.localeCompare(b.fileName);
+        }
+        return a.lapKey.localeCompare(b.lapKey);
+    });
+
+    // Rows
+    for (const result of results) {
+        const values = [
+            result.recordingDate,
+            result.fileName,
+            result.lapKey,
+            result.trimStart,
+            result.trimEnd,
+            result.cda.toFixed(3),
+            result.crr.toFixed(4),
+            result.crrApplied !== undefined ? result.crrApplied.toFixed(4) : '',
+            result.ambientTemp !== undefined ? result.ambientTemp.toFixed(1) : '',
+            result.tireSensitivity ?? '',
+            result.airSpeedCalibration !== undefined ? result.airSpeedCalibration.toFixed(1) : '',
+            result.windSource,
+            result.windSpeed,
+            result.windDirection,
+            result.systemMass,
+            result.rho.toFixed(3),
+            result.eta.toFixed(3),
+            result.r2.toFixed(4),
+            result.rmse.toFixed(2),
+            result.veGain.toFixed(2),
+            result.actualGain.toFixed(2),
+            ...virtualDistanceCsvCells(result.virtualDistances),
+            result.avgPower.toFixed(1),
+            result.avgSpeed.toFixed(2),
+            result.avgTemperature.toFixed(1),
+            `"${result.notes.replace(/"/g, '""')}"`, // Escape quotes in notes
+            result.timestamp
+        ];
+        csv += values.join(',') + '\n';
+    }
+
+    return csv;
 }
 
 export class ResultsStorage {
@@ -233,6 +353,10 @@ export class ResultsStorage {
                         rmse: oldRecord.rmse ?? 0,
                         veGain: oldRecord.veGain ?? 0,
                         actualGain: oldRecord.actualGain ?? 0,
+                        // Pre-(h) records have none. Carried through rather
+                        // than defaulted, so a migrated record stays honest
+                        // about not having them.
+                        virtualDistances: oldRecord.virtualDistances,
                         avgPower: oldRecord.avgPower ?? 0,
                         avgSpeed: oldRecord.avgSpeed ?? 0,
                         avgTemperature: oldRecord.avgTemperature ?? 0,
@@ -381,6 +505,10 @@ export class ResultsStorage {
             rmse: data.result.rmse,
             veGain: data.result.ve_elevation_diff,
             actualGain: data.result.actual_elevation_diff,
+            // Entry (h): the per-segment figures as shown, NOT a flattened
+            // total. `?? []` rather than a fabricated single value, so a caller
+            // that supplies none stores none.
+            virtualDistances: data.virtualDistances ?? [],
             avgPower: data.avgPower,
             avgSpeed: data.avgSpeed,
             avgTemperature: data.avgTemperature,
@@ -462,62 +590,7 @@ export class ResultsStorage {
      * Generate CSV from stored results
      */
     private generateCSVFromResults(results: StoredVEResult[]): string {
-        // Headers
-        const headers = [
-            'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
-            'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
-            'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
-            'R2', 'RMSE', 'VEGain', 'ActualGain',
-            'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
-        ];
-
-        let csv = headers.join(',') + '\n';
-
-        // Sort by recording date (descending), then fileName, then by lapKey
-        results.sort((a, b) => {
-            if (a.recordingDate !== b.recordingDate) {
-                return b.recordingDate.localeCompare(a.recordingDate); // Descending
-            }
-            if (a.fileName !== b.fileName) {
-                return a.fileName.localeCompare(b.fileName);
-            }
-            return a.lapKey.localeCompare(b.lapKey);
-        });
-
-        // Rows
-        for (const result of results) {
-            const values = [
-                result.recordingDate,
-                result.fileName,
-                result.lapKey,
-                result.trimStart,
-                result.trimEnd,
-                result.cda.toFixed(3),
-                result.crr.toFixed(4),
-                result.crrApplied !== undefined ? result.crrApplied.toFixed(4) : '',
-                result.ambientTemp !== undefined ? result.ambientTemp.toFixed(1) : '',
-                result.tireSensitivity ?? '',
-                result.airSpeedCalibration !== undefined ? result.airSpeedCalibration.toFixed(1) : '',
-                result.windSource,
-                result.windSpeed,
-                result.windDirection,
-                result.systemMass,
-                result.rho.toFixed(3),
-                result.eta.toFixed(3),
-                result.r2.toFixed(4),
-                result.rmse.toFixed(2),
-                result.veGain.toFixed(2),
-                result.actualGain.toFixed(2),
-                result.avgPower.toFixed(1),
-                result.avgSpeed.toFixed(2),
-                result.avgTemperature.toFixed(1),
-                `"${result.notes.replace(/"/g, '""')}"`, // Escape quotes in notes
-                result.timestamp
-            ];
-            csv += values.join(',') + '\n';
-        }
-
-        return csv;
+        return generateCSVFromResults(results);
     }
 
     /**

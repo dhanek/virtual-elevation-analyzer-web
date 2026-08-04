@@ -6,6 +6,7 @@ import {
 	buildFilteredDataFromProfiles,
 	resolveRecordedWindSource,
 } from "./segmentSummary";
+import { standardVirtualDistances } from "./segmentVirtualDistance";
 import type {
 	AnalysisModeHandler,
 	ModeRenderArgs,
@@ -165,6 +166,13 @@ export const standardMode: AnalysisModeHandler = {
 	 * results rather than one, so the combined shape is used (D-09 entries f
 	 * and g). `currentAnalyzedLaps` is deliberately left alone: the binder owns
 	 * it today and changing that is plan 07-03's business.
+	 *
+	 * The per-lap virtual distances are written alongside (change-list entry
+	 * (h)). They come from the same call the stitched VD header uses, so a
+	 * stored or exported figure cannot disagree with the one on screen; and
+	 * because each lap is integrated over its OWN trim window, a lap the trim
+	 * window has dropped contributes no entry — the same rule that keeps it out
+	 * of the headline mean.
 	 */
 	summarize(appState, profiles, aggregate, inputs) {
 		if (profiles.length === 0) {
@@ -175,6 +183,10 @@ export const standardMode: AnalysisModeHandler = {
 			profiles.length === 1
 				? profiles[0].result
 				: buildCombinedSegmentResult(profiles, aggregate);
+		appState.currentVirtualDistances = standardVirtualDistances(
+			profiles,
+			inputs.normalized,
+		);
 		appState.currentFilteredData = buildFilteredDataFromProfiles(
 			appState,
 			profiles,

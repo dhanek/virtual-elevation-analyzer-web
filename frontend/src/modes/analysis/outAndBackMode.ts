@@ -1,5 +1,8 @@
-import { resolveActiveOutAndBackSections, sectionsCoveredByProfiles } from './activeOutAndBackSections';
+import { matchesRange, resolveActiveOutAndBackSections, sectionsCoveredByProfiles } from './activeOutAndBackSections';
 import { writeSegmentModeResultState } from './segmentSummary';
+import { sectionVirtualDistances, type OutAndBackSectionLegs } from './segmentVirtualDistance';
+import type { OutAndBackSection } from '../../utils/GpsLapDetection';
+import type { SegmentVeProfile } from './types';
 import type { AnalysisModeHandler, ModeRenderArgs, ModeSegment, PreparedAnalysisSelection } from './types';
 
 const EMPTY_SELECTION_MESSAGE = 'Please select sections and set parameters first.';
@@ -96,6 +99,8 @@ export const outAndBackMode: AnalysisModeHandler = {
      * and it is now what Store Result persists.
      */
     summarize(appState, profiles, aggregate, inputs) {
+        const sections = resolveActiveOutAndBackSections(appState);
+
         writeSegmentModeResultState(
             appState,
             profiles,
@@ -103,8 +108,37 @@ export const outAndBackMode: AnalysisModeHandler = {
             inputs,
             // Only sections that actually produced a segment, matching
             // GPS-lap's surviving-profiles semantics.
-            sectionsCoveredByProfiles(resolveActiveOutAndBackSections(appState), profiles)
-                .map(section => section.sectionNumber),
+            sectionsCoveredByProfiles(sections, profiles).map(section => section.sectionNumber),
+            // Per SECTION, not per leg. The default would store 2N entries,
+            // one per leg, which would disagree with the header — the whole
+            // point of entry (h) is that the export says what the screen says.
+            sectionVirtualDistances(sectionLegs(sections, profiles)),
         );
     },
 };
+
+/**
+ * Pair each section with its two legs' supplementary series.
+ *
+ * Paired by matching each profile's full-activity range against the section it
+ * came from, NOT by position: the primitive skips a leg under 10 samples, which
+ * would shift every subsequent index by one and silently transplant an inbound
+ * leg onto the wrong section. This reproduces `toOutAndBackProfiles`'s pairing
+ * (`shell/outAndBack/updateOutAndBack.ts`) — the shell has the same problem and
+ * solved it the same way — so both sides of the header/export agreement pair
+ * identically.
+ */
+function sectionLegs(
+    sections: OutAndBackSection[],
+    profiles: SegmentVeProfile[],
+): OutAndBackSectionLegs[] {
+    return sections.map(section => ({
+        label: `Section ${section.sectionNumber}`,
+        outbound: profiles.find(profile =>
+            matchesRange(profile, section.outboundStartIdx, section.outboundEndIdx),
+        )?.supplementarySeries ?? null,
+        inbound: profiles.find(profile =>
+            matchesRange(profile, section.inboundStartIdx, section.inboundEndIdx),
+        )?.supplementarySeries ?? null,
+    }));
+}

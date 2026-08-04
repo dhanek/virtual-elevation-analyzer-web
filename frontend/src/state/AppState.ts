@@ -7,6 +7,7 @@ import type {
 } from "../utils/GpsLapDetection";
 import type { DEMSourceResult } from "../utils/MultiDEMManager";
 import type { DEMSourceType } from "../utils/RemoteDEMConfig";
+import type { SegmentVirtualDistance } from "../analysis/VirtualDistance";
 import type { VEAnalysisResult } from "../utils/ResultsStorage";
 import type {
 	ElevationDisplayProfile,
@@ -184,6 +185,18 @@ export interface SelectionState {
 export interface AnalysisState {
 	currentParameters: AnalysisParameters | null;
 	currentVEResult: VEAnalysisResult | null;
+	/**
+	 * One virtual distance per independently-integrated segment, in analysis
+	 * order — what the VD header shows and what Store Result / Export CSV now
+	 * persist (change-list entry (h)).
+	 *
+	 * It is a separate field rather than a field of `currentVEResult` because
+	 * that object is sometimes the raw wasm-bindgen `VEResult` (single-segment
+	 * Standard), whose properties live on a prototype and cannot be extended
+	 * without losing them. It is written by the same `summarize` seam that
+	 * writes `currentVEResult`, for every mode.
+	 */
+	currentVirtualDistances: SegmentVirtualDistance[];
 	currentWindSource: WindSource;
 	airSpeedCalibrationPercent: number;
 	recomputeStatus: "idle" | "running" | "handoff";
@@ -256,6 +269,7 @@ export class AppState {
 	readonly analysis: AnalysisState = {
 		currentParameters: null,
 		currentVEResult: null,
+		currentVirtualDistances: [],
 		currentWindSource: "none",
 		airSpeedCalibrationPercent: 0,
 		recomputeStatus: "idle",
@@ -450,6 +464,14 @@ export class AppState {
 
 	set currentVEResult(result: VEAnalysisResult | null) {
 		this.analysis.currentVEResult = result;
+	}
+
+	get currentVirtualDistances(): SegmentVirtualDistance[] {
+		return this.analysis.currentVirtualDistances;
+	}
+
+	set currentVirtualDistances(distances: SegmentVirtualDistance[]) {
+		this.analysis.currentVirtualDistances = distances;
 	}
 
 	get currentWindSource(): WindSource {
