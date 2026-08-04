@@ -6,12 +6,7 @@ import {
 import { log } from "../../utils/log";
 import { MapVisualization } from "../../components/MapVisualization";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
-import { getSelectedWindSource, bindWindSourceRadios } from "../dom/windSource";
-import {
-	clampAirSpeedCalibrationPercent,
-	calculateAutoAirSpeedCalibrationPercent,
-} from "../../analysis/AirSpeedCalibration";
-import { calculateAirSpeedSyncError } from "../../analysis/WindSourceResolver";
+import { calculateAutoAirSpeedCalibrationPercent } from "../../analysis/AirSpeedCalibration";
 import { createPlotContext } from "../../plots/PlotContext";
 import {
 	buildVirtualElevationFigures,
@@ -24,28 +19,22 @@ import { calculateAutoRho } from "./autoRho";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { bindCrrTempControls } from "./crrTempControls";
-import { bindWindHeightControls } from "./windHeightControls";
-import { scheduleRecompute } from "../analysis/recomputeRunner";
-import { bindElevationSmoothingToggle } from "../analysis/elevationProfileCycle";
 import {
 	DEM_PROFILE_FALLBACK_ORDER,
 	type ElevationDisplayProfile,
 } from "../../analysis/elevationProfiles";
 import { veViewMatchesSelection } from "./veSelectionGuard";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import type {
 	ModeUpdateCallbacks,
 	SegmentVeProfile,
 } from "../../modes/analysis/types";
-import {
-	isVeTabActive,
-	updateModeVEPlots,
-} from "../analysis/updateModeVEPlots";
+import { isVeTabActive } from "../analysis/updateModeVEPlots";
+import { bindModeControls } from "../analysis/bindModeControls";
+import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import { configureModeUpdateRequests } from "../analysis/requestModeUpdate";
 import { setupTabSwitching } from "../dom/tabs";
 import {
-	mapTrimToSegments,
 	resolveSelectionWindSeries,
 	stitchStandardProfiles,
 	type StitchedStandardSeries,
@@ -144,32 +133,6 @@ function resolveActiveAltitudeForSelection(
 	}
 
 	return fallbackAltitude;
-}
-
-/**
- * Update Virtual Elevation plots based on current slider values.
- */
-export function updateVEPlots(
-	appState: AppState,
-	analysisInput: AnalysisInput,
-	selectedIndices: number[],
-	trimStart: number,
-	trimEnd: number,
-) {
-	scheduleRecompute({
-		mode: "standard",
-		run: async () => {
-			const windSource = getSelectedWindSource() as WindSource;
-			await updateVEPlotsWithWindSource(
-				appState,
-				analysisInput,
-				selectedIndices,
-				trimStart,
-				trimEnd,
-				windSource,
-			);
-		},
-	});
 }
 
 /**
@@ -404,24 +367,28 @@ function drawStandardVdPlot(
 }
 
 /**
- * Update Virtual Elevation plots with a specific wind source.
+ * Standard's `compare` branch — the ONE update path that does not go through
+ * the funnel, and therefore not through the primitive either.
  *
- * A thin adapter over `updateModeVEPlots` for everything except `compare`.
- * It reads the four DOM values Standard owns (CdA, Crr, trim start, trim end),
- * maps the trim window onto the handler's per-lap segments, and hands the rest
- * to the primitive.
+ * Plan 07-03 moved every other Standard control onto `requestModeUpdate`. This
+ * one could not follow: `updateModeVEPlots` has no compare path until plan 07-04
+ * (D-07/D-20), and `resolveWindSeries` collapses 'compare' to 'fit', so routing
+ * it through the funnel would silently turn "Compare both methods" into plain
+ * FIT for the user — a live capability lost inside a refactor, with no D-09
+ * change-list entry to its name. The two `standard / compare / rho present|absent`
+ * golden cases from plan 07-01 exist to prove it did not move.
+ *
+ * It composes its own two calculators over the concatenated selection. It does
+ * NOT call the primitive, which is why "the funnel is the only caller of
+ * `updateModeVEPlots`" holds without an exception clause.
  */
-export async function updateVEPlotsWithWindSource(
+export async function updateStandardComparePlots(
 	appState: AppState,
 	analysisInput: AnalysisInput,
 	selectedIndices: number[],
 	trimStart: number,
 	trimEnd: number,
-	windSource: WindSource,
 ) {
-	// The primitive guards both of these too and returns null, but the Standard
-	// callbacks are constructed BEFORE the call and need the activity arrays, so
-	// the guard has to happen here as well.
 	if (!appState.currentParameters || !appState.currentFitData) return;
 
 	const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
@@ -432,33 +399,8 @@ export async function updateVEPlotsWithWindSource(
 	const cda = parseFloat(cdaSlider.value);
 	const rawCrr = parseFloat(crrSlider.value);
 	// The slider value is the 22 °C-referenced Crr; the physics uses the
-	// temperature-corrected value when the correction is enabled. The primitive
-	// applies the correction itself, so it receives the RAW value; this one is
-	// for the compare branch's calculators and for the plot label.
+	// temperature-corrected value when the correction is enabled.
 	const crr = resolveAppliedCrr(appState.currentParameters, rawCrr);
-
-	if (windSource !== "compare") {
-		const handler = getAnalysisModeHandler(null);
-		await updateModeVEPlots({
-			appState,
-			handler,
-			callbacks: createStandardUpdateCallbacks(appState, windSource, cda, crr),
-			windSource,
-			cda,
-			crr: rawCrr,
-			// The handler cannot see the trim sliders (they are DOM, and
-			// modes/analysis stays DOM-free), so the binder attaches trim here.
-			// mapTrimToSegments also DROPS laps the window does not cover -- see
-			// MIN_TRIMMED_SEGMENT_SAMPLES.
-			segments: mapTrimToSegments(
-				handler.getUpdateSegments(appState),
-				selectedIndices,
-				trimStart,
-				trimEnd,
-			),
-		});
-		return;
-	}
 
 	// LIVE until plan 07-04 wires renderVe to virtualElevationCompare.
 	// Reachability is asserted by the standard/compare golden cases and by plan
@@ -623,8 +565,21 @@ export async function updateVEPlotsWithWindSource(
 	}
 }
 
+
 /**
- * Setup Standard VE panel sliders and their synchronization logic.
+ * Setup Standard VE panel sliders.
+ *
+ * There are no per-control handler bodies here any more. Every VE control in
+ * every mode is a row in `MODE_CONTROL_TABLE`, wired by the one binder, and each
+ * row reaches the primitive through the one funnel (D-04, ROADMAP SC#2). What is
+ * left in this function is the three things that are genuinely Standard's:
+ *
+ *   - which figures the primitive's profiles are drawn into (the registered
+ *     `ModeUpdateCallbacks` factory),
+ *   - the mode-specific side effects the binder calls back into (map trim
+ *     markers, auto-rho, the auto-calibration window, the compare escape hatch),
+ *   - the map trim twin sliders' RANGES, which come from this panel's activity
+ *     arrays. Their handlers are rows like everything else.
  */
 export function setupVESliders(
 	appState: AppState,
@@ -658,7 +613,6 @@ export function setupVESliders(
 		log.error("setupVESliders: appState.currentParameters is null");
 		return;
 	}
-	const params = appState.currentParameters;
 
 	const trimStartSlider = document.getElementById(
 		"trimStartSlider",
@@ -700,170 +654,34 @@ export function setupVESliders(
 	// them. It also carried its own offset+calibration copy, a third wind
 	// algorithm alongside the other two.
 	//
-	// (Recorded precisely because Task 4's first draft of this comment named the
-	// calibration slider as one of the handlers that forgot it. At `cb2c7f8` the
-	// calibration slider DID call the helper; the four above did not.)
-	//
-	// It is gone. `updateVEPlots` now rebuilds all four plots through
-	// `updateModeVEPlots`, which owns the one active-tab class check left in the
-	// update path (D-14). There is no second entry point left to forget — and
-	// the `compare` branch, which does not reach the primitive until plan 07-04,
-	// imports that same check rather than growing a private copy.
+	// Plan 07-02 removed the second COMPUTE path. This plan removes the second
+	// BINDING path, which is the half that actually produced the bug: a handler
+	// that updated its own state and forgot to ask for the plots. There is now no
+	// hand-written control handler in this file to forget anything, and there is
+	// no way to add a control except as a table row that funnels by construction.
 	//
 	// (Neither the class name nor the deleted helper's name is spelled out here:
 	// the D-05 and D-14 criteria are mechanical greps for them in this file, and
 	// a mention in prose would defeat both. Same lesson as plan 07-01's
 	// deviation 2.)
 
-	// Trim-marker repaints must not outlive this panel's lap selection: after
-	// the user switches lap checkboxes, synthetic input dispatches (auto-rho /
-	// parameter changes via handleParametersChange) still run these handlers
-	// with the PREVIOUS lap's trim values and coordinates, which would draw
-	// stale start/end markers over the newly selected lap's route.
-	const mapCanFollowThisPanel = () =>
-		mapVisualization !== null &&
-		veViewMatchesSelection(appState.currentAnalyzedLaps, appState.selectedLaps);
+	const currentTrim = () => ({
+		start: parseInt(trimStartSlider.value),
+		end: parseInt(trimEndSlider.value),
+	});
 
-	const updateTrimStart = () => {
-		const value = parseInt(trimStartSlider.value);
-		trimStartValue.value = value.toString();
-		const trimEnd = parseInt(trimEndSlider.value);
-		if (value >= trimEnd - MIN_TRIM_WINDOW_SAMPLES) {
-			const corrected = trimEnd - MIN_TRIM_WINDOW_SAMPLES;
-			trimStartSlider.value = corrected.toString();
-			trimStartValue.value = corrected.toString();
-			return;
-		}
-		updateVEPlots(appState, analysisInput, selectedIndices, value, trimEnd);
-		// Only repaint map trim markers while this panel's laps are still the
-		// selected laps (see veViewMatchesSelection).
-		if (mapCanFollowThisPanel()) {
-			mapVisualization!.fitBoundsToTrimRegion(
-				value,
-				trimEnd,
-				positionLat,
-				positionLong,
-			);
-		}
-		triggerAutoRhoOnTrimChange();
-		saveCurrentLapSettings();
-	};
-
-	const updateTrimEnd = () => {
-		const value = parseInt(trimEndSlider.value);
-		trimEndValue.value = value.toString();
-		const trimStart = parseInt(trimStartSlider.value);
-		if (value <= trimStart + MIN_TRIM_WINDOW_SAMPLES) {
-			const corrected = trimStart + MIN_TRIM_WINDOW_SAMPLES;
-			trimEndSlider.value = corrected.toString();
-			trimEndValue.value = corrected.toString();
-			return;
-		}
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, value);
-		if (mapCanFollowThisPanel()) {
-			mapVisualization!.fitBoundsToTrimRegion(
-				trimStart,
-				value,
-				positionLat,
-				positionLong,
-			);
-		}
-		triggerAutoRhoOnTrimChange();
-		saveCurrentLapSettings();
-	};
-
-	const updateCdA = () => {
-		const value = parseFloat(cdaSlider.value);
-		cdaValue.value = value.toFixed(3);
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		saveCurrentLapSettings();
-	};
-
-	const updateCrr = () => {
-		const value = parseFloat(crrSlider.value);
-		crrValue.value = value.toFixed(4);
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		saveCurrentLapSettings();
-	};
-
-	const updateTrimStartFromInput = () => {
-		const value = parseInt(trimStartValue.value);
-		if (isNaN(value)) return;
-		const trimEnd = parseInt(trimEndSlider.value);
-		const clamped = Math.max(
-			0,
-			Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES),
-		);
-		trimStartSlider.value = clamped.toString();
-		trimStartValue.value = clamped.toString();
-		updateVEPlots(appState, analysisInput, selectedIndices, clamped, trimEnd);
-		if (mapCanFollowThisPanel()) {
-			mapVisualization!.fitBoundsToTrimRegion(
-				clamped,
-				trimEnd,
-				positionLat,
-				positionLong,
-			);
-		}
-		triggerAutoRhoOnTrimChange();
-		saveCurrentLapSettings();
-	};
-
-	const updateTrimEndFromInput = () => {
-		const value = parseInt(trimEndValue.value);
-		if (isNaN(value)) return;
-		const trimStart = parseInt(trimStartSlider.value);
-		const clamped = Math.max(
-			trimStart + MIN_TRIM_WINDOW_SAMPLES,
-			Math.min(value, timestamps.length - 1),
-		);
-		trimEndSlider.value = clamped.toString();
-		trimEndValue.value = clamped.toString();
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, clamped);
-		if (mapCanFollowThisPanel()) {
-			mapVisualization!.fitBoundsToTrimRegion(
-				trimStart,
-				clamped,
-				positionLat,
-				positionLong,
-			);
-		}
-		triggerAutoRhoOnTrimChange();
-		saveCurrentLapSettings();
-	};
-
-	const updateCdAFromInput = () => {
-		const value = parseFloat(cdaValue.value);
-		if (isNaN(value)) return;
-		const clamped = Math.max(params.cda_min, Math.min(value, params.cda_max));
-		cdaSlider.value = clamped.toString();
-		cdaValue.value = clamped.toFixed(3);
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		saveCurrentLapSettings();
-	};
-
-	const updateCrrFromInput = () => {
-		const value = parseFloat(crrValue.value);
-		if (isNaN(value)) return;
-		const clamped = Math.max(params.crr_min, Math.min(value, params.crr_max));
-		crrSlider.value = clamped.toString();
-		crrValue.value = clamped.toFixed(4);
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		saveCurrentLapSettings();
-	};
-
-	trimStartSlider.oninput = updateTrimStart;
-	trimEndSlider.oninput = updateTrimEnd;
-	cdaSlider.oninput = updateCdA;
-	crrSlider.oninput = updateCrr;
+	// Standard's half of the primitive contract: the figures, and nothing else.
+	// Registered rather than passed, so the funnel can build it for whichever
+	// mode is live without knowing any of them.
+	registerModeUpdateCallbacks("standard", (context) =>
+		createStandardUpdateCallbacks(
+			appState,
+			context.windSource,
+			context.cda,
+			context.appliedCrr,
+		),
+	);
+	configureModeUpdateRequests({ appState });
 
 	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	const triggerAutoRhoOnTrimChange = () => {
@@ -893,222 +711,9 @@ export function setupVESliders(
 		}, 1000);
 	}
 
-	trimStartValue.onchange = updateTrimStartFromInput;
-	trimEndValue.onchange = updateTrimEndFromInput;
-	cdaValue.onchange = updateCdAFromInput;
-	crrValue.onchange = updateCrrFromInput;
-
-	bindWindSourceRadios(() => {
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-	});
-
-	const airSpeedCalibrationSlider = document.getElementById(
-		"airSpeedCalibrationSlider",
-	) as HTMLInputElement;
-	const airSpeedCalibrationValue = document.getElementById(
-		"airSpeedCalibrationValue",
-	) as HTMLInputElement;
-
-	if (airSpeedCalibrationSlider && airSpeedCalibrationValue) {
-		// airSpeedCalibrationPercent lives in AppState (not persisted per-file)
-		// so it bypasses the parameter storage layer and uses local update.
-		// This is intentional - it's a runtime adjustment, not a saved parameter.
-		// See analyzeOrchestrator.handleParametersChange for parameters that trigger orchestrator updates.
-		const updateAirSpeedCalibration = () => {
-			const value = parseFloat(airSpeedCalibrationSlider.value);
-			airSpeedCalibrationValue.value = value.toFixed(1);
-			appState.airSpeedCalibrationPercent = value;
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(
-				appState,
-				analysisInput,
-				selectedIndices,
-				trimStart,
-				trimEnd,
-			);
-			saveCurrentLapSettings();
-		};
-
-		const updateAirSpeedCalibrationFromInput = () => {
-			const value = parseFloat(airSpeedCalibrationValue.value);
-			if (isNaN(value)) return;
-			const clamped = clampAirSpeedCalibrationPercent(value);
-			airSpeedCalibrationSlider.value = clamped.toString();
-			airSpeedCalibrationValue.value = clamped.toFixed(1);
-			appState.airSpeedCalibrationPercent = clamped;
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(
-				appState,
-				analysisInput,
-				selectedIndices,
-				trimStart,
-				trimEnd,
-			);
-			saveCurrentLapSettings();
-		};
-
-		airSpeedCalibrationSlider.oninput = updateAirSpeedCalibration;
-		airSpeedCalibrationValue.onchange = updateAirSpeedCalibrationFromInput;
-
-		const autoAdjustButton = document.getElementById(
-			"autoAdjustCalibration",
-		) as HTMLButtonElement;
-		if (autoAdjustButton) {
-			autoAdjustButton.onclick = () => {
-				const trimStart = parseInt(trimStartSlider.value);
-				const trimEnd = parseInt(trimEndSlider.value);
-				const calibrationPercent = calculateAutoAirSpeedCalibrationPercent([
-					{
-						timestamps,
-						groundSpeed: velocity,
-						apparentSpeed: windSpeed,
-						startIndex: trimStart,
-						endIndex: trimEnd,
-					},
-				]);
-				if (calibrationPercent === null) return;
-				airSpeedCalibrationSlider.value = calibrationPercent.toFixed(1);
-				airSpeedCalibrationValue.value = calibrationPercent.toFixed(1);
-				appState.airSpeedCalibrationPercent = calibrationPercent;
-				updateVEPlots(
-					appState,
-					analysisInput,
-					selectedIndices,
-					trimStart,
-					trimEnd,
-				);
-				saveCurrentLapSettings();
-			};
-		}
-	}
-
-	const airSpeedOffsetSlider = document.getElementById(
-		"airSpeedOffsetSlider",
-	) as HTMLInputElement;
-	const airSpeedOffsetValue = document.getElementById(
-		"airSpeedOffsetValue",
-	) as HTMLInputElement;
-	const airSpeedOffsetErrorMetric = document.getElementById(
-		"airSpeedOffsetErrorMetric",
-	) as HTMLSpanElement;
-
-	if (airSpeedOffsetSlider && airSpeedOffsetValue) {
-		const updateAirSpeedOffset = () => {
-			const value = parseInt(airSpeedOffsetSlider.value);
-			airSpeedOffsetValue.value = value.toString();
-			if (parametersComponent && appState.currentParameters) {
-				parametersComponent.setParameters({ air_speed_offset: value });
-			}
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			const errorMetric = calculateAirSpeedSyncError(
-				velocity,
-				windSpeed,
-				value,
-				trimStart,
-				trimEnd,
-			);
-			if (airSpeedOffsetErrorMetric && !isNaN(errorMetric)) {
-				airSpeedOffsetErrorMetric.textContent = errorMetric.toFixed(2);
-			}
-			// Note: updateVEPlots is now triggered via orchestrator through handleParametersChange
-			// when setParameters is called above. This avoids double updates.
-			saveCurrentLapSettings();
-		};
-
-		const updateAirSpeedOffsetFromInput = () => {
-			const value = parseInt(airSpeedOffsetValue.value);
-			if (isNaN(value)) return;
-			const clamped = Math.max(-10, Math.min(value, 10));
-			airSpeedOffsetSlider.value = clamped.toString();
-			airSpeedOffsetValue.value = clamped.toString();
-			if (parametersComponent && appState.currentParameters) {
-				parametersComponent.setParameters({ air_speed_offset: clamped });
-			}
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			const errorMetric = calculateAirSpeedSyncError(
-				velocity,
-				windSpeed,
-				clamped,
-				trimStart,
-				trimEnd,
-			);
-			if (airSpeedOffsetErrorMetric && !isNaN(errorMetric)) {
-				airSpeedOffsetErrorMetric.textContent = errorMetric.toFixed(2);
-			}
-			// Note: updateVEPlots is now triggered via orchestrator through handleParametersChange
-			// when setParameters is called above. This avoids double updates.
-			saveCurrentLapSettings();
-		};
-
-		airSpeedOffsetSlider.oninput = updateAirSpeedOffset;
-		airSpeedOffsetValue.onchange = updateAirSpeedOffsetFromInput;
-
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		const initialOffset =
-			appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
-		const initialError = calculateAirSpeedSyncError(
-			velocity,
-			windSpeed,
-			initialOffset,
-			trimStart,
-			trimEnd,
-		);
-		if (airSpeedOffsetErrorMetric && !isNaN(initialError)) {
-			airSpeedOffsetErrorMetric.textContent = initialError.toFixed(2);
-		}
-	}
-
-	bindElevationSmoothingToggle(appState, () => {
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
-		updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		saveCurrentLapSettings();
-	});
-
-	bindCrrTempControls({
-		getParams: () => appState.currentParameters,
-		setParams: (fields) => {
-			if (parametersComponent) {
-				// Persists per-file via the orchestrator's parameter storage path.
-				parametersComponent.setParameters(fields);
-			} else if (appState.currentParameters) {
-				Object.assign(appState.currentParameters, fields);
-			}
-		},
-		onChange: () => {
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		},
-	});
-
-	// Same persistence and recompute needs as the Crr temperature controls above,
-	// so the binding shape is deliberately identical: standard mode routes through
-	// the parameters component directly rather than the parametersSync gateway.
-	bindWindHeightControls({
-		getParams: () => appState.currentParameters,
-		setParams: (fields) => {
-			if (parametersComponent) {
-				// Persists per-file via the orchestrator's parameter storage path.
-				parametersComponent.setParameters(fields);
-			} else if (appState.currentParameters) {
-				Object.assign(appState.currentParameters, fields);
-			}
-		},
-		onChange: () => {
-			const trimStart = parseInt(trimStartSlider.value);
-			const trimEnd = parseInt(trimEndSlider.value);
-			updateVEPlots(appState, analysisInput, selectedIndices, trimStart, trimEnd);
-		},
-	});
-
+	// The map's trim twins are the same control with a second face, so the binder
+	// owns their handlers. Their RANGES are not declarative — they come from this
+	// panel's activity length — so they are set here, once.
 	const mapTrimControls = document.getElementById("mapTrimControls");
 	const mapTrimStartSlider = document.getElementById(
 		"mapTrimStartSlider",
@@ -1149,59 +754,70 @@ export function setupVESliders(
 		mapTrimEndValue.value = initialTrimEnd.toString();
 		mapTrimEndValue.min = MIN_TRIM_WINDOW_SAMPLES.toString();
 		mapTrimEndValue.max = (timestamps.length - 1).toString();
-
-		const syncMapToMain = () => {
-			mapTrimStartSlider.value = trimStartSlider.value;
-			mapTrimStartValue.value = trimStartValue.value;
-			mapTrimEndSlider.value = trimEndSlider.value;
-			mapTrimEndValue.value = trimEndValue.value;
-		};
-
-		trimStartSlider.addEventListener("input", syncMapToMain);
-		trimEndSlider.addEventListener("input", syncMapToMain);
-		trimStartValue.addEventListener("change", syncMapToMain);
-		trimEndValue.addEventListener("change", syncMapToMain);
-
-		mapTrimStartSlider.oninput = () => {
-			mapTrimStartValue.value = mapTrimStartSlider.value;
-			trimStartSlider.value = mapTrimStartSlider.value;
-			trimStartValue.value = mapTrimStartSlider.value;
-			updateTrimStart();
-		};
-		mapTrimEndSlider.oninput = () => {
-			mapTrimEndValue.value = mapTrimEndSlider.value;
-			trimEndSlider.value = mapTrimEndSlider.value;
-			updateTrimEnd();
-		};
-		mapTrimStartValue.onchange = () => {
-			const value = parseInt(mapTrimStartValue.value);
-			if (!isNaN(value)) {
-				const trimEnd = parseInt(trimEndSlider.value);
-				const clamped = Math.max(
-					0,
-					Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES),
-				);
-				mapTrimStartSlider.value = clamped.toString();
-				mapTrimStartValue.value = clamped.toString();
-				trimStartSlider.value = clamped.toString();
-				trimStartValue.value = clamped.toString();
-				updateTrimStart();
-			}
-		};
-		mapTrimEndValue.onchange = () => {
-			const value = parseInt(mapTrimEndValue.value);
-			if (!isNaN(value)) {
-				const trimStart = parseInt(trimStartSlider.value);
-				const clamped = Math.max(
-					trimStart + MIN_TRIM_WINDOW_SAMPLES,
-					Math.min(value, timestamps.length - 1),
-				);
-				mapTrimEndSlider.value = clamped.toString();
-				mapTrimEndValue.value = clamped.toString();
-				trimEndSlider.value = clamped.toString();
-				trimEndValue.value = clamped.toString();
-				updateTrimEnd();
-			}
-		};
 	}
+
+	bindModeControls({
+		appState,
+		modeId: "standard",
+		saveSettings: saveCurrentLapSettings,
+		onTrimMapUpdate: (trimStart, trimEnd) => {
+			mapVisualization?.fitBoundsToTrimRegion(
+				trimStart,
+				trimEnd,
+				positionLat,
+				positionLong,
+			);
+		},
+		// Trim-marker repaints must not outlive this panel's lap selection. Auto-rho
+		// still fires ~500 ms after a selection change and runs these handlers with
+		// the PREVIOUS lap's trim values and coordinates, which would draw stale
+		// start/end markers over the newly selected lap's route — so the guard
+		// survives N-4's removal of the synthetic dispatch. Only its reason changed.
+		mapCanFollow: () =>
+			mapVisualization !== null &&
+			veViewMatchesSelection(appState.currentAnalyzedLaps, appState.selectedLaps),
+		triggerAutoRho: triggerAutoRhoOnTrimChange,
+		// Standard has exactly one segment window — its trim — so the generalised
+		// per-segment mean (N-3) reduces to the number this panel already showed.
+		getOffsetMetricWindows: () => {
+			const { start, end } = currentTrim();
+			return Number.isNaN(start) || Number.isNaN(end)
+				? []
+				: [{ start, end }];
+		},
+		getSyncErrorSeries: () => ({ groundSpeed: velocity, airSpeed: windSpeed }),
+		getAutoCalibrationPercent: () => {
+			const { start, end } = currentTrim();
+			return calculateAutoAirSpeedCalibrationPercent([
+				{
+					timestamps,
+					groundSpeed: velocity,
+					apparentSpeed: windSpeed,
+					startIndex: start,
+					endIndex: end,
+				},
+			]);
+		},
+		// Temporary: plan 07-04 (D-07/D-20) generalises compare into the primitive
+		// and deletes this branch.
+		onWindSourceSelected: (windSource) => {
+			if (windSource !== "compare") return false;
+			const { start, end } = currentTrim();
+			void updateStandardComparePlots(
+				appState,
+				analysisInput,
+				selectedIndices,
+				start,
+				end,
+			);
+			return true;
+		},
+	});
+
+	// The offset control is not rendered in Standard's template, but its default
+	// is still what the parameters form carries into the primitive; referencing it
+	// here keeps the signature honest about what the panel was handed.
+	log.debug(
+		`Standard VE controls bound (default air-speed offset ${defaultAirSpeedOffset}s)`,
+	);
 }

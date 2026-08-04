@@ -14,7 +14,7 @@
  * held the closures registered by the last NON-compare update, so activating a
  * tab repainted stale non-compare data.
  *
- * These tests drive the REAL `updateVEPlotsWithWindSource` through its real
+ * These tests drive the REAL `updateStandardComparePlots` through its real
  * compare branch, its real wind resolution and the real `setupTabSwitching`
  * module. Only the WASM calculator is mocked, and only because a node test
  * cannot instantiate it — a rewrite of the compare branch to junk fails here.
@@ -42,7 +42,7 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 import { AppState } from "../../state/AppState";
 import { createAnalysisInput } from "../../analysis/AnalysisInput";
 import { setupTabSwitching } from "../dom/tabs";
-import { updateVEPlotsWithWindSource } from "./bindStandardSliders";
+import { updateStandardComparePlots } from "./bindStandardSliders";
 
 const SAMPLE_COUNT = 120;
 const TRIM_START = 0;
@@ -154,13 +154,12 @@ beforeEach(() => {
 
 async function runCompareUpdate(): Promise<AppState> {
 	const appState = makeAppState();
-	await updateVEPlotsWithWindSource(
+	await updateStandardComparePlots(
 		appState,
 		analysisInputFor(appState),
 		SELECTED_INDICES,
 		TRIM_START,
 		TRIM_END,
-		"compare",
 	);
 	return appState;
 }
