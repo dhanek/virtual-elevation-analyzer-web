@@ -228,7 +228,7 @@ describe("hiding the control is a visibility change only", () => {
 });
 
 describe("all three sidebars route through the shared binder", () => {
-	test("standard, GPS lap and out-and-back all call bindWindSourceRadios", () => {
+	test("standard, GPS lap and out-and-back all reach bindWindSourceRadios", () => {
 		const sidebars = [
 			"src/shell/ve/bindStandardSliders.ts",
 			"src/shell/gpsLap/renderGpsLap.ts",
@@ -238,10 +238,26 @@ describe("all three sidebars route through the shared binder", () => {
 			const source = readFileSync(resolve(process.cwd(), relative), "utf8");
 			// If a sidebar ever binds input[name="windSource"] by hand instead, the
 			// coverage above stops covering it and this fails loudly.
-			expect(source).toContain("bindWindSourceRadios(");
+			//
+			// Plan 07-03 (D-04) put ONE binder above the three sidebars, so a sidebar
+			// may now reach the shared radio binder either directly or through
+			// `bindModeControls`. Both are the shared path; a hand-rolled listener is
+			// still what this guard exists to reject, and the assertion below pins
+			// the delegate to the same shared binder so the indirection cannot become
+			// an escape route.
+			expect(source).toMatch(/bindWindSourceRadios\(|bindModeControls\(/);
 			expect(source).not.toMatch(
 				/addEventListener\([^)]*\)[\s\S]{0,80}name="windSource"/,
 			);
 		}
+
+		const binder = readFileSync(
+			resolve(process.cwd(), "src/shell/analysis/bindModeControls.ts"),
+			"utf8",
+		);
+		expect(binder).toContain("bindWindSourceRadios(");
+		expect(binder).not.toMatch(
+			/addEventListener\([^)]*\)[\s\S]{0,80}name="windSource"/,
+		);
 	});
 });
