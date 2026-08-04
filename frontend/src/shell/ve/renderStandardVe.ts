@@ -32,7 +32,11 @@ import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveSelectionWindSeries } from "./standardSegments";
-import { selectedLapCount, updateVirtualDistanceHeader } from "./vdHeader";
+import {
+	selectedLapCount,
+	updateCombinedVirtualDistanceHeader,
+	virtualDistanceHeaderMarkup,
+} from "./vdHeader";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 
@@ -182,10 +186,19 @@ export async function initializeVEAnalysis(
 		virtualDistanceFigure.layout,
 		virtualDistanceFigure.config,
 	);
-	// The template leaves the three VD spans empty on purpose; fill them from the
-	// same integration that just drew the curve, so the first paint and every
-	// later slider-driven redraw agree.
-	updateVirtualDistanceHeader(virtualDistanceInput, selectedLapCount(appState));
+	// The template leaves the header empty on purpose; fill it from the same
+	// integration that just drew the curve, so the first paint and every later
+	// slider-driven redraw agree.
+	//
+	// This placeholder paint has no per-segment decomposition -- it integrates
+	// the concatenated selection in one pass -- so a multi-lap selection gets the
+	// labelled combined figure here. The synthetic `input` dispatch on
+	// #trimStartSlider (below) immediately routes through the primitive and
+	// replaces it with the honest per-lap lines.
+	updateCombinedVirtualDistanceHeader(
+		virtualDistanceInput,
+		selectedLapCount(appState),
+	);
 
 	appState.filteredVEData = {
 		positionLat: analysisInput.positionLat,
@@ -393,19 +406,16 @@ export async function showVirtualElevationAnalysisInline(
                         </div>
                         <div class="ve-tab-content" id="vd-tab">
                              <!--
-                                Deliberately EMPTY. These three spans used to be
-                                interpolated here from the analyze-time result and
-                                never written again, so they stayed frozen while
-                                the trim sliders moved the curve below them. They
-                                are now owned by vdHeader.ts and written from the
-                                same integration that draws that curve, on every
-                                VD draw including the first.
+                                Deliberately EMPTY, and owned by vdHeader.ts. The
+                                numbers used to be interpolated here from the
+                                analyze-time result and never written again, so
+                                they stayed frozen while the trim sliders moved
+                                the curve below them. They are now written from
+                                the same integration that draws that curve, on
+                                every VD draw including the first -- and, for a
+                                multi-lap selection, one line per lap.
                              -->
-                             <div class="ve-metrics-compact ve-metrics-compact--spaced">
-                                VD (Air):<span id="vdAirValue"></span> |
-                                VD (Ground):<span id="vdGroundValue"></span> |
-                                Difference:<span id="vdDiffValue" class="ve-metrics-compact__value"></span>
-                            </div>
+                            ${virtualDistanceHeaderMarkup()}
                             <div id="vdPlot" class="ve-plot-container"></div>
                         </div>
                     </div>

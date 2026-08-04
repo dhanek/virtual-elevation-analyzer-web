@@ -60,6 +60,7 @@ import {
 } from "./updateGpsLap";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
+import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
 import {
@@ -664,7 +665,7 @@ export function getGpsLapNumberForRange(
 	return resolveGpsLapNumber(appState, range, fallbackLapNumber);
 }
 
-interface GpsLapVeTemplateOptions {
+export interface GpsLapVeTemplateOptions {
 	params: AnalysisParameters;
 	hasWindSpeed: boolean;
 	hasConstantWind: boolean;
@@ -679,7 +680,15 @@ interface GpsLapVeTemplateOptions {
 	elevationToggleMarkup: string;
 }
 
-function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
+/**
+ * Exported for `gpsLapVdHeader.test.ts`, which guards that the VD tab actually
+ * carries a header container. It had none, which is why stacked mode and GPS lap
+ * splitting mode showed no label at all -- a gap only a markup assertion catches,
+ * since a renderer writing into a container that does not exist fails silently.
+ */
+export function buildGpsLapVeAnalysisTemplate(
+	opts: GpsLapVeTemplateOptions,
+): string {
 	const {
 		params,
 		hasWindSpeed,
@@ -851,6 +860,16 @@ function buildGpsLapVeAnalysisTemplate(opts: GpsLapVeTemplateOptions): string {
 													showVirtualDistanceTab
 														? `
                         <div class="ve-tab-content" id="vd-tab">
+                            <!--
+                                This sidebar -- which the Standard "Stacked" view
+                                also reuses -- had no VD header at all, so both
+                                stacked mode and GPS lap splitting mode showed a
+                                bare plot with the label missing outright. The
+                                container is owned by vdHeader.ts and filled per
+                                lap from the same cumulative series the plot
+                                below draws.
+                            -->
+                            ${virtualDistanceHeaderMarkup()}
                             <div id="gpsLapVdPlot" class="ve-plot ve-plot--tall"></div>
                         </div>
                         `
