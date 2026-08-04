@@ -647,21 +647,72 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
     };
 }
 
-export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {
-    // D-21: integrate the series exactly as given. No calibration multiplier
-    // lives here any more; see VirtualDistancePlotInput.
-    const vdAir: number[] = new Array(input.timestamps.length).fill(0);
-    const vdGround: number[] = new Array(input.timestamps.length).fill(0);
+/** Cumulative air / ground virtual distance in metres, indexed like the input. */
+export interface VirtualDistanceIntegration {
+    air: number[];
+    ground: number[];
+}
+
+/** The two virtual distances over the trim window, plus their relative gap. */
+export interface VirtualDistanceTotals {
+    airKm: number;
+    groundKm: number;
+    /** ((air - ground) / ground) * 100, matching the Rust reference definition. */
+    differencePercent: number;
+}
+
+/**
+ * D-21: integrate the series exactly as given. No calibration multiplier lives
+ * here any more; see VirtualDistancePlotInput.
+ *
+ * Shared by the figure and by `computeVirtualDistanceTotals` so the numbers in
+ * the VD header can never disagree with the curve they sit above.
+ */
+function integrateVirtualDistance(input: VirtualDistancePlotInput): VirtualDistanceIntegration {
+    const air: number[] = new Array(input.timestamps.length).fill(0);
+    const ground: number[] = new Array(input.timestamps.length).fill(0);
 
     for (let i = input.context.trimStart + 1; i < input.timestamps.length; i++) {
         const dt = input.timestamps[i] - input.timestamps[i - 1];
 
         const apparentSpeed = !isNaN(input.windSpeed[i]) ? input.windSpeed[i] : 0;
-        vdAir[i] = vdAir[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
+        air[i] = air[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
 
         const groundSpeed = !isNaN(input.velocity[i]) && input.velocity[i] > 0 ? input.velocity[i] : 0;
-        vdGround[i] = vdGround[i - 1] + groundSpeed * dt;
+        ground[i] = ground[i - 1] + groundSpeed * dt;
     }
+
+    return { air, ground };
+}
+
+/**
+ * The endpoint of each plotted curve at the trim end, in km.
+ *
+ * This is deliberately derived from the SAME integration the figure draws
+ * rather than from a VE result: the `#vdAirValue` / `#vdGroundValue` /
+ * `#vdDiffValue` spans sit directly above that curve, and a header sourced from
+ * anywhere else drifts away from it the moment a trim slider moves.
+ */
+export function computeVirtualDistanceTotals(input: VirtualDistancePlotInput): VirtualDistanceTotals {
+    const { air, ground } = integrateVirtualDistance(input);
+    const endIndex = Math.min(input.context.trimEnd, air.length - 1);
+
+    if (endIndex < 0) {
+        return { airKm: 0, groundKm: 0, differencePercent: 0 };
+    }
+
+    const airMeters = air[endIndex];
+    const groundMeters = ground[endIndex];
+
+    return {
+        airKm: airMeters / 1000,
+        groundKm: groundMeters / 1000,
+        differencePercent: groundMeters > 0 ? ((airMeters - groundMeters) / groundMeters) * 100 : 0,
+    };
+}
+
+export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {
+    const { air: vdAir, ground: vdGround } = integrateVirtualDistance(input);
 
     const airSlices = createContextSlices(vdAir.map(value => value / 1000), input.context);
     const groundSlices = createContextSlices(vdGround.map(value => value / 1000), input.context);
