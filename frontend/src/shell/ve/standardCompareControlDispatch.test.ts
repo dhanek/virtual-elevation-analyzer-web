@@ -230,7 +230,9 @@ describe("Standard compare survives a control interaction", () => {
 			"windHeightSlider",
 		) as HTMLInputElement;
 		slider.value = NEW_K.toString();
-		slider.dispatchEvent(new Event("change"));
+		// `input`, not `change`: k recomputes while the thumb moves, like every
+		// other slider in the panel.
+		slider.dispatchEvent(new Event("input"));
 		await settle();
 
 		// The model took the new factor.
