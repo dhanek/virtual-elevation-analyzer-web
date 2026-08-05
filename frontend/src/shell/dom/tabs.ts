@@ -21,14 +21,21 @@ let currentRenderMap: TabRenderMap = {}
 // so rebuilt panels get freshly bound while in-place recomputes do not.
 const boundButtons = new WeakSet<Element>()
 
-function handleTabClick(e: Event): void {
-    const target = e.currentTarget as HTMLElement
-    const tabName = target.getAttribute('data-tab')
-    if (!tabName) return
-
+/**
+ * Make one tab the active one, exactly as a click on its button would.
+ *
+ * Exported because a click is no longer the only way a tab becomes active.
+ * `syncFitWindControlsVisibility` hides the VD tab when the wind source is
+ * constant, and `.ve-tab-content--active` and `[hidden]` are different axes —
+ * a hidden pane that is still the active one leaves the panel showing nothing
+ * at all. The guard needs to move the user, and it must move them the same way
+ * a click does, render callback included, or the tab it moves them to would be
+ * active-but-undrawn.
+ */
+export function activateTab(tabName: string): void {
     // Update button active states (re-query in case the DOM changed)
     document.querySelectorAll('.ve-tab-button').forEach(b => b.classList.remove('ve-tab-button--active'))
-    target.classList.add('ve-tab-button--active')
+    document.querySelector(`.ve-tab-button[data-tab="${tabName}"]`)?.classList.add('ve-tab-button--active')
 
     // Update tab content active states
     document.querySelectorAll('.ve-tab-content').forEach(content => {
@@ -53,6 +60,13 @@ function handleTabClick(e: Event): void {
         log.debug('Tab switching: rendering VE tab')
         currentRenderMap.ve()
     }
+}
+
+function handleTabClick(e: Event): void {
+    const target = e.currentTarget as HTMLElement
+    const tabName = target.getAttribute('data-tab')
+    if (!tabName) return
+    activateTab(tabName)
 }
 
 /**

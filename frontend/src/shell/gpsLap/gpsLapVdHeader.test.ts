@@ -55,7 +55,6 @@ describe("the GPS-lap / stacked VD header", () => {
 			hasWindSpeed: false,
 			hasConstantWind: false,
 			showWindTab: false,
-			showFitWindControls: false,
 			showVirtualDistanceTab: true,
 			selectedWindSource: "none",
 			currentAirSpeedCalibrationValue: "0",

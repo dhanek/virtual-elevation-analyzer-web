@@ -47,12 +47,14 @@ type WindSource = "fit" | "constant" | "compare";
 function flagsFor(selectedWindSource: WindSource) {
 	const effective =
 		selectedWindSource === "compare" ? "fit" : selectedWindSource;
-	const showFitWindControls = effective === "fit";
 	return {
 		selectedWindSource,
 		showWindTab: true,
-		showFitWindControls,
-		showVirtualDistanceTab: showFitWindControls,
+		// PRESENCE, not visibility. `hasWindSpeed` is true throughout this
+		// suite, so the VD tab is always rendered; whether it is HIDDEN is what
+		// `effective` decides, and that is asserted separately below.
+		showVirtualDistanceTab: true,
+		effective,
 	};
 }
 
@@ -125,10 +127,26 @@ const ALWAYS_PRESENT = [
 	'input[name="windSource"][value="compare"]',
 ];
 
-/** Controls whose PRESENCE depends on the selected source, today. */
+/**
+ * The elements the BINDER needs to find, which must therefore be present under
+ * every source.
+ *
+ * They used to be gated at template time, so under constant they were absent
+ * from the DOM entirely — and `bindModeControls` binds once, from the render,
+ * so it skipped their rows and left them unbound for the panel's life once the
+ * source-driven sidebar rebuild was removed. Presence is now static.
+ */
 const SOURCE_DEPENDENT = [
 	"#airSpeedOffsetSlider",
 	"#airSpeedOffsetValue",
+	"#vd-tab",
+	'.ve-tab-button[data-tab="vd"]',
+];
+
+/** The wrappers whose `hidden` decides what actually reaches the screen. */
+const SOURCE_DEPENDENT_BLOCKS = [
+	"#airSpeedOffsetControls",
+	"#airSpeedCalibrationControls",
 	"#vd-tab",
 	'.ve-tab-button[data-tab="vd"]',
 ];
@@ -144,8 +162,8 @@ describe.each(MODES)("the $name sidebar, as rendered", ({ render }) => {
 		},
 	);
 
-	it.each<WindSource>(["fit", "compare"])(
-		"renders the FIT air-speed controls under %s",
+	it.each<WindSource>(["fit", "constant", "compare"])(
+		"renders the FIT air-speed controls under %s, whatever the source",
 		(source) => {
 			const doc = render(source);
 			for (const selector of SOURCE_DEPENDENT) {
@@ -154,12 +172,29 @@ describe.each(MODES)("the $name sidebar, as rendered", ({ render }) => {
 		},
 	);
 
-	it("omits the FIT air-speed controls entirely under constant", () => {
+	it("hides every FIT air-speed block under constant", () => {
+		// Nothing NEW appears: under constant these blocks were not rendered
+		// before the migration and are not shown after it. What changed is that
+		// they exist in the DOM for the binder to find.
 		const doc = render("constant");
-		for (const selector of SOURCE_DEPENDENT) {
-			expect(doc.querySelector(selector), selector).toBeNull();
+		for (const selector of SOURCE_DEPENDENT_BLOCKS) {
+			const element = doc.querySelector(selector);
+			expect(element, selector).not.toBeNull();
+			expect(element!.hasAttribute("hidden"), selector).toBe(true);
 		}
 	});
+
+	it.each<WindSource>(["fit", "compare"])(
+		"shows every FIT air-speed block under %s",
+		(source) => {
+			const doc = render(source);
+			for (const selector of SOURCE_DEPENDENT_BLOCKS) {
+				const element = doc.querySelector(selector);
+				expect(element, selector).not.toBeNull();
+				expect(element!.hasAttribute("hidden"), selector).toBe(false);
+			}
+		},
+	);
 
 	it("renders compare identically to fit apart from checked and hidden state", () => {
 		// `compare` folds onto `fit` before the presence flags are computed, so

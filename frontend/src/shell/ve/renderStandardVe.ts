@@ -12,11 +12,6 @@ import {
 import { setupTabSwitching } from "../dom/tabs";
 import { bindActionFooter } from "../dom/actionFooter";
 import { getSelectedWindSource } from "../dom/windSource";
-import {
-	AIR_SPEED_CALIBRATION_MAX_PERCENT,
-	AIR_SPEED_CALIBRATION_MIN_PERCENT,
-	AIR_SPEED_CALIBRATION_STEP_PERCENT,
-} from "../../analysis/AirSpeedCalibration";
 import { createPlotContext } from "../../plots/PlotContext";
 import {
 	buildVirtualElevationFigures,
@@ -29,6 +24,7 @@ import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "./crrTempControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
+import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -347,18 +343,9 @@ export async function showVirtualElevationAnalysisInline(
 
                             ${
 															hasWindSpeed
-																? `
-                            <div class="ve-parameter">
-                                <div class="ve-param-header">
-                                    <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="${appState.airSpeedCalibrationPercent.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           class="ve-param-header__value" />
-                                    <span>%</span>
-                                </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${appState.airSpeedCalibrationPercent.toFixed(1)}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn ve-parameter__auto-btn">Auto Adjust</button>
-                            </div>
-                            `
+																? airSpeedCalibrationControlMarkup(
+																		appState.airSpeedCalibrationPercent.toFixed(1),
+																	)
 																: ""
 														}
                         </div>

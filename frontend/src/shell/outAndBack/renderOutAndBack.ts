@@ -16,9 +16,6 @@ import type { OutAndBackSection } from "../../utils/GpsLapDetection";
 import type { OutAndBackVEProfile } from "./types";
 
 import {
-	AIR_SPEED_CALIBRATION_MAX_PERCENT,
-	AIR_SPEED_CALIBRATION_MIN_PERCENT,
-	AIR_SPEED_CALIBRATION_STEP_PERCENT,
 	calculateAutoAirSpeedCalibrationPercent,
 	clampAirSpeedCalibrationPercent,
 	formatAirSpeedCalibrationPercent,
@@ -62,6 +59,9 @@ import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
+import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
+import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
+import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import {
 	bindWindHeightControls,
 	windHeightControlsMarkup,
@@ -337,10 +337,13 @@ export async function showOutAndBackVEAnalysis(
  * halves are guarded, the same way `gpsLapVdHeader.test.ts` guards the sidebar
  * this one was modelled on.
  */
-export function outAndBackVdTabMarkup(show: boolean): string {
+export function outAndBackVdTabMarkup(
+	show: boolean,
+	windSource?: string | null,
+): string {
 	if (!show) return "";
 	return `
-                        <div class="ve-tab-content" id="vd-tab">
+                        <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(windSource)}>
                             ${virtualDistanceHeaderMarkup()}
                             <div id="oabVdPlot" class="ve-plot ve-plot--tall"></div>
                         </div>
@@ -352,7 +355,6 @@ export interface OutAndBackVeTemplateOptions {
 	hasWindSpeed: boolean;
 	hasConstantWind: boolean;
 	showWindTab: boolean;
-	showFitWindControls: boolean;
 	showVirtualDistanceTab: boolean;
 	selectedWindSource: string;
 	currentAirSpeedCalibrationValue: string;
@@ -392,7 +394,6 @@ export function buildOutAndBackVeAnalysisTemplate(
 		hasWindSpeed,
 		hasConstantWind,
 		showWindTab,
-		showFitWindControls,
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
@@ -458,18 +459,10 @@ export function buildOutAndBackVeAnalysisTemplate(
 
                             ${
 															hasWindSpeed
-																? `
-                            <div class="ve-parameter">
-                                <div class="ve-param-header">
-                                    <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="${currentAirSpeedCalibrationValue}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           class="ve-param-header__value" />
-                                    <span>%</span>
-                                </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${currentAirSpeedCalibrationValue}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn ve-parameter__auto-btn">Auto Adjust</button>
-                            </div>
-                            `
+																? airSpeedCalibrationControlMarkup(
+																		currentAirSpeedCalibrationValue,
+																		selectedWindSource,
+																	)
 																: ""
 														}
                         </div>
@@ -498,7 +491,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                             ${
 															showVirtualDistanceTab
 																? `
-                            <button class="ve-tab-button" data-tab="vd">VD</button>
+                            <button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(selectedWindSource)}>VD</button>
                             `
 																: ""
 														}
@@ -526,19 +519,22 @@ export function buildOutAndBackVeAnalysisTemplate(
                         <div class="ve-tab-content" id="wind-tab">
                             <div id="oabWindPlot" class="ve-plot ve-plot--tall"></div>
                             ${
-															showFitWindControls
-																? `
-                            <div class="ve-parameter ve-parameter--panel">
-                                <h4 class="ve-parameter__title">Air Speed Time Offset</h4>
-                                <div class="ve-parameter__grid">
-                                    <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}"
-                                           class="ve-parameter__slider" />
-                                    <input type="number" id="airSpeedOffsetValue" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
-                                           class="ve-parameter__value" />
-                                    <span class="ve-parameter__unit">seconds</span>
-                                </div>
-                            </div>
-                            `
+															// PRESENCE on hasWindSpeed, VISIBILITY on the source.
+															// Gated on showFitWindControls this block was absent
+															// from the DOM under constant, so bindModeControls --
+															// which binds ONCE, from the render -- skipped its row
+															// and the slider would stay unbound for the panel's
+															// life once the source-driven sidebar rebuild is
+															// removed. The shared helper carries
+															// data-wind-source="fit", so under constant the block
+															// is present-and-hidden: the user sees exactly what
+															// they see today, because it was not rendered there.
+															hasWindSpeed
+																? airSpeedOffsetControlMarkup(
+																		params?.air_speed_offset,
+																		defaultAirSpeedOffset,
+																		selectedWindSource,
+																	)
 																: ""
 														}
                         </div>
@@ -550,7 +546,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                             <div id="oabPowerPlot" class="ve-plot ve-plot--tall"></div>
                         </div>
 
-                        ${outAndBackVdTabMarkup(showVirtualDistanceTab)}
+                        ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
                     </div>
                 </div>
             </div>
@@ -574,11 +570,9 @@ export async function showOutAndBackVEPlot(
 	const { appState } = services;
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
-	const effectiveWindSource =
-		selectedWindSource === "compare" ? "fit" : selectedWindSource;
 	const showWindTab = hasWindSpeed || hasConstantWind;
-	const showFitWindControls = hasWindSpeed && effectiveWindSource === "fit";
-	const showVirtualDistanceTab = showFitWindControls;
+	// PRESENCE, not visibility — see the identical note in renderGpsLap.ts.
+	const showVirtualDistanceTab = hasWindSpeed;
 
 	const Plotly = await waitForPlotly();
 
@@ -608,7 +602,6 @@ export async function showOutAndBackVEPlot(
 		hasWindSpeed,
 		hasConstantWind,
 		showWindTab,
-		showFitWindControls,
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
