@@ -22,6 +22,14 @@
  * reaches the template.
  */
 
+import {
+	fitWindControlsApplyTo,
+	WIND_SOURCE_VISIBILITY_ATTR,
+} from "./windSourceVisibility";
+
+/** The block's own id, so the visibility sync and tests can name it. */
+export const AIR_SPEED_OFFSET_CONTROLS_ID = "airSpeedOffsetControls";
+
 export const AIR_SPEED_OFFSET_MIN_SECONDS = -10;
 export const AIR_SPEED_OFFSET_MAX_SECONDS = 10;
 export const AIR_SPEED_OFFSET_STEP_SECONDS = 1;
@@ -47,15 +55,33 @@ export function resolveInitialAirSpeedOffset(
  * source-gated control would be absent at bind time and stay unbound for the
  * rest of the panel's life. That is the N-3 failure mode restated, and it is why
  * the k control took the same visibility-not-presence route in d4bf97f.
+ *
+ * The block carries `data-wind-source="fit"`, so `syncFitWindControlsVisibility`
+ * hides it under constant wind, where the offset is applied nowhere: it is read
+ * only on the `fit` branch of `resolveWindSeries`, and on the golden fixture
+ * offset 2 -> 30 under constant leaves mean r² at 0.181694 and the VE checksum
+ * at 1254.10, byte-identical. `3dbaefc` gated this block on `hasWindSpeed` so
+ * the binder could bind it once and did not add the matching visibility toggle,
+ * which is what left it visible and inert in Standard under constant.
+ *
+ * `windSource` is optional and decides only the INITIAL hidden state, exactly
+ * as in `windHeightControlsMarkup`: the bind-time sync settles it either way,
+ * so passing it is the difference between no flash and a flash, never between
+ * right and wrong.
  */
 export function airSpeedOffsetControlMarkup(
 	storedOffset: number | null | undefined,
 	defaultOffset: number,
+	windSource?: string | null,
 ): string {
 	const value = resolveInitialAirSpeedOffset(storedOffset, defaultOffset);
+	const hidden =
+		windSource !== undefined && windSource !== null
+			? !fitWindControlsApplyTo(windSource)
+			: false;
 
 	return `
-        <div class="ve-parameter ve-parameter--panel">
+        <div class="ve-parameter ve-parameter--panel" id="${AIR_SPEED_OFFSET_CONTROLS_ID}" ${WIND_SOURCE_VISIBILITY_ATTR}="fit"${hidden ? " hidden" : ""}>
             <h4 class="ve-parameter__title">Air Speed Time Offset</h4>
             <div class="ve-parameter__grid">
                 <input type="range" id="airSpeedOffsetSlider" min="${AIR_SPEED_OFFSET_MIN_SECONDS}" max="${AIR_SPEED_OFFSET_MAX_SECONDS}" step="${AIR_SPEED_OFFSET_STEP_SECONDS}" value="${value}"

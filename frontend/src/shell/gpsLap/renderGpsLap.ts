@@ -16,11 +16,7 @@ import type { ShellServices } from "../analysis/types";
 import type { LapVEProfile } from "./types";
 
 import {
-	AIR_SPEED_CALIBRATION_MAX_PERCENT,
-	AIR_SPEED_CALIBRATION_MIN_PERCENT,
-	AIR_SPEED_CALIBRATION_STEP_PERCENT,
 	calculateAutoAirSpeedCalibrationPercent,
-	clampAirSpeedCalibrationPercent,
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -34,17 +30,16 @@ import {
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
 import { setupTabSwitching } from "../dom/tabs";
-import { bindWindSourceRadios, getSelectedWindSource } from "../dom/windSource";
+import { bindModeControls } from "../analysis/bindModeControls";
+import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import { getSelectedWindSource } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
 import {
 	handleStoreResult,
 	handleExportAllResults,
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
-import {
-	bindElevationSmoothingToggle,
-	elevationSmoothingToggleMarkup,
-} from "../analysis/elevationProfileCycle";
+import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import {
 	calculateGpsLapStats,
 	calculateMeanElevationProfile,
@@ -53,21 +48,17 @@ import {
 	renderGpsLapPowerPlot,
 	renderGpsLapVdPlot,
 } from "./gpsLapPlots";
-import {
-	updateGpsLapVEPlots,
-	recalculateGpsLapVE,
-	scheduleGpsLapRecompute,
-} from "./updateGpsLap";
+import { createGpsLapUpdateCallbacks } from "./updateGpsLap";
+import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
+import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
+import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
+import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
-import {
-	bindWindHeightControls,
-	windHeightControlsMarkup,
-} from "../ve/windHeightControls";
-import { mergeAnalysisParameters } from "../analysis/parametersSync";
+import { crrTempControlsMarkup } from "../ve/crrTempControls";
+import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 
 /**
@@ -306,11 +297,15 @@ export async function showGpsLapVEPlot(
 	const { appState } = services;
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
-	const effectiveWindSource =
-		selectedWindSource === "compare" ? "fit" : selectedWindSource;
 	const showWindTab = hasWindSpeed || hasConstantWind;
-	const showFitWindControls = hasWindSpeed && effectiveWindSource === "fit";
-	const showVirtualDistanceTab = showFitWindControls;
+	// PRESENCE, not visibility. The VD tab used to be gated on the selected
+	// source, so it was absent from the DOM under constant and only came back
+	// because a source change rebuilt the whole sidebar. Removing that rebuild
+	// is the point of the migration, so the tab is now rendered whenever a FIT
+	// air-speed channel exists and HIDDEN under constant by
+	// syncFitWindControlsVisibility. Nothing new becomes visible: under
+	// constant the user saw no VD tab before and sees none now.
+	const showVirtualDistanceTab = hasWindSpeed;
 	// Ensure Plotly is loaded (side effect only; Plotly is accessed via the
 	// global in downstream helpers).
 	await waitForPlotly();
@@ -341,7 +336,6 @@ export async function showGpsLapVEPlot(
 		hasWindSpeed,
 		hasConstantWind,
 		showWindTab,
-		showFitWindControls,
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
@@ -359,172 +353,24 @@ export async function showGpsLapVEPlot(
 	// Setup slider event handlers for CdA/Crr with recalculation
 	setupGpsLapSliderHandlers(appState, parameterStorage, waitForPlotly, params);
 
-	bindElevationSmoothingToggle(appState, () => {
-		const windSource = getSelectedWindSource();
-		const cda = parseFloat(
-			(document.getElementById("cdaValue") as HTMLInputElement)?.value || "0.3",
-		);
-		const crr = parseFloat(
-			(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-				"0.008",
-		);
-		scheduleGpsLapRecompute(() =>
-			updateGpsLapVEPlots(
-				appState,
-				parameterStorage,
-				waitForPlotly,
-				cda,
-				crr,
-				windSource,
-			),
-		);
-	});
+	// Every VE control is bound by `setupGpsLapSliderHandlers` above, from
+	// MODE_CONTROL_TABLE. What used to sit here -- the elevation-smoothing
+	// toggle, the wind-source radios, the calibration slider, its number input
+	// and Auto Adjust -- was six more hand-written listeners in a second file,
+	// each independently responsible for remembering to recompute.
+	//
+	// The wind-source radios in particular no longer call `recalculateGpsLapVE`.
+	// That rebuilt the entire sidebar behind a "Recalculating VE..." spinner and
+	// redrew every plot, which is why the source change was the one interaction
+	// in this mode that did not go through the funnel. It is now one scheduled
+	// recompute like every other control, and the panel persists across it --
+	// which is what the active-tab guard in windSourceVisibility.ts exists for.
 
-	// Setup tab switching
 	setupTabSwitching({
 		wind: () => renderGpsLapWindPlot(lapProfiles),
 		power: () => renderGpsLapPowerPlot(lapProfiles),
 		vd: () => renderGpsLapVdPlot(lapProfiles),
 	});
-
-	// Setup wind source radio button listeners
-	bindWindSourceRadios(() => {
-		log.debug("Wind source changed - triggering GPS lap VE recalculation");
-		void recalculateGpsLapVE(
-			appState,
-			services,
-			parameterStorage,
-			resultsStorage,
-			waitForPlotly,
-		);
-	});
-
-	// Setup air speed calibration listeners
-	const airSpeedCalibrationSlider = document.getElementById(
-		"airSpeedCalibrationSlider",
-	) as HTMLInputElement;
-	const airSpeedCalibrationValue = document.getElementById(
-		"airSpeedCalibrationValue",
-	) as HTMLInputElement;
-
-	if (airSpeedCalibrationSlider && airSpeedCalibrationValue) {
-		const updateAirSpeedCalibration = () => {
-			const value = parseFloat(airSpeedCalibrationSlider.value);
-			airSpeedCalibrationValue.value = value.toFixed(1);
-			appState.airSpeedCalibrationPercent = value;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			log.debug("Air speed calibration changed - updating GPS lap VE plots");
-			const windSource = getSelectedWindSource();
-			const cda = parseFloat(
-				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-					"0.3",
-			);
-			const crr = parseFloat(
-				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-					"0.008",
-			);
-			scheduleGpsLapRecompute(() =>
-				updateGpsLapVEPlots(
-					appState,
-					parameterStorage,
-					waitForPlotly,
-					cda,
-					crr,
-					windSource,
-				),
-			);
-		};
-
-		const updateAirSpeedCalibrationFromInput = () => {
-			const value = parseFloat(airSpeedCalibrationValue.value);
-			if (isNaN(value)) return;
-			const clamped = clampAirSpeedCalibrationPercent(value);
-			airSpeedCalibrationSlider.value = clamped.toString();
-			airSpeedCalibrationValue.value = clamped.toFixed(1);
-			appState.airSpeedCalibrationPercent = clamped;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			log.debug("Air speed calibration changed - updating GPS lap VE plots");
-			const windSource = getSelectedWindSource();
-			const cda = parseFloat(
-				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-					"0.3",
-			);
-			const crr = parseFloat(
-				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-					"0.008",
-			);
-			scheduleGpsLapRecompute(() =>
-				updateGpsLapVEPlots(
-					appState,
-					parameterStorage,
-					waitForPlotly,
-					cda,
-					crr,
-					windSource,
-				),
-			);
-		};
-
-		airSpeedCalibrationSlider.addEventListener(
-			"input",
-			updateAirSpeedCalibration,
-		);
-		airSpeedCalibrationValue.addEventListener(
-			"change",
-			updateAirSpeedCalibrationFromInput,
-		);
-
-		const autoAdjustButton = document.getElementById(
-			"autoAdjustCalibration",
-		) as HTMLButtonElement;
-		if (autoAdjustButton) {
-			autoAdjustButton.addEventListener("click", () => {
-				const calibrationPercent = calculateAutoAirSpeedCalibrationPercent(
-					buildAutoCalibrationSegmentsFromRanges(
-						appState,
-						appState.currentGpsLapIndexRanges ?? [],
-						getNormalizedActivityArrays,
-						resolveWindSeries,
-						extractSegmentData,
-					),
-				);
-
-				if (calibrationPercent === null) {
-					log.warn(
-						"Cannot auto-adjust GPS lap calibration: no usable FIT air speed data available",
-					);
-					return;
-				}
-
-				airSpeedCalibrationSlider.value = calibrationPercent.toFixed(1);
-				airSpeedCalibrationValue.value = calibrationPercent.toFixed(1);
-				appState.airSpeedCalibrationPercent = calibrationPercent;
-				void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-				log.debug(
-					`Auto-adjusted GPS lap air speed calibration to ${calibrationPercent.toFixed(1)}%`,
-				);
-				const windSource = getSelectedWindSource();
-				const cda = parseFloat(
-					(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-						"0.3",
-				);
-				const crr = parseFloat(
-					(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-						"0.008",
-				);
-				scheduleGpsLapRecompute(() =>
-					updateGpsLapVEPlots(
-						appState,
-						parameterStorage,
-						waitForPlotly,
-						cda,
-						crr,
-						windSource,
-					),
-				);
-			});
-		}
-	}
 
 	// Setup action footer buttons
 	bindActionFooter({
@@ -549,102 +395,96 @@ export async function showGpsLapVEPlot(
 }
 
 /**
- * Setup slider event handlers for GPS lap mode (uses standard slider IDs).
+ * Wire every GPS-lap VE control, from the one table, through the one funnel.
+ *
+ * This function used to hand-write four listeners for CdA and Crr and delegate
+ * two more blocks, while the RENDER function next door hand-wrote another six
+ * for elevation smoothing, the wind-source radios, the calibration slider, its
+ * number input and Auto Adjust. Twelve bindings across two files, each of them
+ * independently responsible for remembering to ask for a recompute — which is
+ * the 2026-04-19 omission class with twelve places to reoccur. There is now
+ * exactly ONE place per mode where a VE control is wired, and it is not this
+ * file: it is `MODE_CONTROL_TABLE`.
+ *
+ * The exported signature and its call site are unchanged on purpose, so this is
+ * a replacement of the body rather than a re-plumbing of the render path.
+ * `bindActionFooter` stays in the render function: it saves, stores and exports
+ * and never recomputes, so it is deliberately not in the table.
  */
 export function setupGpsLapSliderHandlers(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
-	waitForPlotly: () => Promise<any>,
+	_waitForPlotly: () => Promise<any>,
 	_params: AnalysisParameters,
 ) {
-	const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
-	const cdaValue = document.getElementById("cdaValue") as HTMLInputElement;
-	const crrSlider = document.getElementById("crrSlider") as HTMLInputElement;
-	const crrValue = document.getElementById("crrValue") as HTMLInputElement;
+	// The renderer half of the mode seam, registered from the render that owns
+	// the activity arrays it closes over. Mirrors what Standard does in
+	// `setupVESliders`, and must happen before the first `requestModeUpdate`.
+	registerModeUpdateCallbacks("gpsLap", () =>
+		createGpsLapUpdateCallbacks(appState),
+	);
 
-	const triggerRecalculation = () => {
-		const windSource = getSelectedWindSource();
-		const cda = parseFloat(cdaValue?.value || "0.3");
-		const crr = parseFloat(crrValue?.value || "0.008");
-		scheduleGpsLapRecompute(() =>
-			updateGpsLapVEPlots(
-				appState,
-				parameterStorage,
-				waitForPlotly,
-				cda,
-				crr,
-				windSource,
+	/** The lap windows every per-segment readout is measured over. */
+	const ranges = () => resolveActiveGpsLapRanges(appState);
+
+	bindModeControls({
+		appState,
+		modeId: "gpsLap",
+		saveSettings: () => {
+			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
+		},
+		// N-3: one sync-error window per lap, where Standard supplies its single
+		// trim window. The binder displays the NaN-skipping mean over them, so
+		// Standard's displayed number is unchanged and the GPS modes gain one.
+		getOffsetMetricWindows: () =>
+			ranges().map((range: { startIdx: number; endIdx: number }) => ({
+				start: range.startIdx,
+				end: range.endIdx,
+			})),
+		getSyncErrorSeries: () => syncErrorSeries(appState),
+		// Every mode keeps its own segment source for the auto calibration: the
+		// difference between the three is DATA, not control flow, so it is an
+		// option here rather than a mode `if` inside the binder (D-02).
+		getAutoCalibrationPercent: () =>
+			calculateAutoAirSpeedCalibrationPercent(
+				buildAutoCalibrationSegmentsFromRanges(
+					appState,
+					ranges(),
+					getNormalizedActivityArrays,
+					resolveWindSeries,
+					extractSegmentData,
+				),
 			),
-		);
+	});
+}
+
+/**
+ * The ground- and air-speed series the offset metric is measured between.
+ *
+ * Resolved on demand rather than captured at render time, so the number follows
+ * the CURRENTLY selected wind source. Both lookups are cached
+ * (`getNormalizedActivityArrays`), so this is a map read per interaction.
+ */
+function syncErrorSeries(appState: AppState): {
+	groundSpeed: number[];
+	airSpeed: number[];
+} {
+	const fitData = appState.currentFitData;
+	const params = appState.currentParameters;
+	if (!fitData || !params) {
+		return { groundSpeed: [], airSpeed: [] };
+	}
+	const normalized = getNormalizedActivityArrays(fitData);
+	const resolution = resolveWindSeries({
+		fitData,
+		windSource: getSelectedWindSource(),
+		params,
+		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+	});
+	return {
+		groundSpeed: normalized.velocity,
+		airSpeed: resolution.windSpeed,
 	};
-
-	if (cdaSlider && cdaValue) {
-		cdaSlider.addEventListener("input", () => {
-			cdaValue.value = parseFloat(cdaSlider.value).toFixed(3);
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-		cdaValue.addEventListener("change", () => {
-			cdaSlider.value = cdaValue.value;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-	}
-
-	if (crrSlider && crrValue) {
-		crrSlider.addEventListener("input", () => {
-			crrValue.value = parseFloat(crrSlider.value).toFixed(4);
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-		crrValue.addEventListener("change", () => {
-			crrSlider.value = crrValue.value;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-	}
-
-	bindCrrTempControls({
-		getParams: () => appState.currentParameters,
-		setParams: (fields) => {
-			// Prefer the parameters-component gateway so its private copy stays
-			// in sync (a later form edit would otherwise revert these fields).
-			if (mergeAnalysisParameters(fields)) return;
-			if (!appState.currentParameters) return;
-			Object.assign(appState.currentParameters, fields);
-			if (appState.currentFileHash && appState.selectedFile) {
-				void parameterStorage.saveParameters(
-					appState.currentFileHash,
-					appState.currentParameters,
-					appState.selectedFile.name,
-				);
-			}
-		},
-		onChange: triggerRecalculation,
-	});
-
-	// Same persistence and recompute needs as the Crr temperature controls above,
-	// so the binding shape is deliberately identical: the k write must go through
-	// the parametersSync gateway or the component's private copy reverts it on the
-	// next form edit (see shell/analysis/parametersSync.ts).
-	bindWindHeightControls({
-		getParams: () => appState.currentParameters,
-		setParams: (fields) => {
-			// Prefer the parameters-component gateway so its private copy stays
-			// in sync (a later form edit would otherwise revert these fields).
-			if (mergeAnalysisParameters(fields)) return;
-			if (!appState.currentParameters) return;
-			Object.assign(appState.currentParameters, fields);
-			if (appState.currentFileHash && appState.selectedFile) {
-				void parameterStorage.saveParameters(
-					appState.currentFileHash,
-					appState.currentParameters,
-					appState.selectedFile.name,
-				);
-			}
-		},
-		onChange: triggerRecalculation,
-	});
 }
 
 /**
@@ -670,7 +510,6 @@ export interface GpsLapVeTemplateOptions {
 	hasWindSpeed: boolean;
 	hasConstantWind: boolean;
 	showWindTab: boolean;
-	showFitWindControls: boolean;
 	showVirtualDistanceTab: boolean;
 	selectedWindSource: string;
 	currentAirSpeedCalibrationValue: string;
@@ -694,7 +533,6 @@ export function buildGpsLapVeAnalysisTemplate(
 		hasWindSpeed,
 		hasConstantWind,
 		showWindTab,
-		showFitWindControls,
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
@@ -760,18 +598,10 @@ export function buildGpsLapVeAnalysisTemplate(
 
                             ${
 															hasWindSpeed
-																? `
-                            <div class="ve-parameter">
-                                <div class="ve-param-header">
-                                    <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="${currentAirSpeedCalibrationValue}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           class="ve-param-header__value" />
-                                    <span>%</span>
-                                </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${currentAirSpeedCalibrationValue}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn ve-parameter__auto-btn">Auto Adjust</button>
-                            </div>
-                            `
+																? airSpeedCalibrationControlMarkup(
+																		currentAirSpeedCalibrationValue,
+																		selectedWindSource,
+																	)
 																: ""
 														}
                         </div>
@@ -800,7 +630,7 @@ export function buildGpsLapVeAnalysisTemplate(
                             ${
 															showVirtualDistanceTab
 																? `
-                            <button class="ve-tab-button" data-tab="vd">VD</button>
+                            <button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(selectedWindSource)}>VD</button>
                             `
 																: ""
 														}
@@ -832,19 +662,22 @@ export function buildGpsLapVeAnalysisTemplate(
                         <div class="ve-tab-content" id="wind-tab">
                             <div id="gpsLapWindPlot" class="ve-plot ve-plot--tall"></div>
                             ${
-															showFitWindControls
-																? `
-                            <div class="ve-parameter ve-parameter--panel">
-                                <h4 class="ve-parameter__title">Air Speed Time Offset</h4>
-                                <div class="ve-parameter__grid">
-                                    <input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}"
-                                           class="ve-parameter__slider" />
-                                    <input type="number" id="airSpeedOffsetValue" value="${params?.air_speed_offset ?? defaultAirSpeedOffset}" step="1" min="-10" max="10"
-                                           class="ve-parameter__value" />
-                                    <span class="ve-parameter__unit">seconds</span>
-                                </div>
-                            </div>
-                            `
+															// PRESENCE on hasWindSpeed, VISIBILITY on the source.
+															// Gated on showFitWindControls this block was absent
+															// from the DOM under constant, so bindModeControls --
+															// which binds ONCE, from the render -- skipped its row
+															// and the slider would stay unbound for the panel's
+															// life once the source-driven sidebar rebuild is
+															// removed. The shared helper carries
+															// data-wind-source="fit", so under constant the block
+															// is present-and-hidden: the user sees exactly what
+															// they see today, because it was not rendered there.
+															hasWindSpeed
+																? airSpeedOffsetControlMarkup(
+																		params?.air_speed_offset,
+																		defaultAirSpeedOffset,
+																		selectedWindSource,
+																	)
 																: ""
 														}
                         </div>
@@ -859,7 +692,7 @@ export function buildGpsLapVeAnalysisTemplate(
                         ${
 													showVirtualDistanceTab
 														? `
-                        <div class="ve-tab-content" id="vd-tab">
+                        <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(selectedWindSource)}>
                             <!--
                                 This sidebar -- which the Standard "Stacked" view
                                 also reuses -- had no VD header at all, so both

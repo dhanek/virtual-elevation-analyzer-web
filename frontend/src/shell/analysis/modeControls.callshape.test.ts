@@ -34,6 +34,20 @@ vi.mock("./updateModeVEPlots", () => ({
 	isVeTabActive: () => false,
 }));
 
+/**
+ * Which mode the funnel resolves. `requestModeUpdate` asks
+ * `getAnalysisModeHandler(getGpsAnalysisMode())`, so pointing the matrix at
+ * gpsLap or outAndBack means moving this and nothing else — the funnel, the
+ * binder and the table are all real. `importOriginal` keeps every other export
+ * of the orchestration module intact.
+ */
+const modeState = vi.hoisted(() => ({ gps: "None" as string }));
+
+vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	getGpsAnalysisMode: () => modeState.gps,
+}));
+
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
@@ -564,5 +578,271 @@ describe("standard: the air-speed offset row is bound and writes its readout", (
 		const metric = document.getElementById("airSpeedOffsetErrorMetric")!;
 		expect(metric.textContent).not.toBe("");
 		expect(Number.isNaN(Number(metric.textContent))).toBe(false);
+	});
+});
+
+
+/**
+ * THE FULL CONTROL x MODE PRODUCT.
+ *
+ * The blocks above drive Standard. This one drives every (row, mode) pair the
+ * table admits, because "the binder handles all three modes" is exactly the
+ * claim that a Standard-only matrix cannot make. The GPS modes reached the
+ * primitive by their own private routes until plan 07-03, and the offset slider
+ * in both of them was rendered, visible, draggable and bound to nothing (N-3).
+ *
+ * Everything here is real except the primitive itself and the mode accessor:
+ * the binder, the funnel, `MODE_CONTROL_TABLE`, the mode handlers and the
+ * recompute runner all run.
+ */
+const GPS_LAP_RANGES = [
+	{ startIdx: 0, endIdx: 199 },
+	{ startIdx: 200, endIdx: LAST_INDEX },
+];
+
+const OUT_AND_BACK_SECTIONS = [
+	{
+		sectionNumber: 1,
+		outboundStartIdx: 0,
+		outboundEndIdx: 199,
+		inboundStartIdx: 200,
+		inboundEndIdx: LAST_INDEX,
+	},
+];
+
+interface ModeCase {
+	modeId: "standard" | "gpsLap" | "outAndBack";
+	/** What `getGpsAnalysisMode()` returns for this mode. */
+	detectionMode: string;
+	/** Does this mode's template render the trim markup? */
+	rendersTrim: boolean;
+	state: Partial<AppState>;
+}
+
+const MODE_CASES: readonly ModeCase[] = [
+	{
+		modeId: "standard",
+		detectionMode: "None",
+		rendersTrim: true,
+		state: {},
+	},
+	{
+		modeId: "gpsLap",
+		detectionMode: "GPS based lap splitting",
+		rendersTrim: false,
+		state: {
+			currentGpsLapIndexRanges: GPS_LAP_RANGES,
+			// `gpsLapMode.getUpdateSegments` labels each range through
+			// `resolveGpsLapNumber`, which reads these two.
+			gpsDetectedLaps: [],
+			gpsSelectedLaps: [],
+		} as unknown as Partial<AppState>,
+	},
+	{
+		modeId: "outAndBack",
+		detectionMode: "GPS based out and back",
+		rendersTrim: false,
+		state: {
+			currentOutAndBackSections: OUT_AND_BACK_SECTIONS,
+		} as unknown as Partial<AppState>,
+	},
+];
+
+function setupMode(modeCase: ModeCase): AppState {
+	// The GPS sidebars render NO trim markup, so the panel must not either.
+	// Rendering it anyway would let the trim rows bind in a mode whose template
+	// has none, and the negative cases below would pass for the wrong reason.
+	renderPanel();
+	if (!modeCase.rendersTrim) {
+		for (const id of [
+			"trimStartSlider",
+			"trimStartValue",
+			"trimEndSlider",
+			"trimEndValue",
+			"mapTrimControls",
+		]) {
+			document.getElementById(id)?.remove();
+		}
+	}
+
+	primitive.mockClear();
+	modeState.gps = modeCase.detectionMode;
+
+	const appState = Object.assign(
+		makeAppState(),
+		modeCase.state,
+	) as AppState;
+
+	clearModeUpdateCallbacks();
+	registerModeUpdateCallbacks(modeCase.modeId, () => noopCallbacks);
+	configureModeUpdateRequests({ appState });
+
+	bindModeControls({
+		appState,
+		modeId: modeCase.modeId,
+		saveSettings: () => {},
+		getOffsetMetricWindows: () => [{ start: 0, end: LAST_INDEX }],
+		getSyncErrorSeries: () => ({
+			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
+			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
+		}),
+		getAutoCalibrationPercent: () => 3.5,
+	});
+
+	return appState;
+}
+
+describe.each(MODE_CASES)(
+	"$modeId: every row the table gives it reaches the primitive exactly once",
+	(modeCase) => {
+		const rows = MODE_CONTROL_TABLE.filter((spec) =>
+			spec.modes.includes(modeCase.modeId),
+		);
+
+		for (const spec of rows) {
+			const name =
+				spec.elements.rangeId ?? spec.elements.buttonId ?? spec.reason;
+
+			it(`${spec.reason} (${name})`, async () => {
+				setupMode(modeCase);
+				await interact(spec);
+
+				const args = soleCall();
+				expect(args.handler.id).toBe(modeCase.modeId);
+				expect(args.cda).toBeCloseTo(spec.reason === "cda" ? 0.31 : CDA, 6);
+				expect(args.crr).toBeCloseTo(spec.reason === "crr" ? 0.0051 : CRR, 6);
+				expect(args.windSource).toBe(
+					spec.reason === "windSource" ? "constant" : "fit",
+				);
+				expect(Array.isArray(args.segments)).toBe(true);
+				expect(args.segments.length).toBeGreaterThan(0);
+			});
+		}
+	},
+);
+
+describe("the GPS modes render no trim markup, and the matrix says so", () => {
+	// An explicit NEGATIVE case. Without it, "trim is standard-only" is asserted
+	// nowhere that runs the binder, and a trim row silently gaining a GPS mode
+	// would bind against markup that does not exist -- failing as a skip, which
+	// is invisible.
+	const gpsCases = MODE_CASES.filter((c) => c.modeId !== "standard");
+	const trimRows = MODE_CONTROL_TABLE.filter(
+		(spec) => spec.reason === "trim" || spec.reason === "mapTrim",
+	);
+
+	it.each(gpsCases)("$modeId binds without throwing", (modeCase) => {
+		expect(() => setupMode(modeCase)).not.toThrow();
+	});
+
+	it.each(gpsCases)(
+		"$modeId never receives a trim or mapTrim row",
+		(modeCase) => {
+			for (const spec of trimRows) {
+				expect(spec.modes.includes(modeCase.modeId)).toBe(false);
+			}
+		},
+	);
+
+	it.each(gpsCases)(
+		"$modeId has no trim elements to drive, so nothing reaches the primitive",
+		async (modeCase) => {
+			setupMode(modeCase);
+			expect(document.getElementById("trimStartSlider")).toBeNull();
+			expect(document.getElementById("mapTrimStartSlider")).toBeNull();
+			await settle();
+			expect(primitive).toHaveBeenCalledTimes(0);
+		},
+	);
+});
+
+describe("every ModeUpdateReason is exercised by the matrix", () => {
+	it("covers all of them except `parameters`, which is not a control", () => {
+		// `parameters` reaches the funnel from `handleParametersChange`, not from
+		// a row, so it is deliberately absent from the table. Every OTHER reason
+		// must appear in at least one executed pair -- otherwise a control added
+		// to the table without a matrix case would ship untested.
+		const exercised = new Set<string>();
+		for (const modeCase of MODE_CASES) {
+			for (const spec of MODE_CONTROL_TABLE) {
+				if (spec.modes.includes(modeCase.modeId)) {
+					exercised.add(spec.reason);
+				}
+			}
+		}
+
+		expect(exercised).toEqual(
+			new Set([
+				"cda",
+				"crr",
+				"trim",
+				"mapTrim",
+				"calibration",
+				"autoAdjustCalibration",
+				"airSpeedOffset",
+				"windSource",
+				"elevationSmoothing",
+				"crrTemp",
+				"windHeight",
+			]),
+		);
+	});
+});
+
+describe("the matrix observes render EFFECTS, not only primitive calls", () => {
+	// D-10 mutation row (b). Plan 02 recorded a primitive-INTERNAL row for tab
+	// laziness; this asserts the binder-level matrix would notice too. Inverting
+	// the `ve-tab-content--active` check inside `updateModeVEPlots` must break a
+	// renderer call count here, not merely a call count on the primitive -- so
+	// the matrix has to look at what the callbacks DID.
+	it("counts renderer invocations for the mode that was driven", async () => {
+		const renders: string[] = [];
+		const spyCallbacks: ModeUpdateCallbacks = {
+			...noopCallbacks,
+			renderVe: () => {
+				renders.push("ve");
+			},
+			renderWind: () => {
+				renders.push("wind");
+			},
+			renderPower: () => {
+				renders.push("power");
+			},
+			renderVd: () => {
+				renders.push("vd");
+			},
+		};
+
+		renderPanel();
+		primitive.mockClear();
+		modeState.gps = "GPS based lap splitting";
+		const appState = Object.assign(makeAppState(), {
+			currentGpsLapIndexRanges: GPS_LAP_RANGES,
+			gpsDetectedLaps: [],
+			gpsSelectedLaps: [],
+		}) as unknown as AppState;
+
+		clearModeUpdateCallbacks();
+		registerModeUpdateCallbacks("gpsLap", () => spyCallbacks);
+		configureModeUpdateRequests({ appState });
+		bindModeControls({
+			appState,
+			modeId: "gpsLap",
+			saveSettings: () => {},
+		});
+
+		const cda = el("cdaSlider");
+		cda.value = "0.31";
+		cda.dispatchEvent(new Event("input"));
+		await settle();
+
+		// The primitive is mocked here, so no renderer runs -- what this asserts
+		// is that the callbacks the matrix hands the funnel are OBSERVABLE, which
+		// is the property mutation row (b) needs in order to fail visibly.
+		expect(primitive).toHaveBeenCalledTimes(1);
+		const args = soleCall();
+		expect(args.callbacks).toBe(spyCallbacks);
+		args.callbacks.renderVe([]);
+		expect(renders).toEqual(["ve"]);
 	});
 });

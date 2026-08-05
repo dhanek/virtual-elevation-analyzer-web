@@ -365,6 +365,35 @@
 	display: block;
 }
 
+/* The VD tab follows the wind source in the two GPS sidebars (07-03): it is
+   hidden under constant wind, where those sidebars did not render it at all
+   before the migration. `hidden` alone is NOT enough for the pane — the UA
+   default [hidden] { display: none } is (0,0,0) and .ve-tab-content--active is
+   (0,1,0), so an active pane that becomes hidden would stay on screen. The
+   repeated-class form matches the specificity guard used in analysis-params.css
+   and out-ranks the modifier. The tab BUTTON sets no display of its own, so the
+   UA rule would already cover it; stating it anyway means adding a display to
+   .ve-tab-button later cannot silently un-hide the control.
+
+   The active-tab guard in windSourceVisibility.ts moves the user off a pane
+   that becomes hidden, so in practice both rules should be belt and braces —
+   which is exactly why they are worth having: the guard failing open shows an
+   empty panel, not a stale one. */
+.ve-tab-content[hidden].ve-tab-content[hidden] {
+	display: none;
+}
+
+.ve-tab-button[hidden].ve-tab-button[hidden] {
+	display: none;
+}
+
+/* Same reasoning for the FIT-only sidebar blocks (air-speed offset, air-speed
+   calibration + Auto Adjust), which are hidden under constant wind because the
+   physics ignores them there. */
+.ve-parameter[hidden].ve-parameter[hidden] {
+	display: none;
+}
+
 /* Compact metrics and plot header */
 .ve-plot-header {
 	display: flex;

@@ -3,24 +3,17 @@
  *
  * Verbatim lift from main.ts -- update logic for out-and-back mode.
  */
-import type { AppState, WindSource } from "../../state/AppState";
-import type { ParameterStorage } from "../../utils/ParameterStorage";
-import type { ResultsStorage } from "../../utils/ResultsStorage";
-import type { ShellServices } from "../analysis/types";
+import type { AppState } from "../../state/AppState";
 import type {
 	ModeUpdateCallbacks,
 	SegmentVeProfile,
 } from "../../modes/analysis/types";
 import type { OutAndBackVEProfile } from "./types";
 
-import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import {
 	matchesRange,
 	resolveActiveOutAndBackSections,
 } from "../../modes/analysis/activeOutAndBackSections";
-import { updateModeVEPlots } from "../analysis/updateModeVEPlots";
-import { getGpsAnalysisMode } from "../section3/section3Orchestration";
-import { getSelectedWindSource } from "../dom/windSource";
 import {
 	calculateOutAndBackMeanElevation,
 	calculateOutAndBackStats,
@@ -29,18 +22,7 @@ import {
 	renderOutAndBackPowerPlot,
 	renderOutAndBackVdPlot,
 } from "./outAndBackPlots";
-import { showOutAndBackVEAnalysis } from "./renderOutAndBack";
-import { log } from "../../utils/log";
-import { scheduleRecompute } from "../analysis/recomputeRunner";
 
-export function scheduleOutAndBackRecompute(
-	run: () => Promise<void> | void,
-): void {
-	scheduleRecompute({
-		mode: "out-and-back",
-		run,
-	});
-}
 
 /**
  * Reassemble the primitive's FLAT segment list into the per-section shape the
@@ -101,7 +83,7 @@ function toOutAndBackProfiles(
  * identity of the `profiles` array so `aggregate` and the render callbacks
  * share one computation regardless of call order.
  */
-function createOutAndBackUpdateCallbacks(
+export function createOutAndBackUpdateCallbacks(
 	appState: AppState,
 	Plotly: any,
 ): ModeUpdateCallbacks {
@@ -191,88 +173,4 @@ function createOutAndBackUpdateCallbacks(
 			}
 		},
 	};
-}
-
-/**
- * Update Out and Back VE plots with new CdA/Crr values
- */
-export async function updateOutAndBackVEPlots(
-	appState: AppState,
-	waitForPlotly: () => Promise<any>,
-	cda: number,
-	crr: number,
-) {
-	if (
-		!appState.currentFitData ||
-		!appState.currentOutAndBackSections ||
-		appState.currentOutAndBackSections.length === 0 ||
-		!appState.currentParameters
-	) {
-		log.error("Missing data for Out and Back VE update");
-		return;
-	}
-
-	const Plotly = await waitForPlotly();
-
-	// The wind source was read from the DOM inside the old spine. It is now read
-	// here, at the adapter boundary, and passed in as an argument — the primitive
-	// reads no controls.
-	await updateModeVEPlots({
-		appState,
-		handler: getAnalysisModeHandler(getGpsAnalysisMode()),
-		callbacks: createOutAndBackUpdateCallbacks(appState, Plotly),
-		windSource: getSelectedWindSource() as WindSource,
-		cda,
-		crr,
-	});
-}
-
-/**
- * Recalculate Out and Back VE with updated parameters
- */
-export async function recalculateOutAndBackVE(
-	services: ShellServices,
-	parameterStorage: ParameterStorage,
-	resultsStorage: ResultsStorage,
-	waitForPlotly: () => Promise<any>,
-) {
-	const { appState } = services;
-	if (
-		!appState.currentFitData ||
-		!appState.currentParameters ||
-		!appState.currentOutAndBackSections ||
-		appState.currentOutAndBackSections.length === 0
-	) {
-		log.error(
-			"Cannot recalculate Out and Back VE: missing data, parameters, or sections",
-		);
-		return;
-	}
-
-	const cda = parseFloat(
-		(document.getElementById("cdaValue") as HTMLInputElement)?.value || "0.3",
-	);
-	const crr = parseFloat(
-		(document.getElementById("crrValue") as HTMLInputElement)?.value || "0.008",
-	);
-	const updatedParams = { ...appState.currentParameters, cda, crr };
-
-	services.showLoading("Recalculating VE with new parameters...");
-
-	try {
-		await showOutAndBackVEAnalysis(
-			services,
-			parameterStorage,
-			resultsStorage,
-			appState.currentOutAndBackSections,
-			appState.currentFitData,
-			updatedParams,
-			appState.currentParameters.air_speed_offset ?? 2,
-			waitForPlotly,
-			true,
-		);
-	} catch (err) {
-		log.error("Out and Back recalculation failed:", err);
-		services.hideLoading();
-	}
 }
