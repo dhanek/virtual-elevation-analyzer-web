@@ -22,7 +22,7 @@
  * `parameterChangeHandler.test.ts` as the anti-pattern to avoid: a test that
  * imports no production module and asserts on its own mock.)
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** The observed argument object of every primitive call, in order. */
 type PrimitiveArgs = Record<string, any>;
@@ -44,6 +44,7 @@ import {
 	clearModeUpdateCallbacks,
 	registerModeUpdateCallbacks,
 } from "./modeUpdateCallbacks";
+import { configureParameterMerge } from "./parametersSync";
 import {
 	configureModeUpdateRequests,
 	resetModeUpdateRequests,
@@ -271,9 +272,12 @@ async function interact(spec: ModeControlSpec): Promise<void> {
 				toggle.checked = true;
 				toggle.dispatchEvent(new Event("change"));
 			} else {
+				// Driven with `input`, like every other slider in the matrix: k is a
+				// range element wherever it is rendered, and it recomputes while the
+				// thumb moves rather than only on release (see the cadence block).
 				const slider = el("windHeightSlider");
 				slider.value = "0.75";
-				slider.dispatchEvent(new Event("change"));
+				slider.dispatchEvent(new Event("input"));
 			}
 			break;
 	}
@@ -442,6 +446,109 @@ describe("standard: veViewMatchesSelection still gates the map markers", () => {
 
 		expect(primitive).toHaveBeenCalledTimes(1);
 		expect(trimMapUpdates).toEqual([{ start: 40, end: LAST_INDEX }]);
+	});
+});
+
+/**
+ * CADENCE — the 2026-08-05 report: "when I use the CDA slider the plots get
+ * updated while I drag them, for the wind height k factor it only gets updated
+ * on release".
+ *
+ * The assertion is on the OBSERVED CADENCE: how many times the primitive runs
+ * while the thumb is moving, and how many more times it runs when the thumb is
+ * released. It is deliberately NOT an assertion that a given row listens to a
+ * given DOM event — a row that changes its listeners but keeps the cadence
+ * passes here, and a row that keeps its listeners but loses the cadence fails.
+ *
+ * The equality case pins its own floor (`toBeGreaterThan(0)`) before comparing,
+ * because "k matches CdA" is satisfied vacuously by a harness in which neither
+ * one redraws at all.
+ */
+describe("standard: every slider redraws live during a drag, at one cadence", () => {
+	/** Positions the thumb passes through, all on-step and in-range for both. */
+	const CDA_DRAG = ["0.26", "0.27", "0.28"] as const;
+	const K_DRAG = ["0.55", "0.6", "0.65"] as const;
+
+	interface Cadence {
+		/** Primitive runs observed before the thumb was released. */
+		duringDrag: number;
+		/** Additional primitive runs the release itself produced. */
+		onRelease: number;
+	}
+
+	/**
+	 * What a browser emits for a pointer drag on a range input: one `input` per
+	 * position the thumb passes through, then exactly one `change` on release.
+	 */
+	async function drag(
+		rangeId: string,
+		positions: readonly string[],
+	): Promise<Cadence> {
+		const range = el(rangeId);
+		for (const position of positions) {
+			range.value = position;
+			range.dispatchEvent(new Event("input"));
+			await settle();
+		}
+		const duringDrag = primitive.mock.calls.length;
+
+		range.dispatchEvent(new Event("change"));
+		await settle();
+
+		return {
+			duringDrag,
+			onRelease: primitive.mock.calls.length - duringDrag,
+		};
+	}
+
+	/**
+	 * k is written through `mergeAnalysisParameters`, so without a merge handler
+	 * the drag would redraw with a factor that never reached the model — a pass
+	 * that proves nothing. Wiring the gateway lets the value be asserted too.
+	 */
+	function setupWithParameterMerge(): AppState {
+		const { appState } = setup();
+		configureParameterMerge((fields) => {
+			Object.assign(appState.currentParameters!, fields);
+		});
+		return appState;
+	}
+
+	afterEach(() => {
+		configureParameterMerge(null);
+	});
+
+	it("redraws at every position the CdA thumb passes, and not again on release", async () => {
+		setup();
+		expect(await drag("cdaSlider", CDA_DRAG)).toEqual({
+			duringDrag: CDA_DRAG.length,
+			onRelease: 0,
+		});
+	});
+
+	it("redraws at every position the k thumb passes, and not again on release", async () => {
+		const appState = setupWithParameterMerge();
+
+		expect(await drag("windHeightSlider", K_DRAG)).toEqual({
+			duringDrag: K_DRAG.length,
+			onRelease: 0,
+		});
+		// Each of those redraws ran against the factor the thumb was sitting on,
+		// not against the pre-drag one.
+		expect(appState.currentParameters!.wind_height_factor).toBeCloseTo(0.65, 6);
+	});
+
+	it("gives k and CdA the same cadence for the same gesture", async () => {
+		setup();
+		const cda = await drag("cdaSlider", CDA_DRAG);
+
+		setupWithParameterMerge();
+		const k = await drag("windHeightSlider", K_DRAG);
+
+		// Floor first: an equality that both sides satisfy with zero redraws is
+		// not evidence of anything.
+		expect(cda.duringDrag).toBeGreaterThan(0);
+		expect(k).toEqual(cda);
 	});
 });
 

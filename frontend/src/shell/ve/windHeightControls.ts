@@ -343,38 +343,61 @@ export function bindWindHeightControls(
 	valueInput.value = initial.toFixed(2);
 	refreshWindHeightReadout(binding.getParams());
 
-	const commit = (factor: number) => {
+	/**
+	 * Write the factor to the model, bring the control back in step with it, and
+	 * ask for a recompute.
+	 *
+	 * `resyncInputs` is false on the LIVE-DRAG path and true everywhere else.
+	 * That is the whole of CR-01's caveat: the full refresh writes
+	 * `#windHeightSlider` from the model, so calling it while the thumb is under
+	 * the user's cursor would rewrite the element being dragged. The recompute
+	 * itself is unconditional — it is not what CR-01 was protecting against.
+	 */
+	const commit = (factor: number, resyncInputs = true) => {
 		binding.setParams({ wind_height_factor: factor });
-		refreshWindHeightReadout(binding.getParams());
+		const params = binding.getParams();
+		if (resyncInputs) {
+			refreshWindHeightReadout(params);
+		} else if (params) {
+			refreshWindHeightText(params);
+		}
 		binding.onChange();
 	};
 
+	/**
+	 * A drag recomputes live, at the same cadence as every other slider.
+	 *
+	 * `syncRangeAndNumber` — the shared helper behind the CdA, Crr, trim,
+	 * calibration and offset rows — binds a range on `input` and a number on
+	 * `change`, and this row now does exactly that. It used to commit on
+	 * `change` alone, so k was the one slider in the panel that moved the plots
+	 * only on release; the maintainer reported the two side by side on
+	 * 2026-08-05.
+	 *
+	 * The original "a live drag must not fire a VE recompute per pixel" comment
+	 * predates the funnel. Every request now goes through `requestModeUpdate` ->
+	 * `scheduleRecompute`, which is latest-input-wins and cancels an in-flight
+	 * run, so a drag ends on one pass over the newest values whichever event
+	 * feeds it. k and CdA take the identical route through that funnel — same
+	 * `RecomputeMode`, same debounce, same primitive, and under `compare` the
+	 * same two-calculator override — so there is no cost difference that could
+	 * justify a different cadence for one of them.
+	 *
+	 * Deliberately NO `change` listener on the slider: `change` fires after the
+	 * last `input` of a drag, so a committing one would make k the only row that
+	 * recomputes twice for one gesture, and it would be a second entry point to
+	 * the model for the same control. Clamping is unnecessary here because the
+	 * range element cannot leave its own min/max; the typed number input below
+	 * is where an out-of-range value can arrive, and it still clamps.
+	 */
 	slider.addEventListener("input", () => {
 		const dragged = parseFloat(slider.value);
 		if (Number.isNaN(dragged)) return;
 		valueInput.value = dragged.toFixed(2);
-		const params = binding.getParams();
-		if (!params) return;
-		// The readout reads from params, but the dragged value is not committed
-		// yet — pass a shallow copy carrying it so the readout tracks the drag.
-		// This is the one place the readout is computed from a value that is not
-		// yet in the model. No setParams and no onChange here: a live drag must
-		// not fire a VE recompute per pixel.
-		//
-		// Text only (CR-01): the full refresh writes the inputs from the MODEL,
-		// which still holds the pre-drag factor, so using it here would snap the
-		// slider back under the user's cursor on every pointer move.
-		refreshWindHeightText({ ...params, wind_height_factor: dragged });
-	});
-
-	// Releasing the slider commits and recomputes. This is also what clears the
-	// D-05 warning and the "unknown"-provenance prompt, automatically, because
-	// both live in the readout formatter.
-	slider.addEventListener("change", () => {
-		const parsed = parseFloat(slider.value);
-		if (Number.isNaN(parsed)) return;
-		valueInput.value = parsed.toFixed(2);
-		commit(parsed);
+		// Commits, so this also clears the D-05 warning and the
+		// "unknown"-provenance prompt the moment the thumb moves, automatically,
+		// because both live in the readout formatter.
+		commit(dragged, false);
 	});
 
 	valueInput.addEventListener("change", () => {

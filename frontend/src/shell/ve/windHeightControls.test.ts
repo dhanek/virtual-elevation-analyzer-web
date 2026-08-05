@@ -242,29 +242,57 @@ describe("bindWindHeightControls", () => {
 		bind();
 	});
 
-	test("dragging the slider updates the readout without recomputing", () => {
+	test("dragging the slider commits and recomputes at every position", () => {
 		onChange.mockClear();
 		const slider = document.getElementById(
 			"windHeightSlider",
 		) as HTMLInputElement;
-		slider.value = "0.8";
-		slider.dispatchEvent(new Event("input"));
+
+		for (const position of ["0.7", "0.8"]) {
+			slider.value = position;
+			slider.dispatchEvent(new Event("input"));
+		}
 
 		const readout = document.getElementById("windHeightReadout") as HTMLElement;
 		expect(readout.textContent).toContain("2.80");
-		expect(onChange).not.toHaveBeenCalled();
-		expect(setParams).not.toHaveBeenCalled();
+		// Live, like every other slider in the panel — see the cadence block in
+		// modeControls.callshape.test.ts for the cross-row comparison.
+		expect(setParams).toHaveBeenNthCalledWith(1, { wind_height_factor: 0.7 });
+		expect(setParams).toHaveBeenNthCalledWith(2, { wind_height_factor: 0.8 });
+		expect(onChange).toHaveBeenCalledTimes(2);
 	});
 
-	test("releasing the slider commits the factor and recomputes once", () => {
+	test("a drag never rewrites the element under the cursor (CR-01)", () => {
+		const slider = document.getElementById(
+			"windHeightSlider",
+		) as HTMLInputElement;
+		// The model is deliberately made to disagree with the thumb: a full
+		// refresh mid-drag would write the model's factor back into the slider.
+		setParams.mockImplementation(() => {
+			params = { ...params, wind_height_factor: 0.3 };
+		});
+
+		slider.value = "0.9";
+		slider.dispatchEvent(new Event("input"));
+
+		expect(slider.value).toBe("0.9");
+	});
+
+	test("releasing the slider adds no second recompute", () => {
 		const slider = document.getElementById(
 			"windHeightSlider",
 		) as HTMLInputElement;
 		slider.value = "0.6";
+		slider.dispatchEvent(new Event("input"));
+		onChange.mockClear();
+		setParams.mockClear();
+
+		// A browser emits `change` after the last `input` of a drag. One gesture
+		// must still be one commit, so nothing may be listening for it.
 		slider.dispatchEvent(new Event("change"));
 
-		expect(setParams).toHaveBeenCalledWith({ wind_height_factor: 0.6 });
-		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(setParams).not.toHaveBeenCalled();
+		expect(onChange).not.toHaveBeenCalled();
 	});
 
 	test("moving the slider clears the hand-entry warning", () => {
@@ -287,7 +315,7 @@ describe("bindWindHeightControls", () => {
 			"windHeightSlider",
 		) as HTMLInputElement;
 		slider.value = "0.5";
-		slider.dispatchEvent(new Event("change"));
+		slider.dispatchEvent(new Event("input"));
 
 		expect(readout.textContent).not.toMatch(/by hand|needs setting/i);
 		expect(
@@ -315,7 +343,7 @@ describe("bindWindHeightControls", () => {
 			"windHeightSlider",
 		) as HTMLInputElement;
 		slider.value = "0.5";
-		slider.dispatchEvent(new Event("change"));
+		slider.dispatchEvent(new Event("input"));
 
 		expect(readout.textContent).not.toMatch(/saved before|needs setting/i);
 		expect(
