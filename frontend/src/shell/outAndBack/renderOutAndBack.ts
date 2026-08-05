@@ -347,52 +347,62 @@ export function outAndBackVdTabMarkup(show: boolean): string {
                         `;
 }
 
-export async function showOutAndBackVEPlot(
-	services: ShellServices,
-	parameterStorage: ParameterStorage,
-	resultsStorage: ResultsStorage,
-	waitForPlotly: () => Promise<any>,
-	profiles: OutAndBackVEProfile[],
-	meanElevation: { distances: number[]; elevation: number[] },
-	params: AnalysisParameters,
-	hasWindSpeed: boolean,
-	hasConstantWind: boolean,
-	defaultAirSpeedOffset: number,
-	preservedWindSource: string | null = null,
-) {
-	const { appState } = services;
-	const selectedWindSource =
-		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
-	const effectiveWindSource =
-		selectedWindSource === "compare" ? "fit" : selectedWindSource;
-	const showWindTab = hasWindSpeed || hasConstantWind;
-	const showFitWindControls = hasWindSpeed && effectiveWindSource === "fit";
-	const showVirtualDistanceTab = showFitWindControls;
+export interface OutAndBackVeTemplateOptions {
+	params: AnalysisParameters;
+	hasWindSpeed: boolean;
+	hasConstantWind: boolean;
+	showWindTab: boolean;
+	showFitWindControls: boolean;
+	showVirtualDistanceTab: boolean;
+	selectedWindSource: string;
+	currentAirSpeedCalibrationValue: string;
+	initialStats: {
+		rmse: number;
+		avgVeGain: number;
+		avgActualGain: number;
+	};
+	sectionCount: number;
+	defaultAirSpeedOffset: number;
+	elevationToggleMarkup: string;
+}
 
-	const Plotly = await waitForPlotly();
+/**
+ * The out-and-back sidebar, as a PURE function of its flags.
+ *
+ * It used to be interpolated inline inside `showOutAndBackVEPlot`, which is
+ * `async` and awaits Plotly before it touches the DOM — so no test could reach
+ * it and every claim about which controls out-and-back renders under which wind
+ * source was a READ of the template rather than an observation of its output.
+ * Plan 07-03 depends on those claims (it makes presence static and moves the
+ * source dependence into visibility), and this phase has already had one static
+ * claim refuted by running the code. Extracting the template is what turns the
+ * out-and-back column of the sidebar table from a hypothesis into a test —
+ * `outAndBackSidebar.presence.test.ts` renders this and queries it, exactly as
+ * `gpsLapSidebar.presence.test.ts` does for the parallel GPS-lap template.
+ *
+ * T-08-02: every interpolated value is a number produced by toFixed or one of
+ * the exported numeric constants, plus markup from the shared control helpers.
+ * No user-controlled string reaches the template. Behaviour is a verbatim lift.
+ */
+export function buildOutAndBackVeAnalysisTemplate(
+	opts: OutAndBackVeTemplateOptions,
+): string {
+	const {
+		params,
+		hasWindSpeed,
+		hasConstantWind,
+		showWindTab,
+		showFitWindControls,
+		showVirtualDistanceTab,
+		selectedWindSource,
+		currentAirSpeedCalibrationValue,
+		initialStats,
+		sectionCount,
+		defaultAirSpeedOffset,
+		elevationToggleMarkup,
+	} = opts;
 
-	// Show the VE analysis section
-	const veSection = document.getElementById("veAnalysisSection") as HTMLElement;
-	if (veSection) {
-		veSection.classList.remove("hidden", "workflow-section--inactive");
-	}
-
-	const veAnalysisContent = document.getElementById(
-		"veAnalysisContent",
-	) as HTMLElement;
-	if (!veAnalysisContent) {
-		log.error("VE analysis content container not found");
-		return;
-	}
-
-	// Calculate initial statistics
-	const initialStats = calculateOutAndBackStats(profiles, meanElevation);
-	const currentAirSpeedCalibrationValue = formatAirSpeedCalibrationPercent(
-		appState.airSpeedCalibrationPercent,
-	);
-
-	// Create full interface with controls sidebar (matching normal mode)
-	veAnalysisContent.innerHTML = `
+	return `
         <div class="ve-inline-container">
             <div class="ve-layout">
                 <!-- Controls Sidebar -->
@@ -400,7 +410,7 @@ export async function showOutAndBackVEPlot(
                     <div class="ve-controls-scrollable">
                         <div class="ve-controls">
                             <h4>Analysis Parameters</h4>
-                            ${elevationSmoothingToggleMarkup(appState)}
+                            ${elevationToggleMarkup}
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>CdA (Drag Coefficient × Area):</label>
@@ -499,7 +509,7 @@ export async function showOutAndBackVEPlot(
                                 RMSE:<span id="oabRmseValue">${initialStats.rmse.toFixed(2)}m</span> |
                                 VE Gain:<span id="oabVeGainValue">${initialStats.avgVeGain.toFixed(2)}m</span> |
                                 Actual:<span id="oabActualGainValue">${initialStats.avgActualGain.toFixed(2)}m</span> |
-                                Sections:<span id="oabSectionCountValue">${profiles.length}</span>
+                                Sections:<span id="oabSectionCountValue">${sectionCount}</span>
                             </div>
                             <div class="ve-plot-container">
                                 <div id="oabVePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div>
@@ -546,6 +556,67 @@ export async function showOutAndBackVEPlot(
             </div>
         </div>
     `;
+}
+
+export async function showOutAndBackVEPlot(
+	services: ShellServices,
+	parameterStorage: ParameterStorage,
+	resultsStorage: ResultsStorage,
+	waitForPlotly: () => Promise<any>,
+	profiles: OutAndBackVEProfile[],
+	meanElevation: { distances: number[]; elevation: number[] },
+	params: AnalysisParameters,
+	hasWindSpeed: boolean,
+	hasConstantWind: boolean,
+	defaultAirSpeedOffset: number,
+	preservedWindSource: string | null = null,
+) {
+	const { appState } = services;
+	const selectedWindSource =
+		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
+	const effectiveWindSource =
+		selectedWindSource === "compare" ? "fit" : selectedWindSource;
+	const showWindTab = hasWindSpeed || hasConstantWind;
+	const showFitWindControls = hasWindSpeed && effectiveWindSource === "fit";
+	const showVirtualDistanceTab = showFitWindControls;
+
+	const Plotly = await waitForPlotly();
+
+	// Show the VE analysis section
+	const veSection = document.getElementById("veAnalysisSection") as HTMLElement;
+	if (veSection) {
+		veSection.classList.remove("hidden", "workflow-section--inactive");
+	}
+
+	const veAnalysisContent = document.getElementById(
+		"veAnalysisContent",
+	) as HTMLElement;
+	if (!veAnalysisContent) {
+		log.error("VE analysis content container not found");
+		return;
+	}
+
+	// Calculate initial statistics
+	const initialStats = calculateOutAndBackStats(profiles, meanElevation);
+	const currentAirSpeedCalibrationValue = formatAirSpeedCalibrationPercent(
+		appState.airSpeedCalibrationPercent,
+	);
+
+	// Create full interface with controls sidebar (matching normal mode)
+	veAnalysisContent.innerHTML = buildOutAndBackVeAnalysisTemplate({
+		params,
+		hasWindSpeed,
+		hasConstantWind,
+		showWindTab,
+		showFitWindControls,
+		showVirtualDistanceTab,
+		selectedWindSource,
+		currentAirSpeedCalibrationValue,
+		initialStats,
+		sectionCount: profiles.length,
+		defaultAirSpeedOffset,
+		elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
+	});
 
 	// Setup slider sync with recalculation
 	setupOutAndBackSliderSync(services, parameterStorage, waitForPlotly);
