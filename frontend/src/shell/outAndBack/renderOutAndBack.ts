@@ -12,12 +12,12 @@ import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { ShellServices } from "../analysis/types";
+import type { AppState } from "../../state/AppState";
 import type { OutAndBackSection } from "../../utils/GpsLapDetection";
 import type { OutAndBackVEProfile } from "./types";
 
 import {
 	calculateAutoAirSpeedCalibrationPercent,
-	clampAirSpeedCalibrationPercent,
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -31,17 +31,16 @@ import {
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
 import { setupTabSwitching } from "../dom/tabs";
-import { bindWindSourceRadios, getSelectedWindSource } from "../dom/windSource";
+import { bindModeControls } from "../analysis/bindModeControls";
+import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import { getSelectedWindSource } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
 import {
 	handleStoreResult,
 	handleExportAllResults,
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
-import {
-	bindElevationSmoothingToggle,
-	elevationSmoothingToggleMarkup,
-} from "../analysis/elevationProfileCycle";
+import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import {
 	calculateOutAndBackMeanElevation,
 	calculateOutAndBackStats,
@@ -50,23 +49,15 @@ import {
 	renderOutAndBackPowerPlot,
 	renderOutAndBackVdPlot,
 } from "./outAndBackPlots";
-import {
-	updateOutAndBackVEPlots,
-	recalculateOutAndBackVE,
-	scheduleOutAndBackRecompute,
-} from "./updateOutAndBack";
+import { createOutAndBackUpdateCallbacks } from "./updateOutAndBack";
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { bindCrrTempControls, crrTempControlsMarkup } from "../ve/crrTempControls";
+import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
-import {
-	bindWindHeightControls,
-	windHeightControlsMarkup,
-} from "../ve/windHeightControls";
-import { mergeAnalysisParameters } from "../analysis/parametersSync";
+import { windHeightControlsMarkup } from "../ve/windHeightControls";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -612,157 +603,30 @@ export async function showOutAndBackVEPlot(
 	});
 
 	// Setup slider sync with recalculation
+	// The renderer half of the mode seam, registered from the render that owns
+	// the Plotly handle and the activity arrays it closes over. Must happen
+	// before the first `requestModeUpdate`.
+	registerModeUpdateCallbacks("outAndBack", () =>
+		createOutAndBackUpdateCallbacks(appState, Plotly),
+	);
+
 	setupOutAndBackSliderSync(services, parameterStorage, waitForPlotly);
 
-	bindElevationSmoothingToggle(appState, () => {
-		const cda = parseFloat(
-			(document.getElementById("cdaValue") as HTMLInputElement)?.value || "0.3",
-		);
-		const crr = parseFloat(
-			(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-				"0.008",
-		);
-		scheduleOutAndBackRecompute(() =>
-			updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
-		);
-	});
+	// Every VE control is bound by `setupOutAndBackSliderSync` above, from
+	// MODE_CONTROL_TABLE. What used to sit here -- the elevation-smoothing
+	// toggle, the wind-source radios, the calibration slider, its number input
+	// and Auto Adjust -- was six more hand-written listeners in a second file.
+	//
+	// The wind-source radios no longer call `recalculateOutAndBackVE`, which
+	// rebuilt the whole sidebar behind a spinner and redrew every plot. A source
+	// change is now one scheduled recompute like every other control, and the
+	// panel persists across it.
 
-	// Setup tab switching
 	setupTabSwitching({
 		wind: () => renderOutAndBackWindPlot(profiles),
 		power: () => renderOutAndBackPowerPlot(profiles),
 		vd: () => renderOutAndBackVdPlot(profiles),
 	});
-
-	// Setup wind source radio button listeners
-	bindWindSourceRadios(() => {
-		log.debug("Wind source changed - triggering Out and Back VE recalculation");
-		void recalculateOutAndBackVE(
-			services,
-			parameterStorage,
-			resultsStorage,
-			waitForPlotly,
-		);
-	});
-
-	// Setup air speed calibration listeners
-	const airSpeedCalibrationSlider = document.getElementById(
-		"airSpeedCalibrationSlider",
-	) as HTMLInputElement;
-	const airSpeedCalibrationValueEl = document.getElementById(
-		"airSpeedCalibrationValue",
-	) as HTMLInputElement;
-
-	if (airSpeedCalibrationSlider && airSpeedCalibrationValueEl) {
-		const updateAirSpeedCalibration = () => {
-			const value = parseFloat(airSpeedCalibrationSlider.value);
-			airSpeedCalibrationValueEl.value = value.toFixed(1);
-			appState.airSpeedCalibrationPercent = value;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			log.debug(
-				"Air speed calibration changed - triggering Out and Back VE recalculation",
-			);
-			const cda = parseFloat(
-				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-					"0.3",
-			);
-			const crr = parseFloat(
-				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-					"0.008",
-			);
-			scheduleOutAndBackRecompute(() =>
-				updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
-			);
-		};
-
-		const updateAirSpeedCalibrationFromInput = () => {
-			const value = parseFloat(airSpeedCalibrationValueEl.value);
-			if (isNaN(value)) return;
-			const clamped = clampAirSpeedCalibrationPercent(value);
-			airSpeedCalibrationSlider.value = clamped.toString();
-			airSpeedCalibrationValueEl.value = clamped.toFixed(1);
-			appState.airSpeedCalibrationPercent = clamped;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			log.debug(
-				"Air speed calibration changed - triggering Out and Back VE recalculation",
-			);
-			const cda = parseFloat(
-				(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-					"0.3",
-			);
-			const crr = parseFloat(
-				(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-					"0.008",
-			);
-			scheduleOutAndBackRecompute(() =>
-				updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
-			);
-		};
-
-		airSpeedCalibrationSlider.addEventListener(
-			"input",
-			updateAirSpeedCalibration,
-		);
-		airSpeedCalibrationValueEl.addEventListener(
-			"change",
-			updateAirSpeedCalibrationFromInput,
-		);
-
-		const autoAdjustButton = document.getElementById(
-			"autoAdjustCalibration",
-		) as HTMLButtonElement;
-		if (autoAdjustButton) {
-			autoAdjustButton.addEventListener("click", () => {
-				const calibrationRanges = appState.currentOutAndBackSections.flatMap(
-					(section) => [
-						{
-							startIdx: section.outboundStartIdx,
-							endIdx: section.outboundEndIdx,
-						},
-						{
-							startIdx: section.inboundStartIdx,
-							endIdx: section.inboundEndIdx,
-						},
-					],
-				);
-				const calibrationPercent = calculateAutoAirSpeedCalibrationPercent(
-					buildAutoCalibrationSegmentsFromRanges(
-						appState,
-						calibrationRanges,
-						getNormalizedActivityArrays,
-						resolveWindSeries,
-						extractSegmentData,
-					),
-				);
-
-				if (calibrationPercent === null) {
-					log.warn(
-						"Cannot auto-adjust out-and-back calibration: no usable FIT air speed data available",
-					);
-					return;
-				}
-
-				airSpeedCalibrationSlider.value = calibrationPercent.toFixed(1);
-				airSpeedCalibrationValueEl.value = calibrationPercent.toFixed(1);
-				appState.airSpeedCalibrationPercent = calibrationPercent;
-				void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-				log.debug(
-					`Auto-adjusted out-and-back air speed calibration to ${calibrationPercent.toFixed(1)}%`,
-				);
-				const cda = parseFloat(
-					(document.getElementById("cdaValue") as HTMLInputElement)?.value ||
-						"0.3",
-				);
-				const crr = parseFloat(
-					(document.getElementById("crrValue") as HTMLInputElement)?.value ||
-						"0.008",
-				);
-				scheduleOutAndBackRecompute(() =>
-					updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
-				);
-			});
-		}
-	}
 
 	// Setup action footer buttons
 	bindActionFooter({
@@ -785,93 +649,88 @@ export async function showOutAndBackVEPlot(
 }
 
 /**
- * Setup slider-input sync for Out and Back controls with dynamic recalculation (uses standard slider IDs)
+ * Wire every out-and-back VE control, from the one table, through the one funnel.
+ *
+ * Same replacement as GPS-lap, for the same reason: this function hand-wrote
+ * four listeners for CdA and Crr and delegated two more blocks, while the RENDER
+ * function next door hand-wrote six more for elevation smoothing, the
+ * wind-source radios, the calibration slider, its number input and Auto Adjust.
+ * There is now exactly one place per mode where a VE control is wired, and it is
+ * `MODE_CONTROL_TABLE`.
+ *
+ * The exported signature and its call site are unchanged on purpose.
+ * `bindActionFooter` stays in the render function: it never recomputes, so it is
+ * deliberately not in the table.
  */
 export function setupOutAndBackSliderSync(
 	services: ShellServices,
 	parameterStorage: ParameterStorage,
-	waitForPlotly: () => Promise<any>,
+	_waitForPlotly: () => Promise<any>,
 ) {
 	const { appState } = services;
-	const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
-	const cdaValueEl = document.getElementById("cdaValue") as HTMLInputElement;
-	const crrSlider = document.getElementById("crrSlider") as HTMLInputElement;
-	const crrValueEl = document.getElementById("crrValue") as HTMLInputElement;
 
-	// Helper to trigger recalculation
-	const triggerRecalculation = () => {
-		const cda = parseFloat(cdaValueEl?.value || "0.3");
-		const crr = parseFloat(crrValueEl?.value || "0.008");
-		scheduleOutAndBackRecompute(() =>
-			updateOutAndBackVEPlots(appState, waitForPlotly, cda, crr),
-		);
+	/** The section windows every per-segment readout is measured over. */
+	const ranges = () => outAndBackRanges(appState);
+
+	bindModeControls({
+		appState,
+		modeId: "outAndBack",
+		saveSettings: () => {
+			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
+		},
+		// N-3: one sync-error window per section leg — outbound and inbound are
+		// separate windows, as they are everywhere else in this mode.
+		getOffsetMetricWindows: () =>
+			ranges().map((range) => ({ start: range.startIdx, end: range.endIdx })),
+		getSyncErrorSeries: () => syncErrorSeries(appState),
+		getAutoCalibrationPercent: () =>
+			calculateAutoAirSpeedCalibrationPercent(
+				buildAutoCalibrationSegmentsFromRanges(
+					appState,
+					ranges(),
+					getNormalizedActivityArrays,
+					resolveWindSeries,
+					extractSegmentData,
+				),
+			),
+	});
+}
+
+/** Outbound and inbound legs of every section, as flat index ranges. */
+function outAndBackRanges(
+	appState: AppState,
+): Array<{ startIdx: number; endIdx: number }> {
+	return appState.currentOutAndBackSections.flatMap((section) => [
+		{ startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
+		{ startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
+	]);
+}
+
+/**
+ * The ground- and air-speed series the offset metric is measured between.
+ *
+ * Resolved on demand rather than captured at render time, so the number follows
+ * the CURRENTLY selected wind source. Both lookups are cached, so this is a map
+ * read per interaction.
+ */
+function syncErrorSeries(appState: AppState): {
+	groundSpeed: number[];
+	airSpeed: number[];
+} {
+	const fitData = appState.currentFitData;
+	const params = appState.currentParameters;
+	if (!fitData || !params) {
+		return { groundSpeed: [], airSpeed: [] };
+	}
+	const normalized = getNormalizedActivityArrays(fitData);
+	const resolution = resolveWindSeries({
+		fitData,
+		windSource: getSelectedWindSource(),
+		params,
+		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+	});
+	return {
+		groundSpeed: normalized.velocity,
+		airSpeed: resolution.windSpeed,
 	};
-
-	if (cdaSlider && cdaValueEl) {
-		cdaSlider.addEventListener("input", () => {
-			cdaValueEl.value = parseFloat(cdaSlider.value).toFixed(3);
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-		cdaValueEl.addEventListener("change", () => {
-			cdaSlider.value = cdaValueEl.value;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-	}
-
-	if (crrSlider && crrValueEl) {
-		crrSlider.addEventListener("input", () => {
-			crrValueEl.value = parseFloat(crrSlider.value).toFixed(4);
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-		crrValueEl.addEventListener("change", () => {
-			crrSlider.value = crrValueEl.value;
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
-			triggerRecalculation();
-		});
-	}
-
-	bindCrrTempControls({
-		getParams: () => appState.currentParameters,
-		setParams: (fields) => {
-			// Prefer the parameters-component gateway so its private copy stays
-			// in sync (a later form edit would otherwise revert these fields).
-			if (mergeAnalysisParameters(fields)) return;
-			if (!appState.currentParameters) return;
-			Object.assign(appState.currentParameters, fields);
-			if (appState.currentFileHash && appState.selectedFile) {
-				void parameterStorage.saveParameters(
-					appState.currentFileHash,
-					appState.currentParameters,
-					appState.selectedFile.name,
-				);
-			}
-		},
-		onChange: triggerRecalculation,
-	});
-
-	// Same persistence and recompute needs as the Crr temperature controls above,
-	// so the binding shape is deliberately identical: the k write must go through
-	// the parametersSync gateway or the component's private copy reverts it on the
-	// next form edit (see shell/analysis/parametersSync.ts).
-	bindWindHeightControls({
-		getParams: () => appState.currentParameters,
-		setParams: (fields) => {
-			// Prefer the parameters-component gateway so its private copy stays
-			// in sync (a later form edit would otherwise revert these fields).
-			if (mergeAnalysisParameters(fields)) return;
-			if (!appState.currentParameters) return;
-			Object.assign(appState.currentParameters, fields);
-			if (appState.currentFileHash && appState.selectedFile) {
-				void parameterStorage.saveParameters(
-					appState.currentFileHash,
-					appState.currentParameters,
-					appState.selectedFile.name,
-				);
-			}
-		},
-		onChange: triggerRecalculation,
-	});
 }
