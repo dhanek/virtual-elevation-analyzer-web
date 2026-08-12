@@ -64,14 +64,18 @@ export function elevationSmoothingToggleMarkup(appState: AppState): string {
  * Bind the elevation-smoothing toggle buttons. On change, updates the active
  * profile and the button styling, then invokes `onToggle` so the caller can
  * recompute its plots. Safe to call when the control is absent (no-op).
+ *
+ * RETURNS whether a toggle button was actually bound, so `bindModeControls` can
+ * report this row as bound or skipped from what happened rather than from a
+ * duplicated element lookup.
  */
 export function bindElevationSmoothingToggle(
 	appState: AppState,
 	onToggle: (enabled: boolean) => void,
-): void {
+): boolean {
 	const container = document.getElementById("elevationProfileSwitchToggle");
 	if (!container) {
-		return;
+		return false;
 	}
 
 	const buttons = container.querySelectorAll(
@@ -93,4 +97,6 @@ export function bindElevationSmoothingToggle(
 			onToggle(enabled);
 		});
 	});
+
+	return buttons.length > 0;
 }

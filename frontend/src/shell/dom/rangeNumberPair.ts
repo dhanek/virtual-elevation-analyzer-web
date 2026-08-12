@@ -23,11 +23,16 @@ export interface RangeNumberPairOptions {
  *
  * This replaces the repeated slider/number sync patterns in
  * setupVESliders, setupGpsLapSliderHandlers, and setupOutAndBackSliderSync.
+ *
+ * RETURNS whether the listeners were actually attached. `bindModeControls`
+ * reports its per-mode bound/skipped row sets from what the binding helpers say
+ * they did, rather than from a second copy of their element lookups — so the two
+ * cannot drift, and "this row bound" is asserted from the code that binds it.
  */
 export function syncRangeAndNumber(
     options: RangeNumberPairOptions,
     onChange: (value: number) => void,
-): void {
+): boolean {
     const { rangeId, numberId, decimals = 1, clampMin, clampMax } = options
 
     const rangeEl = document.getElementById(rangeId) as HTMLInputElement | null
@@ -35,7 +40,7 @@ export function syncRangeAndNumber(
 
     if (!rangeEl || !numberEl) {
         log.warn(`syncRangeAndNumber: could not find elements #${rangeId} or #${numberId}`)
-        return
+        return false
     }
 
     function clamp(value: number): number {
@@ -61,4 +66,6 @@ export function syncRangeAndNumber(
         log.debug(`Number [${numberId}] changed to ${value}`)
         onChange(value)
     })
+
+    return true
 }

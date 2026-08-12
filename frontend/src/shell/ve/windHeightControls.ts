@@ -326,9 +326,14 @@ export function refreshWindHeightReadout(
 	refreshWindHeightText(params);
 }
 
+/**
+ * RETURNS whether the block was actually bound, so `bindModeControls` can report
+ * this row as bound or skipped from what happened here rather than from a second
+ * copy of these element lookups.
+ */
 export function bindWindHeightControls(
 	binding: WindHeightControlsBinding,
-): void {
+): boolean {
 	const slider = document.getElementById(
 		"windHeightSlider",
 	) as HTMLInputElement | null;
@@ -336,7 +341,7 @@ export function bindWindHeightControls(
 		"windHeightValue",
 	) as HTMLInputElement | null;
 	// The sidebar may not be rendered in this mode.
-	if (!slider || !valueInput) return;
+	if (!slider || !valueInput) return false;
 
 	const initial = resolveWindHeightFactor(binding.getParams() ?? {});
 	slider.value = initial.toFixed(2);
@@ -438,4 +443,6 @@ export function bindWindHeightControls(
 		);
 		windFieldsBound.add(windDirectionField);
 	}
+
+	return true;
 }

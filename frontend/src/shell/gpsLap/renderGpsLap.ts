@@ -30,7 +30,10 @@ import {
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
 import { setupTabSwitching } from "../dom/tabs";
-import { bindModeControls } from "../analysis/bindModeControls";
+import {
+	bindModeControls,
+	type BindModeControlsResult,
+} from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
 import { getSelectedWindSource } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
@@ -406,17 +409,20 @@ export async function showGpsLapVEPlot(
  * exactly ONE place per mode where a VE control is wired, and it is not this
  * file: it is `MODE_CONTROL_TABLE`.
  *
- * The exported signature and its call site are unchanged on purpose, so this is
- * a replacement of the body rather than a re-plumbing of the render path.
  * `bindActionFooter` stays in the render function: it saves, stores and exports
  * and never recomputes, so it is deliberately not in the table.
+ *
+ * RETURNS what `bindModeControls` bound, so "every row GPS-lap claims is bound in
+ * GPS-lap" is a checkable property of the real wiring rather than an inference
+ * from the table. `modeControlBindingCoverage.test.ts` drives exactly this
+ * function over the real sidebar markup and asserts the bound set.
  */
 export function setupGpsLapSliderHandlers(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
 	_waitForPlotly: () => Promise<any>,
 	_params: AnalysisParameters,
-) {
+): BindModeControlsResult {
 	// The renderer half of the mode seam, registered from the render that owns
 	// the activity arrays it closes over. Mirrors what Standard does in
 	// `setupVESliders`, and must happen before the first `requestModeUpdate`.
@@ -427,7 +433,7 @@ export function setupGpsLapSliderHandlers(
 	/** The lap windows every per-segment readout is measured over. */
 	const ranges = () => resolveActiveGpsLapRanges(appState);
 
-	bindModeControls({
+	return bindModeControls({
 		appState,
 		modeId: "gpsLap",
 		saveSettings: () => {

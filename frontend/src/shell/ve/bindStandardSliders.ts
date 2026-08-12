@@ -35,7 +35,6 @@ import {
 	registerModeUpdateCallbacks,
 	registerModeWindSourceOverride,
 } from "../analysis/modeUpdateCallbacks";
-import { configureModeUpdateRequests } from "../analysis/requestModeUpdate";
 import { setupTabSwitching } from "../dom/tabs";
 import {
 	resolveSelectionWindSeries,
@@ -752,7 +751,11 @@ export function setupVESliders(
 			);
 		};
 	});
-	configureModeUpdateRequests({ appState });
+	// The funnel is configured by `bindModeControls` below, from the same
+	// `appState`. It used to be configured HERE, and here only — which is why the
+	// GPS modes, which never run this function, bound every control onto a funnel
+	// that dropped every call. Configuring it per mode was the forget-to-call
+	// surface one level up from the one the table removed.
 
 	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	const triggerAutoRhoOnTrimChange = () => {
