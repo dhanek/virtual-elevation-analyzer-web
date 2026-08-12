@@ -59,10 +59,7 @@ import {
 	registerModeUpdateCallbacks,
 } from "./modeUpdateCallbacks";
 import { configureParameterMerge } from "./parametersSync";
-import {
-	configureModeUpdateRequests,
-	resetModeUpdateRequests,
-} from "./requestModeUpdate";
+import { resetModeUpdateRequests } from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
 const LAST_INDEX = SAMPLE_COUNT - 1;
@@ -199,8 +196,12 @@ function setup(overrides: Partial<AppState> = {}): Harness {
 
 	clearModeUpdateCallbacks();
 	registerModeUpdateCallbacks("standard", () => noopCallbacks);
-	configureModeUpdateRequests({ appState });
-
+	// NOTE: this file must NOT call `configureModeUpdateRequests`. It used to,
+	// and that single line is why 66 green tests coexisted with two entirely dead
+	// modes: production configured the funnel only from Standard's binder, and
+	// the matrix quietly did it for whichever mode it drove. A test that supplies
+	// the wiring production is missing cannot observe it missing. The binder owns
+	// that step now, so the matrix gets it the same way the app does.
 	bindModeControls({
 		appState,
 		modeId: "standard",
@@ -675,8 +676,8 @@ function setupMode(modeCase: ModeCase): AppState {
 
 	clearModeUpdateCallbacks();
 	registerModeUpdateCallbacks(modeCase.modeId, () => noopCallbacks);
-	configureModeUpdateRequests({ appState });
-
+	// The funnel is configured by `bindModeControls`, exactly as in production —
+	// see the note in `setup()`.
 	bindModeControls({
 		appState,
 		modeId: modeCase.modeId,
@@ -824,7 +825,6 @@ describe("the matrix observes render EFFECTS, not only primitive calls", () => {
 
 		clearModeUpdateCallbacks();
 		registerModeUpdateCallbacks("gpsLap", () => spyCallbacks);
-		configureModeUpdateRequests({ appState });
 		bindModeControls({
 			appState,
 			modeId: "gpsLap",
