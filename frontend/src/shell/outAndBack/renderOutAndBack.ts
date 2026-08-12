@@ -31,7 +31,10 @@ import {
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
 import { setupTabSwitching } from "../dom/tabs";
-import { bindModeControls } from "../analysis/bindModeControls";
+import {
+	bindModeControls,
+	type BindModeControlsResult,
+} from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
 import { getSelectedWindSource } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
@@ -658,21 +661,24 @@ export async function showOutAndBackVEPlot(
  * There is now exactly one place per mode where a VE control is wired, and it is
  * `MODE_CONTROL_TABLE`.
  *
- * The exported signature and its call site are unchanged on purpose.
  * `bindActionFooter` stays in the render function: it never recomputes, so it is
  * deliberately not in the table.
+ *
+ * RETURNS what `bindModeControls` bound, so "every row out-and-back claims is
+ * bound in out-and-back" is a checkable property of the real wiring — see
+ * `modeControlBindingCoverage.test.ts`.
  */
 export function setupOutAndBackSliderSync(
 	services: ShellServices,
 	parameterStorage: ParameterStorage,
 	_waitForPlotly: () => Promise<any>,
-) {
+): BindModeControlsResult {
 	const { appState } = services;
 
 	/** The section windows every per-segment readout is measured over. */
 	const ranges = () => outAndBackRanges(appState);
 
-	bindModeControls({
+	return bindModeControls({
 		appState,
 		modeId: "outAndBack",
 		saveSettings: () => {

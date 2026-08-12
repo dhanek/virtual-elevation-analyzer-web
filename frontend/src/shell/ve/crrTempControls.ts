@@ -125,7 +125,14 @@ export function refreshCrrTempReadout(params: AnalysisParameters | null): void {
 	readout.textContent = formatCrrTempReadout(params, currentRawCrr());
 }
 
-export function bindCrrTempControls(binding: CrrTempControlsBinding): void {
+/**
+ * RETURNS whether the block was actually bound, so `bindModeControls` can report
+ * this row as bound or skipped from what happened here rather than from a second
+ * copy of these four element lookups.
+ */
+export function bindCrrTempControls(
+	binding: CrrTempControlsBinding,
+): boolean {
 	const toggle = document.getElementById("crrTempToggle") as HTMLInputElement;
 	const fields = document.getElementById("crrTempFields") as HTMLElement;
 	const ambient = document.getElementById(
@@ -135,7 +142,7 @@ export function bindCrrTempControls(binding: CrrTempControlsBinding): void {
 		"crrTempSensitivity",
 	) as HTMLSelectElement;
 
-	if (!toggle || !fields || !ambient || !sensitivity) return;
+	if (!toggle || !fields || !ambient || !sensitivity) return false;
 
 	refreshCrrTempReadout(binding.getParams());
 
@@ -195,4 +202,6 @@ export function bindCrrTempControls(binding: CrrTempControlsBinding): void {
 	crrValue?.addEventListener("change", () =>
 		refreshCrrTempReadout(binding.getParams()),
 	);
+
+	return true;
 }

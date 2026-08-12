@@ -23,6 +23,18 @@
  * component exists and falls back to a local assign when it does not, so the
  * binder takes no `parametersComponent` argument at all and there is one
  * persistence gateway rather than two (07-RESEARCH.md §Priority 6).
+ *
+ * CONFIGURING THE FUNNEL IS PART OF BINDING, not a separate step a mode has to
+ * remember. `requestModeUpdate` needs an `appState` before it will schedule
+ * anything, and for one commit that configuration lived in Standard's
+ * `setupVESliders` alone — so when plan 07-03 migrated GPS-lap (`f810cb9`) and
+ * out-and-back (`5ea4279`) onto this binder, both modes bound every row
+ * perfectly and then had every single interaction dropped by the funnel's
+ * `if (!deps) return`. Two entire modes were inert: not one control redrew
+ * anything. The step is done HERE, from the `appState` the binder is already
+ * given, because this is the one function each mode already calls to wire its
+ * controls — the same reasoning that put the controls in a table in the first
+ * place. Nothing outside this file calls `configureModeUpdateRequests`.
  */
 import {
 	clampAirSpeedCalibrationPercent,
@@ -41,7 +53,10 @@ import {
 	type ModeControlSpec,
 } from "./modeControlTable";
 import { mergeAnalysisParameters } from "./parametersSync";
-import { requestModeUpdate } from "./requestModeUpdate";
+import {
+	configureModeUpdateRequests,
+	requestModeUpdate,
+} from "./requestModeUpdate";
 
 /**
  * The trim window may never close below this many samples.
@@ -93,6 +108,27 @@ export interface BindModeControlsOptions {
 	getAutoCalibrationPercent?: () => number | null;
 }
 
+/**
+ * What this bind actually wired, so it can be ASSERTED rather than assumed.
+ *
+ * A row whose elements are not in the DOM at bind time used to disappear into a
+ * `log.debug` and leave the control silently dead. That is the same shape as the
+ * defect this whole table exists to prevent, one level down, so the binder now
+ * reports it: every row is either in `bound` or in `skipped`, and the union is
+ * exactly `controlsForMode(modeId)`.
+ *
+ * Which set a row lands in is decided by the BINDING HELPERS themselves — they
+ * each return whether they attached — rather than by a second copy of their
+ * element lookups here. The two therefore cannot drift.
+ */
+export interface BindModeControlsResult {
+	modeId: AnalysisModeId;
+	/** Rows whose listeners are attached and live. */
+	bound: readonly ModeControlSpec[];
+	/** Rows this mode claims whose elements this panel did not render. */
+	skipped: readonly ModeControlSpec[];
+}
+
 function element(id: string | undefined): HTMLElement | null {
 	if (!id || typeof document === "undefined") return null;
 	return document.getElementById(id);
@@ -102,25 +138,20 @@ function input(id: string | undefined): HTMLInputElement | null {
 	return element(id) as HTMLInputElement | null;
 }
 
-/** Does this mode's template actually render the row's elements? */
-function isRendered(spec: ModeControlSpec): boolean {
-	const { rangeId, numberId, buttonId } = spec.elements;
-	if (rangeId || numberId) {
-		return !!input(rangeId) && !!input(numberId);
-	}
-	if (buttonId) {
-		return !!element(buttonId);
-	}
-	// Radio groups, toggles and delegated blocks do their own presence checks.
-	return true;
-}
-
 function clamp(value: number, min: number, max: number): number {
 	return Math.max(min, Math.min(value, max));
 }
 
-export function bindModeControls(options: BindModeControlsOptions): void {
+export function bindModeControls(
+	options: BindModeControlsOptions,
+): BindModeControlsResult {
 	const { appState, modeId, saveSettings } = options;
+
+	// Binding a mode's controls and configuring the funnel they call are ONE
+	// step, because they were two for exactly one commit and both GPS modes
+	// spent it completely inert — every row bound, every interaction dropped by
+	// `if (!deps) return`. See the file header.
+	configureModeUpdateRequests({ appState });
 
 	/**
 	 * Steps 2 and 3 of every handler. `trimWindow` is supplied only by the rows
@@ -315,17 +346,15 @@ export function bindModeControls(options: BindModeControlsOptions): void {
 		if (number) number.value = value.toFixed(decimals);
 	}
 
+	const bound: ModeControlSpec[] = [];
+	const skipped: ModeControlSpec[] = [];
+
 	for (const spec of controlsForMode(modeId)) {
-		if (!isRendered(spec)) {
-			log.debug(
-				`bindModeControls(${modeId}): ${spec.reason} not rendered, skipping`,
-			);
-			continue;
-		}
+		let attached = false;
 
 		switch (spec.kind) {
 			case "rangeNumber":
-				syncRangeAndNumber(
+				attached = syncRangeAndNumber(
 					{
 						rangeId: spec.elements.rangeId!,
 						numberId: spec.elements.numberId!,
@@ -335,8 +364,9 @@ export function bindModeControls(options: BindModeControlsOptions): void {
 				);
 				break;
 
-			case "button":
-				element(spec.elements.buttonId)?.addEventListener("click", () => {
+			case "button": {
+				const button = element(spec.elements.buttonId);
+				button?.addEventListener("click", () => {
 					const percent = options.getAutoCalibrationPercent?.();
 					if (percent === null || percent === undefined) return;
 					const value = clampAirSpeedCalibrationPercent(percent);
@@ -347,18 +377,20 @@ export function bindModeControls(options: BindModeControlsOptions): void {
 					appState.airSpeedCalibrationPercent = value;
 					finish(spec);
 				});
+				attached = !!button;
 				break;
+			}
 
 			case "radioGroup":
 				// No special case for a mode-owned source. Which RENDERER serves the
 				// selected source is the funnel's business (see
 				// `getModeWindSourceOverride`), and it has to be, because every other
 				// row reaches that renderer too.
-				bindWindSourceRadios(() => finish(spec));
+				attached = bindWindSourceRadios(() => finish(spec));
 				break;
 
 			case "toggle":
-				bindElevationSmoothingToggle(appState, () => finish(spec));
+				attached = bindElevationSmoothingToggle(appState, () => finish(spec));
 				break;
 
 			case "delegated": {
@@ -369,14 +401,24 @@ export function bindModeControls(options: BindModeControlsOptions): void {
 					},
 					onChange: () => finish(spec),
 				};
-				if (spec.reason === "crrTemp") {
-					bindCrrTempControls(binding);
-				} else {
-					bindWindHeightControls(binding);
-				}
+				attached =
+					spec.reason === "crrTemp"
+						? bindCrrTempControls(binding)
+						: bindWindHeightControls(binding);
 				break;
 			}
 		}
+
+		if (!attached) {
+			// LOUD, not `log.debug`. An unbound row is a dead control — which is
+			// exactly what this phase shipped — so it does not get to be quiet.
+			log.warn(
+				`bindModeControls(${modeId}): ${spec.reason} found no elements in this panel — the control is UNBOUND`,
+			);
+			skipped.push(spec);
+			continue;
+		}
+		bound.push(spec);
 
 		// The offset readout must be right before the first interaction, not only
 		// after one. When the span is absent this is a no-op, which is what keeps
@@ -385,4 +427,6 @@ export function bindModeControls(options: BindModeControlsOptions): void {
 			refreshOffsetMetric(spec);
 		}
 	}
+
+	return { modeId, bound, skipped };
 }

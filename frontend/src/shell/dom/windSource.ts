@@ -39,8 +39,12 @@ export function getSelectedWindSource(): string {
  * The syncs run before onChange so a recompute starts from the settled state,
  * and they run outside the radio loop so they still fire in the sidebars that
  * render no wind-source radios at all.
+ *
+ * RETURNS whether any radio was actually bound — a ride with neither a FIT
+ * air-speed channel nor a configured constant wind renders no radio group, and
+ * `bindModeControls` reports that row as skipped rather than as bound.
  */
-export function bindWindSourceRadios(onChange: () => void): void {
+export function bindWindSourceRadios(onChange: () => void): boolean {
     syncWindHeightControlsVisibility(getSelectedWindSource())
     syncFitWindControlsVisibility(getSelectedWindSource())
     const radios = document.querySelectorAll('input[name="windSource"]')
@@ -53,4 +57,5 @@ export function bindWindSourceRadios(onChange: () => void): void {
             onChange()
         })
     })
+    return radios.length > 0
 }
