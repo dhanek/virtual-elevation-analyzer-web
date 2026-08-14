@@ -23,6 +23,7 @@ import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import {
 	collectSelectionIndices,
 	getAnalysisModeHandler,
+	getAnalysisModeHandlerById,
 } from "../../modes/analysis/AnalysisModes";
 import type { AnalysisModeId, ModeSegment } from "../../modes/analysis/types";
 import type { AppState, WindSource } from "../../state/AppState";
@@ -158,6 +159,41 @@ function withTrim(
 }
 
 /**
+ * WHICH MODE IS ON SCREEN — asked of the PANEL, not only of the Section 3 mode.
+ *
+ * The GPS-lap overlay is reached two ways, and `getGpsAnalysisMode()` can only
+ * see one of them:
+ *
+ *   - genuine GPS lap splitting, where the mode reads "GPS based lap splitting";
+ *   - the "Stacked" lap view of a multi-lap STANDARD selection, where the user
+ *     never left standard mode and it still reads "None".
+ *
+ * In the second case resolving by the mode string alone hands the update to
+ * Standard's handler — and therefore, via `getModeUpdateCallbacks(handler.id)`,
+ * to STANDARD's render callbacks — while the GPS-LAP panel is on screen. Every
+ * redraw is then aimed at `vePlot` / `vdPlot` / `windSpeedPlot`, ids that panel
+ * does not contain, and Plotly throws: after its first paint the stacked view
+ * never updated again. Before `f810cb9` the overlay's controls called
+ * `updateGpsLapVEPlots` directly, so this is a regression of that migration, and
+ * it is the one place "works in GPS-lap, dead in standard (None)" is literally
+ * true.
+ *
+ * `isGpsLapModeActive` is the state that already means "the overlay is on
+ * screen": set by `gpsLapMode.syncState` and by the orchestrator's stacked
+ * toggle, cleared by `standardMode` / `outAndBackMode.syncState` and by the
+ * stitched toggle. `resolveActiveGpsLapRanges` already collapses both routes
+ * onto the same ranges for exactly this reason; asking the same question here
+ * keeps the segments and the renderer from drifting apart.
+ */
+function resolveActiveModeHandler(
+	appState: AppState,
+): ReturnType<typeof getAnalysisModeHandler> {
+	return appState.isGpsLapModeActive
+		? getAnalysisModeHandlerById("gpsLap")
+		: getAnalysisModeHandler(getGpsAnalysisMode());
+}
+
+/**
  * Ask for a VE update.
  *
  * Every bound control funnels through here, and so does the parameters form.
@@ -181,9 +217,9 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 		return;
 	}
 
-	// Total by construction: `getAnalysisModeHandler` indexes a complete record
-	// by `getAnalysisModeId`, so there is no null branch to guard.
-	const handler = getAnalysisModeHandler(getGpsAnalysisMode());
+	// Total by construction: both accessors index a complete record, so there is
+	// no null branch to guard.
+	const handler = resolveActiveModeHandler(appState);
 
 	const cda = readNumber("cdaSlider", "cdaValue", FALLBACK_CDA);
 	const crr = readNumber("crrSlider", "crrValue", FALLBACK_CRR);
