@@ -5,10 +5,16 @@
  * rendered (appState.currentAnalyzedLaps). Once the user switches the lap
  * checkboxes, the map belongs to the NEW selection — repainting trim markers
  * from this panel's values would draw the previous lap's start/end points
- * onto the newly selected lap's route. That exact path is triggered by
- * handleParametersChange's synthetic "input" dispatch on trimStartSlider
- * (e.g. auto-rho firing ~500ms after a lap switch), which runs the trim
- * handlers with the previous lap's slider values and GPS coordinates.
+ * onto the newly selected lap's route.
+ *
+ * The trigger this guard was written against was handleParametersChange's
+ * synthetic "input" dispatch on trimStartSlider. That dispatch is gone (N-4,
+ * plan 07-03), but the RACE it exposed is not: auto-rho still fires ~500 ms
+ * after a lap switch and writes parameters, and that write still reaches a
+ * recompute — now through `requestModeUpdate("parameters")` — while the panel
+ * on screen still belongs to the previous selection. So does any other edit in
+ * the parameters form made in that window. The mechanism changed; the timing
+ * hazard did not, and this guard is still what stops the stale markers.
  * See .planning/debug/resolved/stale-trim-on-lap-switch.md.
  */
 export function veViewMatchesSelection(

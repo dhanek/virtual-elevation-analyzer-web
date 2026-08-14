@@ -27,6 +27,7 @@ import {
 } from "../section3/section3Orchestration";
 import { resolveRhoArray } from "./rhoArrayResolver";
 import { configureRecomputeRunner } from "./recomputeRunner";
+import { requestModeUpdate } from "./requestModeUpdate";
 import { configureParameterMerge } from "./parametersSync";
 import {
 	clearLapViewToggle,
@@ -152,7 +153,9 @@ export function initializeAnalysisParameters(): void {
  * Orchestrator-triggered parameters (saved with files via parameter storage layer):
  * - All parameters that go through setParameters() → trigger this function
  * - These are persisted with the analysis file
- * - When VE section is visible, dispatch input event on trimStartSlider to trigger recalculation
+ * - Recalculation goes through the one funnel, `requestModeUpdate("parameters")`,
+ *   which resolves the handler from the mode that is on screen and performs the
+ *   VE-visibility check itself. This function no longer knows any mode's markup.
  *
  * Local-only parameters (runtime adjustments in AppState):
  * - airSpeedCalibrationPercent: Lives in AppState, not persisted per-file
@@ -234,23 +237,21 @@ export function handleParametersChange(parameters: AnalysisParameters): void {
 		}, 100);
 	}
 
-	// If VE analysis is already visible, recalculate when parameters change
-	const veSection =
-		document.getElementById("veAnalysisSection") ??
-		document.getElementById("veSection");
-	const isVeVisible =
-		!!veSection &&
-		!veSection.classList.contains("hidden") &&
-		!veSection.classList.contains("workflow-section--inactive");
-	if (isVeVisible) {
-		const trimStartSlider = document.getElementById(
-			"trimStartSlider",
-		) as HTMLInputElement;
-
-		if (trimStartSlider) {
-			trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
-		}
-	}
+	// Recalculate, in whichever mode is on screen (N-4).
+	//
+	// This used to fake an `input` event on Standard's trim-start slider. That
+	// element exists in ONE template -- Standard's -- so in GPS-lap and
+	// out-and-back the lookup returned null and every form-driven parameter
+	// change (rho, system mass, eta, velodrome, constant wind speed/direction,
+	// air-speed offset) silently did nothing at all. No element id belonging to
+	// one mode's markup appears in this mode-agnostic file any more; the funnel
+	// resolves the handler from the live mode, so one call reaches all three.
+	//
+	// The VE-visibility check is not lost, it MOVED: `requestModeUpdate` runs it
+	// through `isVeSectionVisible`, which is the same class-name test lifted
+	// verbatim. Keeping a second copy here is how two copies of one answer drift
+	// apart, so this asks unconditionally and the funnel answers.
+	requestModeUpdate("parameters");
 
 	// Update analyze button state
 	updateAnalyzeButton();
