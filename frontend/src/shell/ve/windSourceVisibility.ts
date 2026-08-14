@@ -28,14 +28,20 @@
  * exactly this reason.
  *
  * OPT-IN, NOT MODE-BRANCHED. The sync toggles whatever the template TAGGED,
- * and nothing else. That keeps the one real per-mode difference named at the
- * template seam where it belongs (D-02) rather than as an `if (modeId)` in
- * here: the two GPS sidebars omit the VD tab under constant today, so they tag
- * it and the visible sidebar is unchanged; Standard SHOWS its VD tab under
- * constant today, so it does not tag it and keeps showing it. The VD tab does
- * not lie under constant — it integrates `apparentWindSpeedMps`, which is
- * computed from the configured wind and responds correctly to speed, direction
- * and k — so there is no correctness reason to take it away from Standard.
+ * and nothing else — never an `if (modeId)` in here (D-02). All four VE
+ * templates now tag the VD tab, so all three modes hide it under constant.
+ *
+ * THAT UNIFORMITY IS A REVERSAL, and the history is worth keeping. On
+ * 2026-08-05 the maintainer ruled that Standard KEEPS its VD tab under
+ * constant, on the grounds that the tab does not lie there: it integrates
+ * `apparentWindSpeedMps`, which the constant path computes properly and which
+ * responds correctly to wind speed, direction and k. That reasoning still
+ * holds and the computation is untouched. On 2026-08-14 the ruling was
+ * reversed on a different axis: Standard's Stacked lap view is the GPS-lap
+ * overlay, whose template tags the tab, so within one mode the VD tab appeared
+ * under Stitched and vanished under Stacked as the user toggled views.
+ * View-dependent tab visibility is surprising; the reversal buys uniformity,
+ * not correctness.
  */
 import { activateTab } from "../dom/tabs";
 

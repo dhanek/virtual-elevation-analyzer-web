@@ -15,15 +15,23 @@
  * Standard mode renders TWO different panels, and that is the whole point here:
  *
  *   - STITCHED (the default) — `showVirtualElevationAnalysisInline`, whose plot
- *     ids are `vePlot` / `vdPlot` and whose VD tab is deliberately NOT tagged
- *     `data-wind-source="fit"`, so it stays visible under constant wind. That
- *     asymmetry is the maintainer's ruling (plan 07-03): the tab does not lie
- *     there, because it integrates `apparentWindSpeedMps` computed from the
- *     configured wind.
+ *     ids are `vePlot` / `vdPlot`.
  *   - STACKED — the "Stacked" lap view of a multi-lap standard selection, which
  *     renders the GPS-LAP overlay (`showGpsLapVEPlot`, ids `gpsLapVePlot` /
- *     `gpsLapVdPlot`, VD tab tagged and therefore hidden under constant) while
- *     `getGpsAnalysisMode()` is still `"None"`.
+ *     `gpsLapVdPlot`) while `getGpsAnalysisMode()` is still `"None"`.
+ *
+ * BOTH PANELS NOW HIDE THE VD TAB UNDER CONSTANT WIND, and getting there was a
+ * REVERSAL worth recording rather than quietly restating. On 2026-08-05 the
+ * maintainer ruled that Standard KEEPS its VD tab under constant, because the tab
+ * does not lie there: it integrates `apparentWindSpeedMps`, which the constant
+ * path computes properly. That reasoning still holds — the computation is
+ * untouched by this change, and the tab is still correct wherever it is shown.
+ * On 2026-08-14 the ruling was reversed on an axis neither side had considered:
+ * the STACKED view is the GPS-lap overlay, which tags its VD tab, so within one
+ * mode the tab appeared under Stitched and vanished under Stacked as the user
+ * toggled views. View-dependent tab visibility is surprising; all three modes now
+ * hide it under constant, in every view. The reversal buys uniformity, not
+ * correctness.
  *
  * WHAT IS REAL: both render entry points, their templates, `bindModeControls`,
  * `MODE_CONTROL_TABLE`, `requestModeUpdate`, `scheduleRecompute`, the mode
@@ -45,12 +53,25 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+/**
+ * The fake encodes WHICH wind series it was handed, so a redraw can be told
+ * apart from a stale one: `resolveWindSeries` returns an all-NaN series for
+ * `constant`, so the constant leg ramps UP by 1 per sample and the FIT leg ramps
+ * DOWN by 1. The slope of the redrawn 'Virtual Elevation' trace therefore says
+ * which SOURCE the plot was computed for — which is what turns "the guard lands
+ * the user on VE" into "…on a VE drawn for the wind source they just chose".
+ */
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	createVeCalculator: (input: any) => {
 		const n = input.timestamps.length;
+		const isConstantLeg = Array.from(input.windSpeed as number[]).every(
+			(value) => Number.isNaN(value),
+		);
+		const ve = new Float64Array(n);
+		for (let i = 0; i < n; i++) ve[i] = isConstantLeg ? i : -i;
 		return {
 			calculate_virtual_elevation: () => ({
-				virtual_elevation: new Float64Array(n).fill(1),
+				virtual_elevation: ve,
 				r2: 0.5,
 				rmse: 1,
 				ve_elevation_diff: 2,
@@ -99,12 +120,14 @@ const DRAGGED_CDA = 0.42;
 const drawTargets: string[] = [];
 /** Draws aimed at an id this panel does not contain — always a defect. */
 const missingTargets: string[] = [];
+/** Every draw's trace list, in order, so a redraw's CONTENT can be read. */
+const draws: Array<{ id: string; data: any[] }> = [];
 
 function fakePlotly(name: "newPlot" | "react") {
 	return (id: string, ...rest: unknown[]) => {
-		void rest;
 		void name;
 		drawTargets.push(id);
+		draws.push({ id, data: (rest[0] as any[]) ?? [] });
 		if (!document.getElementById(id)) {
 			missingTargets.push(id);
 			// Exactly what Plotly does, so a draw into thin air cannot pass for one
@@ -287,6 +310,22 @@ function activeTabId(): string | null {
 	return document.querySelector(".ve-tab-content--active")?.id ?? null;
 }
 
+/**
+ * The slope of the last VE redraw's 'Virtual Elevation' trace: +1 when it was
+ * computed from the constant-wind (all-NaN) series, -1 from the FIT one. The
+ * builder offsets the whole trace to the actual elevation at the first sample,
+ * so a DIFFERENCE is what survives that and an absolute value would not.
+ */
+function lastVeSlope(): number {
+	for (let i = draws.length - 1; i >= 0; i--) {
+		if (draws[i].id !== "vePlot") continue;
+		const trace = draws[i].data.find((t) => t.name === "Virtual Elevation");
+		if (!trace) throw new Error("the VE plot carries no 'Virtual Elevation' trace");
+		return trace.y[1] - trace.y[0];
+	}
+	throw new Error("the VE plot was never drawn");
+}
+
 function vdButtonHidden(): boolean {
 	const button = document.querySelector<HTMLElement>(
 		'.ve-tab-button[data-tab="vd"]',
@@ -325,6 +364,7 @@ beforeEach(() => {
 	};
 	drawTargets.length = 0;
 	missingTargets.length = 0;
+	draws.length = 0;
 	overlay.ve.mockClear();
 	overlay.vd.mockClear();
 	clearModeUpdateCallbacks();
@@ -359,21 +399,17 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 		expect(missingTargets).toEqual([]);
 	});
 
-	it.each(["constant", "fit", "compare"])(
-		"keeps VD visible, active and redrawn under %s (the ruled asymmetry)",
+	it.each(["fit", "compare"])(
+		"keeps VD visible, active and redrawn under %s",
 		async (source) => {
+			// The FIT air-speed channel is what the physics uses under both, so the
+			// tab means something and stays.
 			clickTab("vd");
 			await settle();
 			drawTargets.length = 0;
 
 			await selectWindSource(source);
 
-			// THE RULING, plan 07-03: Standard keeps its VD tab under constant
-			// wind. It does not lie there — it integrates `apparentWindSpeedMps`
-			// computed from the configured wind — so it is not tagged
-			// `data-wind-source="fit"` and the active-tab guard has nothing to do.
-			// The GPS sidebars ARE tagged and DO hide; that difference is opted
-			// into at the template seam, not branched on `modeId` (D-02).
 			expect(vdButtonHidden()).toBe(false);
 			expect(tabStrip()).toEqual(["ve", "wind", "power", "vd"]);
 			expect(activeTabId()).toBe("vd-tab");
@@ -382,6 +418,37 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 			expect(missingTargets).toEqual([]);
 		},
 	);
+
+	it("hides VD under constant and lands the user on a VE drawn for constant", async () => {
+		// Browser check 7, in the STITCHED panel. Standard used to be the exception
+		// here (2026-08-05 ruling); the 2026-08-14 reversal makes it behave like
+		// the stacked view and both GPS modes, so the tab no longer appears and
+		// disappears as the lap-view toggle is flipped.
+		clickTab("vd");
+		await settle();
+		expect(activeTabId()).toBe("vd-tab");
+		drawTargets.length = 0;
+		draws.length = 0;
+
+		await selectWindSource("constant");
+
+		// The tab is gone from BOTH axes — the strip reads VE | Wind | Power with
+		// no gap, and the pane is `hidden`, not merely deactivated. `[hidden]` and
+		// `.ve-tab-content--active` are different axes and neither implies the
+		// other, which is exactly how a blank panel happens.
+		expect(vdButtonHidden()).toBe(true);
+		expect(tabStrip()).toEqual(["ve", "wind", "power"]);
+		expect((document.getElementById("vd-tab") as HTMLElement).hidden).toBe(true);
+
+		// The guard moved them, and it moved them to something PAINTED.
+		expect(activeTabId()).toBe("ve-tab");
+		expect(drawTargets).toContain("vePlot");
+		expect(missingTargets).toEqual([]);
+
+		// THE POINT: the VE they land on is computed for the source they just
+		// chose. A stale FIT redraw would slope the other way.
+		expect(lastVeSlope()).toBeCloseTo(1, 10);
+	});
 });
 
 /**
@@ -449,8 +516,10 @@ describe("standard (None): the STACKED overlay's VD tab", () => {
 
 	it("lands on a DRAWN VE tab when VD is hidden by a switch to constant", async () => {
 		// Browser check 7, run in standard (None) mode. The overlay tags its VD
-		// tab, so unlike the stitched panel it does hide, the guard does fire,
-		// and the tab it moves the user to has to be actually painted.
+		// tab, so it hides, the guard fires, and the tab it moves the user to has
+		// to be actually painted. Since the 2026-08-14 reversal the stitched panel
+		// above does the same thing — the pair of tests is what says the two views
+		// of one mode agree, which is the whole reason for the reversal.
 		clickTab("vd");
 		await settle();
 		expect(activeTabId()).toBe("vd-tab");
