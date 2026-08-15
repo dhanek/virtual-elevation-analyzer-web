@@ -3,13 +3,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppState } from "../../state/AppState";
+import * as recomputeRunnerModule from "./recomputeRunner";
 import {
-	HEAVY_RECOMPUTE_DEBOUNCE_MS,
-	STANDARD_RECOMPUTE_DEBOUNCE_MS,
+	RECOMPUTE_DEBOUNCE_MS,
+	type RecomputeMode,
 	cancelActiveRecompute,
 	configureRecomputeRunner,
 	scheduleRecompute,
 } from "./recomputeRunner";
+
+const ALL_MODES: RecomputeMode[] = ["standard", "gps-lap", "out-and-back"];
 
 describe("recomputeRunner", () => {
 	beforeEach(() => {
@@ -33,7 +36,7 @@ describe("recomputeRunner", () => {
 		document.body.replaceChildren();
 	});
 
-	it("debounce schedules only latest recompute within 200ms window", async () => {
+	it("debounce schedules only the latest recompute within one window", async () => {
 		const calls: number[] = [];
 
 		scheduleRecompute({
@@ -42,7 +45,7 @@ describe("recomputeRunner", () => {
 				calls.push(1);
 			},
 		});
-		vi.advanceTimersByTime(150);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS - 1);
 
 		scheduleRecompute({
 			mode: "out-and-back",
@@ -50,26 +53,10 @@ describe("recomputeRunner", () => {
 				calls.push(2);
 			},
 		});
-		vi.advanceTimersByTime(HEAVY_RECOMPUTE_DEBOUNCE_MS);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS);
 		await Promise.resolve();
 
 		expect(calls).toEqual([2]);
-	});
-
-	it("gps-lap mode uses zero debounce so it updates live during a drag", async () => {
-		const calls: number[] = [];
-
-		scheduleRecompute({
-			mode: "gps-lap",
-			run: () => {
-				calls.push(1);
-			},
-		});
-		vi.advanceTimersByTime(0);
-		await Promise.resolve();
-
-		// Fires immediately like standard mode — not deferred to slider release.
-		expect(calls).toEqual([1]);
 	});
 
 	it("latest-input-wins ignores stale completion token", async () => {
@@ -90,7 +77,7 @@ describe("recomputeRunner", () => {
 			},
 		});
 
-		vi.advanceTimersByTime(HEAVY_RECOMPUTE_DEBOUNCE_MS);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS);
 
 		scheduleRecompute({
 			mode: "gps-lap",
@@ -99,7 +86,7 @@ describe("recomputeRunner", () => {
 			},
 		});
 
-		vi.advanceTimersByTime(HEAVY_RECOMPUTE_DEBOUNCE_MS);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS);
 		await Promise.resolve();
 		expect(secondRan).toBe(true);
 
@@ -126,14 +113,14 @@ describe("recomputeRunner", () => {
 			},
 		});
 
-		vi.advanceTimersByTime(HEAVY_RECOMPUTE_DEBOUNCE_MS);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS);
 		await Promise.resolve();
 		expect(appState.recomputeStatus).toBe("running");
 
 		scheduleRecompute({ mode: "gps-lap", run: () => {} });
 		expect(appState.recomputeStatus).toBe("handoff");
 
-		vi.advanceTimersByTime(HEAVY_RECOMPUTE_DEBOUNCE_MS);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS);
 		await Promise.resolve();
 		expect(appState.recomputeStatus).toBe("running");
 
@@ -147,7 +134,7 @@ describe("recomputeRunner", () => {
 
 		scheduleRecompute({ mode: "standard", run: () => {} });
 
-		vi.advanceTimersByTime(STANDARD_RECOMPUTE_DEBOUNCE_MS);
+		vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS);
 		await Promise.resolve();
 
 		vi.advanceTimersByTime(300);
@@ -156,34 +143,39 @@ describe("recomputeRunner", () => {
 		expect(appState.recomputeStatus).toBe("idle");
 	});
 
-	it("standard mode uses zero debounce while heavy modes use 200ms", async () => {
-		let standardCalls = 0;
-		let heavyCalls = 0;
+	// D-15: every mode debounces through the same constant. Written against the
+	// exported constant so plan 04 (D-16) can ratify a different value without
+	// touching this test. Non-vacuous against the table it replaced: standard and
+	// gps-lap were 0 ms (they would have run before RECOMPUTE_DEBOUNCE_MS - 1) and
+	// out-and-back was 200 ms (it would not have run by RECOMPUTE_DEBOUNCE_MS).
+	it.each(ALL_MODES)(
+		"%s debounces on the one uniform constant, not a per-mode value",
+		async (mode) => {
+			let runs = 0;
 
-		scheduleRecompute({
-			mode: "standard",
-			run: () => {
-				standardCalls += 1;
-			},
-		});
-		vi.advanceTimersByTime(0);
-		await Promise.resolve();
+			scheduleRecompute({
+				mode,
+				run: () => {
+					runs += 1;
+				},
+			});
 
-		scheduleRecompute({
-			mode: "out-and-back",
-			run: () => {
-				heavyCalls += 1;
-			},
-		});
-		vi.advanceTimersByTime(199);
-		await Promise.resolve();
+			vi.advanceTimersByTime(RECOMPUTE_DEBOUNCE_MS - 1);
+			await Promise.resolve();
+			expect(runs).toBe(0);
 
-		expect(standardCalls).toBe(1);
-		expect(heavyCalls).toBe(0);
+			vi.advanceTimersByTime(1);
+			await Promise.resolve();
+			expect(runs).toBe(1);
+		},
+	);
 
-		vi.advanceTimersByTime(1);
-		await Promise.resolve();
+	it("no longer exports a per-mode debounce table", () => {
+		const exportedNames = Object.keys(recomputeRunnerModule);
 
-		expect(heavyCalls).toBe(1);
+		expect(exportedNames).toContain("RECOMPUTE_DEBOUNCE_MS");
+		expect(exportedNames).not.toContain("HEAVY_RECOMPUTE_DEBOUNCE_MS");
+		expect(exportedNames).not.toContain("STANDARD_RECOMPUTE_DEBOUNCE_MS");
+		expect(exportedNames).not.toContain("GPS_LAP_RECOMPUTE_DEBOUNCE_MS");
 	});
 });
