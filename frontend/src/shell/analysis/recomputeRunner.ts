@@ -1,11 +1,22 @@
 import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
 
-export const HEAVY_RECOMPUTE_DEBOUNCE_MS = 200;
-export const STANDARD_RECOMPUTE_DEBOUNCE_MS = 0;
-// GPS-lap (incl. the stacked-from-standard overlay) recomputes in-place via
-// Plotly.react, so it can update live during a slider drag like standard mode.
-export const GPS_LAP_RECOMPUTE_DEBOUNCE_MS = 0;
+// One debounce for every mode (D-15). The per-mode table it replaces gave
+// standard 0 ms, gps-lap 0 ms and out-and-back 200 ms; out-and-back was slower
+// because it computes 2N segments, not because it is out-and-back.
+//
+// PROVISIONAL — NOT RATIFIED. 50 ms is the smallest value from
+// {0, 50, 100, 150, 200} at or above the heaviest p95 single-recompute compute
+// time measured by the `npm run profile:slider` pre-screen (1.8 ms). That
+// pre-screen measures COMPUTE time on synthetic data only: it does not measure
+// main-thread stall, paint or perceived responsiveness, and it excludes the
+// roughly doubled per-segment calculator work D-07 adds to `compare` mode. It
+// cannot substitute for the D-16 gate.
+//
+// Owner of the ratified value: plan 04 (D-16). See
+// .planning/phases/07-mode-pipeline-unification/07-DEBOUNCE-HANDOFF.md for the
+// arithmetic, the gate protocol and the report-vs-code drift this reopens.
+export const RECOMPUTE_DEBOUNCE_MS = 50;
 
 export type RecomputeMode = "standard" | "gps-lap" | "out-and-back";
 export type RecomputeStatus = "idle" | "running" | "handoff";
@@ -73,7 +84,6 @@ export function cancelActiveRecompute(
 
 export function scheduleRecompute(request: RecomputeRequest): void {
 	const token = ++activeToken;
-	const debounceMs = getDebounceMs(request.mode);
 
 	if (runningToken !== null) {
 		setRecomputeStatus("handoff");
@@ -90,18 +100,7 @@ export function scheduleRecompute(request: RecomputeRequest): void {
 	debounceTimer = setTimeout(() => {
 		debounceTimer = null;
 		void runPending();
-	}, debounceMs);
-}
-
-function getDebounceMs(mode: RecomputeMode): number {
-	switch (mode) {
-		case "standard":
-			return STANDARD_RECOMPUTE_DEBOUNCE_MS;
-		case "gps-lap":
-			return GPS_LAP_RECOMPUTE_DEBOUNCE_MS;
-		default:
-			return HEAVY_RECOMPUTE_DEBOUNCE_MS;
-	}
+	}, RECOMPUTE_DEBOUNCE_MS);
 }
 
 async function runPending(): Promise<void> {
