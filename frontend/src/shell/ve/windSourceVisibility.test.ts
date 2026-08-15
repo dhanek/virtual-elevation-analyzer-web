@@ -101,8 +101,11 @@ describe("FIT-only controls under constant wind", () => {
 	it("leaves controls that carry no source attribute alone", () => {
 		const power = document.getElementById("power-tab")!;
 		syncFitWindControlsVisibility("constant");
-		// Standard keeps its VD tab under constant — it is not tagged — so the
-		// sync must touch only what the template opted in.
+		// The Power tab is not tagged, so the sync must leave it alone: this is
+		// the opt-in property, not a claim about any particular mode. (Which tabs
+		// opt in is asserted against the real templates —
+		// `standardVdTabVisibility.test.ts` and the two GPS presence suites — not
+		// here, where the fixture supplies the tags.)
 		expect(power.hidden === true).toBe(false);
 	});
 });

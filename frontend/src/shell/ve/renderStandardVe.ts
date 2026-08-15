@@ -25,6 +25,7 @@ import { crrTempControlsMarkup } from "./crrTempControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
+import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -270,6 +271,16 @@ export async function showVirtualElevationAnalysisInline(
 		appState.currentParameters.wind_speed !== 0 &&
 		appState.currentParameters.wind_direction !== undefined;
 
+	// The source the wind-source radios below open on. It decides only the
+	// INITIAL hidden state of the source-dependent blocks — the bind-time sync in
+	// `bindWindSourceRadios` settles them either way — so it is the difference
+	// between no flash and a flash, never between right and wrong.
+	const initialWindSource = hasWindSpeed
+		? "fit"
+		: hasConstantWind
+			? "constant"
+			: "fit";
+
 	const veSection = document.getElementById("veAnalysisSection");
 	if (veSection) {
 		veSection.classList.remove("hidden", "workflow-section--inactive");
@@ -308,7 +319,7 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
-                                ${windHeightControlsMarkup(appState.currentParameters!, hasWindSpeed ? "fit" : hasConstantWind ? "constant" : "fit")}
+                                ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}
                             </div>
 
                             ${
@@ -363,7 +374,27 @@ export async function showVirtualElevationAnalysisInline(
                             ${cdaReference ? `<button class="ve-tab-button" data-tab="cda-validation">CdA Validation</button>` : ""}
                             ${hasWindSpeed || hasConstantWind ? `<button class="ve-tab-button" data-tab="wind">Wind</button>` : ""}
                             <button class="ve-tab-button" data-tab="power">Power</button>
-                            ${hasWindSpeed ? `<button class="ve-tab-button" data-tab="vd">VD</button>` : ""}
+                            ${
+															/*
+															 * The VD tab follows the wind source, exactly as both
+															 * GPS sidebars already do (maintainer ruling
+															 * 2026-08-14, REVERSING the 2026-08-05 one that had
+															 * Standard keep it).
+															 *
+															 * The computation is untouched and is still correct
+															 * under constant: VD integrates `apparentWindSpeedMps`,
+															 * which the constant path computes from the configured
+															 * wind. What was wrong was the POLICY. Standard's
+															 * STACKED lap view is the GPS-lap overlay, whose
+															 * template tags this tab, so within one mode the tab
+															 * appeared under Stitched and vanished under Stacked as
+															 * the user toggled views. Tagging here makes the two
+															 * views agree, and makes all three modes agree.
+															 */
+															hasWindSpeed
+																? `<button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(initialWindSource)}>VD</button>`
+																: ""
+														}
                         </div>
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
@@ -412,7 +443,7 @@ export async function showVirtualElevationAnalysisInline(
                         <div class="ve-tab-content" id="power-tab">
                             <div id="speedPowerPlot" class="ve-plot-container"></div>
                         </div>
-                        <div class="ve-tab-content" id="vd-tab">
+                        <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(initialWindSource)}>
                              <!--
                                 Deliberately EMPTY, and owned by vdHeader.ts. The
                                 numbers used to be interpolated here from the
