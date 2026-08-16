@@ -42,6 +42,71 @@ export function stackedLapColor(index: number): string {
     return STACKED_LAP_COLORS[wrapped];
 }
 
+/** True when `values` never steps backwards. */
+function isNonDecreasing(values: number[]): boolean {
+    for (let i = 1; i < values.length; i++) {
+        if (values[i] < values[i - 1]) return false;
+    }
+    return true;
+}
+
+/**
+ * D3 — one forward walk instead of a full rescan per target.
+ *
+ * All four interpolation sites in this file used to answer "which pair of
+ * samples brackets this distance?" by scanning the sample array from index 0,
+ * for every single target. That is O(targets x samples): with 6 laps of ~1100
+ * points against a ~1100-point reference grid it is ~7 million inner iterations
+ * per update, and it was the single largest term in the GPS-lap slider cost.
+ *
+ * Both sequences are sorted in every real case, so the bracket for target i+1
+ * is at or after the bracket for target i and the cursor only has to move
+ * forward. That is the entire optimisation.
+ *
+ * EXACTNESS, which matters more than the speed here: this returns the SAME index
+ * the rescan returned, including its edge cases, rather than a tidier one.
+ *
+ *   - the rescan returns the FIRST bracketing pair. With duplicate distances
+ *     (a stationary rider) several pairs qualify; advancing only while
+ *     `d[cursor+1] < target` stops at the same first one.
+ *   - when nothing brackets the target the rescan "finds" nothing, and its two
+ *     callers do DIFFERENT things about it -- the mean profile falls back to
+ *     index 0 and extrapolates backwards, the stats loops leave the
+ *     interpolated value at 0. So this returns -1 and leaves that choice to the
+ *     caller instead of inventing a shared answer.
+ *   - if either sequence steps backwards, a forward-only cursor could sail past
+ *     a bracket the rescan would find. Non-monotonic SAMPLES fall back to the
+ *     original rescan for the whole series; a target that moves backwards
+ *     rewinds the cursor. Both cases are pinned by
+ *     `gpsLapStatsInterpolation.test.ts`, because bad GPS does produce them.
+ */
+function createBracketFinder(distances: number[]): (target: number) => number {
+    const n = distances.length;
+    const monotonicSamples = isNonDecreasing(distances);
+    let cursor = 0;
+    let lastTarget = Number.NEGATIVE_INFINITY;
+
+    return function findBracket(target: number): number {
+        if (n < 2) return -1;
+
+        if (!monotonicSamples) {
+            for (let k = 0; k < n - 1; k++) {
+                if (distances[k] <= target && distances[k + 1] >= target) return k;
+            }
+            return -1;
+        }
+
+        if (target < lastTarget) cursor = 0;
+        lastTarget = target;
+
+        while (cursor < n - 2 && distances[cursor + 1] < target) cursor++;
+
+        return distances[cursor] <= target && distances[cursor + 1] >= target
+            ? cursor
+            : -1;
+    };
+}
+
 /**
  * Calculate mean actual elevation profile across all laps
  */
@@ -69,21 +134,24 @@ export function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): { di
     const elevationCount = new Array(referenceDistances.length).fill(0);
 
     for (const lap of lapProfiles) {
+        // One cursor per lap: the reference distances are increasing, so the
+        // bracket for each successive target is at or after the previous one.
+        const findBracket = createBracketFinder(lap.distances);
+        const lapMaxDistance = lap.distances[lap.distances.length - 1];
+
         // Interpolate this lap's elevation onto the reference distances
         for (let i = 0; i < referenceDistances.length; i++) {
             const targetDist = referenceDistances[i];
 
             // Only interpolate within this lap's range
-            if (targetDist > lap.distances[lap.distances.length - 1]) continue;
+            if (targetDist > lapMaxDistance) continue;
 
-            // Find bracketing points
-            let lowIdx = 0;
-            for (let j = 0; j < lap.distances.length - 1; j++) {
-                if (lap.distances[j] <= targetDist && lap.distances[j + 1] >= targetDist) {
-                    lowIdx = j;
-                    break;
-                }
-            }
+            // Find bracketing points. No bracket -> index 0, which extrapolates
+            // backwards from the first two samples; that is what the original
+            // rescan did with its `lowIdx = 0` initialiser and it is load-bearing
+            // for laps that start after the reference grid does.
+            const bracket = findBracket(targetDist);
+            const lowIdx = bracket === -1 ? 0 : bracket;
 
             // Linear interpolation
             const d0 = lap.distances[lowIdx];
@@ -171,17 +239,19 @@ export function calculateGpsLapStats(
         // Interpolate mean elevation at each lap distance point
         let meanElevSum = 0;
         let count = 0;
+        const findResidualBracket = createBracketFinder(meanElevation.distances);
         for (let i = 0; i < lap.distances.length; i++) {
             const dist = lap.distances[i];
+            // No bracket -> 0, NOT the nearest sample. On real elevations that
+            // is a ~1000 m residual rather than a rounding difference, so it is
+            // shipped behaviour worth reproducing exactly, not a bug to tidy.
             let interpMeanElev = 0;
-            for (let k = 0; k < meanElevation.distances.length - 1; k++) {
-                if (meanElevation.distances[k] <= dist && meanElevation.distances[k + 1] >= dist) {
-                    const t = (dist - meanElevation.distances[k]) /
-                              (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-                    interpMeanElev = meanElevation.elevation[k] + t *
-                                     (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-                    break;
-                }
+            const k = findResidualBracket(dist);
+            if (k !== -1) {
+                const t = (dist - meanElevation.distances[k]) /
+                          (meanElevation.distances[k + 1] - meanElevation.distances[k]);
+                interpMeanElev = meanElevation.elevation[k] + t *
+                                 (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
             }
             const residual = calibratedVE[i] - interpMeanElev;
             sumSquaredResiduals += residual * residual;
@@ -190,17 +260,20 @@ export function calculateGpsLapStats(
         }
 
         const meanMeanElev = count > 0 ? meanElevSum / count : 0;
+        // A second cursor, because this walks the same targets from the start
+        // again. Its only output is R2 -- and R2 is clamped with Math.max(0, r2),
+        // so on the golden ride (every lap negative) this loop is invisible.
+        // `gpsLapStatsInterpolation.test.ts` is what actually watches it.
+        const findTotalBracket = createBracketFinder(meanElevation.distances);
         for (let i = 0; i < lap.distances.length; i++) {
             const dist = lap.distances[i];
             let interpMeanElev = 0;
-            for (let k = 0; k < meanElevation.distances.length - 1; k++) {
-                if (meanElevation.distances[k] <= dist && meanElevation.distances[k + 1] >= dist) {
-                    const t = (dist - meanElevation.distances[k]) /
-                              (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-                    interpMeanElev = meanElevation.elevation[k] + t *
-                                     (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-                    break;
-                }
+            const k = findTotalBracket(dist);
+            if (k !== -1) {
+                const t = (dist - meanElevation.distances[k]) /
+                          (meanElevation.distances[k + 1] - meanElevation.distances[k]);
+                interpMeanElev = meanElevation.elevation[k] + t *
+                                 (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
             }
             sumSquaredTotal += Math.pow(interpMeanElev - meanMeanElev, 2);
         }
@@ -300,20 +373,17 @@ export function renderGpsLapVEPlots(
         const residuals: number[] = [];
         const residualDistances: number[] = [];
 
+        const findBracket = createBracketFinder(meanElevation.distances);
         for (let j = 0; j < lap.distances.length; j++) {
             const dist = lap.distances[j];
             // Interpolate mean elevation at this distance
             let meanElev = 0;
-            if (meanElevation.distances.length > 0) {
-                for (let k = 0; k < meanElevation.distances.length - 1; k++) {
-                    if (meanElevation.distances[k] <= dist && meanElevation.distances[k + 1] >= dist) {
-                        const t = (dist - meanElevation.distances[k]) /
-                                  (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-                        meanElev = meanElevation.elevation[k] + t *
-                                   (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-                        break;
-                    }
-                }
+            const k = findBracket(dist);
+            if (k !== -1) {
+                const t = (dist - meanElevation.distances[k]) /
+                          (meanElevation.distances[k + 1] - meanElevation.distances[k]);
+                meanElev = meanElevation.elevation[k] + t *
+                           (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
             }
             residuals.push(calibratedVE[j] - meanElev);
             residualDistances.push(dist);

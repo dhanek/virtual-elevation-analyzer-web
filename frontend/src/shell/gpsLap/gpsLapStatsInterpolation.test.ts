@@ -149,6 +149,45 @@ describe("the GPS-lap interpolation walks", () => {
 		expect(mean.elevation[10]).toBeCloseTo(110, PRECISION);
 	});
 
+	/**
+	 * The case that separates a forward walk from a fresh rescan, and the reason
+	 * the non-monotonic fallback is not dead code.
+	 *
+	 * These distances start HIGH (0.5) and dip BELOW the target later (0.1). For
+	 * a target of ~0.2 the walk's cursor cannot advance — the very first pair's
+	 * right end, 0.4, is already above the target — so it reports "no bracket"
+	 * and the caller extrapolates backwards from samples 0 and 1. A fresh rescan
+	 * keeps looking and finds a real bracket at index 2.
+	 *
+	 * It took three attempts to build an input where the two actually disagree:
+	 * linear interpolation returns the SAME value from either of two brackets
+	 * that share an endpoint, so the obvious "backwards step" inputs agree by
+	 * arithmetic. Measured with the fallback removed, the profile checksum moves
+	 * 11046 -> 11716 and RMSE 77.96 -> 79.06. Literals are the rescan's.
+	 */
+	it("falls back to a full rescan when a lap's distances start above a later dip", () => {
+		const laps = [
+			lap(
+				1,
+				[0.5, 0.4, 0.1, 0.3],
+				[130, 126, 104, 112],
+				[130.5, 125.6, 103.4, 112.7],
+			),
+		];
+
+		const mean = calculateMeanElevationProfile(laps);
+		const stats = calculateGpsLapStats(laps, mean);
+
+		expect(mean.elevation[0]).toBeCloseTo(110, PRECISION);
+		expect(mean.elevation[20]).toBeCloseTo(112.39999999999999, PRECISION);
+		expect(mean.elevation.reduce((s, v) => s + v, 0)).toBeCloseTo(
+			11046,
+			PRECISION,
+		);
+		expect(stats.meanRMSE).toBeCloseTo(77.95677933601698, PRECISION);
+		expect(stats.closingError).toBeCloseTo(17.799999999999997, PRECISION);
+	});
+
 	it("handles a non-monotonic distance series the way a fresh rescan does", () => {
 		// Bad GPS can make cumulative distance step backwards. A forward-only
 		// pointer would sail past the bracket a later, smaller target needs; the
