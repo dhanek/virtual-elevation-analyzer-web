@@ -466,13 +466,64 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
 
         expect(outcome).not.toBeNull();
 
-        // The REAL aggregation helpers, exercised on the primitive's output.
-        const profiles = outcome!.profiles.map(toLapProfile);
-        const meanElevation = calculateMeanElevationProfile(profiles as never);
-        const stats = calculateGpsLapStats(profiles as never, meanElevation);
-        expect(Number.isFinite(stats.meanR2)).toBe(true);
-
         return summariseSegments(outcome!.profiles.map(p => summarise(p.result)));
+    }
+
+    /**
+     * THE AGGREGATION HELPERS, UNDER LITERALS (plan 07-03, the D3 guard).
+     *
+     * `runGpsLap` above used to end with `expect(Number.isFinite(stats.meanR2))`
+     * — it CALLED both helpers and then asserted essentially nothing about
+     * them. The 19 literals summarise `profile.result`, i.e. what the WASM
+     * calculator returned; not one of them is a function of
+     * `calculateMeanElevationProfile` or `calculateGpsLapStats`. So the two
+     * O(lapPoints x refPoints) interpolation walks D3 rewrites were, in fact,
+     * UNGUARDED by the golden suite, and "the literals will catch it" would have
+     * been the same true-but-irrelevant reassurance as `gps-lap-6 = 1.2 ms`.
+     *
+     * These literals were captured from the O(n^2) linear-rescan implementation
+     * at 126b95d, BEFORE the two-pointer rewrite, in their own commit — so the
+     * "unmoved" claim is checkable in the history rather than asserted.
+     */
+    async function runGpsLapAggregation(wind: WindMode, withRho: boolean) {
+        const ride = loadGoldenRide();
+        const appState = makeUpdateAppState(ride);
+        appState.currentGpsLapIndexRanges = ride.indexRanges;
+
+        const outcome = await updateModeVEPlots({
+            appState,
+            handler: getAnalysisModeHandler('GPS based lap splitting'),
+            callbacks: noopCallbacks(),
+            windSource: wind,
+            cda: GOLDEN_CDA,
+            crr: GOLDEN_CRR,
+            isTabActive: () => false,
+            resolveRho: withRho ? () => ride.rhoArray : () => null,
+        });
+        expect(outcome).not.toBeNull();
+
+        const profiles = outcome!.profiles.map(toLapProfile);
+        const mean = calculateMeanElevationProfile(profiles as never);
+        const stats = calculateGpsLapStats(profiles as never, mean);
+
+        const mid = Math.floor(mean.elevation.length / 2);
+        return {
+            // The interpolation grid itself: a changed reference-distance walk
+            // moves its length or its endpoints.
+            meanLength: mean.elevation.length,
+            meanFirst: mean.elevation[0],
+            meanMid: mean.elevation[mid],
+            meanLast: mean.elevation[mean.elevation.length - 1],
+            // Sum over every interpolated sample: moving ANY single point moves
+            // it, which is what the endpoints alone cannot see.
+            meanChecksum: mean.elevation.reduce((s, v) => s + v, 0),
+            meanR2: stats.meanR2,
+            meanRMSE: stats.meanRMSE,
+            avgVeGain: stats.avgVeGain,
+            avgActualGain: stats.avgActualGain,
+            closingError: stats.closingError,
+            lapClosingErrorChecksum: stats.lapClosingErrors.reduce((s, v) => s + v, 0),
+        };
     }
 
     // ── Out-and-back ────────────────────────────────────────────────────────
@@ -647,6 +698,75 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         },
     };
 
+    /**
+     * The aggregation-helper literals. Captured from the linear-rescan
+     * implementation, in the commit that introduced this block, so that D3's
+     * "unmoved" claim is verifiable against history.
+     *
+     * TWO HONEST LIMITS OF THIS BLOCK, stated because the alternative is another
+     * true-but-irrelevant number:
+     *
+     * 1. `meanR2` is 0 in ALL FOUR cases, and that is not a coincidence or a
+     *    sentinel: `calculateGpsLapStats` clamps each lap's R² with
+     *    `Math.max(0, r2)`, and on this fixture every lap's raw R² is negative.
+     *    So `meanR2` here pins the CLAMP, not the fit — and the second
+     *    interpolation walk (the `sumSquaredTotal` loop), whose only output is
+     *    R², is INVISIBLE to these literals. `gpsLapStatsInterpolation.test.ts`
+     *    covers that loop on synthetic laps with a positive R², which is the
+     *    only way to see it move.
+     *
+     * 2. `meanLength/First/Mid/Last/Checksum` are identical across all four
+     *    rows, which is also correct: the mean elevation profile is a function
+     *    of distance and ACTUAL elevation only, so neither the wind source nor
+     *    rho can move it. That is exactly the property D2's cache depends on,
+     *    and these four rows are where it is written down.
+     *
+     * The load-bearing numbers here are `meanChecksum` (every interpolated
+     * sample), `meanRMSE` and `closingError` (both a function of the FIRST
+     * interpolation walk, per lap point).
+     */
+    const GPS_LAP_AGGREGATION: Record<
+        string,
+        Awaited<ReturnType<typeof runGpsLapAggregation>>
+    > = {
+        'fit / present': {
+            meanLength: 287,
+            meanFirst: 1063.2142857142858, meanMid: 1063.65, meanLast: 1064.1,
+            meanChecksum: 305170.45696907304,
+            meanR2: 0, meanRMSE: 5.007569404339831,
+            avgVeGain: 8.635857151837952, avgActualGain: 0.8857142857141298,
+            closingError: 60.45100006286566,
+            lapClosingErrorChecksum: 60.45100006286566,
+        },
+        'fit / absent': {
+            meanLength: 287,
+            meanFirst: 1063.2142857142858, meanMid: 1063.65, meanLast: 1064.1,
+            meanChecksum: 305170.45696907304,
+            meanR2: 0, meanRMSE: 5.287997565780452,
+            avgVeGain: 9.118447594906716, avgActualGain: 0.8857142857141298,
+            closingError: 63.82913316434701,
+            lapClosingErrorChecksum: 63.82913316434701,
+        },
+        'constant / present': {
+            meanLength: 287,
+            meanFirst: 1063.2142857142858, meanMid: 1063.65, meanLast: 1064.1,
+            meanChecksum: 305170.45696907304,
+            meanR2: 0, meanRMSE: 2.8554621876852972,
+            avgVeGain: 4.90796476465448, avgActualGain: 0.8857142857141298,
+            closingError: 34.35575335258136,
+            lapClosingErrorChecksum: 34.35575335258136,
+        },
+        'constant / absent': {
+            meanLength: 287,
+            meanFirst: 1063.2142857142858, meanMid: 1063.65, meanLast: 1064.1,
+            meanChecksum: 305170.45696907304,
+            meanR2: 0, meanRMSE: 3.152730954554147,
+            avgVeGain: 5.429462686581246, avgActualGain: 0.8857142857141298,
+            closingError: 38.00623880606872,
+            lapClosingErrorChecksum: 38.00623880606872,
+        },
+    };
+
     const ANALYZE_LEG: Record<string, GoldenCase> = {
         'rho present': {
             r2: 0.3409142470926482, rmse: 53.03262090234332,
@@ -744,6 +864,35 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
     test('gpsLap / constant / rho absent', async () => {
         expectGolden(await runGpsLap('constant', false), GOLDEN['gpsLap / constant / rho absent']);
     });
+
+    test.each([
+        ['fit', true],
+        ['fit', false],
+        ['constant', true],
+        ['constant', false],
+    ] as Array<[WindMode, boolean]>)(
+        'gpsLap aggregation helpers / %s / rho %s',
+        async (wind, withRho) => {
+            const actual = await runGpsLapAggregation(wind, withRho);
+            const expected =
+                GPS_LAP_AGGREGATION[`${wind} / ${withRho ? 'present' : 'absent'}`];
+
+            expect(actual.meanLength).toBe(expected.meanLength);
+            expect(actual.meanFirst).toBeCloseTo(expected.meanFirst, PRECISION);
+            expect(actual.meanMid).toBeCloseTo(expected.meanMid, PRECISION);
+            expect(actual.meanLast).toBeCloseTo(expected.meanLast, PRECISION);
+            expect(actual.meanChecksum).toBeCloseTo(expected.meanChecksum, PRECISION);
+            expect(actual.meanR2).toBeCloseTo(expected.meanR2, PRECISION);
+            expect(actual.meanRMSE).toBeCloseTo(expected.meanRMSE, PRECISION);
+            expect(actual.avgVeGain).toBeCloseTo(expected.avgVeGain, PRECISION);
+            expect(actual.avgActualGain).toBeCloseTo(expected.avgActualGain, PRECISION);
+            expect(actual.closingError).toBeCloseTo(expected.closingError, PRECISION);
+            expect(actual.lapClosingErrorChecksum).toBeCloseTo(
+                expected.lapClosingErrorChecksum,
+                PRECISION,
+            );
+        },
+    );
 
     test('outAndBack / fit / rho present', async () => {
         expectGolden(await runOutAndBack('fit', true), GOLDEN['outAndBack / fit / rho present']);
