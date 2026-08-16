@@ -46,7 +46,12 @@ describe("the GPS-lap / stacked VD header", () => {
             ${virtualDistanceHeaderMarkup()}
             <div id="gpsLapVdPlot"></div>
         `;
-		(window as unknown as { Plotly: unknown }).Plotly = { newPlot: vi.fn() };
+		// Both, because the VD plot draws with `react` since D4 and this fixture
+		// must not be the reason a draw-method change looks green or red.
+		(window as unknown as { Plotly: unknown }).Plotly = {
+			react: vi.fn(),
+			newPlot: vi.fn(),
+		};
 	});
 
 	it("is emitted by the sidebar template, above the plot", () => {

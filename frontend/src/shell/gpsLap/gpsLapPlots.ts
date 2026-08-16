@@ -442,7 +442,12 @@ export function renderGpsLapWindPlot(lapProfiles: LapVEProfile[]) {
         })),
     });
 
-    PlotlyGlobal.newPlot('gpsLapWindPlot', figure.data, figure.layout, figure.config);
+    // `react`, not `newPlot` (D4): these three redraw on every slider update
+    // while their tab is open, and `newPlot` tears the graph down and rebuilds
+    // it from scratch each time. `react` initializes an empty div on the first
+    // call exactly as `newPlot` does, then diffs -- which is what the VE and
+    // residual plots above have always done.
+    PlotlyGlobal.react('gpsLapWindPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -464,7 +469,7 @@ export function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
         })),
     });
 
-    PlotlyGlobal.newPlot('gpsLapPowerPlot', figure.data, figure.layout, figure.config);
+    PlotlyGlobal.react('gpsLapPowerPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -494,6 +499,6 @@ export function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
         series,
     });
 
-    PlotlyGlobal.newPlot('gpsLapVdPlot', figure.data, figure.layout, figure.config);
+    PlotlyGlobal.react('gpsLapVdPlot', figure.data, figure.layout, figure.config);
     renderVirtualDistanceHeader(lapVirtualDistanceRows(series));
 }
