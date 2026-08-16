@@ -15,10 +15,12 @@
  */
 import type { AppState } from "../../state/AppState";
 import type {
+	ModeAggregateStats,
 	ModeUpdateCallbacks,
 	SegmentVeProfile,
 } from "../../modes/analysis/types";
 import type { LapVEProfile } from "./types";
+import type { GpsLapHeaderStats } from "./gpsLapPlots";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 import {
@@ -30,6 +32,29 @@ import {
 	calculateGpsLapStats,
 } from "./gpsLapPlots";
 import { setupTabSwitching } from "../dom/tabs";
+
+/**
+ * The header's three numbers, read off the aggregate the primitive computed.
+ *
+ * This is the D1 anti-drift seam. The primitive calls `aggregate` once, hands
+ * that object to `handler.summarize` (which writes the stored result) and to
+ * `renderVe` (which paints the header and the plot). Reading the header from the
+ * SAME object is what makes "the number above the plot" and "the number in the
+ * stored result" the same computation by construction rather than by two
+ * implementations that happen to agree today.
+ */
+function headerStats(aggregate: ModeAggregateStats): GpsLapHeaderStats {
+	return {
+		meanR2: aggregate.r2,
+		meanRMSE: aggregate.rmse,
+		// `extra` is optional on the shared type, but GPS-lap's `aggregate` below
+		// is its only producer and always writes `closingError`. NaN, not 0, if
+		// that ever stops holding: a header reading "NaNm" is a visible defect,
+		// while "0.00m" is a plausible lie — and closing error near zero is
+		// exactly what a good lap set looks like, so 0 would not be questioned.
+		closingError: aggregate.extra?.closingError ?? Number.NaN,
+	};
+}
 
 /**
  * Build the GPS-lap `ModeUpdateCallbacks`.
@@ -102,9 +127,13 @@ export function createGpsLapUpdateCallbacks(
 			};
 		},
 
-		renderVe(profiles) {
+		renderVe(profiles, aggregate) {
 			const lapProfiles = laps(profiles);
-			renderGpsLapVEPlots(lapProfiles, meanElevation(profiles));
+			renderGpsLapVEPlots(
+				lapProfiles,
+				meanElevation(profiles),
+				headerStats(aggregate),
+			);
 			setupTabSwitching({
 				wind: () => renderGpsLapWindPlot(lapProfiles),
 				power: () => renderGpsLapPowerPlot(lapProfiles),
@@ -126,9 +155,10 @@ export function createGpsLapUpdateCallbacks(
 
 		renderMetrics() {
 			// GPS-lap's metric spans and summary table are painted inside
-			// `renderGpsLapVEPlots` (gpsLapPlots.ts:352-375), which recomputes the
-			// stats itself. Nothing to do here, and duplicating the write would
-			// be a second place for the header to drift from the plot.
+			// `renderGpsLapVEPlots`, from the aggregate `renderVe` hands it --
+			// the same object the primitive gave `summarize`. Nothing to do here,
+			// and duplicating the write would be a second place for the header to
+			// drift from the plot.
 		},
 	};
 }

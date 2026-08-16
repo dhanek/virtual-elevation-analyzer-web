@@ -116,6 +116,20 @@ export function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): { di
 }
 
 /**
+ * The three numbers the GPS-lap header shows above the plot.
+ *
+ * Named as a type because there is exactly ONE producer of them per update and
+ * three consumers -- the sidebar template's initial paint, the header spans, and
+ * the stored result. Whoever computes them computes them once and hands the same
+ * object to all three; see `renderGpsLapVEPlots`.
+ */
+export interface GpsLapHeaderStats {
+    meanR2: number;
+    meanRMSE: number;
+    closingError: number;
+}
+
+/**
  * Calculate statistics for GPS lap VE analysis
  */
 export function calculateGpsLapStats(
@@ -220,10 +234,23 @@ export function calculateGpsLapStats(
 
 /**
  * Render GPS lap VE plots (extracted for reuse during recalculation)
+ *
+ * `stats` is REQUIRED and is NOT recomputed here (D1). This function used to
+ * call `calculateGpsLapStats` itself, so every slider update ran that helper
+ * twice on identical inputs -- once for the aggregate the primitive stores in
+ * the result state, and again here for the header spans. The second run cost
+ * ~6 ms of a ~22 ms update and bought nothing.
+ *
+ * Taking the stats as a required parameter rather than an optional one is the
+ * point: an optional parameter with a recompute fallback would leave two code
+ * paths that can print different numbers, which is the drift this is supposed to
+ * make impossible. There is now exactly one computation per update and the
+ * header, the plot and the stored result all read it.
  */
 export function renderGpsLapVEPlots(
     lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+    meanElevation: { distances: number[]; elevation: number[] },
+    stats: GpsLapHeaderStats
 ) {
     const PlotlyGlobal = (window as any).Plotly;
     if (!PlotlyGlobal) return;
@@ -349,8 +376,7 @@ export function renderGpsLapVEPlots(
     PlotlyGlobal.react('gpsLapVePlot', veTraces, veLayout, { responsive: true });
     PlotlyGlobal.react('gpsLapResidualPlot', residualTraces, residualLayout, { responsive: true });
 
-    // Update statistics
-    const stats = calculateGpsLapStats(lapProfiles, meanElevation);
+    // Update statistics -- from the caller's single computation, never a second one.
     const r2Span = document.getElementById('gpsLapR2Value');
     const rmseSpan = document.getElementById('gpsLapRmseValue');
     const closingErrorSpan = document.getElementById('gpsLapClosingErrorValue');
