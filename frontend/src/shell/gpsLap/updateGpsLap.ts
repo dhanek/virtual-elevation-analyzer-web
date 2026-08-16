@@ -32,6 +32,63 @@ import {
 	calculateGpsLapStats,
 } from "./gpsLapPlots";
 import { setupTabSwitching } from "../dom/tabs";
+import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
+
+/**
+ * D2 — the mean elevation profile, cached ACROSS updates.
+ *
+ * `calculateMeanElevationProfile` reads exactly two things off each lap:
+ * `distances` and `actualElevation`. Neither depends on CdA or Crr, so during a
+ * slider drag it recomputed an identical answer on every single frame — ~3.7 ms
+ * of a ~22 ms update spent reproducing the previous result.
+ *
+ * The per-instance memo below cannot help: `requestModeUpdate` calls
+ * `getModeUpdateCallbacks` on every event, so `createGpsLapUpdateCallbacks` runs
+ * fresh per update and its closure dies with it. This cache is therefore
+ * module-level, which makes its INVALIDATION the whole safety argument.
+ *
+ * The key is exact, not a fingerprint. A content hash over the elevation samples
+ * would be cheap but could collide, and the failure it would produce is the one
+ * this phase has already shipped once (D-06): a toggle that recomputes and
+ * returns the previous numbers, i.e. a control that lies. So the key is composed
+ * of the identities and values the two arrays are DERIVED from:
+ *
+ *   - `distances` <- `buildRelativeDistanceSeries(slice.distance)`, a function of
+ *     the activity's distance channel and the segment range alone;
+ *   - `actualElevation` <- `params.velodrome ? zeros : slice.altitude`, a
+ *     function of the RESOLVED elevation array and the segment range.
+ *
+ * Hence: activity identity, resolved-elevation array identity, the velodrome
+ * flag, and the segment ranges. `resolveElevationProfile` returns the array
+ * cached on AppState, so its identity is stable while the displayed profile is —
+ * and changes the moment the elevation-smoothing toggle selects another one,
+ * which is the invalidation `gpsLapMeanElevationCache.test.ts` watches fail.
+ */
+interface MeanElevationCache {
+	fitData: unknown;
+	elevation: number[];
+	velodrome: boolean;
+	shape: string;
+	value: { distances: number[]; elevation: number[] };
+}
+
+let meanElevationCache: MeanElevationCache | null = null;
+
+/** Test seam. Production never needs it: every input change is in the key. */
+export function resetGpsLapMeanElevationCache(): void {
+	meanElevationCache = null;
+}
+
+/** O(nLaps), not O(nSamples) — the ranges, not the data they select. */
+function segmentShape(profiles: SegmentVeProfile[]): string {
+	return profiles
+		.map((p) => {
+			const { startIdx, endIdx } = p.segment.range;
+			const trim = p.segment.trim;
+			return `${startIdx}:${endIdx}:${trim ? `${trim.start}-${trim.end}` : ""}`;
+		})
+		.join(",");
+}
 
 /**
  * The header's three numbers, read off the aggregate the primitive computed.
@@ -80,6 +137,40 @@ export function createGpsLapUpdateCallbacks(
 		elevation: [],
 	};
 
+	/**
+	 * The cross-update half of the memo (D2). The per-instance memo above stops
+	 * `aggregate` and `renderVe` recomputing within ONE update; this stops the
+	 * NEXT update recomputing an answer that cannot have changed.
+	 */
+	function meanElevationFor(
+		profiles: SegmentVeProfile[],
+		lapProfiles: LapVEProfile[],
+	): { distances: number[]; elevation: number[] } {
+		const fitData = appState.currentFitData;
+		const elevation = resolveElevationProfile(
+			appState,
+			fitData!,
+			normalized.altitude,
+		).altitude;
+		const velodrome = appState.currentParameters?.velodrome === true;
+		const shape = segmentShape(profiles);
+
+		const hit =
+			meanElevationCache !== null &&
+			meanElevationCache.fitData === fitData &&
+			meanElevationCache.elevation === elevation &&
+			meanElevationCache.velodrome === velodrome &&
+			meanElevationCache.shape === shape;
+
+		if (hit) {
+			return meanElevationCache!.value;
+		}
+
+		const value = calculateMeanElevationProfile(lapProfiles);
+		meanElevationCache = { fitData, elevation, velodrome, shape, value };
+		return value;
+	}
+
 	function laps(profiles: SegmentVeProfile[]): LapVEProfile[] {
 		if (profiles !== memoKey) {
 			memoKey = profiles;
@@ -103,7 +194,7 @@ export function createGpsLapUpdateCallbacks(
 					totalDistance: profile.distancesKm[profile.distancesKm.length - 1] ?? 0,
 				};
 			});
-			memoMean = calculateMeanElevationProfile(memoLaps);
+			memoMean = meanElevationFor(profiles, memoLaps);
 		}
 		return memoLaps;
 	}
