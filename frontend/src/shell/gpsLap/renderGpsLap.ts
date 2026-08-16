@@ -51,6 +51,7 @@ import {
 	renderGpsLapPowerPlot,
 	renderGpsLapVdPlot,
 } from "./gpsLapPlots";
+import type { GpsLapHeaderStats } from "./gpsLapPlots";
 import { createGpsLapUpdateCallbacks } from "./updateGpsLap";
 import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
@@ -388,8 +389,10 @@ export async function showGpsLapVEPlot(
 		},
 	});
 
-	// Render the plots using the shared function
-	renderGpsLapVEPlots(lapProfiles, meanElevation);
+	// Render the plots using the shared function. `initialStats` is the SAME
+	// object the template above painted the header spans from, so the first
+	// paint and the plot cannot disagree either (D1).
+	renderGpsLapVEPlots(lapProfiles, meanElevation, initialStats);
 
 	// Scroll to the VE analysis section
 	veSection?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -519,7 +522,12 @@ export interface GpsLapVeTemplateOptions {
 	showVirtualDistanceTab: boolean;
 	selectedWindSource: string;
 	currentAirSpeedCalibrationValue: string;
-	initialStats: { meanR2: number; meanRMSE: number; closingError: number };
+	/**
+	 * The same three numbers `renderGpsLapVEPlots` writes into the header spans
+	 * on every later update. One named type, so the initial paint and the update
+	 * paint cannot fall out of step with each other.
+	 */
+	initialStats: GpsLapHeaderStats;
 	lapCount: number;
 	defaultAirSpeedOffset: number;
 	elevationToggleMarkup: string;

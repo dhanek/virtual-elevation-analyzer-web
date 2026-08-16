@@ -53,7 +53,7 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 import { AppState } from "../../state/AppState";
 import { configureParameterMerge } from "../analysis/parametersSync";
 import { clearModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
-import { RECOMPUTE_DEBOUNCE_MS } from "../analysis/recomputeRunner";
+import { RECOMPUTE_THROTTLE_MS } from "../analysis/recomputeRunner";
 import { resetModeUpdateRequests } from "../analysis/requestModeUpdate";
 import { setupTabSwitching } from "../dom/tabs";
 import { setupVESliders } from "./bindStandardSliders";
@@ -178,12 +178,12 @@ function bindPanel(appState: AppState): void {
 
 /**
  * Let the scheduled run settle. Real timers, so this must outwait the uniform
- * recompute debounce (D-15) before flushing the run's own turns — reading the
+ * recompute throttle interval (D-15) before flushing the run's own turns — reading the
  * constant rather than a literal keeps it correct when plan 04 ratifies a value.
  */
 async function settle(): Promise<void> {
 	await new Promise((resolve) =>
-		setTimeout(resolve, RECOMPUTE_DEBOUNCE_MS + 10),
+		setTimeout(resolve, RECOMPUTE_THROTTLE_MS + 10),
 	);
 	for (let i = 0; i < 5; i++) {
 		await new Promise((resolve) => setTimeout(resolve, 0));
