@@ -152,7 +152,7 @@ async function main(): Promise<void> {
         { updateModeVEPlots },
         { createGpsLapUpdateCallbacks },
         { calculateMeanElevationProfile, calculateGpsLapStats },
-        { scheduleRecompute, RECOMPUTE_DEBOUNCE_MS },
+        { scheduleRecompute, RECOMPUTE_THROTTLE_MS },
     ] = await Promise.all([
         import('../pkg/virtual_elevation_analyzer.js'),
         import('../src/components/AnalysisParameters'),
@@ -357,59 +357,63 @@ async function main(): Promise<void> {
             process.stdout.write('\nPost-compute helpers, in isolation (gps-lap-6):\n')
             process.stdout.write(`  calculateMeanElevationProfile  median ${formatMs(percentile(meanTimings, 0.5))}\n`)
             process.stdout.write(`  calculateGpsLapStats           median ${formatMs(percentile(statTimings, 0.5))}\n`)
-            process.stdout.write('  NOTE: calculateGpsLapStats runs TWICE per update -- once via the\n')
-            process.stdout.write('  `aggregate` callback (updateGpsLap.ts:94) and again inside\n')
-            process.stdout.write('  renderGpsLapVEPlots (gpsLapPlots.ts:353). The second call is redundant.\n')
+            process.stdout.write('  Both were rewritten as two-pointer walks (D3), from ~3.8ms and\n')
+            process.stdout.write('  ~5.9ms respectively. calculateGpsLapStats no longer runs twice per\n')
+            process.stdout.write('  update: renderGpsLapVEPlots takes the aggregate as a parameter (D1),\n')
+            process.stdout.write('  and the mean profile is cached across updates (D2).\n')
         }
     }
 
     // ---------------------------------------------------------------- report 2
-    await reportDebounce(scheduleRecompute, RECOMPUTE_DEBOUNCE_MS, measurements)
+    await reportDebounce(scheduleRecompute, RECOMPUTE_THROTTLE_MS, measurements)
 }
 
 /**
- * SECTION 2 -- what the debounce does to a sustained drag.
+ * SECTION 2 -- what the SCHEDULER does to a sustained drag.
  *
- * `scheduleRecompute` clears and re-arms its timer on EVERY call
- * (`recomputeRunner.ts:96-103`). That is a resetting trailing debounce: while
- * input events keep arriving closer together than the debounce window, the timer
- * is never allowed to reach zero and NOT ONE update runs. It is not a throttle
- * and it does not yield `1000 / debounce` updates per second.
+ * HISTORY, because this section is the reason the scheduler changed. Until
+ * 2026-08-16 `scheduleRecompute` cleared and re-armed its timer on EVERY call:
+ * a resetting trailing debounce. While input events arrived closer together
+ * than the window, the timer never reached zero and NOT ONE update ran. This
+ * script measured exactly that -- 0 updates at 8/16/33 ms spacing against the
+ * shipped 50 ms -- and it is what the maintainer was feeling as a frozen plot.
  *
- * The model below is a five-line statement of that rule. It is validated against
- * the REAL `scheduleRecompute` at the shipped constant before it is used at any
- * other value, because `RECOMPUTE_DEBOUNCE_MS` is a module constant with no
- * injection seam and re-tuning it is explicitly plan 04's D-16 decision.
+ * The scheduler is now a LEADING-EDGE THROTTLE with a guaranteed trailing run,
+ * so the model below is the throttle rule: one update immediately, then one per
+ * interval, capped by how long an update actually takes. It is validated
+ * against the REAL `scheduleRecompute` at the shipped constant before being
+ * used at any other value, because `RECOMPUTE_THROTTLE_MS` is a module constant
+ * with no injection seam and re-tuning it is explicitly plan 04's D-16 decision.
  */
 function modelUpdatesDuringDrag(
-    debounceMs: number,
+    intervalMs: number,
     eventSpacingMs: number,
     dragMs: number,
     perUpdateMs = 0,
 ): number {
-    if (eventSpacingMs <= debounceMs) {
-        // The timer is re-armed before it can fire: nothing repaints mid-drag.
-        return 0
-    }
     const eventCount = Math.floor(dragMs / eventSpacingMs)
-    // An update cannot start until the previous one has finished, so the rate is
-    // also capped by the measured cost. At debounce 0 this cap is the ONLY thing
-    // limiting the rate, which is why 0 is not free: it pins the main thread.
-    const costCap = perUpdateMs > 0 ? Math.floor(dragMs / (debounceMs + perUpdateMs)) : eventCount
-    return Math.min(eventCount, costCap)
+    // One at the leading edge, then one per interval -- but an update cannot
+    // start before the previous one has finished, so the effective spacing is
+    // whichever of the two is larger. At interval 0 the cost is the ONLY limit,
+    // which is why 0 is not free: it pins the main thread.
+    const effectiveSpacing = Math.max(intervalMs, perUpdateMs)
+    const rateCap = effectiveSpacing > 0 ? Math.floor(dragMs / effectiveSpacing) : eventCount
+    return Math.min(eventCount, rateCap)
 }
 
 async function reportDebounce(
     scheduleRecompute: (request: { mode: 'gps-lap'; run: () => void }) => void,
-    shippedDebounceMs: number,
+    shippedIntervalMs: number,
     measurements: RenderMeasurement[],
 ): Promise<void> {
     const DRAG_MS = 2_000
     const SPACINGS = [8, 16, 33, 60, 120]
 
     // --- validation against the real runner, at the shipped value only -------
-    process.stdout.write('\n\nDebounce behaviour under a sustained drag\n')
-    process.stdout.write(`Real runner check: RECOMPUTE_DEBOUNCE_MS = ${shippedDebounceMs} ms\n\n`)
+    process.stdout.write('\n\nScheduler behaviour under a sustained drag\n')
+    process.stdout.write(`Real runner check: RECOMPUTE_THROTTLE_MS = ${shippedIntervalMs} ms\n`)
+    process.stdout.write('This is the number that was 0 across the top three rows under the\n')
+    process.stdout.write('resetting debounce -- a frozen plot for the whole drag.\n\n')
     process.stdout.write('spacing   real updates   model updates   agree\n')
     process.stdout.write('---------------------------------------------\n')
 
@@ -433,8 +437,11 @@ async function reportDebounce(
         // No cost cap here on purpose: the `run` this drives is a counter, so the
         // real runner in this check has a per-update cost of ~0 and the model
         // must be evaluated at the same cost to be comparable.
-        const predicted = modelUpdatesDuringDrag(shippedDebounceMs, spacing, DRAG_MS)
-        const agree = (during === 0) === (predicted === 0) ? 'yes' : 'NO'
+        const predicted = modelUpdatesDuringDrag(shippedIntervalMs, spacing, DRAG_MS)
+        // Now that both deliver updates mid-drag, agreement on the COUNT matters,
+        // not merely on whether it is zero. Timer scheduling in node is not exact,
+        // so allow a small slack rather than demanding equality.
+        const agree = Math.abs(during - predicted) <= Math.max(2, predicted * 0.15) ? 'yes' : 'NO'
         process.stdout.write(
             `${`${spacing}ms`.padStart(7)}   ${String(during).padStart(12)}   ${String(predicted).padStart(13)}   ${agree.padStart(5)}\n`,
         )
@@ -449,33 +456,44 @@ async function reportDebounce(
     process.stdout.write(
         `\nMeasured per-update cost used below (gps-lap-6, VE tab, Plotly EXCLUDED): ${perUpdate.toFixed(1)}ms\n`,
     )
-    process.stdout.write(`\nUpdates delivered DURING a ${DRAG_MS / 1000}s drag, by debounce value:\n`)
+    const CANDIDATES = [16, 20, 25, 33, 50]
+
+    process.stdout.write(`\nUpdates delivered DURING a ${DRAG_MS / 1000}s drag, by throttle interval:\n`)
     process.stdout.write('(cost-capped: an update cannot start before the previous one finishes)\n\n')
-    process.stdout.write('spacing      0ms     16ms     33ms     50ms\n')
-    process.stdout.write('-------------------------------------------\n')
+    process.stdout.write(`spacing  ${CANDIDATES.map(c => `${c}ms`.padStart(8)).join('')}\n`)
+    process.stdout.write('-------------------------------------------------\n')
     for (const spacing of SPACINGS) {
-        const cells = [0, 16, 33, 50]
+        const cells = CANDIDATES
             .map(d => String(modelUpdatesDuringDrag(d, spacing, DRAG_MS, perUpdate)).padStart(8))
             .join('')
         process.stdout.write(`${`${spacing}ms`.padStart(7)}${cells}\n`)
     }
 
-    process.stdout.write('\nLatency from the LAST input event to the repaint that answers it:\n\n')
-    process.stdout.write('debounce   settle latency (excl. Plotly)\n')
+    process.stdout.write('\nLatency from the LAST input event to the repaint that answers it:\n')
+    process.stdout.write('(worst case: the input lands just after a run starts, so it waits out\n')
+    process.stdout.write('the interval and then costs one update)\n\n')
+    process.stdout.write('interval   settle latency (excl. Plotly)\n')
     process.stdout.write('---------------------------------------\n')
-    for (const d of [0, 16, 33, 50]) {
+    for (const d of CANDIDATES) {
         process.stdout.write(`${`${d}ms`.padStart(8)}   ${formatMsLocal(d + perUpdate).padStart(28)}\n`)
     }
 
     process.stdout.write(
         '\nMain-thread duty cycle while dragging (fraction of wall time spent in the\n' +
-        'update, Plotly excluded), for a drag whose events are closer together than\n' +
-        'the debounce -- i.e. every normal drag:\n\n',
+        'update, Plotly EXCLUDED). Under the throttle this is the real duty cycle,\n' +
+        'not a hypothetical: updates now actually run mid-drag.\n\n',
     )
-    for (const d of [0, 16, 33, 50]) {
-        const duty = perUpdate / (d + perUpdate)
-        process.stdout.write(`  ${`${d}ms`.padStart(5)}  ${(duty * 100).toFixed(0)}% busy, ${(1000 / (d + perUpdate)).toFixed(0)} updates/sec if the debounce did not reset\n`)
+    for (const d of CANDIDATES) {
+        const effective = Math.max(d, perUpdate)
+        const duty = perUpdate / effective
+        process.stdout.write(`  ${`${d}ms`.padStart(5)}  ${(duty * 100).toFixed(0)}% busy, ${(1000 / effective).toFixed(0)} updates/sec\n`)
     }
+
+    process.stdout.write(
+        '\nNOTE: every duty figure above EXCLUDES Plotly, which is handed the trace\n' +
+        'and point counts printed earlier. The shipped interval budgets half of\n' +
+        'itself for that unmeasured work; see the arithmetic in recomputeRunner.ts.\n',
+    )
 }
 
 void main()
