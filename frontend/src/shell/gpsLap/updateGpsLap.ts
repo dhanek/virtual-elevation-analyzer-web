@@ -110,6 +110,17 @@ function headerStats(aggregate: ModeAggregateStats): GpsLapHeaderStats {
 		// while "0.00m" is a plausible lie — and closing error near zero is
 		// exactly what a good lap set looks like, so 0 would not be questioned.
 		closingError: aggregate.extra?.closingError ?? Number.NaN,
+		// The constant leg's same three numbers, shown beside the FIT ones rather
+		// than averaged into them (07-04 ruling 2). Absent when the update did
+		// not run under `compare`, which is what keeps the single-source header
+		// byte-identical to what it was.
+		compare: aggregate.compare
+			? {
+					meanR2: aggregate.compare.r2,
+					meanRMSE: aggregate.compare.rmse,
+					closingError: aggregate.compare.extra?.closingError ?? Number.NaN,
+				}
+			: undefined,
 	};
 }
 
@@ -185,6 +196,9 @@ export function createGpsLapUpdateCallbacks(
 						resolveGpsLapNumber(appState, profile.segment.range, i + 1),
 					distances: profile.distancesKm,
 					virtualElevation: profile.virtualElevation,
+					// Carried straight through from the primitive: non-null iff
+					// the requested source is `compare` (D-07/D-20).
+					virtualElevationCompare: profile.virtualElevationCompare,
 					actualElevation: profile.actualElevation,
 					supplementarySeries: profile.supplementarySeries,
 					duration:
@@ -215,6 +229,18 @@ export function createGpsLapUpdateCallbacks(
 				actualGain: stats.avgActualGain,
 				segmentCount: lapProfiles.length,
 				extra: { closingError: stats.closingError },
+				// GPS-lap's own second set of numbers, computed by the SAME helper
+				// over the constant leg. The primitive never learns this shape
+				// (D-02): it hands over profiles and takes back an aggregate.
+				compare: stats.compare
+					? {
+							r2: stats.compare.meanR2,
+							rmse: stats.compare.meanRMSE,
+							veGain: stats.compare.avgVeGain,
+							actualGain: stats.compare.avgActualGain,
+							extra: { closingError: stats.compare.closingError },
+						}
+					: undefined,
 			};
 		},
 

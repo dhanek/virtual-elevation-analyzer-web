@@ -233,6 +233,11 @@ export async function showGpsLapVEAnalysis(
 				lapNumber,
 				distances: relativeDistances,
 				virtualElevation: veArray,
+				// The ANALYZE leg computes one wind source, so the initial paint
+				// is always single-source. The first `requestModeUpdate` after
+				// this panel binds repaints it through the primitive, which is
+				// where compare (D-07/D-20) is resolved.
+				virtualElevationCompare: null,
 				actualElevation: actualElevation,
 				supplementarySeries,
 				duration,
@@ -657,6 +662,10 @@ export function buildGpsLapVeAnalysisTemplate(
                                 Mean RMSE:<span id="gpsLapRmseValue">${initialStats.meanRMSE.toFixed(2)}m</span> |
                                 Closing Error:<span id="gpsLapClosingErrorValue">${initialStats.closingError.toFixed(2)}m</span> |
                                 Laps:<span id="gpsLapCountValue">${lapCount}</span>
+                                <!-- Filled in only under "Compare both methods",
+                                     so the three spans above are read as a pair
+                                     of numbers rather than one (07-04 ruling 2). -->
+                                <span id="gpsLapCompareMarker"></span>
                             </div>
                             <div class="ve-plot-container">
                                 <div id="gpsLapVePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div>
