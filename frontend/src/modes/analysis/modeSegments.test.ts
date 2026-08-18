@@ -61,6 +61,7 @@ function makeProfile(indices: number[]): SegmentVeProfile {
         timeIndices: indices.map((_, i) => i),
         virtualElevation: indices.map(() => 1),
         virtualElevationCompare: null,
+        resultCompare: null,
         actualElevation: indices.map(() => 100),
         supplementarySeries: {
             distancesKm: [],

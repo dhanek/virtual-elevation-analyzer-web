@@ -382,10 +382,10 @@ export function bindModeControls(
 			}
 
 			case "radioGroup":
-				// No special case for a mode-owned source. Which RENDERER serves the
-				// selected source is the funnel's business (see
-				// `getModeWindSourceOverride`), and it has to be, because every other
-				// row reaches that renderer too.
+				// No special case for a mode-owned source — and as of plan 07-04 no
+				// mode owns one at all. `compare` was the last, and it is now
+				// resolved inside the primitive like every other source, so this row
+				// binds the radios and nothing else.
 				attached = bindWindSourceRadios(() => finish(spec));
 				break;
 

@@ -253,6 +253,144 @@ describe("wind is resolved ONCE PER UPDATE, not once per segment (D-05)", () => 
 	}
 });
 
+/**
+ * COMPARE IS A REAL SECOND SERIES, IN EVERY MODE (D-07/D-20, plan 07-04 Task 1).
+ *
+ * This block is the home of D-10 mutation row (b), which plan 03 recorded as
+ * unfireable in `modeControls.callshape.test.ts` because that matrix mocks the
+ * primitive. Here the primitive is REAL and only the WASM calculator is mocked —
+ * and the mock records the wind series it was handed, which is the one input
+ * that differs between the two legs. So "compare computed the same series twice"
+ * is visible rather than inferred.
+ */
+describe("compare resolves twice and produces a second series (D-07/D-20)", () => {
+	for (const mode of MODES) {
+		it(`${mode}: every segment carries a compare leg of the same length`, async () => {
+			const { callbacks } = spyCallbacks();
+			const outcome = await updateModeVEPlots({
+				appState: stateFor(mode),
+				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				callbacks,
+				windSource: "compare",
+				cda: 0.3,
+				crr: 0.005,
+				isTabActive: () => false,
+			});
+
+			expect(outcome).not.toBeNull();
+			expect(outcome!.profiles.length).toBeGreaterThan(0);
+			for (const profile of outcome!.profiles) {
+				expect(profile.virtualElevationCompare).not.toBeNull();
+				expect(profile.resultCompare).not.toBeNull();
+				expect(profile.virtualElevationCompare!.length).toBe(
+					profile.virtualElevation.length,
+				);
+			}
+			expect(outcome!.inputs.compareWind).not.toBeNull();
+			// NOT the collapsed source: the requested one, so `summarize` can write
+			// what the user actually asked for.
+			expect(outcome!.inputs.windSource).toBe("compare");
+		});
+
+		it(`${mode}: the two calculators differ in the WIND SERIES and nothing else`, async () => {
+			const { callbacks } = spyCallbacks();
+			const outcome = await updateModeVEPlots({
+				appState: stateFor(mode),
+				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				callbacks,
+				windSource: "compare",
+				cda: 0.3,
+				crr: 0.005,
+				isTabActive: () => false,
+			});
+
+			const segments = outcome!.profiles.length;
+			// Two calculators per segment, built through the one factory.
+			expect(calculatorCalls).toHaveLength(segments * 2);
+
+			for (let i = 0; i < segments; i++) {
+				const primary = calculatorCalls[i * 2];
+				const comparison = calculatorCalls[i * 2 + 1];
+
+				// The constant leg is the all-NaN series; the primary is not. If the
+				// primitive asked the resolver for 'compare' and let it collapse,
+				// BOTH would be the fit series and this is where that shows.
+				expect(
+					Array.from(comparison.windSpeed as number[]).every((v) =>
+						Number.isNaN(v),
+					),
+				).toBe(true);
+				expect(
+					Array.from(primary.windSpeed as number[]).some((v) => !Number.isNaN(v)),
+				).toBe(true);
+
+				// Everything else is shared, so any difference between the two legs
+				// is physics rather than bookkeeping.
+				expect(comparison.altitude).toEqual(primary.altitude);
+				expect(comparison.rhoArray).toEqual(primary.rhoArray);
+				expect(comparison.cda).toBe(primary.cda);
+				expect(comparison.crr).toBe(primary.crr);
+				expect(comparison.timestamps).toEqual(primary.timestamps);
+			}
+		});
+	}
+
+	/**
+	 * D-10 mutation row (b)'s assertion. Populating `virtualElevationCompare`
+	 * unconditionally makes every one of these fail.
+	 */
+	for (const mode of MODES) {
+		for (const source of ["fit", "constant", "none"] as const) {
+			it(`${mode}: leaves the compare leg null under \`${source}\``, async () => {
+				const { callbacks } = spyCallbacks();
+				const outcome = await updateModeVEPlots({
+					appState: stateFor(mode),
+					handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+					callbacks,
+					windSource: source,
+					cda: 0.3,
+					crr: 0.005,
+					isTabActive: () => false,
+				});
+
+				expect(outcome!.inputs.compareWind).toBeNull();
+				for (const profile of outcome!.profiles) {
+					expect(profile.virtualElevationCompare).toBeNull();
+					expect(profile.resultCompare).toBeNull();
+				}
+				// One calculator per segment, not two — the non-compare path pays
+				// nothing for compare existing.
+				expect(calculatorCalls).toHaveLength(outcome!.profiles.length);
+			});
+		}
+	}
+
+	it("asks the resolver for the two CONCRETE sources, never for `compare`", async () => {
+		// Ruling 1: `WindSourceResolver.ts`'s `'compare' -> 'fit'` collapse is
+		// deliberately untouched, because seven other callers depend on it. The
+		// primitive therefore never hands it a source it would have to collapse.
+		const spy = vi.spyOn(WindSourceResolver, "resolveWindSeries");
+		const { callbacks } = spyCallbacks();
+
+		await updateModeVEPlots({
+			appState: stateFor("gpsLap"),
+			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
+			callbacks,
+			windSource: "compare",
+			cda: 0.3,
+			crr: 0.005,
+			isTabActive: () => false,
+		});
+
+		// Twice per UPDATE, not twice per segment.
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(spy.mock.calls.map((call) => call[0].windSource)).toEqual([
+			"fit",
+			"constant",
+		]);
+	});
+});
+
 describe("the summarize seam owns the AppState result writes (D-17a / N-1)", () => {
 	for (const mode of MODES) {
 		it(`${mode}: all three result fields are populated`, async () => {

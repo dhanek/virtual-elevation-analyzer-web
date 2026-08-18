@@ -1,8 +1,4 @@
 import { AppState, WindSource } from "../../state/AppState";
-import {
-	AnalysisInput,
-	createAnalysisInput,
-} from "../../analysis/AnalysisInput";
 import { log } from "../../utils/log";
 import { MapVisualization } from "../../components/MapVisualization";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
@@ -17,27 +13,16 @@ import {
 } from "../../plots/StandardPlotBuilders";
 import { calculateAutoRho } from "./autoRho";
 import { ShellServices } from "../analysis/types";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import {
-	DEM_PROFILE_FALLBACK_ORDER,
-	type ElevationDisplayProfile,
-} from "../../analysis/elevationProfiles";
 import { veViewMatchesSelection } from "./veSelectionGuard";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type {
 	ModeUpdateCallbacks,
 	SegmentVeProfile,
 } from "../../modes/analysis/types";
-import { isVeTabActive } from "../analysis/updateModeVEPlots";
 import { bindModeControls } from "../analysis/bindModeControls";
-import {
-	registerModeUpdateCallbacks,
-	registerModeWindSourceOverride,
-} from "../analysis/modeUpdateCallbacks";
+import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
 import { setupTabSwitching } from "../dom/tabs";
 import {
-	resolveSelectionWindSeries,
 	stitchStandardProfiles,
 	type StitchedStandardSeries,
 } from "./standardSegments";
@@ -45,7 +30,6 @@ import {
 	renderVirtualDistanceHeader,
 	segmentVirtualDistanceRows,
 	selectedLapCount,
-	updateCombinedVirtualDistanceHeader,
 } from "./vdHeader";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
@@ -103,70 +87,6 @@ function updateMetricsDisplay(
 			coveredLaps.selected,
 		);
 	}
-}
-
-function isValidSelectionProfile(
-	profile: number[] | null,
-	selectedIndices: number[],
-): profile is number[] {
-	if (!profile) return false;
-	if (selectedIndices.length === 0) return false;
-	return selectedIndices.every((index) => index >= 0 && index < profile.length);
-}
-
-function filterProfileBySelection(
-	profile: number[],
-	selectedIndices: number[],
-): number[] {
-	return selectedIndices.map((index) => profile[index]);
-}
-
-/**
- * KEPT DELIBERATELY, for the `compare` branch only.
- *
- * The plan expected this to become dead once the primitive resolves elevation on
- * full arrays and slices per segment — which is true of the non-compare path,
- * and it no longer has any caller there. But plan 07-02 leaves the `compare`
- * branch composing its own two calculators until plan 07-04 (D-20), and that
- * branch still needs the ACTIVE display profile. Deleting this would silently
- * downgrade compare to raw FIT altitude, i.e. re-break for compare the exact
- * control D-18 was fixing everywhere else. It goes when compare folds into the
- * primitive.
- */
-function resolveActiveAltitudeForSelection(
-	appState: AppState,
-	selectedIndices: number[],
-	fallbackAltitude: number[],
-): number[] {
-	if (selectedIndices.length !== fallbackAltitude.length) {
-		return fallbackAltitude;
-	}
-
-	const byProfile: Record<ElevationDisplayProfile, number[] | null> = {
-		"fit-raw": appState.fitRawElevation,
-		"dem-raw-nearest": appState.demRawNearestElevation,
-		"dem-interpolated-smoothed-5pt":
-			appState.demInterpolatedSmoothed5ptElevation,
-	};
-
-	const activeProfile = byProfile[appState.activeDisplayProfile];
-	if (isValidSelectionProfile(activeProfile, selectedIndices)) {
-		return filterProfileBySelection(activeProfile, selectedIndices);
-	}
-
-	for (const profileKey of DEM_PROFILE_FALLBACK_ORDER) {
-		const candidate = byProfile[profileKey];
-		if (isValidSelectionProfile(candidate, selectedIndices)) {
-			return filterProfileBySelection(candidate, selectedIndices);
-		}
-	}
-
-	const fitRaw = byProfile["fit-raw"];
-	if (isValidSelectionProfile(fitRaw, selectedIndices)) {
-		return filterProfileBySelection(fitRaw, selectedIndices);
-	}
-
-	return fallbackAltitude;
 }
 
 /**
@@ -234,6 +154,10 @@ function createStandardUpdateCallbacks(
 		 */
 		aggregate(profiles) {
 			const count = profiles.length;
+			const compareResults = profiles
+				.map((p) => p.resultCompare)
+				.filter((result): result is NonNullable<typeof result> => result !== null);
+
 			return {
 				r2: profiles.reduce((sum, p) => sum + p.result.r2, 0) / count,
 				rmse: profiles.reduce((sum, p) => sum + p.result.rmse, 0) / count,
@@ -244,19 +168,58 @@ function createStandardUpdateCallbacks(
 					profiles.reduce((sum, p) => sum + p.result.actual_elevation_diff, 0) /
 					count,
 				segmentCount: count,
+				// The constant-wind leg's own per-lap means, kept SEPARATE here
+				// (07-04 ruling 2). `renderMetrics` is what folds the two together
+				// for Standard's spans, because Standard's averaging is pre-phase
+				// behaviour that is deliberately not being changed.
+				compare:
+					compareResults.length > 0
+						? {
+								r2:
+									compareResults.reduce((sum, r) => sum + r.r2, 0) /
+									compareResults.length,
+								rmse:
+									compareResults.reduce((sum, r) => sum + r.rmse, 0) /
+									compareResults.length,
+								veGain:
+									compareResults.reduce(
+										(sum, r) => sum + r.ve_elevation_diff,
+										0,
+									) / compareResults.length,
+								actualGain:
+									compareResults.reduce(
+										(sum, r) => sum + r.actual_elevation_diff,
+										0,
+									) / compareResults.length,
+							}
+						: undefined,
 			};
 		},
 
 		renderVe(profiles) {
 			const series = stitched(profiles);
 			const context = contextFor(profiles);
-			const figures = buildVirtualElevationFigures({
-				context,
-				virtualElevation: series.virtualElevation,
-				actualElevation: series.actualElevation,
-				cdaLabel: cda.toFixed(3),
-				crrLabel: appliedCrr.toFixed(4),
-			});
+			// The SAME dispatch the two GPS modes get: which figure is drawn is a
+			// property of the profiles the primitive produced, not of a separate
+			// update path. Before 07-04 this was a whole second entry point in this
+			// file that composed its own two calculators and never reached the
+			// primitive. (Its name is deliberately not written down: the acceptance
+			// criterion for its removal is a mechanical grep, and naming it in prose
+			// would defeat that — plan 07-01 deviation 2.)
+			const figures = series.virtualElevationCompare
+				? buildVirtualElevationComparisonFigures({
+						context,
+						virtualElevationFit: series.virtualElevation,
+						virtualElevationConstant: series.virtualElevationCompare,
+						actualElevation: series.actualElevation,
+					})
+				: buildVirtualElevationFigures({
+						context,
+						virtualElevation: series.virtualElevation,
+						actualElevation: series.actualElevation,
+						cdaLabel: cda.toFixed(3),
+						crrLabel: appliedCrr.toFixed(4),
+					});
 			Plotly.react(
 				"vePlot",
 				figures.elevation.data,
@@ -287,11 +250,23 @@ function createStandardUpdateCallbacks(
 		renderVd: drawVd,
 
 		renderMetrics(aggregate) {
+			// STANDARD'S AVERAGING IS UNCHANGED (07-04 ruling 2). Pre-refactor the
+			// compare branch showed `(result1.x + result2.x) / 2` for all four
+			// spans; it still does, now over the two per-lap means. An r² averaged
+			// across two wind models describes neither, and the GPS modes
+			// therefore show `fit / constant` side by side — but changing
+			// Standard's display is a behaviour change with no D-09 entry and no
+			// place in this phase's scope, so it is recorded as an observation and
+			// left alone.
+			const mean = (primary: number, secondary: number | undefined) =>
+				secondary === undefined ? primary : (primary + secondary) / 2;
+			const compare = aggregate.compare;
+
 			updateMetricsDisplay(
-				aggregate.r2,
-				aggregate.rmse,
-				aggregate.veGain,
-				aggregate.actualGain,
+				mean(aggregate.r2, compare?.r2),
+				mean(aggregate.rmse, compare?.rmse),
+				mean(aggregate.veGain, compare?.veGain),
+				mean(aggregate.actualGain, compare?.actualGain),
 				// `segmentCount` is how many per-lap fits the mean is actually over,
 				// AFTER the primitive dropped any lap the trim left too short.
 				{
@@ -407,215 +382,6 @@ function drawStandardVdPlot(
 }
 
 /**
- * Standard's `compare` branch — the ONE update path that does not go through
- * the funnel, and therefore not through the primitive either.
- *
- * Plan 07-03 moved every other Standard control onto `requestModeUpdate`. This
- * one could not follow: `updateModeVEPlots` has no compare path until plan 07-04
- * (D-07/D-20), and `resolveWindSeries` collapses 'compare' to 'fit', so routing
- * it through the funnel would silently turn "Compare both methods" into plain
- * FIT for the user — a live capability lost inside a refactor, with no D-09
- * change-list entry to its name. The two `standard / compare / rho present|absent`
- * golden cases from plan 07-01 exist to prove it did not move.
- *
- * It composes its own two calculators over the concatenated selection. It does
- * NOT call the primitive, which is why "the funnel is the only caller of
- * `updateModeVEPlots`" holds without an exception clause.
- */
-export async function updateStandardComparePlots(
-	appState: AppState,
-	analysisInput: AnalysisInput,
-	selectedIndices: number[],
-	trimStart: number,
-	trimEnd: number,
-) {
-	if (!appState.currentParameters || !appState.currentFitData) return;
-
-	const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
-	const crrSlider = document.getElementById("crrSlider") as HTMLInputElement;
-
-	if (!cdaSlider || !crrSlider) return;
-
-	const cda = parseFloat(cdaSlider.value);
-	const rawCrr = parseFloat(crrSlider.value);
-	// The slider value is the 22 °C-referenced Crr; the physics uses the
-	// temperature-corrected value when the correction is enabled.
-	const crr = resolveAppliedCrr(appState.currentParameters, rawCrr);
-
-	// LIVE until plan 07-04 wires renderVe to virtualElevationCompare.
-	// Reachability is asserted by the standard/compare golden cases and by plan
-	// 03's post-refactor browser check. This branch composes its own two
-	// calculators over the concatenated selection and is deliberately NOT routed
-	// through the primitive by this plan (D-20); a regression here silently
-	// turns "Compare both methods" into plain FIT for the user.
-	const context = createPlotContext(
-		analysisInput.timestamps.length,
-		trimStart,
-		trimEnd,
-	);
-	const activeAltitude = resolveActiveAltitudeForSelection(
-		appState,
-		selectedIndices,
-		analysisInput.altitude,
-	);
-
-	{
-		const constantWindSpeed = new Array(analysisInput.windSpeed.length).fill(
-			NaN,
-		);
-		const calculator1 = createVeCalculator({
-			timestamps: analysisInput.timestamps,
-			power: analysisInput.power,
-			velocity: analysisInput.velocity,
-			positionLat: analysisInput.positionLat,
-			positionLong: analysisInput.positionLong,
-			altitude: activeAltitude,
-			distance: analysisInput.distance,
-			windSpeed: constantWindSpeed,
-			params: appState.currentParameters,
-			cda,
-			crr,
-		});
-
-		// D-05: the fifth and last inline offset+calibration copy is gone. Even
-		// though the branch itself waits for plan 07-04, its WIND now comes from
-		// the one resolver, resolved over the FULL series and sliced afterwards
-		// -- so compare inherits the offset-ordering fix (change-list entry c)
-		// rather than keeping a private copy of the defect.
-		const calibratedWindSpeed = resolveSelectionWindSeries(
-			appState,
-			selectedIndices,
-			"fit",
-		);
-
-		const calculator2 = createVeCalculator({
-			timestamps: analysisInput.timestamps,
-			power: analysisInput.power,
-			velocity: analysisInput.velocity,
-			positionLat: analysisInput.positionLat,
-			positionLong: analysisInput.positionLong,
-			altitude: activeAltitude,
-			distance: analysisInput.distance,
-			windSpeed: calibratedWindSpeed,
-			params: appState.currentParameters,
-			cda,
-			crr,
-		});
-
-		const result1 = calculator1.calculate_virtual_elevation(
-			cda,
-			crr,
-			trimStart,
-			trimEnd,
-		);
-		const result2 = calculator2.calculate_virtual_elevation(
-			cda,
-			crr,
-			trimStart,
-			trimEnd,
-		);
-
-		appState.currentVEResult = result1;
-		appState.currentWindSource = "compare";
-
-		const figures = buildVirtualElevationComparisonFigures({
-			context,
-			virtualElevationConstant: Array.from(result1.virtual_elevation),
-			virtualElevationFit: Array.from(result2.virtual_elevation),
-			actualElevation: activeAltitude,
-		});
-		Plotly.react(
-			"vePlot",
-			figures.elevation.data,
-			figures.elevation.layout,
-			figures.elevation.config,
-		);
-		Plotly.react(
-			"veResidualsPlot",
-			figures.residuals.data,
-			figures.residuals.layout,
-			figures.residuals.config,
-		);
-
-		updateMetricsDisplay(
-			(result1.r2 + result2.r2) / 2,
-			(result1.rmse + result2.rmse) / 2,
-			(result1.ve_elevation_diff + result2.ve_elevation_diff) / 2,
-			(result1.actual_elevation_diff + result2.actual_elevation_diff) / 2,
-			// compare integrates the WHOLE concatenated selection in ONE pass rather
-			// than one fit per lap, so no lap can be dropped for being too short and
-			// the covered count is the selection itself. Passing it explicitly rather
-			// than null keeps the span from carrying a stale count over from the last
-			// non-compare render.
-			{
-				covered: selectedLapCount(appState),
-				selected: selectedLapCount(appState),
-			},
-		);
-
-		// REGRESSION FIX (07-02 Task 4 follow-up). Before this phase the eight
-		// slider handlers called the deleted secondary-plot helper AFTER
-		// `updateVEPlots`, unconditionally — so the Wind, Power and VD tabs
-		// refreshed in `compare` mode too. Task 4 removed that helper and moved
-		// its job into the primitive, but `compare` deliberately does not go
-		// through the primitive (D-20, plan 07-04), so those three tabs silently
-		// stopped updating on ANY interaction in compare mode.
-		// (The deleted helper is not named here: the D-05 acceptance criterion is
-		// a mechanical grep for its name in this file, and plan 07-01's deviation
-		// 2 recorded the same lesson.)
-		//
-		// The three draws are the SAME functions the primitive-driven path uses,
-		// not a fourth copy: re-introducing a private copy here is the failure
-		// class this phase exists to remove.
-		//
-		// The wind series is plotted in the FIT channel because that is what
-		// `calculator2` consumed; `calculator1`'s wind is all-NaN by
-		// construction, so there is nothing to draw for the constant leg.
-		const compareSeries: StandardSecondarySeries = {
-			timestamps: analysisInput.timestamps,
-			velocity: analysisInput.velocity,
-			power: analysisInput.power,
-			apparentWindSpeedMps: calibratedWindSpeed,
-		};
-		const drawCompareWind = () =>
-			drawStandardWindPlot(context, compareSeries, "fit");
-		const drawComparePower = () => drawStandardPowerPlot(context, compareSeries);
-		// compare integrates the WHOLE concatenated selection in one pass, so
-		// there are no per-lap figures to show here -- unlike the primitive path
-		// there are no per-segment profiles to decompose. A single-lap selection
-		// is well defined and renders normally; anything wider renders the
-		// combined integral with the caveat that says what it is.
-		const drawCompareVd = () =>
-			drawStandardVdPlot(context, compareSeries, () =>
-				updateCombinedVirtualDistanceHeader(
-					{
-						context,
-						timestamps: compareSeries.timestamps,
-						velocity: compareSeries.velocity,
-						windSpeed: compareSeries.apparentWindSpeedMps,
-					},
-					selectedLapCount(appState),
-				),
-			);
-
-		// Without this the tab render map still holds the closures the LAST
-		// non-compare update registered, so activating Wind or VD in compare mode
-		// repainted that stale non-compare data.
-		setupTabSwitching({
-			wind: drawCompareWind,
-			power: drawComparePower,
-			vd: drawCompareVd,
-		});
-
-		// The one tab-active check, imported rather than re-implemented (D-14).
-		if (isVeTabActive("wind-tab")) drawCompareWind();
-		if (isVeTabActive("power-tab")) drawComparePower();
-		if (isVeTabActive("vd-tab")) drawCompareVd();
-	}
-}
-
-
-/**
  * Setup Standard VE panel sliders.
  *
  * There are no per-control handler bodies here any more. Every VE control in
@@ -636,28 +402,19 @@ export function setupVESliders(
 	services: ShellServices,
 	mapVisualization: MapVisualization | null,
 	saveCurrentLapSettings: () => void,
-	selectedIndices: number[],
+	// FOUR ARRAYS LESS than before 07-04. `selectedIndices`, `power`, `altitude`
+	// and `distance` were read only by the compare escape hatch this plan
+	// deleted; the primitive slices all four out of the resolved full-activity
+	// arrays itself. What is left is what this panel genuinely still owns: the
+	// map's trim-marker coordinates, the auto-calibration window's series, and
+	// the trim sliders' ranges.
 	timestamps: number[],
-	power: number[],
 	velocity: number[],
 	positionLat: number[],
 	positionLong: number[],
-	altitude: number[],
-	distance: number[],
 	windSpeed: number[],
 	defaultAirSpeedOffset: number,
 ) {
-	const analysisInput = createAnalysisInput({
-		timestamps,
-		power,
-		velocity,
-		positionLat,
-		positionLong,
-		altitude,
-		distance,
-		windSpeed,
-	});
-
 	if (!appState.currentParameters) {
 		log.error("setupVESliders: appState.currentParameters is null");
 		return;
@@ -730,27 +487,15 @@ export function setupVESliders(
 			context.appliedCrr,
 		),
 	);
-	// Standard renders `compare` itself, for every control and not just for the
-	// radio that selects it. Registered as a property of the SOURCE so the funnel
-	// routes there whatever the user touched — dragging k, CdA or the trim under
-	// "Compare both methods" recomputes the comparison rather than painting a
-	// single-source figure over it.
+	// THE COMPARE ESCAPE HATCH IS GONE (07-04 Task 1, D-07/D-20). Standard used to
+	// register a wind-source override here, claiming `compare` for a private
+	// branch that composed its own two calculators and never reached the
+	// primitive — the last update path in the app that bypassed the funnel. The
+	// primitive now resolves wind twice under `compare` and produces a second
+	// per-segment series, so `compare` is a property of the PROFILES and the
+	// dispatch lives in `renderVe` above, exactly like the two GPS modes. There is
+	// no source any mode renders for itself, and therefore no registry of them.
 	//
-	// Temporary: plan 07-04 (D-07/D-20) generalises compare into the primitive and
-	// deletes this registration along with `updateStandardComparePlots`.
-	registerModeWindSourceOverride("standard", (windSource) => {
-		if (windSource !== "compare") return null;
-		return () => {
-			const { start, end } = currentTrim();
-			return updateStandardComparePlots(
-				appState,
-				analysisInput,
-				selectedIndices,
-				start,
-				end,
-			);
-		};
-	});
 	// The funnel is configured by `bindModeControls` below, from the same
 	// `appState`. It used to be configured HERE, and here only — which is why the
 	// GPS modes, which never run this function, bound every control onto a funnel

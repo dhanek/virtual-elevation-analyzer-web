@@ -83,11 +83,11 @@ export interface ModeUpdateOutcome {
  * Guarded so the primitive stays callable from node, which is what lets the
  * golden harness assert real numbers against it with no browser environment.
  *
- * EXPORTED so Standard's `compare` branch can reuse it rather than
- * re-implementing it. That branch does not go through this primitive until plan
- * 07-04 (D-20), but it still has to skip inactive tabs, and a second copy of the
- * class-name check is exactly what D-14 exists to prevent. Importing the one
- * definition keeps the check spelled out in a single file.
+ * Exported because Standard's `compare` branch used to import it rather than
+ * carry a second copy of the class-name check. Plan 07-04 folded that branch
+ * into this primitive, so the export currently has no production consumer — it
+ * is kept as the ONE definition any future caller must import, which is what
+ * D-14 exists to enforce.
  */
 export function isVeTabActive(tabId: string): boolean {
 	if (typeof document === "undefined") {
@@ -114,14 +114,36 @@ export async function updateModeVEPlots(
 
 	const normalized = getNormalizedActivityArrays(fitData);
 
-	// (1) Wind, ONCE, over the full series. Offset and calibration happen here
-	//     and nowhere else in the update path.
+	// (1) Wind, ONCE per leg, over the full series. Offset and calibration happen
+	//     here and nowhere else in the update path.
+	//
+	//     COMPARE RESOLVES TWICE, and asks for the two CONCRETE sources by name
+	//     (D-07/D-20, plan 07-04 ruling 1). `resolveWindSeries` collapses
+	//     'compare' to 'fit' before it does anything else, and that collapse is
+	//     deliberately left in place: seven other callers pass a wind source
+	//     through it and every one of them wants a SINGLE USABLE series — the
+	//     auto-calibration helper in particular would compute a meaningless
+	//     percentage from the all-NaN constant series. Un-collapsing at the
+	//     resolver would change what all of them receive. Asking here for 'fit'
+	//     and then for 'constant' reproduces both existing behaviours exactly,
+	//     with no blast radius outside this function.
+	const isCompare = args.windSource === "compare";
+
 	const wind = resolveWindSeries({
 		fitData,
-		windSource: args.windSource,
+		windSource: isCompare ? "fit" : args.windSource,
 		params,
 		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
 	});
+
+	const compareWind = isCompare
+		? resolveWindSeries({
+				fitData,
+				windSource: "constant",
+				params,
+				airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+			})
+		: null;
 
 	// (2) Elevation, ONCE, full length. The smoothing toggle now reaches every
 	//     mode rather than only the analyze path.
@@ -143,6 +165,7 @@ export async function updateModeVEPlots(
 	const inputs: ResolvedUpdateInputs = {
 		normalized,
 		wind,
+		compareWind,
 		altitude: elevation.altitude,
 		rhoArray,
 		params,
@@ -230,6 +253,41 @@ export async function updateModeVEPlots(
 				trimEnd,
 			) as VEAnalysisResult;
 
+			// THE SECOND CALCULATOR (D-07/D-20). Identical inputs — same rho
+			// slice, same resolved altitude, same cda/crr, same trim — except the
+			// wind series, which is exactly the one difference Standard's
+			// pre-refactor compare branch made between its two calculators. Built
+			// through `createVeCalculator` like every other calculator in the app,
+			// so two per segment does not cost a second WASM entry point
+			// (Phase 8 D-04).
+			let virtualElevationCompare: number[] | null = null;
+			let resultCompare: VEAnalysisResult | null = null;
+			if (compareWind) {
+				const compareCalculator = createVeCalculator({
+					timestamps: slice.timestamps,
+					power: slice.power,
+					velocity: slice.velocity,
+					positionLat: slice.positionLat,
+					positionLong: slice.positionLong,
+					altitude: slice.altitude,
+					distance: slice.distance,
+					windSpeed: indices.map((i) => compareWind.windSpeed[i]),
+					rhoArray: segmentRho,
+					params,
+					cda: args.cda,
+					crr: appliedCrr,
+				});
+				resultCompare = compareCalculator.calculate_virtual_elevation(
+					args.cda,
+					appliedCrr,
+					trimStart,
+					trimEnd,
+				) as VEAnalysisResult;
+				virtualElevationCompare = Array.from(
+					resultCompare.virtual_elevation as Float64Array,
+				);
+			}
+
 			profiles.push({
 				segment,
 				indices,
@@ -238,8 +296,8 @@ export async function updateModeVEPlots(
 				virtualElevation: Array.from(
 					result.virtual_elevation as Float64Array,
 				),
-				// D-07/D-20 populates this in plan 07-04.
-				virtualElevationCompare: null,
+				virtualElevationCompare,
+				resultCompare,
 				actualElevation: params.velodrome
 					? new Array(slice.altitude.length).fill(0)
 					: slice.altitude,

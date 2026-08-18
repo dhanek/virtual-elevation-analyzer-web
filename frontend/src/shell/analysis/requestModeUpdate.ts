@@ -13,10 +13,10 @@
  * `getAnalysisModeHandler` for behaviour (D-03) and `getModeUpdateCallbacks` for
  * rendering. Nothing here knows which mode it is serving.
  *
- * Standard's `compare` branch is the one live exception, and it is not an
- * exception to the sentence above: that branch composes its own two calculators
- * and never reaches the primitive. Plan 07-04 (D-07/D-20) folds it in and
- * deletes it.
+ * As of plan 07-04 there are NO exceptions left. Standard's `compare` branch was
+ * the last one — it composed its own two calculators and never reached the
+ * primitive — and D-07/D-20 folded it in. Every wind source in every mode now
+ * takes this road.
  */
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
@@ -32,10 +32,7 @@ import { getSelectedWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
-import {
-	getModeUpdateCallbacks,
-	getModeWindSourceOverride,
-} from "./modeUpdateCallbacks";
+import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
 import { scheduleRecompute, type RecomputeMode } from "./recomputeRunner";
 import { updateModeVEPlots } from "./updateModeVEPlots";
 
@@ -225,24 +222,12 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	const crr = readNumber("crrSlider", "crrValue", FALLBACK_CRR);
 	const windSource = getSelectedWindSource() as WindSource;
 
-	// Does the mode render this source itself? Asked for EVERY reason, not only
-	// for a wind-source change: the selected source outlives the interaction that
-	// selected it, so a control moved afterwards has to reach the same renderer.
-	// Scheduled like any other update rather than run inline, so a drag under
-	// Standard's `compare` stays latest-input-wins instead of composing two
-	// calculators per pointer event.
-	const override = getModeWindSourceOverride(handler.id, windSource);
-	if (override) {
-		log.debug(`requestModeUpdate(${reason}) -> ${handler.id}/${windSource} own`);
-		scheduleRecompute({
-			mode: recomputeModeFor(handler.id),
-			run: async () => {
-				await override();
-			},
-		});
-		return;
-	}
-
+	// NO SOURCE IS ROUTED ANYWHERE ELSE (07-04 Task 1). Standard used to claim
+	// `compare` here and run its own two-calculator branch, because the primitive
+	// had no compare path. It has one now, so every wind source — `compare`
+	// included — takes the same road: one funnel, one primitive, one set of
+	// injected renderers. The sentence at the top of this file finally holds with
+	// no exception clause attached to it.
 	const callbacks = getModeUpdateCallbacks(handler.id, {
 		windSource,
 		cda,

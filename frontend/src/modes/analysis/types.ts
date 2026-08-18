@@ -117,6 +117,16 @@ export interface ResolvedUpdateInputs {
 	normalized: NormalizedActivityArrays;
 	/** resolveWindSeries over the FULL series — the only offset/calibration site. */
 	wind: WindSeriesResolution;
+	/**
+	 * The SECOND full-series resolution, present iff the requested wind source is
+	 * `compare`, and null for every other source (D-07/D-20, plan 07-04).
+	 *
+	 * A SIBLING rather than a union on `wind`, deliberately: `wind` keeps meaning
+	 * "the primary series" for every downstream reader, so nothing that already
+	 * reads `inputs.wind` has to learn about compare in order to keep compiling
+	 * or to keep being correct.
+	 */
+	compareWind: WindSeriesResolution | null;
 	/** resolveElevationProfile over the FULL series (D-06 / D-18). */
 	altitude: number[];
 	/** Full-length; the primitive slices per segment (D-06). */
@@ -146,11 +156,46 @@ export interface SegmentVeProfile {
 	/** x-axis basis for Standard: 0..n-1 over this segment's extract. */
 	timeIndices: number[];
 	virtualElevation: number[];
-	/** Always null in plan 07-02; D-07/D-20 populates it in plan 07-04. */
+	/**
+	 * The constant-wind leg of a comparison, over the SAME samples as
+	 * `virtualElevation` (D-07/D-20, plan 07-04).
+	 *
+	 * INVARIANT: non-null if and only if the requested wind source is `compare`.
+	 * Every other source leaves it null, and the primary series is unchanged in
+	 * every non-compare case. The two legs differ in exactly one input — the wind
+	 * series — so any difference between them is physics, not bookkeeping.
+	 */
 	virtualElevationCompare: number[] | null;
 	actualElevation: number[];
 	supplementarySeries: SegmentSupplementarySeries;
 	result: VEAnalysisResult;
+	/**
+	 * The constant-wind leg's own metrics, non-null under exactly the same
+	 * condition as `virtualElevationCompare`.
+	 *
+	 * Carried rather than recomputed from the array: r² and RMSE come out of the
+	 * calculator, and a mode-side reimplementation of them would be a second
+	 * statistic that could drift from the one the primary series reports.
+	 */
+	resultCompare: VEAnalysisResult | null;
+}
+
+/**
+ * The constant-wind leg's headline numbers, SIDE BY SIDE with the primary
+ * leg's rather than averaged into them (07-04 ruling 2).
+ *
+ * An r² averaged across two different wind models describes neither model, so
+ * the GPS modes display `fit / constant`. Standard's existing averaging is a
+ * pre-phase behaviour that is NOT on the D-09 change list and is deliberately
+ * left alone — it consumes this block, it does not motivate its shape.
+ */
+export interface ModeCompareStats {
+	r2: number;
+	rmse: number;
+	veGain: number;
+	actualGain: number;
+	/** Mode-only figures for the constant leg, e.g. GPS-lap's closingError. */
+	extra?: Record<string, number>;
 }
 
 export interface ModeAggregateStats {
@@ -161,6 +206,16 @@ export interface ModeAggregateStats {
 	segmentCount: number;
 	/** Mode-only figures, e.g. GPS-lap's closingError. */
 	extra?: Record<string, number>;
+	/**
+	 * Present iff the update ran under `compare` (D-07/D-20).
+	 *
+	 * The extension goes on the OUTPUT side because that is the direction plan
+	 * 02's contract runs: the primitive hands `aggregate` the profiles and takes
+	 * back a `ModeAggregateStats`. Each mode computes its own second set of
+	 * numbers from `SegmentVeProfile.virtualElevationCompare` / `resultCompare`,
+	 * so the primitive never learns any mode's stat shape (D-02).
+	 */
+	compare?: ModeCompareStats;
 }
 
 /**

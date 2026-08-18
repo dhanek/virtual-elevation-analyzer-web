@@ -120,6 +120,7 @@ function profile(
 		timeIndices: indices.map((_, i) => i),
 		virtualElevation: indices.map(index => index),
 		virtualElevationCompare: null,
+		resultCompare: null,
 		actualElevation: indices.map(() => 100),
 		supplementarySeries: {
 			distancesKm: [],

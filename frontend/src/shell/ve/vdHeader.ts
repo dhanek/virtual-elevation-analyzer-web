@@ -33,11 +33,12 @@
  * rejected that: the per-lap figures are real, they are what the computation
  * actually produces, and they are what the header now shows -- one row per lap.
  *
- * The concatenated integral survives ONLY as a fallback for the two paths that
- * genuinely have no per-segment decomposition (the transient initial paint, and
- * `compare`, which integrates the whole selection in one pass until plan 07-04
- * lands D-20). It is never shown unlabelled: the row says how many laps it spans
- * and that it includes the gaps between them.
+ * The concatenated integral survives ONLY as a fallback for the one path that
+ * genuinely has no per-segment decomposition: the transient initial paint.
+ * `compare` used to be the second such path, but plan 07-04 routed it through
+ * the primitive, so it now has per-lap profiles like every other source and gets
+ * per-lap rows. The fallback is never shown unlabelled: the row says how many
+ * laps it spans and that it includes the gaps between them.
  */
 import {
 	computeVirtualDistanceWindowTotals,

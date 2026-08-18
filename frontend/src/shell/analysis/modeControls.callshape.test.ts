@@ -722,6 +722,67 @@ describe.each(MODE_CASES)(
 	},
 );
 
+/**
+ * COMPARE REACHES THE PRIMITIVE UNCOLLAPSED, IN ALL THREE MODES (D-07/D-20).
+ *
+ * The wind-source row above drives the radio to `constant`. This block drives it
+ * to `compare`, which before plan 07-04 was a source two of the three modes
+ * rendered a control for and neither of them honoured.
+ *
+ * WHAT THIS FILE CAN AND CANNOT SEE, stated rather than implied. The primitive
+ * is mocked here, so this block observes the FUNNEL's half of the claim: the
+ * requested source arrives as `'compare'` and not as the collapsed `'fit'`, once
+ * per interaction, for every mode. The other half — that the primitive then
+ * populates `virtualElevationCompare` for `compare` and leaves it null for every
+ * other source — is unobservable behind a mock, and is asserted in
+ * `updateModeVEPlots.test.ts`, which drives the real primitive. That split is
+ * deliberate: plan 03 recorded D-10 mutation row (b) as unfireable HERE for
+ * exactly this reason, and hiding it behind a mock a second time would repeat
+ * the 66-green-cases-over-a-dead-mode failure.
+ */
+describe.each(MODE_CASES)(
+	"$modeId: the compare source reaches the primitive uncollapsed",
+	(modeCase) => {
+		it("arrives as `compare`, exactly once", async () => {
+			setupMode(modeCase);
+
+			const compare = document.querySelector(
+				'input[name="windSource"][value="compare"]',
+			) as HTMLInputElement;
+			compare.checked = true;
+			compare.dispatchEvent(new Event("change"));
+			await settle();
+
+			const args = soleCall();
+			// `'fit'` here would mean the funnel had let the resolver's collapse
+			// decide, which is the defect D-07 names.
+			expect(args.windSource).toBe("compare");
+			expect(args.handler.id).toBe(modeCase.modeId);
+		});
+
+		it("keeps sending `compare` for a control moved afterwards", async () => {
+			// The selected source outlives the interaction that selected it. When
+			// this was only consulted from the radio handler, dragging CdA under
+			// compare repainted a single-source figure over the comparison.
+			setupMode(modeCase);
+			const compare = document.querySelector(
+				'input[name="windSource"][value="compare"]',
+			) as HTMLInputElement;
+			compare.checked = true;
+			compare.dispatchEvent(new Event("change"));
+			await settle();
+			primitive.mockClear();
+
+			const cda = el("cdaSlider");
+			cda.value = "0.31";
+			cda.dispatchEvent(new Event("input"));
+			await settle();
+
+			expect(soleCall().windSource).toBe("compare");
+		});
+	},
+);
+
 describe("the GPS modes render no trim markup, and the matrix says so", () => {
 	// An explicit NEGATIVE case. Without it, "trim is standard-only" is asserted
 	// nowhere that runs the binder, and a trim row silently gaining a GPS mode

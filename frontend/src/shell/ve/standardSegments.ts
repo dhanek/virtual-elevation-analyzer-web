@@ -141,6 +141,12 @@ export interface StitchedStandardSeries {
 	trimStart: number;
 	trimEnd: number;
 	virtualElevation: number[];
+	/**
+	 * The stitched constant-wind leg, non-null iff the update ran under
+	 * `compare` (D-07/D-20). Same length as `virtualElevation`, so the two can be
+	 * drawn against one plot context.
+	 */
+	virtualElevationCompare: number[] | null;
 	actualElevation: number[];
 	timestamps: number[];
 	velocity: number[];
@@ -162,6 +168,13 @@ export function stitchStandardProfiles(
 	normalized: Pick<NormalizedActivityArrays, "timestamps" | "velocity">,
 ): StitchedStandardSeries {
 	const virtualElevation: number[] = [];
+	// Built only when the profiles actually carry a compare leg, so that a
+	// non-compare update keeps producing `null` rather than an empty array a
+	// renderer could mistake for "compare with nothing in it".
+	const isCompare = profiles.some(
+		(profile) => profile.virtualElevationCompare !== null,
+	);
+	const virtualElevationCompare: number[] | null = isCompare ? [] : null;
 	const actualElevation: number[] = [];
 	const timestamps: number[] = [];
 	const velocity: number[] = [];
@@ -185,6 +198,15 @@ export function stitchStandardProfiles(
 		trimEnd = offset + localEnd;
 
 		virtualElevation.push(...profile.virtualElevation);
+		if (virtualElevationCompare) {
+			// A segment that somehow carries no compare leg contributes NaN over
+			// its own extent rather than shortening the series, which would slide
+			// every later sample onto the wrong x position.
+			virtualElevationCompare.push(
+				...(profile.virtualElevationCompare ??
+					new Array<number>(length).fill(Number.NaN)),
+			);
+		}
 		actualElevation.push(...profile.actualElevation);
 		power.push(...profile.supplementarySeries.powerWatts);
 		apparentWindSpeedMps.push(
@@ -203,6 +225,7 @@ export function stitchStandardProfiles(
 		trimStart,
 		trimEnd,
 		virtualElevation,
+		virtualElevationCompare,
 		actualElevation,
 		timestamps,
 		velocity,

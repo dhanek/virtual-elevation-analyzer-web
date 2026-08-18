@@ -81,6 +81,7 @@ function makeProfile(
 		timeIndices: indices.map((_, i) => i),
 		virtualElevation: indices.map(() => 1),
 		virtualElevationCompare: null,
+		resultCompare: null,
 		actualElevation: indices.map(() => 100),
 		supplementarySeries: {
 			distancesKm: indices.map((_, i) => i / 100),

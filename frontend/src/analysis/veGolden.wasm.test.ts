@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, test } from 'vitest';
 import { initSync } from '@wasm/virtual_elevation_analyzer.js';
 
 import { getNormalizedActivityArrays } from './ActivityArrayCache';
-import { createVeCalculator } from './VeCalculatorFactory';
 // NOTE: `resolveWindSeries`, `buildSegmentSupplementarySeries`,
 // `extractSegmentData` and `applyAirSpeedOffset` used to be imported here so
 // this harness could RE-IMPLEMENT the segment spine and Standard's inline wind
@@ -12,7 +11,6 @@ import { createVeCalculator } from './VeCalculatorFactory';
 // `updateModeVEPlots`, and the one branch that still composes by hand (compare,
 // which plan 07-04 owns) takes its wind from the real production helper.
 import { prepareAnalysisPayload } from '../shell/analysis/prepareAnalysisPayload';
-import { resolveSelectionWindSeries } from '../shell/ve/standardSegments';
 import { updateModeVEPlots } from '../shell/analysis/updateModeVEPlots';
 import { getAnalysisModeHandler } from '../modes/analysis/AnalysisModes';
 import type { ModeUpdateCallbacks, SegmentVeProfile } from '../modes/analysis/types';
@@ -26,11 +24,15 @@ import { isGoldenRidePresent, loadGoldenRide } from './__fixtures__/loadGoldenRi
 /**
  * D-08 / D-09 GOLDEN VALUE GUARDS — the gate for phase 07.
  *
- * Fifteen committed literals: {standard, gpsLap, outAndBack} x {fit, constant}
- * x {rho present, rho absent} = 12, plus standard x compare x {rho present, rho
- * absent} = 2, plus one D-21 virtual-distance case added by plan 07-02 Task 4.
- * The first fourteen were captured from a tree containing ZERO phase-07
- * pipeline edits.
+ * Thirteen committed literals: {standard, gpsLap, outAndBack} x {fit, constant}
+ * x {rho present, rho absent} = 12, plus one D-21 virtual-distance case added by
+ * plan 07-02 Task 4. The twelve were captured from a tree containing ZERO
+ * phase-07 pipeline edits.
+ *
+ * `compare` adds no literals of its own (plan 07-04 Task 1): its two legs are
+ * asserted to REPRODUCE the `fit` and `constant` rows exactly, which is a
+ * stronger claim than a fresh baseline and one that a tree with no compare
+ * support could never have satisfied.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * HARNESS FIDELITY — DISCHARGED as of plan 07-02 Task 4.
@@ -53,11 +55,11 @@ import { isGoldenRidePresent, loadGoldenRide } from './__fixtures__/loadGoldenRi
  *     movement is recorded under named change-list entries (f) and (g) in
  *     07-GOLDEN-BASELINE.md, never silently re-baselined.
  *
- * The only branch still composed by hand is `compare` (cases 5 and 6), which
- * plan 07-02 deliberately leaves outside the primitive for plan 07-04 (D-20).
- * Even that branch now takes its wind from the production helper
- * `resolveSelectionWindSeries`, so no offset/calibration algorithm is mirrored
- * anywhere in this file.
+ * NOTHING IS COMPOSED BY HAND ANY MORE (plan 07-04 Task 1). `compare` was the
+ * last branch that was — cases 5 and 6 built their own two calculators over the
+ * concatenated selection — and it now runs through the primitive like every
+ * other source. No calculator is constructed in this file at all outside the
+ * production update path, and no offset/calibration algorithm is mirrored.
  *
  * A CROSS-CHECK WORTH KNOWING ABOUT. The fixture's Standard selection is laps
  * 8-14, whose per-lap ranges are exactly the fixture's `indexRanges` — the same
@@ -349,88 +351,94 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         return summariseSegments(outcome.profiles.map(p => summarise(p.result)));
     }
 
+    // ── Compare, all three modes (07-04 Task 1) ─────────────────────────────
     /**
-     * The `compare` branch is NOT routed through the primitive by this plan —
-     * D-20 gives it to plan 07-04 — so cases 5 and 6 keep the plan-01
-     * composition, over the concatenated (deduplicated) selection with a single
-     * calculator per method. They must NOT move.
+     * RE-POINTED at the real `updateModeVEPlots` (plan 07-04 Task 1).
      *
-     * The one thing that did change here: the fit series comes from the
-     * production helper `resolveSelectionWindSeries` rather than a hand-written
-     * offset+calibration copy, matching what the production compare branch now
-     * does. The helper resolves over the FULL activity and slices afterwards; on
-     * this fixture the selection IS the full activity, so the numbers are
-     * unchanged, but on a real non-contiguous multi-lap ride compare inherits
-     * change-list entry (c) along with everything else.
+     * Cases 5 and 6 used to compose `compare` BY HAND here — one calculator per
+     * method over the concatenated selection — because `updateModeVEPlots` had
+     * no compare path and `resolveWindSeries` collapses 'compare' to 'fit'. That
+     * branch no longer exists in production, so mirroring it would have been the
+     * `parameterChangeHandler.test.ts` trap: a harness asserting against its own
+     * copy of a dead code path.
+     *
+     * WHAT REPLACED THEM, and why it is a stronger guard than new literals.
+     *
+     * Under compare the primitive resolves twice and runs two calculators per
+     * segment whose ONLY difference is the wind series. So the two legs must
+     * reproduce, sample for sample, the two single-source cases already in the
+     * table:
+     *
+     *   compare's PRIMARY leg    === that mode's `fit` literals
+     *   compare's COMPARISON leg === that mode's `constant` literals
+     *
+     * That is checkable against numbers captured from a tree with zero compare
+     * support, which is exactly what makes it non-vacuous. It is also precisely
+     * what D-10 mutation row (a) breaks: asking the comparison resolution for
+     * 'fit' instead of 'constant' makes the comparison leg equal the FIT
+     * literals, and the constant-leg assertion fails on every field.
+     *
+     * The old blended cases 5/6 are RETIRED, with their pre-07-04 values and the
+     * reason preserved in 07-GOLDEN-BASELINE.md. They could not survive in their
+     * old shape: they blended two whole-selection runs, and under D-19 Option B
+     * Standard has seven per-lap runs per leg.
      */
-    function runStandardCompare(withRho: boolean): GoldenCase {
-        const ride = loadGoldenRide();
+    function appStateForMode(
+        mode: 'standard' | 'gpsLap' | 'outAndBack',
+        ride: ReturnType<typeof loadGoldenRide>,
+    ): AppState {
         const appState = makeUpdateAppState(ride);
+        if (mode === 'gpsLap') {
+            appState.currentGpsLapIndexRanges = ride.indexRanges;
+        } else if (mode === 'outAndBack') {
+            appState.outAndBackSections =
+                ride.sections as unknown as AppState['outAndBackSections'];
+            appState.outAndBackSelectedSections = ride.sections.map(s => s.sectionNumber);
+        }
+        return appState;
+    }
 
-        const payload = prepareAnalysisPayload({
-            appState,
-            fitData: ride.fitData,
-            selection: {
-                mode: 'standard',
-                selectedItems: [],
-                selectedEntries: [],
-                indexRanges: null,
-                timeRanges: ride.laps.map(lap => ({ start: lap.start_time, end: lap.end_time })),
-                outAndBackSections: null,
-                emptySelectionMessage: '',
-            },
-            params: ride.params,
+    const HANDLER_FOR = {
+        standard: null,
+        gpsLap: 'GPS based lap splitting',
+        outAndBack: 'GPS based out and back',
+    } as const;
+
+    async function runCompare(
+        mode: 'standard' | 'gpsLap' | 'outAndBack',
+        withRho: boolean,
+    ): Promise<{ primary: GoldenCase; comparison: GoldenCase }> {
+        const ride = loadGoldenRide();
+
+        const outcome = await updateModeVEPlots({
+            appState: appStateForMode(mode, ride),
+            handler: getAnalysisModeHandler(HANDLER_FOR[mode]),
+            callbacks: noopCallbacks(),
+            windSource: 'compare',
             cda: GOLDEN_CDA,
             crr: GOLDEN_CRR,
-            getNormalizedActivityArrays,
-            calculateRhoArray: withRho ? () => ride.rhoArray : undefined,
+            isTabActive: () => false,
+            resolveRho: withRho ? () => ride.rhoArray : () => null,
         });
 
-        const analysisInput = payload.filteredData;
-        const rhoArray = withRho ? payload.rhoArray : null;
-        const trimStart = 0;
-        const trimEnd = analysisInput.timestamps.length - 1;
+        expect(outcome).not.toBeNull();
 
-        // bindStandardSliders.ts — constant wind is an all-NaN series.
-        const constantWind = new Array<number>(analysisInput.windSpeed.length).fill(Number.NaN);
-        const fitWind = resolveSelectionWindSeries(appState, payload.selectedIndices, 'fit');
-
-        const calculate = (windSpeed: number[]) => {
-            const calculator = createVeCalculator({
-                timestamps: analysisInput.timestamps,
-                power: analysisInput.power,
-                velocity: analysisInput.velocity,
-                positionLat: analysisInput.positionLat,
-                positionLong: analysisInput.positionLong,
-                altitude: analysisInput.altitude,
-                distance: analysisInput.distance,
-                windSpeed,
-                rhoArray,
-                params: ride.params,
-                cda: GOLDEN_CDA,
-                crr: GOLDEN_CRR,
-            });
-            return calculator.calculate_virtual_elevation(
-                GOLDEN_CDA,
-                GOLDEN_CRR,
-                trimStart,
-                trimEnd,
+        // The D-07 invariant, asserted per segment rather than in aggregate: a
+        // comparison leg that is missing on ONE lap would otherwise be invisible
+        // in a summed checksum.
+        for (const profile of outcome!.profiles) {
+            expect(profile.virtualElevationCompare).not.toBeNull();
+            expect(profile.resultCompare).not.toBeNull();
+            expect(profile.virtualElevationCompare!.length).toBe(
+                profile.virtualElevation.length,
             );
-        };
+        }
 
-        const constantResult = summarise(calculate(constantWind));
-        const fitResult = summarise(calculate(fitWind));
         return {
-            r2: (constantResult.r2 + fitResult.r2) / 2,
-            rmse: (constantResult.rmse + fitResult.rmse) / 2,
-            veElevationDiff: (constantResult.veElevationDiff + fitResult.veElevationDiff) / 2,
-            actualElevationDiff:
-                (constantResult.actualElevationDiff + fitResult.actualElevationDiff) / 2,
-            veLength: constantResult.veLength,
-            veFirst: constantResult.veFirst,
-            veMid: fitResult.veMid,
-            veLast: fitResult.veLast,
-            veChecksum: constantResult.veChecksum + fitResult.veChecksum,
+            primary: summariseSegments(outcome!.profiles.map(p => summarise(p.result))),
+            comparison: summariseSegments(
+                outcome!.profiles.map(p => summarise(p.resultCompare!)),
+            ),
         };
     }
 
@@ -626,20 +634,11 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
             veMid: 0.6339384644627134, veLast: 12.059466638124354,
             veChecksum: 4707.914727056141,
         },
-        'standard / compare / rho present': {
-            r2: 0.37076455698221766, rmse: 27.660186515290867,
-            veElevationDiff: 47.36263303718022, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.08454169112765618,
-            veMid: 34.314201998008826, veLast: 60.58180277923049,
-            veChecksum: 69710.61308842475,
-        },
-        'standard / compare / rho absent': {
-            r2: 0.36803843146696, rmse: 29.832327736438977,
-            veElevationDiff: 50.877350103641106, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.08735132354814168,
-            veMid: 36.22807384732491, veLast: 63.96213983278249,
-            veChecksum: 75296.93643148862,
-        },
+        // 'standard / compare / rho present|absent' USED TO LIVE HERE. They were
+        // a 50/50 BLEND of two whole-selection runs, produced by a hand-composed
+        // branch that plan 07-04 Task 1 deleted. Compare is now checked leg by
+        // leg against the `fit` and `constant` rows below, for all three modes —
+        // see `runCompare`. Retired values and reason: 07-GOLDEN-BASELINE.md.
         'gpsLap / fit / rho present': {
             r2: 0.3135718941005455, rmse: 5.163938255431569,
             veElevationDiff: 8.635857151837952, actualElevationDiff: -0.14285714285714285,
@@ -796,12 +795,40 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
     test('standard / constant / rho absent', async () => {
         expectGolden(await runStandard('constant', false), GOLDEN['standard / constant / rho absent']);
     });
-    test('standard / compare / rho present', () => {
-        expectGolden(runStandardCompare(true), GOLDEN['standard / compare / rho present']);
-    });
-    test('standard / compare / rho absent', () => {
-        expectGolden(runStandardCompare(false), GOLDEN['standard / compare / rho absent']);
-    });
+    /**
+     * COMPARE, ALL THREE MODES (D-07/D-20, plan 07-04 Task 1).
+     *
+     * Before this plan the "Compare both methods" radio was rendered in GPS-lap
+     * and out-and-back and did nothing in either: `resolveWindSeries` collapsed
+     * 'compare' to 'fit', so both modes silently computed plain FIT. These six
+     * cases are what makes that observable — and they are the D-10 mutation
+     * row (a) site.
+     */
+    test.each([
+        ['standard', true],
+        ['standard', false],
+        ['gpsLap', true],
+        ['gpsLap', false],
+        ['outAndBack', true],
+        ['outAndBack', false],
+    ] as Array<['standard' | 'gpsLap' | 'outAndBack', boolean]>)(
+        '%s / compare / rho %s — both legs',
+        async (mode, withRho) => {
+            const rho = withRho ? 'present' : 'absent';
+            const { primary, comparison } = await runCompare(mode, withRho);
+
+            // The FIT leg is the primary series, unchanged by asking for compare.
+            expectGolden(primary, GOLDEN[`${mode} / fit / rho ${rho}`]);
+            // The CONSTANT leg is real constant-wind physics, not a second copy
+            // of the FIT series. This is the assertion the tree failed before
+            // 07-04 in gpsLap and outAndBack, and it is mutation row (a)'s site.
+            expectGolden(comparison, GOLDEN[`${mode} / constant / rho ${rho}`]);
+
+            // Stated separately so the failure message says WHICH property broke
+            // if the two legs ever collapse onto one another.
+            expect(comparison.veChecksum).not.toBeCloseTo(primary.veChecksum, 3);
+        },
+    );
 
     /**
      * CASE 15 — the D-21 / N-6 guard, added by plan 07-02 Task 4.

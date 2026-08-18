@@ -1,3 +1,4 @@
+import { anchorSeriesTo, residualsAgainst } from './comparisonTraces';
 import { buildTrimBoundaryShapes, createContextSlices, type PlotContext } from './PlotContext';
 import {
     computeVirtualDistanceWindowTotals,
@@ -319,12 +320,15 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
     const constantSlices = createContextSlices(input.virtualElevationConstant, input.context);
     const actualSlices = createContextSlices(input.actualElevation, input.context);
 
-    const fitOffset = actualSlices.main[0] - fitSlices.main[0];
-    const constantOffset = actualSlices.main[0] - constantSlices.main[0];
-    const offsetFit = fitSlices.main.map(value => value + fitOffset);
-    const offsetConstant = constantSlices.main.map(value => value + constantOffset);
-    const fitResiduals = offsetFit.map((value, index) => value - actualSlices.main[index]);
-    const constantResiduals = offsetConstant.map((value, index) => value - actualSlices.main[index]);
+    // Each series is anchored INDEPENDENTLY on the first main-window actual
+    // sample, through the one shared helper the GPS comparison figures also use
+    // (07-04 Task 1). Output is unchanged: `comparisonTraces.test.ts` pins every
+    // y value of all six traces, and was green against the hand-rolled version
+    // before this call replaced it.
+    const offsetFit = anchorSeriesTo(fitSlices.main, actualSlices.main[0]);
+    const offsetConstant = anchorSeriesTo(constantSlices.main, actualSlices.main[0]);
+    const fitResiduals = residualsAgainst(offsetFit, actualSlices.main);
+    const constantResiduals = residualsAgainst(offsetConstant, actualSlices.main);
 
     return {
         elevation: {
