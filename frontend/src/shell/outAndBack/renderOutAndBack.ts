@@ -142,10 +142,12 @@ export async function showOutAndBackVEAnalysis(
 			sectionNumber: section.sectionNumber,
 			outboundDistances: [],
 			outboundVE: [],
+			outboundVECompare: null,
 			outboundActualElevation: [],
 			outboundSeries: null,
 			inboundDistances: [],
 			inboundVE: [],
+			inboundVECompare: null,
 			inboundActualElevation: [],
 			inboundSeries: null,
 			outboundDuration: section.outboundDuration,
@@ -497,12 +499,28 @@ export function buildOutAndBackVeAnalysisTemplate(
                                 VE Gain:<span id="oabVeGainValue">${initialStats.avgVeGain.toFixed(2)}m</span> |
                                 Actual:<span id="oabActualGainValue">${initialStats.avgActualGain.toFixed(2)}m</span> |
                                 Sections:<span id="oabSectionCountValue">${sectionCount}</span>
+                                <!-- Filled in only under "Compare both methods",
+                                     so the paired spans above are read as two
+                                     numbers rather than one (07-04 ruling 2). -->
+                                <span id="oabCompareMarker"></span>
                             </div>
                             <div class="ve-plot-container">
                                 <div id="oabVePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div>
                             </div>
                             <div class="ve-plot-container">
                                 <div id="oabVeResidualsPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div>
+                            </div>
+                            <!-- The constant-wind view, BELOW the FIT view (D-20
+                                 option-b). Present unconditionally so the render
+                                 path only has to unhide it; hidden until an
+                                 update actually carries a comparison series. -->
+                            <div id="oabCompareView" class="hidden">
+                                <div class="ve-plot-container">
+                                    <div id="oabVeComparePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div>
+                                </div>
+                                <div class="ve-plot-container">
+                                    <div id="oabVeCompareResidualsPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div>
+                                </div>
                             </div>
                             <div id="oabClosingError" class="ve-closing-error hidden"></div>
                         </div>

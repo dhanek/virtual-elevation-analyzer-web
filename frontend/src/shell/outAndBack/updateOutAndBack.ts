@@ -60,10 +60,16 @@ function toOutAndBackProfiles(
 			sectionNumber: section.sectionNumber,
 			outboundDistances: outbound?.distancesKm ?? [],
 			outboundVE: outbound?.virtualElevation ?? [],
+			// Carried straight through from the primitive, PER LEG: non-null iff
+			// the requested source is `compare` (D-07/D-20). A section's two
+			// comparison arrays come from its two segments, because that is where
+			// the primitive computes them.
+			outboundVECompare: outbound?.virtualElevationCompare ?? null,
 			outboundActualElevation: outbound ? [...outbound.actualElevation] : [],
 			outboundSeries: outbound?.supplementarySeries ?? null,
 			inboundDistances: inbound?.distancesKm ?? [],
 			inboundVE: inbound?.virtualElevation ?? [],
+			inboundVECompare: inbound?.virtualElevationCompare ?? null,
 			inboundActualElevation: inbound ? [...inbound.actualElevation] : [],
 			inboundSeries: inbound?.supplementarySeries ?? null,
 			outboundDuration: section.outboundDuration,
@@ -133,6 +139,20 @@ export function createOutAndBackUpdateCallbacks(
 				// Sections, not segments — this is what the header span counts.
 				segmentCount: sectionProfiles.length,
 				extra: { avgDiff: stats.avgDiff },
+				// Out-and-back's own second set of numbers, computed by the SAME
+				// helper over the constant legs. r2 has no compare counterpart
+				// here for the same reason it has no primary one — the helper
+				// does not produce it — so it repeats the mean r2 rather than
+				// inventing a number for a field this screen never shows.
+				compare: stats.compare
+					? {
+							r2: meanR2,
+							rmse: stats.compare.rmse,
+							veGain: stats.compare.avgVeGain,
+							actualGain: stats.compare.avgActualGain,
+							extra: { avgDiff: stats.compare.avgDiff },
+						}
+					: undefined,
 			};
 		},
 
@@ -159,17 +179,34 @@ export function createOutAndBackUpdateCallbacks(
 			const veGainValueSpan = document.getElementById("oabVeGainValue");
 			const actualGainValueSpan = document.getElementById("oabActualGainValue");
 			const sectionCountSpan = document.getElementById("oabSectionCountValue");
+			const compareMarker = document.getElementById("oabCompareMarker");
+			// Under compare the two spans that HAVE a second number carry both as
+			// `fit / constant` (ruling 2). Averaging them would describe neither
+			// model. "Actual" is excluded on purpose: out-and-back's actual gain is
+			// 0 by construction for both models, so a pair there would be noise.
+			const compare = aggregate.compare ?? null;
+			const pair = (fit: string, constant: string | null) =>
+				constant === null ? fit : `${fit} / ${constant}`;
 			if (rmseSpan) {
-				rmseSpan.textContent = `${aggregate.rmse.toFixed(2)}m`;
+				rmseSpan.textContent = pair(
+					`${aggregate.rmse.toFixed(2)}m`,
+					compare ? `${compare.rmse.toFixed(2)}m` : null,
+				);
 			}
 			if (veGainValueSpan) {
-				veGainValueSpan.textContent = `${aggregate.veGain.toFixed(2)}m`;
+				veGainValueSpan.textContent = pair(
+					`${aggregate.veGain.toFixed(2)}m`,
+					compare ? `${compare.veGain.toFixed(2)}m` : null,
+				);
 			}
 			if (actualGainValueSpan) {
 				actualGainValueSpan.textContent = `${aggregate.actualGain.toFixed(2)}m`;
 			}
 			if (sectionCountSpan) {
 				sectionCountSpan.textContent = aggregate.segmentCount.toString();
+			}
+			if (compareMarker) {
+				compareMarker.textContent = compare ? " (FIT / Constant)" : "";
 			}
 		},
 	};
