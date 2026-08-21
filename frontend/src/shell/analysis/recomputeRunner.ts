@@ -10,40 +10,52 @@ import { log } from "../../utils/log";
 // call, which is a RESETTING TRAILING DEBOUNCE: while input events arrive closer
 // together than the window, the timer never reaches zero and NOT ONE update
 // runs. At 50 ms that meant a normal drag (events every 8-33 ms) repainted
-// ZERO times until the finger stopped. The plot only moved on release.
+// ZERO times until the finger stopped. The plot only moved on release. Now the
+// first event runs on the next macrotask, then at most one update per interval,
+// and the last event always lands because the pending request is kept and a
+// trailing run is armed.
 //
-// The rule the old comment claimed -- "one recompute finishes before the next is
-// scheduled" -- described a throttle while the code was a debounce, so it was
-// vacuous at any non-zero value. Now it is true: the first event runs on the
-// next macrotask, then at most one update per interval, and the last event
-// always lands because the pending request is kept and a trailing run is armed.
+// RATIFIED 2026-08-21 by the D-16 gate. This is the value the gate was run at
+// and the value it passed at -- Chrome DevTools, real FIT, continuous CdA drag:
+// Max Stall 25.7-60.0 ms against a 100 ms limit, 215-308 update cycles against
+// a floor of 5, no visible freeze in any measured row. The measurements are in
+// .planning/phases/07-mode-pipeline-unification/07-PROFILE-REPORT.md; the
+// one-word decision is in the sibling 07-GATE-RESULT. One interval, not a
+// per-mode table, per D-15; `RecomputeMode` stays for cancel semantics and
+// logging only.
 //
-// PROVISIONAL — NOT RATIFIED. 20 ms is the smallest value from
-// {16, 20, 25, 33, 50} satisfying BOTH:
+// WHAT THE GATE COVERS, stated because a bare "ratified" reads broader than the
+// evidence: gps-lap only, in both wind sources, at 6 and 18 laps. Standard mode
+// was INFERRED from the margin, not measured. Out-and-back was not measured at
+// all -- no ride was available -- so its compare view has no browser exposure.
+// Seven of the twelve planned rows are not measurements. This is not a
+// whole-app performance clearance.
 //
-//   (a) >= 16.7 ms, one frame at 60 Hz. Updating faster than the display
-//       refreshes burns main thread on frames nobody can see.
-//   (b) >= 2 x the p95 measured update cost of the heaviest workload
-//       (18 laps, 8.6 ms p95 -> 17.2 ms), so at most HALF the interval goes to
-//       the part we can measure.
+// 0 ms is UNTESTED, NOT REJECTED. The ladder rule is "the most responsive
+// candidate that passes every row", and 0 is more responsive than 20; the only
+// thing keeping it out is that nobody ran it. In every measured row the
+// throttle NEVER BINDS -- a gps-lap update cycle cost ~45-49 ms against a 20 ms
+// interval, so the pipeline is cost-capped and 0 would have changed nothing
+// observable there. Where 0 WOULD differ is standard mode and small workloads,
+// which are exactly the unmeasured rows: cheap updates at 0 ms redraw on
+// essentially every input event, which the gate lists as a failure condition.
+// Anyone wanting 0 measures those rows first.
 //
-//   max(16.7, 17.2) = 17.2 -> 20 ms. Duty cycle on the measured part: 43% at
-//   18 laps p95, 27% at 6 laps p95 (5.5 ms).
+// That ~45-49 ms per-cycle figure also FALSIFIES the assumption 20 ms was
+// picked under. It was chosen as >= 2x the headless p95 (18 laps, 8.6 ms) on
+// the theory that the other half of the interval covered Plotly, paint and
+// input handling, which the headless profiler cannot see. In the browser one
+// cycle costs more than TWICE the whole interval. So for the workloads that
+// were measured, cost sets the update rate and this constant does not bind at
+// all; it is ratified as a CEILING on update frequency for the cheap cases, not
+// as a budget the expensive ones fit inside.
 //
-// THE ASSUMPTION IN (b), STATED SO IT CAN BE FALSIFIED: the other half of the
-// interval is budgeted for Plotly, paint and input handling, none of which the
-// headless profiler can see -- Plotly is a runtime CDN global and jsdom has no
-// layout. It is handed 13 traces / ~14 400 points per VE-tab update. If the
-// D-16 trace shows Plotly alone exceeding ~10 ms per update at the gate
-// workload, the factor of 2 is wrong and this must rise to 33 or 50 ms.
-//
-// The measured costs behind (b) are post-D1/D2/D3/D4: those four speedups took
-// the 6-lap VE-tab update from 22.3 ms to 3.7 ms median. Choosing the interval
-// against the OLD cost would have picked 50 ms and thrown the speedups away.
-//
-// Owner of the ratified value: plan 04 (D-16). See
-// .planning/phases/07-mode-pipeline-unification/07-DEBOUNCE-HANDOFF.md for the
-// arithmetic, the gate protocol and the report-vs-code drift this reopens.
+// (An earlier revision of this comment attributed the sentence "one recompute
+// finishes before the next is scheduled" to a previous comment in THIS file. No
+// committed version of this file ever contained it -- it is from
+// 07-DEBOUNCE-HANDOFF.md section 2 and the plan. Dropped rather than repeated;
+// the real comment-vs-code drift, and this mis-quotation of it, are in
+// 07-PROFILE-REPORT.md section "Corrections to 3-PROFILE-REPORT.md".)
 export const RECOMPUTE_THROTTLE_MS = 20;
 
 export type RecomputeMode = "standard" | "gps-lap" | "out-and-back";
