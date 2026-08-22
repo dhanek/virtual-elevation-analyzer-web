@@ -129,6 +129,11 @@ import type { OutAndBackVEProfile } from "./types";
 
 const ride: OutAndBackRide = loadOutAndBackRide();
 
+/** Clearly different from the template's `params.cda || 0.3` default, and inside
+ * the fixture's own `cda_min` 0.15 / `cda_max` 0.5, so the binder does not clamp
+ * it into something the assertions could not tell apart from the initial value. */
+const DRAGGED_CDA = 0.42;
+
 /** Two legs per section, and every leg of this fixture clears MIN_SEGMENT_SAMPLES. */
 const EXPECTED_SEGMENTS = ride.sections.length * 2;
 
@@ -295,6 +300,20 @@ async function settle(): Promise<void> {
 	await vi.advanceTimersByTimeAsync(500);
 }
 
+function el(id: string): HTMLInputElement {
+	const node = document.getElementById(id) as HTMLInputElement | null;
+	if (!node) throw new Error(`#${id} is not in the rendered panel`);
+	return node;
+}
+
+/** A real user gesture: set the thumb, fire the event the browser fires. */
+async function drag(id: string, value: number): Promise<void> {
+	const slider = el(id);
+	slider.value = value.toString();
+	slider.dispatchEvent(new Event("input", { bubbles: true }));
+	await settle();
+}
+
 /** A real click on the REAL radio the template rendered. */
 async function selectWindSource(
 	value: "constant" | "fit" | "compare",
@@ -444,5 +463,217 @@ describe("out-and-back on the synthetic fixture: the real compare render chain",
 		expect(drawTargets).not.toContain("oabVeComparePlot");
 		expect(drawTargets).not.toContain("oabVeCompareResidualsPlot");
 		expect(missingTargets).toEqual([]);
+	});
+});
+
+/**
+ * N-1: OUT-AND-BACK STORE RESULT / EXPORT CSV, EXECUTED RATHER THAN REASONED ABOUT.
+ *
+ * N-1 was recorded NOT VERIFIED at the 2026-08-18 maintainer sweep and stayed the
+ * phase's one deliberately unconfirmed plan-03 behaviour, because no out-and-back
+ * ride existed to click through. The fixture makes the CODE-PATH half executable.
+ *
+ * WHAT THIS BLOCK MAY AND MAY NOT SUPPLY — the line that decides whether it is
+ * worth anything:
+ *
+ *   - It MAY fake `ResultsStorage` (jsdom has no persistence layer worth driving)
+ *     and it MAY click the notes dialog's OK button to resolve
+ *     `showNotesDialog()`. Neither is the behaviour under test.
+ *   - It MUST NOT create `#storeResult` or `#exportAllResults`. Out-and-back's own
+ *     template ships both (`renderOutAndBack.ts:469-470`) and the whole point is
+ *     to click the buttons production renders.
+ *   - It MUST NOT create the two trim sliders `handleStoreResult` looks for. Their
+ *     ABSENCE from the out-and-back template is precisely the thing under test.
+ *     Supplying them would be this phase's anti-pattern 1 in its purest form:
+ *     anything a test supplies in `setup()`, it cannot see missing.
+ *
+ * The `Cannot store` case below is a CHARACTERISATION of a defect, not an
+ * endorsement of it. It does not stand on `saveResult` not having been called —
+ * that alone would also pass if the click never landed, if the footer was never
+ * bound, if the dialog never resolved, or if the harness simply did nothing. It
+ * asserts the positive path up to the abort (button present, dialog on
+ * `document.body`, the specific log line emitted) and it was watched FLIPPING
+ * under mutation OAB-5, which removes the CAUSE by adding the two ids to the
+ * out-and-back template — recorded with its verbatim output in `07-08-SUMMARY.md`
+ * and reverted in the same task.
+ *
+ * SYNTHETIC-FIXTURE EVIDENCE, as everywhere in this file. The on-screen half of
+ * N-1 — "do the stored numbers match what the metrics header shows" — still needs
+ * a human and a real ride.
+ */
+describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain", () => {
+	let appState: AppState;
+	const saveResult = vi.fn(async () => {});
+	const exportAllResultsToCSV = vi.fn(async () => {});
+	let consoleError: ReturnType<typeof vi.spyOn>;
+	const alerts: string[] = [];
+
+	/** Every `log.error(...)` line, which `utils/log` writes to `console.error`. */
+	function errorLines(): string[] {
+		return consoleError.mock.calls.map((call) => String(call[0]));
+	}
+
+	beforeEach(async () => {
+		vi.useFakeTimers();
+		Element.prototype.scrollIntoView = () => {};
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+		modeState.gps = "GPS based out and back";
+		resetRecording();
+		saveResult.mockClear();
+		exportAllResultsToCSV.mockClear();
+		alerts.length = 0;
+		// jsdom's own `alert` is a not-implemented stub that only writes to the
+		// virtual console. Recorded here because an alert is how `handleStoreResult`
+		// reports its EARLY guards (`:96`, `:101`) and its `catch` (`:211`), and the
+		// defect case has to be able to rule all three out.
+		window.alert = (message?: any) => {
+			alerts.push(String(message));
+		};
+		consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		renderHostPage();
+		appState = makeAppState();
+		appState.selectedFile = new File([], "synthetic-out-and-back.fit");
+		await renderOutAndBack(appState, {
+			saveResult,
+			exportAllResultsToCSV,
+		} as unknown as ResultsStorage);
+	});
+
+	afterEach(() => {
+		consoleError.mockRestore();
+		vi.useRealTimers();
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	/**
+	 * Click the REAL footer button and resolve the module-private notes dialog the
+	 * way a user does — by clicking its OK button.
+	 *
+	 * Returns which of the dialog's three elements were on `document.body` at the
+	 * moment OK was clicked, so the caller can assert that execution really did
+	 * reach `storageHandlers.ts:111` rather than dying earlier in silence.
+	 */
+	async function clickStoreResult(): Promise<{
+		notesInput: boolean;
+		notesOkBtn: boolean;
+		notesCancelBtn: boolean;
+	}> {
+		const storeBtn = document.getElementById("storeResult");
+		expect(
+			storeBtn,
+			"#storeResult must come from the rendered out-and-back template",
+		).not.toBeNull();
+
+		storeBtn!.click();
+		// `showNotesDialog` appends synchronously inside its Promise executor, so
+		// one microtask turn is enough for the handler to have reached it.
+		await Promise.resolve();
+
+		const seen = {
+			notesInput: !!document.getElementById("notesInput"),
+			notesOkBtn: !!document.getElementById("notesOkBtn"),
+			notesCancelBtn: !!document.getElementById("notesCancelBtn"),
+		};
+
+		document.getElementById("notesOkBtn")?.click();
+		await vi.advanceTimersByTimeAsync(0);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		return seen;
+	}
+
+	it("a CdA drag writes the on-screen result into AppState through the summarize seam", async () => {
+		expect(appState.currentVEResult).toBeNull();
+
+		await drag("cdaSlider", DRAGGED_CDA);
+
+		// The physics really ran on the dragged value, for every leg.
+		expect(calculatorCalls.length).toBe(EXPECTED_SEGMENTS);
+		for (const call of calculatorCalls) {
+			expect(call.cda).toBeCloseTo(DRAGGED_CDA, 6);
+		}
+		// D-17(a)'s seam holds: `outAndBackMode.summarize` ->
+		// `writeSegmentModeResultState` (`segmentSummary.ts:131-141`) wrote all of
+		// it. This is the half of N-1 that was already true.
+		expect(appState.currentVEResult).not.toBeNull();
+		expect(appState.currentFilteredData).not.toBeNull();
+		expect(appState.currentWindSource).toBe("fit");
+		expect(appState.currentAnalyzedLaps).toEqual(
+			ride.sections.map((section) => section.sectionNumber),
+		);
+	});
+
+	it("CHARACTERISES A DEFECT: Store Result reaches the notes dialog, then aborts on the trim sliders out-and-back never renders, and persists nothing", async () => {
+		await drag("cdaSlider", DRAGGED_CDA);
+
+		// The two early returns cannot explain the outcome: both of the values they
+		// guard on are present before the click.
+		expect(appState.currentVEResult).not.toBeNull();
+		expect(appState.currentFilteredData).not.toBeNull();
+		// `isGpsLapModeActive` is false in out-and-back (`outAndBackMode.ts:44`), so
+		// `storageHandlers.ts:118` takes the `else` branch that needs the two trim
+		// sliders.
+		expect(appState.isGpsLapModeActive).toBe(false);
+
+		// EVERYTHING BELOW IS `expect.soft`, deliberately. Under the positive
+		// control (OAB-5 — the two trim ids ADDED to the out-and-back template) all
+		// four of these observations change at once, and a hard assertion would
+		// abort at the first of them and hide the rest. Soft assertions still fail
+		// the case; they just let the whole flip be read off one run.
+		//
+		// The cause, named and asserted rather than described: this template ships
+		// no trim window, and nothing in this file creates one.
+		expect.soft(document.getElementById("trimStartSlider")).toBeNull();
+		expect.soft(document.getElementById("trimEndSlider")).toBeNull();
+
+		const dialog = await clickStoreResult();
+
+		// EXECUTION REACHED THE HANDLER. All three dialog elements were on
+		// `document.body`, which is strictly past `storageHandlers.ts:105` (the
+		// `#storeResult` lookup) and inside `:111` (`await showNotesDialog()`) —
+		// so "the click never landed" and "the footer was never bound" are both
+		// ruled out by observation rather than by argument.
+		expect(dialog).toEqual({
+			notesInput: true,
+			notesOkBtn: true,
+			notesCancelBtn: true,
+		});
+
+		// THE DEFECT'S SIGNATURE, asserted directly: `storageHandlers.ts:132`,
+		// inside the `else` branch, after the trim-slider lookup at `:126-127`
+		// returned null.
+		expect.soft(errorLines()).toContain("Cannot store: UI elements not found");
+		// Not the `catch` at `:209-211` — that logs a different line and alerts.
+		expect.soft(errorLines()).not.toContain("❌ Failed to store result:");
+		expect.soft(alerts).toEqual([]);
+
+		// Only now, standing on the four positive observations above, does the
+		// negative mean anything.
+		expect.soft(saveResult).not.toHaveBeenCalled();
+	});
+
+	it("Export All Results does reach resultsStorage.exportAllResultsToCSV", async () => {
+		await drag("cdaSlider", DRAGGED_CDA);
+
+		const exportBtn = document.getElementById("exportAllResults");
+		expect(
+			exportBtn,
+			"#exportAllResults must come from the rendered out-and-back template",
+		).not.toBeNull();
+
+		exportBtn!.click();
+		await vi.advanceTimersByTimeAsync(0);
+		await Promise.resolve();
+
+		// `handleExportAllResults` reads no AppState at all
+		// (`storageHandlers.ts:222-248`), so the export button itself works in
+		// out-and-back. What it exports is whatever `saveResult` was handed
+		// earlier — which is what the case above shows never happens.
+		expect(exportAllResultsToCSV).toHaveBeenCalledTimes(1);
+		expect(errorLines()).not.toContain("❌ Failed to export results:");
 	});
 });
