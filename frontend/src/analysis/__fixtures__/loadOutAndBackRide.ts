@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ActivityDataLike } from '../../state/AppState';
 import type { AnalysisParameters } from '../../components/AnalysisParameters';
@@ -44,7 +45,30 @@ import type { AnalysisParameters } from '../../components/AnalysisParameters';
  * reads would be indistinguishable from measured ones.
  */
 
-export const OUT_AND_BACK_RIDE_PATH = fileURLToPath(new URL('./out-and-back-ride.json', import.meta.url));
+/**
+ * Resolved with `dirname(fileURLToPath(import.meta.url))` + `join`, NOT with
+ * `fileURLToPath(new URL('./out-and-back-ride.json', import.meta.url))` — which
+ * is what `loadGoldenRide.ts` uses and what this file originally copied.
+ *
+ * `new URL('./relative', import.meta.url)` is Vite's STATIC ASSET pattern, and
+ * Vite rewrites it whenever it transforms a module in **web** mode. Vitest picks
+ * the transform mode from the environment: `ssr` for `environment: 'node'`, and
+ * `web` for `jsdom` / `happy-dom`. So the original expression resolved correctly
+ * under `outAndBackFixture.test.ts` (node) and silently became
+ * `http://localhost:3000/src/…/out-and-back-ride.json` under any jsdom consumer,
+ * where `fileURLToPath` then threw `ERR_INVALID_URL_SCHEME: The URL must be of
+ * scheme file`. Plan 07-08's jsdom chain test is the first jsdom consumer, and it
+ * could not import this module at all until this line changed.
+ *
+ * A BARE `import.meta.url` is not part of that pattern and survives both
+ * transform modes as a `file://` URL — verified in both environments, not
+ * assumed. Keep it bare; re-introducing the `new URL(...)` form would break the
+ * jsdom side again with no test in `environment: 'node'` able to see it.
+ */
+export const OUT_AND_BACK_RIDE_PATH = join(
+    dirname(fileURLToPath(import.meta.url)),
+    'out-and-back-ride.json',
+);
 
 export interface OutAndBackRideProvenance {
     synthetic: true;
