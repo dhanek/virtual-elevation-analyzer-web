@@ -69,26 +69,40 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
 	getGpsAnalysisMode: () => modeState.gps,
 }));
 
-/** The far end of the chain: the functions that actually paint a figure. */
+/**
+ * The far end of the chain: the functions that actually paint a figure.
+ *
+ * The three SECONDARY draws per mode were `() => {}` no-ops until 07-05. They
+ * are spies now because the tab-laziness predicate is only observable through
+ * whether they ran — see the D-14 block at the foot of this file.
+ */
 const drawn = vi.hoisted(() => ({
 	gpsLapVe: vi.fn(),
+	gpsLapWind: vi.fn(),
+	gpsLapPower: vi.fn(),
+	gpsLapVd: vi.fn(),
 	outAndBackVe: vi.fn(),
+	outAndBackWind: vi.fn(),
+	outAndBackPower: vi.fn(),
+	outAndBackVd: vi.fn(),
 }));
 
 vi.mock("../gpsLap/gpsLapPlots", async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	renderGpsLapVEPlots: (...args: unknown[]) => drawn.gpsLapVe(...args),
-	renderGpsLapWindPlot: () => {},
-	renderGpsLapPowerPlot: () => {},
-	renderGpsLapVdPlot: () => {},
+	renderGpsLapWindPlot: (...args: unknown[]) => drawn.gpsLapWind(...args),
+	renderGpsLapPowerPlot: (...args: unknown[]) => drawn.gpsLapPower(...args),
+	renderGpsLapVdPlot: (...args: unknown[]) => drawn.gpsLapVd(...args),
 }));
 
 vi.mock("../outAndBack/outAndBackPlots", async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	renderOutAndBackPlots: (...args: unknown[]) => drawn.outAndBackVe(...args),
-	renderOutAndBackWindPlot: () => {},
-	renderOutAndBackPowerPlot: () => {},
-	renderOutAndBackVdPlot: () => {},
+	renderOutAndBackWindPlot: (...args: unknown[]) =>
+		drawn.outAndBackWind(...args),
+	renderOutAndBackPowerPlot: (...args: unknown[]) =>
+		drawn.outAndBackPower(...args),
+	renderOutAndBackVdPlot: (...args: unknown[]) => drawn.outAndBackVd(...args),
 }));
 
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
@@ -251,12 +265,41 @@ async function drag(id: string, value: number): Promise<void> {
 	await settle();
 }
 
+/**
+ * A real user gesture on a REAL tab button — the one the template shipped, not
+ * a node this file created. `setupTabSwitching` bound the handler during the
+ * mode's own render, so this goes through `activateTab` exactly as a browser
+ * click does, `ve-tab-content--active` swap and one render callback included.
+ */
+function clickTab(name: string): void {
+	const button = document.querySelector<HTMLElement>(
+		`.ve-tab-button[data-tab="${name}"]`,
+	);
+	if (!button) {
+		throw new Error(
+			`.ve-tab-button[data-tab="${name}"] is not in the rendered sidebar`,
+		);
+	}
+	button.click();
+}
+
+/** Which pane the templates/`activateTab` consider active, read never written. */
+function activeTabId(): string | null {
+	return document.querySelector(".ve-tab-content--active")?.id ?? null;
+}
+
 interface ModeUnderTest {
 	name: string;
 	gpsAnalysisMode: string;
 	/** Renders the real sidebar and does the real binding. */
 	render: (appState: AppState) => Promise<void>;
 	drawSpy: ReturnType<typeof vi.fn>;
+	/** That mode's three secondary-tab draws, in tab order. */
+	secondary: {
+		wind: ReturnType<typeof vi.fn>;
+		power: ReturnType<typeof vi.fn>;
+		vd: ReturnType<typeof vi.fn>;
+	};
 }
 
 const MODES: readonly ModeUnderTest[] = [
@@ -264,6 +307,11 @@ const MODES: readonly ModeUnderTest[] = [
 		name: "GPS-lap",
 		gpsAnalysisMode: "GPS based lap splitting",
 		drawSpy: drawn.gpsLapVe,
+		secondary: {
+			wind: drawn.gpsLapWind,
+			power: drawn.gpsLapPower,
+			vd: drawn.gpsLapVd,
+		},
 		render: (appState) =>
 			showGpsLapVEPlot(
 				makeServices(appState),
@@ -283,6 +331,11 @@ const MODES: readonly ModeUnderTest[] = [
 		name: "out-and-back",
 		gpsAnalysisMode: "GPS based out and back",
 		drawSpy: drawn.outAndBackVe,
+		secondary: {
+			wind: drawn.outAndBackWind,
+			power: drawn.outAndBackPower,
+			vd: drawn.outAndBackVd,
+		},
 		render: (appState) =>
 			showOutAndBackVEPlot(
 				makeServices(appState),
@@ -314,7 +367,13 @@ describe.each(MODES)(
 			modeState.gps = gpsAnalysisMode;
 			calculatorCalls.length = 0;
 			drawn.gpsLapVe.mockClear();
+			drawn.gpsLapWind.mockClear();
+			drawn.gpsLapPower.mockClear();
+			drawn.gpsLapVd.mockClear();
 			drawn.outAndBackVe.mockClear();
+			drawn.outAndBackWind.mockClear();
+			drawn.outAndBackPower.mockClear();
+			drawn.outAndBackVd.mockClear();
 
 			renderHostPage();
 			appState = makeAppState();
@@ -391,6 +450,116 @@ describe.each(MODES)(
 			await drag("windHeightSlider", 0.7);
 
 			expect(drawSpy).toHaveBeenCalled();
+		});
+	},
+);
+
+/**
+ * THE DEFAULT TAB-ACTIVE PREDICATE, DRIVEN AGAINST REAL TAB MARKUP (D-14).
+ *
+ * WHY THIS BLOCK EXISTS. Before 07-05 the mutation `?? false` -> `=== false` at
+ * `updateModeVEPlots.ts:99` — which inverts `isVeTabActive` — failed exactly two
+ * files, `standardModeRealChain.test.ts` and `standardCompareSecondaryPlots.test.ts`.
+ * Both Standard. The predicate was guarded in ONE mode of three. It survived this
+ * file untouched, and it survived `updateModeVEPlots.test.ts` entirely, because
+ * that file's two "D-14" cases hand the primitive a predicate of their own: a test
+ * cannot see missing what it supplies in its own setup. That is the phase's
+ * anti-pattern 1, and these cases are shaped to be immune to it.
+ *
+ * So NOTHING here supplies a predicate. The panes and buttons come from the real
+ * templates, `document` is real jsdom, and the only thing standing between a drag
+ * and a secondary redraw is the production function itself. Invert it and Case A
+ * flips from 0 secondary draws to 3, while Case B flips from 1 to 0 — the guard
+ * fails in BOTH directions, which is what stops an inversion from being read as a
+ * mere over-eager repaint.
+ *
+ * The click matters as much as the drag. `activateTab` renders the tab it moves
+ * to, exactly once; that render is the CLICK's, not the drag's, so the spies are
+ * cleared between the two.
+ */
+describe.each(MODES)(
+	"$name: the DEFAULT tab-active predicate gates the secondary plots (D-14)",
+	({ gpsAnalysisMode, render, drawSpy, secondary }) => {
+		let appState: AppState;
+
+		beforeEach(async () => {
+			vi.useFakeTimers();
+			Element.prototype.scrollIntoView = () => {};
+			clearModeUpdateCallbacks();
+			resetModeUpdateRequests();
+			modeState.gps = gpsAnalysisMode;
+			calculatorCalls.length = 0;
+			drawn.gpsLapVe.mockClear();
+			drawn.gpsLapWind.mockClear();
+			drawn.gpsLapPower.mockClear();
+			drawn.gpsLapVd.mockClear();
+			drawn.outAndBackVe.mockClear();
+			drawn.outAndBackWind.mockClear();
+			drawn.outAndBackPower.mockClear();
+			drawn.outAndBackVd.mockClear();
+
+			renderHostPage();
+			appState = makeAppState();
+			await render(appState);
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+			clearModeUpdateCallbacks();
+			resetModeUpdateRequests();
+		});
+
+		it("does not redraw an inactive secondary tab when a slider is dragged", async () => {
+			// THE PRECONDITION, asserted rather than assumed: all three panes are
+			// in the document and none of them is active. Without this the case
+			// would also pass against a panel that never rendered the panes at
+			// all, which is an accident, not a guard.
+			for (const id of ["wind-tab", "power-tab", "vd-tab"]) {
+				const pane = document.getElementById(id);
+				expect(pane, `#${id} must be in the rendered panel`).not.toBeNull();
+				expect(pane!.classList.contains("ve-tab-content--active")).toBe(false);
+			}
+			expect(activeTabId()).toBe("ve-tab");
+
+			drawSpy.mockClear();
+			secondary.wind.mockClear();
+			secondary.power.mockClear();
+			secondary.vd.mockClear();
+
+			await drag("cdaSlider", DRAGGED_CDA);
+
+			// The update genuinely ran — otherwise three zeroes below would mean
+			// nothing at all.
+			expect(drawSpy).toHaveBeenCalled();
+
+			expect(secondary.wind).toHaveBeenCalledTimes(0);
+			expect(secondary.power).toHaveBeenCalledTimes(0);
+			expect(secondary.vd).toHaveBeenCalledTimes(0);
+		});
+
+		it("redraws the secondary tab the user is actually on when a slider is dragged", async () => {
+			clickTab("wind");
+
+			expect(activeTabId()).toBe("wind-tab");
+			expect(
+				document
+					.getElementById("wind-tab")!
+					.classList.contains("ve-tab-content--active"),
+			).toBe(true);
+
+			// AFTER the click: `activateTab` already painted wind once, and that
+			// paint is not what is under test.
+			drawSpy.mockClear();
+			secondary.wind.mockClear();
+			secondary.power.mockClear();
+			secondary.vd.mockClear();
+
+			await drag("cdaSlider", DRAGGED_CDA);
+
+			// One active tab, one secondary redraw.
+			expect(secondary.wind).toHaveBeenCalledTimes(1);
+			expect(secondary.power).toHaveBeenCalledTimes(0);
+			expect(secondary.vd).toHaveBeenCalledTimes(0);
 		});
 	},
 );
