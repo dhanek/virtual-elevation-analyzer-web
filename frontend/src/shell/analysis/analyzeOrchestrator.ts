@@ -463,11 +463,6 @@ export async function handleAnalyze(): Promise<void> {
 
 		deps.hideLoading();
 
-		// The FULL-ACTIVITY rho series. This write used to be dead -- nothing
-		// read it back (07-RESEARCH.md baseline correction 1) -- which is why
-		// slider updates recomputed VE with no per-point air density. D-06 makes
-		// updateModeVEPlots both write and READ this field.
-		deps.appState.currentRhoArray = payload.rhoArray;
 		deps.appState.currentVEResult = payload.initialResult;
 		deps.appState.filteredVEData = {
 			positionLat: payload.filteredData.positionLat,

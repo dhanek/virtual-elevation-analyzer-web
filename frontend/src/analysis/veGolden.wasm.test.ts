@@ -218,7 +218,6 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
             currentFitData: ride.fitData,
             currentParameters: ride.params,
             airSpeedCalibrationPercent: GOLDEN_CALIBRATION_PERCENT,
-            currentRhoArray: null,
             currentGpsLapIndexRanges: null,
             currentOverlayLapNumbers: null,
             currentAnalyzedLaps: [],

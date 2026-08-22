@@ -150,16 +150,6 @@ export interface ActivityState {
 	currentFitResult: ActivityResult | null;
 	currentLaps: ActivityLapLike[];
 	currentCdaReference: number[] | null;
-	/**
-	 * The FULL-ACTIVITY air-density series, indexed like every other activity
-	 * array. Written by the analyze path and both written and READ by
-	 * `updateModeVEPlots`, which slices it per segment.
-	 *
-	 * Before D-06 this was write-only: nothing ever read it back, so slider
-	 * updates recomputed VE with no per-point rho while the initial analyze had
-	 * it. That is the defect the field's read side now closes.
-	 */
-	currentRhoArray: number[] | null;
 }
 
 export interface SelectionState {
@@ -248,7 +238,6 @@ export class AppState {
 		currentFitResult: null,
 		currentLaps: [],
 		currentCdaReference: null,
-		currentRhoArray: null,
 	};
 
 	readonly selection: SelectionState = {
@@ -376,14 +365,6 @@ export class AppState {
 
 	set currentCdaReference(cdaReference: number[] | null) {
 		this.activity.currentCdaReference = cdaReference;
-	}
-
-	get currentRhoArray(): number[] | null {
-		return this.activity.currentRhoArray;
-	}
-
-	set currentRhoArray(rhoArray: number[] | null) {
-		this.activity.currentRhoArray = rhoArray;
 	}
 
 	get filteredLapData(): FilteredLapData | null {

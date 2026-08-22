@@ -15,7 +15,13 @@
  *   - `resolveElevationProfile` over the FULL series (D-06 / D-18). Before this,
  *     the GPS modes read raw altitude, so the elevation-smoothing toggle burned
  *     a recompute and returned identical numbers — a control that lied.
- *   - the rho array (D-06), cached on `appState.currentRhoArray`.
+ *   - the rho array (D-06). The primitive OWNS this resolution per update: it
+ *     resolves the full-activity series here and slices it per segment. There
+ *     is deliberately no caching layer here, and none should be added: the
+ *     former write-only AppState field was deleted on 2026-08-22 by maintainer
+ *     ruling, because nothing ever read it back, because `resolveRhoArray`
+ *     recomputes correctly on every update, and because storing it again would
+ *     introduce an invalidation question that would need its own guard.
  *   - the tab-active check, which after this plan exists in exactly ONE place
  *     in the update path rather than at six call sites (D-14).
  *
@@ -153,10 +159,10 @@ export async function updateModeVEPlots(
 		normalized.altitude,
 	);
 
-	// (3) Rho, ONCE, full length, cached for the next update.
+	// (3) Rho, ONCE per update, full length. Sliced per segment below, at the
+	//     `segmentRho` line inside the segment loop.
 	const resolveRho = args.resolveRho ?? resolveRhoArray;
 	const rhoArray = resolveRho(fitData, normalized);
-	appState.currentRhoArray = rhoArray;
 
 	// (4) The slider Crr is 22 °C-referenced; the physics uses the corrected
 	//     value when the correction is enabled.

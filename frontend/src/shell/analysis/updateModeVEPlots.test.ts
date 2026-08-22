@@ -440,8 +440,6 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 		expect(calculatorCalls[0].rhoArray[0]).toBeCloseTo(fullRho[0], 12);
 		expect(calculatorCalls[1].rhoArray[0]).toBeCloseTo(fullRho[30], 12);
 		expect(calculatorCalls[1].rhoArray).toHaveLength(30);
-		// And it is cached full-length for the next update.
-		expect(appState.currentRhoArray).toHaveLength(SAMPLE_COUNT);
 	});
 
 	it("passes null rho when none can be resolved, without crashing", async () => {
