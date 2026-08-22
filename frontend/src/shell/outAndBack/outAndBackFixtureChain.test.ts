@@ -487,23 +487,49 @@ describe("out-and-back on the synthetic fixture: the real compare render chain",
  *     Supplying them would be this phase's anti-pattern 1 in its purest form:
  *     anything a test supplies in `setup()`, it cannot see missing.
  *
- * The `Cannot store` case below is a CHARACTERISATION of a defect, not an
- * endorsement of it. It does not stand on `saveResult` not having been called —
- * that alone would also pass if the click never landed, if the footer was never
- * bound, if the dialog never resolved, or if the harness simply did nothing. It
- * asserts the positive path up to the abort (button present, dialog on
- * `document.body`, the specific log line emitted) and it was watched FLIPPING
- * under mutation OAB-5, which removes the CAUSE by adding the two ids to the
- * out-and-back template — recorded with its verbatim output in `07-08-SUMMARY.md`
- * and reverted in the same task.
+ * WHAT THIS BLOCK FOUND, AND WHAT HAPPENED NEXT — read this before editing a
+ * case here, because the middle case was INVERTED on purpose.
  *
- * SYNTHETIC-FIXTURE EVIDENCE, as everywhere in this file. The on-screen half of
- * N-1 — "do the stored numbers match what the metrics header shows" — still needs
- * a human and a real ride.
+ * As first written, these cases CHARACTERISED A DEFECT. The click reached
+ * `showNotesDialog()` and then aborted: `outAndBackMode.ts:44` clears
+ * `isGpsLapModeActive`, so `storageHandlers.ts:118` took the `else` branch, which
+ * required `#trimStartSlider` / `#trimEndSlider` — ids only Standard's template
+ * renders — logged `Cannot store: UI elements not found` at `:132` and returned.
+ * Out-and-back Store Result persisted nothing at all. That was executed, not
+ * inferred: an observation-only probe ran first and the assertions were written
+ * to match its output.
+ *
+ * The maintainer then ruled `fix-here` (D-13, Hannes, 2026-08-22), so the branch
+ * now falls back to the whole analysed selection when no trim window is rendered,
+ * exactly as the GPS-lap branch does at `:119-120`. That is **D-09 change-list
+ * entry (u)**, an INTENDED behaviour change with a recorded before/after — so the
+ * middle case now asserts the CORRECT behaviour and carries the defect's signature
+ * in reverse: `saveResult` called once with what is on screen, and the
+ * `Cannot store` line ABSENT. **This is not re-baselining and not anti-pattern 4.**
+ * A guard that was flipped to follow a ruled behaviour change is a different thing
+ * from a literal quietly moved to match new output, and the difference is that
+ * entry (u) exists, with a before/after and its own mutation rows.
+ *
+ * The inverted case still does not stand on any single assertion. It asserts the
+ * positive path (button from the template, all three dialog elements on
+ * `document.body`), the absence of BOTH failure signatures, and then every field
+ * of what was persisted — including `result` by IDENTITY against the post-drag
+ * `currentVEResult`, so a stale analyze-time snapshot cannot pass. It was watched
+ * failing under mutations OAB-6 and OAB-7; see `07-08-SUMMARY.md` for both, with
+ * verbatim output.
+ *
+ * SYNTHETIC-FIXTURE EVIDENCE, as everywhere in this file. **The fix is no more
+ * browser-verified than the defect was.** A jsdom test showing `saveResult` called
+ * is not a user seeing their result stored, and the on-screen half of N-1 — do the
+ * stored numbers match what the metrics header shows — still needs a human and a
+ * real out-and-back ride.
  */
 describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain", () => {
 	let appState: AppState;
-	const saveResult = vi.fn(async () => {});
+	// Typed with its parameter so `mock.calls[0][0]` — the `saveData` literal
+	// `storageHandlers.ts:165-197` builds — is reachable. `vi.fn(async () => {})`
+	// infers a zero-arity tuple and tsc then rejects the index.
+	const saveResult = vi.fn<(data: any) => Promise<void>>(async () => {});
 	const exportAllResultsToCSV = vi.fn(async () => {});
 	let consoleError: ReturnType<typeof vi.spyOn>;
 	const alerts: string[] = [];
@@ -607,26 +633,29 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 		);
 	});
 
-	it("CHARACTERISES A DEFECT: Store Result reaches the notes dialog, then aborts on the trim sliders out-and-back never renders, and persists nothing", async () => {
+	it("Store Result persists what is on screen: one saveResult with the dragged CdA over the whole analysed selection, and no 'Cannot store' line", async () => {
 		await drag("cdaSlider", DRAGGED_CDA);
 
-		// The two early returns cannot explain the outcome: both of the values they
-		// guard on are present before the click.
+		// The two early returns cannot explain any outcome here: both of the values
+		// they guard on are present before the click.
 		expect(appState.currentVEResult).not.toBeNull();
 		expect(appState.currentFilteredData).not.toBeNull();
 		// `isGpsLapModeActive` is false in out-and-back (`outAndBackMode.ts:44`), so
-		// `storageHandlers.ts:118` takes the `else` branch that needs the two trim
-		// sliders.
+		// `storageHandlers.ts:118` takes the `else` branch — the one that used to
+		// require a trim window this mode does not render.
 		expect(appState.isGpsLapModeActive).toBe(false);
 
-		// EVERYTHING BELOW IS `expect.soft`, deliberately. Under the positive
-		// control (OAB-5 — the two trim ids ADDED to the out-and-back template) all
-		// four of these observations change at once, and a hard assertion would
-		// abort at the first of them and hide the rest. Soft assertions still fail
-		// the case; they just let the whole flip be read off one run.
+		// EVERYTHING BELOW IS `expect.soft`, deliberately. Under mutation OAB-6 —
+		// D-09 entry (u) reverted, i.e. the old unconditional trim-slider
+		// requirement put back — every one of these observations changes at once,
+		// and a hard assertion would abort at the first and hide the rest. Soft
+		// assertions still fail the case; they just let the whole flip be read off
+		// ONE run.
 		//
-		// The cause, named and asserted rather than described: this template ships
-		// no trim window, and nothing in this file creates one.
+		// The precondition entry (u) turns on, asserted rather than described: this
+		// template ships no trim window, and nothing in this file creates one. That
+		// has not changed — the FIX is that a missing trim window is no longer
+		// fatal, not that out-and-back grew one.
 		expect.soft(document.getElementById("trimStartSlider")).toBeNull();
 		expect.soft(document.getElementById("trimEndSlider")).toBeNull();
 
@@ -643,17 +672,49 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 			notesCancelBtn: true,
 		});
 
-		// THE DEFECT'S SIGNATURE, asserted directly: `storageHandlers.ts:132`,
-		// inside the `else` branch, after the trim-slider lookup at `:126-127`
-		// returned null.
-		expect.soft(errorLines()).toContain("Cannot store: UI elements not found");
-		// Not the `catch` at `:209-211` — that logs a different line and alerts.
+		// THE DEFECT'S SIGNATURE, IN REVERSE. `Cannot store: UI elements not found`
+		// is the string this case used to REQUIRE, from `storageHandlers.ts:132`.
+		// Asserting its ABSENCE is what pins entry (u): restore the old guard and
+		// this line comes back and this assertion fails.
+		expect.soft(errorLines()).not.toContain(
+			"Cannot store: UI elements not found",
+		);
+		// Nor the `catch` at `:209-211` — a fix that threw past the guard would log
+		// this instead, and `saveResult` would still never be reached.
 		expect.soft(errorLines()).not.toContain("❌ Failed to store result:");
 		expect.soft(alerts).toEqual([]);
 
-		// Only now, standing on the four positive observations above, does the
-		// negative mean anything.
-		expect.soft(saveResult).not.toHaveBeenCalled();
+		// Persisted exactly once.
+		expect.soft(saveResult).toHaveBeenCalledTimes(1);
+
+		const saveData = saveResult.mock.calls[0]?.[0] as any;
+		expect.soft(saveData).toBeDefined();
+		if (!saveData) return;
+
+		// WHAT WAS PERSISTED IS WHAT IS ON SCREEN, field by field.
+		// The dragged CdA, not the analyze-time one — this is the whole of N-1.
+		expect.soft(saveData.cda).toBeCloseTo(DRAGGED_CDA, 6);
+		// The post-drag result object itself, by identity, so a stale analyze-time
+		// snapshot cannot pass.
+		expect.soft(saveData.result).toBe(appState.currentVEResult);
+		expect.soft(saveData.windSource).toBe(appState.currentWindSource);
+		expect.soft(saveData.virtualDistances).toBe(
+			appState.currentVirtualDistances,
+		);
+		expect.soft(saveData.laps).toEqual(appState.currentAnalyzedLaps);
+		// The window is the WHOLE analysed selection, which is what a mode with no
+		// trim control has on screen — the same thing the GPS-lap branch computes
+		// at `storageHandlers.ts:119-120`. Pinned against the real filtered length
+		// so a fix that stored a truncated or single-sample window fails here.
+		expect.soft(saveData.trimStart).toBe(0);
+		expect.soft(saveData.trimEnd).toBe(
+			appState.currentFilteredData!.power.length - 1,
+		);
+		// Not gps-lap. The fix must not have reached this by pretending to be one.
+		expect.soft(saveData.isGpsLapMode).toBe(false);
+		// The averages were taken over that window rather than over an empty slice.
+		expect.soft(saveData.avgPower).toBeGreaterThan(0);
+		expect.soft(saveData.avgSpeed).toBeGreaterThan(0);
 	});
 
 	it("Export All Results does reach resultsStorage.exportAllResultsToCSV", async () => {

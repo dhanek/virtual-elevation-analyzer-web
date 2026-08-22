@@ -128,13 +128,41 @@ export async function handleStoreResult(
             const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
             const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
 
-            if (!trimStartSlider || !trimEndSlider || !cdaSlider || !crrSlider) {
+            if (!cdaSlider || !crrSlider) {
                 log.error('Cannot store: UI elements not found');
                 return;
             }
 
-            trimStart = parseInt(trimStartSlider.value);
-            trimEnd = parseInt(trimEndSlider.value);
+            if (trimStartSlider && trimEndSlider) {
+                trimStart = parseInt(trimStartSlider.value);
+                trimEnd = parseInt(trimEndSlider.value);
+            } else {
+                // D-09 entry (u), N-1. A TRIM WINDOW IS NOT UNIVERSAL, and this
+                // branch used to assume it was: it required `#trimStartSlider` and
+                // `#trimEndSlider`, which only Standard's template renders
+                // (`renderStandardVe.ts:303,308`). Out-and-back sets
+                // `isGpsLapModeActive = false` (`outAndBackMode.ts:44`) so it lands
+                // here, found neither slider, logged 'Cannot store: UI elements not
+                // found' and returned — Store Result persisted NOTHING at all, and
+                // Export CSV therefore had nothing of that ride to export.
+                //
+                // The window is the whole analysed selection, which is exactly what
+                // the GPS-lap branch above computes at `:119-120` for the same
+                // reason: a segment mode has no trim control, so what is on screen
+                // IS the full `currentFilteredData` that `segmentSummary`'s
+                // `buildFilteredDataFromProfiles` concatenated from the surviving
+                // legs. Deriving it any other way would let the two segment modes
+                // disagree, which is the drift `segmentSummary.ts` exists to stop.
+                //
+                // DO NOT "fix" this by setting `isGpsLapModeActive` in
+                // `outAndBackMode.syncState` instead. That field means "the GPS-lap
+                // overlay is on screen" and `requestModeUpdate.ts:188` routes the
+                // whole update to the gpsLap handler on it; flipping it would send
+                // out-and-back's recomputes to the wrong mode.
+                trimStart = 0;
+                trimEnd = appState.currentFilteredData.power.length - 1;
+            }
+
             cda = parseFloat(cdaSlider.value);
             crr = parseFloat(crrSlider.value);
         }
