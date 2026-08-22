@@ -468,10 +468,14 @@ describe.each(MODES)(
  *
  * So NOTHING here supplies a predicate. The panes and buttons come from the real
  * templates, `document` is real jsdom, and the only thing standing between a drag
- * and a secondary redraw is the production function itself. Invert it and Case A
- * flips from 0 secondary draws to 3, while Case B flips from 1 to 0 — the guard
- * fails in BOTH directions, which is what stops an inversion from being read as a
- * mere over-eager repaint.
+ * and a secondary redraw is the production function itself.
+ *
+ * Watched failing, 2026-08-22, in both modes: under the inversion Case A reports
+ * `expected "spy" to be called +0 times, but got 1 times` — wind repainted for a
+ * tab nobody is on — and Case B reports `expected "spy" to be called 1 times, but
+ * got 0 times` — the tab the user IS on left stale. The guard fails in BOTH
+ * directions, which is what stops an inversion from passing as mere over-eager
+ * repainting.
  *
  * The click matters as much as the drag. `activateTab` renders the tab it moves
  * to, exactly once; that render is the CLICK's, not the drag's, so the spies are
