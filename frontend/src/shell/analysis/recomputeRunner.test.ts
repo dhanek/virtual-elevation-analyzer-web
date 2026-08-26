@@ -173,7 +173,20 @@ describe("recomputeRunner", () => {
 		expect(runs).toBe(2);
 	});
 
-	it("latest-input-wins ignores stale completion token", async () => {
+	/**
+	 * Latest-input-wins, and the two passes NEVER OVERLAP while doing it.
+	 *
+	 * This test previously asserted the opposite of its second half: it expected
+	 * the replacement to have already run WHILE the first pass was still blocked
+	 * (`secondRan` true before `resolveFirst()`). That encoded the concurrency
+	 * bug rather than the contract — with a ~45-49 ms cycle against a 20 ms
+	 * interval, overlap was the steady state of a gps-lap drag, and two passes
+	 * writing AppState and calling `Plotly.react` in nondeterministic order let
+	 * the plot and the stored result disagree. The runner now chains passes, so
+	 * the replacement waits for the in-flight one and the guarantee it delivers
+	 * is the one the name always claimed: the LAST input is what finally lands.
+	 */
+	it("latest-input-wins, and never runs two passes at once", async () => {
 		const appState = new AppState();
 		configureRecomputeRunner(appState);
 		resetRecomputeThrottle();
@@ -183,12 +196,15 @@ describe("recomputeRunner", () => {
 			resolveFirst = () => resolve();
 		});
 
+		let firstFinished = false;
 		let secondRan = false;
+		let secondStartedWhileFirstInFlight = false;
 
 		scheduleRecompute({
 			mode: "gps-lap",
 			run: async () => {
 				await firstDone;
+				firstFinished = true;
 			},
 		});
 
@@ -198,15 +214,23 @@ describe("recomputeRunner", () => {
 			mode: "gps-lap",
 			run: () => {
 				secondRan = true;
+				if (!firstFinished) {
+					secondStartedWhileFirstInFlight = true;
+				}
 			},
 		});
 
+		// The first pass is still blocked, so the replacement is queued, NOT
+		// started alongside it.
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS);
-		expect(secondRan).toBe(true);
+		expect(secondRan).toBe(false);
 
+		// Releasing the first hands the queue to the replacement.
 		resolveFirst();
 		await vi.advanceTimersByTimeAsync(300);
 
+		expect(secondRan).toBe(true);
+		expect(secondStartedWhileFirstInFlight).toBe(false);
 		expect(appState.recomputeStatus).toBe("idle");
 	});
 
@@ -252,11 +276,19 @@ describe("recomputeRunner", () => {
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
 		expect(appState.recomputeStatus).toBe("handoff");
 
+		// Still handoff once the window expires: the runner serialises, so the
+		// replacement is queued behind the blocked first pass rather than
+		// starting next to it. (This assertion read `running` while the passes
+		// overlapped — the copy is honest either way, since a superseding input
+		// genuinely is still waiting, but it now waits on the pass rather than
+		// on the interval.)
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS);
-		expect(appState.recomputeStatus).toBe("running");
+		expect(appState.recomputeStatus).toBe("handoff");
 
+		// Releasing the first pass lets the replacement start and announce.
 		releaseFirst();
-		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(appState.recomputeStatus).toBe("running");
 	});
 
 	it("latest completion returns status to idle", async () => {

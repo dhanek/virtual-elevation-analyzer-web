@@ -209,6 +209,25 @@ export function resetRecomputeThrottle(): void {
 	lastRunStartedAt = Number.NEGATIVE_INFINITY;
 }
 
+/**
+ * SERIALISED. Passes are chained onto this, never started alongside one another.
+ *
+ * The throttle interval alone does NOT keep two passes apart: the file header
+ * records a ~45-49 ms gps-lap cycle against a 20 ms interval, so for the
+ * workloads the D-16 gate actually measured the timer fires roughly twice per
+ * cycle. Before this chain that meant the STEADY STATE of a gps-lap drag was two
+ * or more overlapping `updateModeVEPlots` passes, each writing `currentVEResult`
+ * / `currentFilteredData` / `currentAnalyzedLaps` and then calling
+ * `Plotly.react`. Whichever resumed last won the screen while AppState held the
+ * other's numbers — the stored result and the plot could disagree, which is the
+ * invariant the D1 anti-drift seam exists to establish.
+ *
+ * Cancellation cannot substitute for this: no caller supplies `cancel` (see
+ * `requestModeUpdate`), so `activeCancel` is always null in production and an
+ * in-flight pass always runs to completion.
+ */
+let inFlight: Promise<void> = Promise.resolve();
+
 async function runPending(): Promise<void> {
 	if (pendingToken === null || !pendingRequest) {
 		return;
@@ -219,22 +238,40 @@ async function runPending(): Promise<void> {
 	pendingToken = null;
 	pendingRequest = null;
 
-	runningToken = token;
-	activeCancel = request.cancel ?? null;
-	setRecomputeStatus("running");
-
-	try {
-		await request.run(token);
-	} catch (error) {
-		log.error("Recompute runner failed:", error);
-	} finally {
-		activeCancel = null;
-		runningToken = null;
-
-		if (token === activeToken) {
-			flashUpdatedStatus();
+	inFlight = inFlight.then(async () => {
+		// Superseded while queued behind the previous pass. Its replacement is
+		// already pending with a timer armed, so running this one would spend a
+		// full cycle painting values the user has already moved past. This is
+		// what keeps a sustained drag cost-capped rather than backlogged: every
+		// intermediate input collapses and only the newest survives the queue.
+		if (token !== activeToken) {
+			return;
 		}
-	}
+
+		runningToken = token;
+		activeCancel = request.cancel ?? null;
+		setRecomputeStatus("running");
+
+		try {
+			await request.run(token);
+		} catch (error) {
+			log.error("Recompute runner failed:", error);
+		} finally {
+			activeCancel = null;
+			// Guarded rather than unconditional: an unconditional null here was
+			// how the old bookkeeping corrupted, clearing the flag out from under
+			// a pass that was still running.
+			if (runningToken === token) {
+				runningToken = null;
+			}
+
+			if (token === activeToken) {
+				flashUpdatedStatus();
+			}
+		}
+	});
+
+	await inFlight;
 }
 
 function flashUpdatedStatus(): void {
