@@ -22,6 +22,7 @@ import {
 	renderOutAndBackPowerPlot,
 	renderOutAndBackVdPlot,
 } from "./outAndBackPlots";
+import { setupTabSwitching } from "../dom/tabs";
 
 
 /**
@@ -157,7 +158,19 @@ export function createOutAndBackUpdateCallbacks(
 		},
 
 		renderVe(profiles) {
-			renderOutAndBackPlots(Plotly, sections(profiles), meanElevation(profiles));
+			const sectionProfiles = sections(profiles);
+			renderOutAndBackPlots(Plotly, sectionProfiles, meanElevation(profiles));
+			// Re-register the tab map against THIS pass's sections. renderOutAndBack
+			// registers once at analyze time, and updateModeVEPlots deliberately
+			// skips inactive tabs (D-14) — so without this, activating Wind/Power/VD
+			// after any slider move replays the analyze-time closures and paints
+			// stale series (and stale VD header numbers). GPS-lap and Standard both
+			// re-register from renderVe for exactly this reason.
+			setupTabSwitching({
+				wind: () => renderOutAndBackWindPlot(sectionProfiles),
+				power: () => renderOutAndBackPowerPlot(sectionProfiles),
+				vd: () => renderOutAndBackVdPlot(sectionProfiles),
+			});
 		},
 
 		renderWind(profiles) {
