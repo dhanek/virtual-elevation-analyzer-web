@@ -581,3 +581,12 @@
 	font-weight: 400;
 	line-height: 1.5;
 }
+
+/* recomputeRunner drives this pill purely through the `hidden` IDL attribute, so
+   it hits the same trap as .ve-tab-content above: the UA default
+   [hidden] { display: none } is (0,0,0) and the display: inline-flex here is
+   (0,1,0). Without this guard the pill is a permanently laid-out box that reads
+   "Updated" forever, because setRecomputeStatus('idle') only sets node.hidden. */
+.ve-recompute-status[hidden].ve-recompute-status[hidden] {
+	display: none;
+}
