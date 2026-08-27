@@ -455,3 +455,69 @@ describe("avgTemperature when the ride has no temperature channel", () => {
 		expect(saved[0].avgTemperature).toBeUndefined();
 	});
 });
+
+/**
+ * WR-04. The Store button is not disabled until AFTER the dialog resolves —
+ * deliberately, so a cancel leaves it untouched — but nothing guarded a second
+ * click while the first dialog was open, and `showNotesDialog` bound its
+ * controls with `document.getElementById`, which returns the FIRST match.
+ *
+ * So the second dialog's listeners attached to the FIRST dialog's buttons. One
+ * click on the visible OK resolved both promises and `saveResult` ran twice —
+ * two identical rows in the results store and the CSV export, with the second
+ * overlay removed by its own closure so nothing looked wrong.
+ */
+describe("double-clicking Store Result", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	function storableState(): AppState {
+		return makeAppStateStub({
+			currentAnalyzedLaps: [1],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentVirtualDistances: [],
+			currentWindSource: "none",
+			currentFilteredData: {
+				power: [250, 250],
+				velocity: [10, 10],
+				temperature: [20, 20],
+				timestamps: [86_400, 86_401],
+			},
+		} as unknown as Partial<AppState>);
+	}
+
+	it("stores exactly once", async () => {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		button.textContent = "Store Result";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "0");
+		addInput("trimEndSlider", "1");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+
+		const saved: Record<string, unknown>[] = [];
+		const storage = {
+			saveResult: async (data: Record<string, unknown>) => {
+				saved.push(data);
+			},
+		} as unknown as ResultsStorage;
+		const appState = storableState();
+
+		// Two clicks before the first dialog is answered.
+		const first = handleStoreResult(appState, storage);
+		await Promise.resolve();
+		const second = handleStoreResult(appState, storage);
+		await Promise.resolve();
+
+		expect(document.querySelectorAll(".notes-dialog")).toHaveLength(1);
+
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+		await Promise.all([first, second]);
+
+		expect(saved).toHaveLength(1);
+	});
+});

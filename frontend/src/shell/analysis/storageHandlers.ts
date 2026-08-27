@@ -87,10 +87,21 @@ export async function handleSaveScreenshot(
  * Handle Store Result button click.
  * Extracted from main.ts.
  */
+/**
+ * SINGLE-FLIGHT. The Store button is deliberately not disabled until after the
+ * notes dialog resolves — that is what lets a cancel leave it untouched — so
+ * without this flag a second click opened a second dialog while the first was
+ * still up, and the result was stored twice.
+ */
+let storeInFlight = false;
+
 export async function handleStoreResult(
     appState: AppState,
     resultsStorage: ResultsStorage
 ) {
+    if (storeInFlight) {
+        return;
+    }
     if (!appState.selectedFile || !appState.currentParameters || !appState.currentVEResult) {
         log.error('Cannot store: missing required data');
         alert('Cannot store result: missing analysis data. Please run analysis first.');
@@ -114,6 +125,7 @@ export async function handleStoreResult(
 
     const originalText = storeBtn.textContent;
 
+    storeInFlight = true;
     try {
         const notes = await showNotesDialog();
 
@@ -315,6 +327,8 @@ export async function handleStoreResult(
 
         storeBtn.disabled = false;
         storeBtn.textContent = originalText || 'Store Result';
+    } finally {
+        storeInFlight = false;
     }
 }
 
@@ -386,9 +400,18 @@ export function showNotesDialog(): Promise<string | null> {
         document.body.appendChild(overlay);
         document.body.appendChild(dialog);
 
-        const input = document.getElementById('notesInput') as HTMLInputElement | null;
-        const okBtn = document.getElementById('notesOkBtn') as HTMLButtonElement | null;
-        const cancelBtn = document.getElementById('notesCancelBtn') as HTMLButtonElement | null;
+        // QUERIED WITHIN THIS DIALOG, not by id off the document.
+        //
+        // The ids are fixed, and `getElementById` returns the FIRST match — so
+        // a second dialog opened while the first was up bound its listeners to
+        // the FIRST dialog's buttons and read the FIRST dialog's input. One
+        // click on the visible OK then resolved both promises. Scoping the
+        // lookups makes two dialogs incapable of sharing controls, which the
+        // single-flight guard above makes unreachable anyway; both are kept
+        // because the guard is a policy and this is a structural impossibility.
+        const input = dialog.querySelector('#notesInput') as HTMLInputElement | null;
+        const okBtn = dialog.querySelector('#notesOkBtn') as HTMLButtonElement | null;
+        const cancelBtn = dialog.querySelector('#notesCancelBtn') as HTMLButtonElement | null;
 
         // IDEMPOTENT. `removeChild` on an already-removed node throws, and this
         // executor's throw rejects showNotesDialog() straight into
