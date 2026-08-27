@@ -294,7 +294,12 @@ export function buildOutAndBackFixture(source: GoldenRideSource): OutAndBackFixt
         // Sample 0 of section 0 is the fixture origin; every later section joins
         // with the new lap's first real delta so distance never goes flat at a
         // join either.
-        const joinStep = sectionIndex === 0 ? 0 : steps.outbound[1]
+        //
+        // `?? 0` because a source lap of length 1 has no `steps.outbound[1]`:
+        // reading it undefined made `cumulative` NaN and poisoned every later
+        // distance, which `assertFixtureIntegrity`'s `<` comparison cannot see
+        // (NaN < NaN is false). Guarded here AND asserted below.
+        const joinStep = sectionIndex === 0 ? 0 : (steps.outbound[1] ?? 0)
 
         const outboundStartIdx = distance.length
         for (let k = 0; k < length; k++) {
@@ -453,6 +458,14 @@ function assertNoPrecisionUplift(source: GoldenRideSource): void {
     for (const name of COPIED_ARRAYS) {
         const decimals = decimalsFor(name, rounding)
         const values = source[name]
+        // Named rather than left to blow up as a bare TypeError on
+        // `values.length`: a source file missing one of the nine COPIED_ARRAYS
+        // is a diagnosable input problem, not a crash.
+        if (!Array.isArray(values)) {
+            throw new Error(
+                `golden-ride.json carries no \`${name}\` array; all of ${COPIED_ARRAYS.join(', ')} are required.`,
+            )
+        }
         for (let i = 0; i < values.length; i++) {
             if (round(values[i], decimals) !== values[i]) {
                 throw new Error(
@@ -477,8 +490,16 @@ function assertFixtureIntegrity(fixture: OutAndBackFixture): void {
         }
     }
 
-    for (let i = 1; i < fixture.distance.length; i++) {
-        if (fixture.distance[i] < fixture.distance[i - 1]) {
+    // FINITENESS FIRST, then monotonicity. `NaN < NaN` is false, so the
+    // ordering check alone passes a fully NaN-poisoned distance array in
+    // silence and writes it to the tracked fixture directory. Any NaN reaching
+    // `distance` — from a missing join step, or from a NaN in the source lap's
+    // own `distance` channel — has to fail here.
+    for (let i = 0; i < fixture.distance.length; i++) {
+        if (!Number.isFinite(fixture.distance[i])) {
+            throw new Error(`distance[${i}] is not finite: ${fixture.distance[i]}.`)
+        }
+        if (i > 0 && fixture.distance[i] < fixture.distance[i - 1]) {
             throw new Error(
                 `distance goes backwards at index ${i}: ${fixture.distance[i - 1]} -> ${fixture.distance[i]}.`,
             )
