@@ -1,6 +1,9 @@
 import { log } from '../../utils/log'
+import type { WindSource } from '../../state/AppState'
 import { syncWindHeightControlsVisibility } from '../ve/windHeightControls'
 import { syncFitWindControlsVisibility } from '../ve/windSourceVisibility'
+
+const WIND_SOURCES: readonly string[] = ['fit', 'constant', 'compare', 'none']
 
 /**
  * Get the currently selected wind source radio value.
@@ -12,6 +15,23 @@ import { syncFitWindControlsVisibility } from '../ve/windSourceVisibility'
 export function getSelectedWindSource(): string {
     const checked = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null
     return checked?.value ?? 'fit'
+}
+
+/**
+ * Narrow a raw radio `value` to the WindSource union, CHECKED rather than cast.
+ *
+ * The value is whatever the template's `value=` attribute says, so a typo there
+ * — or a future fourth radio nobody added to the union — produced a string the
+ * primitive treats as "not compare, not constant" (`updateModeVEPlots.ts:136`)
+ * and handed unchecked to `resolveWindSeries`, silently. A cast at the call site
+ * cannot catch that, because a cast is exactly the thing that erases the check.
+ */
+export function toWindSource(value: string): WindSource {
+    if (WIND_SOURCES.includes(value)) {
+        return value as WindSource
+    }
+    log.error(`Unknown wind source "${value}" on the checked radio; falling back to "fit".`)
+    return 'fit'
 }
 
 /**

@@ -26,9 +26,9 @@ import {
 	getAnalysisModeHandlerById,
 } from "../../modes/analysis/AnalysisModes";
 import type { AnalysisModeId, ModeSegment } from "../../modes/analysis/types";
-import type { AppState, WindSource } from "../../state/AppState";
+import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
-import { getSelectedWindSource } from "../dom/windSource";
+import { getSelectedWindSource, toWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
@@ -220,7 +220,7 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 
 	const cda = readNumber("cdaSlider", "cdaValue", FALLBACK_CDA);
 	const crr = readNumber("crrSlider", "crrValue", FALLBACK_CRR);
-	const windSource = getSelectedWindSource() as WindSource;
+	const windSource = toWindSource(getSelectedWindSource());
 
 	// NO SOURCE IS ROUTED ANYWHERE ELSE (07-04 Task 1). Standard used to claim
 	// `compare` here and run its own two-calculator branch, because the primitive
