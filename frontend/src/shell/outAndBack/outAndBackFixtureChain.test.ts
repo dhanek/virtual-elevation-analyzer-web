@@ -235,6 +235,17 @@ function initialProfiles(): OutAndBackVEProfile[] {
 		const outbound = leg(section.outboundStartIdx, section.outboundEndIdx);
 		const inbound = leg(section.inboundStartIdx, section.inboundEndIdx);
 		return {
+			// The real leg ranges: the seed of currentFilteredData is derived
+			// from these, so a placeholder would make the length assertions
+			// below vacuous.
+			outboundRange: {
+				startIdx: section.outboundStartIdx,
+				endIdx: section.outboundEndIdx,
+			},
+			inboundRange: {
+				startIdx: section.inboundStartIdx,
+				endIdx: section.inboundEndIdx,
+			},
 			sectionNumber: section.sectionNumber,
 			outboundDistances: outbound.distances,
 			outboundVE: outbound.elevation.slice(),

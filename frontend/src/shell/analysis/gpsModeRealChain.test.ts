@@ -221,6 +221,10 @@ function renderHostPage(): void {
 
 const lapProfile = (lapNumber: number) => ({
 	lapNumber,
+	range:
+		lapNumber === 1
+			? { startIdx: 0, endIdx: HALF - 1 }
+			: { startIdx: HALF, endIdx: LAST_INDEX },
 	distances: [0, 1, 2],
 	virtualElevation: [0, 1, 2],
 	actualElevation: [0, 1, 2],
@@ -233,6 +237,8 @@ const meanElevation = { distances: [0, 1, 2], elevation: [0, 1, 2] };
 
 const sectionProfile = {
 	sectionNumber: 1,
+	outboundRange: { startIdx: 0, endIdx: HALF - 1 },
+	inboundRange: { startIdx: HALF, endIdx: LAST_INDEX },
 	outboundDistances: [0, 1, 2],
 	outboundVE: [0, 1, 2],
 	outboundActualElevation: [0, 1, 2],
@@ -410,6 +416,52 @@ describe.each(MODES)(
 			expect(appState.currentFilteredData!.power.length).toBeGreaterThan(0);
 			expect(appState.currentFilteredData!.timestamps).toHaveLength(
 				appState.currentFilteredData!.power.length,
+			);
+		});
+
+		/**
+		 * WR-03. The CR-01 seed took EVERY active range, but the analyze pass
+		 * drops any lap under 10 samples and any whose calculator throws
+		 * (`renderGpsLap.ts:178-183,251-253`), and out-and-back drops sections
+		 * with no usable leg. Those laps are on no plot and in no profile — yet
+		 * their samples were in the seeded averages, so Store Result before any
+		 * interaction and Store Result after one nudge could report a different
+		 * avgPower for the same analysis. Exactly the two-writers-two-answers
+		 * property the seed exists to prevent.
+		 *
+		 * The fixture chain test could not catch this: nothing is dropped there.
+		 * Here the panel is handed FEWER profiles than AppState has ranges,
+		 * which is what a dropped lap looks like from the plot's side.
+		 */
+		it("seeds only the ranges that produced a rendered profile", async () => {
+			if (gpsAnalysisMode !== "GPS based lap splitting") return;
+
+			const survivorsOnly = makeAppState();
+			// Three active ranges; the third is what the analyze pass dropped.
+			survivorsOnly.currentGpsLapIndexRanges = [
+				{ startIdx: 0, endIdx: HALF - 1 },
+				{ startIdx: HALF, endIdx: LAST_INDEX },
+				{ startIdx: 0, endIdx: 4 },
+			] as never;
+
+			await showGpsLapVEPlot(
+				makeServices(survivorsOnly),
+				parameterStorage,
+				resultsStorage,
+				async () => ({}),
+				[lapProfile(1), lapProfile(2)] as never,
+				meanElevation,
+				survivorsOnly.currentParameters!,
+				true,
+				true,
+				0,
+				"fit",
+			);
+
+			// The two surviving laps cover the whole activity exactly once; the
+			// dropped range would have added five more samples.
+			expect(survivorsOnly.currentFilteredData!.power).toHaveLength(
+				SAMPLE_COUNT,
 			);
 		});
 

@@ -38,6 +38,7 @@ function makeLap(index: number, withCompare: boolean): LapVEProfile {
     const distances = Array.from({ length: SAMPLES }, (_, i) => (i / (SAMPLES - 1)) * 2);
     const actualElevation = Array.from({ length: SAMPLES }, (_, i) => 100 + Math.sin(i / 6) * 3);
     return {
+        range: { startIdx: 0, endIdx: 2 },
         lapNumber: index + 1,
         distances,
         virtualElevation: Array.from({ length: SAMPLES }, (_, i) => i * (0.5 + index)),

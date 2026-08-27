@@ -2,6 +2,16 @@ import type { SegmentSupplementarySeries } from '../../analysis/SegmentSupplemen
 
 export interface OutAndBackVEProfile {
     sectionNumber: number;
+    /**
+     * The full-activity ranges each leg was computed over, null when that leg
+     * produced nothing (under 10 samples, or its calculator threw).
+     *
+     * Per LEG rather than per section because the two fail independently, and
+     * the seed of `currentFilteredData` must cover exactly the legs that made
+     * it onto the plot (WR-03).
+     */
+    outboundRange: { startIdx: number; endIdx: number } | null;
+    inboundRange: { startIdx: number; endIdx: number } | null;
     outboundDistances: number[];      // km, relative to gate A
     outboundVE: number[];
     /**

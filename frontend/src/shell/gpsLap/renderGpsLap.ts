@@ -235,6 +235,7 @@ export async function showGpsLapVEAnalysis(
 
 			lapVEProfiles.push({
 				lapNumber,
+				range,
 				distances: relativeDistances,
 				virtualElevation: veArray,
 				// The ANALYZE leg computes one wind source, so the initial paint
@@ -321,7 +322,10 @@ export async function showGpsLapVEPlot(
 	// `resolveActiveGpsLapRanges` is the same resolver the update path measures
 	// its per-segment readouts over (`:442`), so the seeded samples are the ones
 	// the first recompute will reproduce.
-	seedSegmentModeFilteredData(appState, resolveActiveGpsLapRanges(appState));
+	seedSegmentModeFilteredData(
+		appState,
+		lapProfiles.map((profile) => profile.range),
+	);
 
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");

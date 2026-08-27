@@ -39,6 +39,8 @@ function section(
 ): OutAndBackVEProfile {
 	return {
 		sectionNumber,
+		outboundRange: { startIdx: 0, endIdx: 2 },
+		inboundRange: { startIdx: 0, endIdx: 2 },
 		outboundDistances: [],
 		outboundVE: [],
 		outboundVECompare: null,

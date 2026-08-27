@@ -54,6 +54,8 @@ function makeSection(index: number, withCompare: boolean): OutAndBackVEProfile {
     const distances = Array.from({ length: SAMPLES }, (_, i) => (i / (SAMPLES - 1)) * 2);
     const actual = Array.from({ length: SAMPLES }, (_, i) => 100 + Math.sin(i / 5) * 4);
     return {
+        outboundRange: { startIdx: 0, endIdx: 2 },
+        inboundRange: { startIdx: 0, endIdx: 2 },
         sectionNumber: index + 1,
         outboundDistances: distances,
         outboundVE: Array.from({ length: SAMPLES }, (_, i) => i * (0.5 + index)),

@@ -189,6 +189,8 @@ export function createGpsLapUpdateCallbacks(
 				const first = profile.indices[0];
 				const last = profile.indices[profile.indices.length - 1];
 				return {
+					// The samples this profile actually consumed (WR-03).
+					range: { startIdx: first, endIdx: last },
 					// The handler labels from the same lookup; relabelling here
 					// keeps the summary table and the stored result agreeing.
 					//

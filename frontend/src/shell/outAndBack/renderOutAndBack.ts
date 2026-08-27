@@ -149,11 +149,13 @@ export async function showOutAndBackVEAnalysis(
 			outboundVECompare: null,
 			outboundActualElevation: [],
 			outboundSeries: null,
+			outboundRange: null,
 			inboundDistances: [],
 			inboundVE: [],
 			inboundVECompare: null,
 			inboundActualElevation: [],
 			inboundSeries: null,
+			inboundRange: null,
 			outboundDuration: section.outboundDuration,
 			inboundDuration: section.inboundDuration,
 			totalDistance: section.totalDistance,
@@ -197,6 +199,10 @@ export async function showOutAndBackVEAnalysis(
 				);
 				const veArray = Array.from(result.virtual_elevation as Float64Array);
 
+				profile.outboundRange = {
+					startIdx: section.outboundStartIdx,
+					endIdx: section.outboundEndIdx,
+				};
 				profile.outboundSeries = buildSegmentSupplementarySeries({
 					timestamps: outboundData.timestamps,
 					power: outboundData.power,
@@ -259,6 +265,10 @@ export async function showOutAndBackVEAnalysis(
 				);
 				const veArray = Array.from(result.virtual_elevation as Float64Array);
 
+				profile.inboundRange = {
+					startIdx: section.inboundStartIdx,
+					endIdx: section.inboundEndIdx,
+				};
 				profile.inboundSeries = buildSegmentSupplementarySeries({
 					timestamps: inboundData.timestamps,
 					power: inboundData.power,
@@ -600,7 +610,15 @@ export async function showOutAndBackVEPlot(
 	// `seedSegmentModeFilteredData` so the arrays are built by the same
 	// concatenation `summarize` uses — a second assembly would be one more
 	// writer of a field whose writers disagreeing was CR-02.
-	seedSegmentModeFilteredData(appState, outAndBackRanges(appState));
+	seedSegmentModeFilteredData(
+		appState,
+		profiles.flatMap((profile) =>
+			[profile.outboundRange, profile.inboundRange].filter(
+				(range): range is { startIdx: number; endIdx: number } =>
+					range !== null,
+			),
+		),
+	);
 
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");

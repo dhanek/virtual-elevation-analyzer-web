@@ -255,6 +255,10 @@ async function renderStitched(): Promise<void> {
 
 const lapProfile = (lapNumber: number) => ({
 	lapNumber,
+	range:
+		lapNumber === 1
+			? { startIdx: 0, endIdx: HALF - 1 }
+			: { startIdx: HALF, endIdx: SAMPLE_COUNT - 1 },
 	distances: [0, 1, 2],
 	virtualElevation: [0, 1, 2],
 	actualElevation: [0, 1, 2],
