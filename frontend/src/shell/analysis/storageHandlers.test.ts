@@ -10,9 +10,14 @@
  * previous lap's trim values under the newly selected lap's key.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { saveCurrentLapSettings, showNotesDialog } from "./storageHandlers";
+import {
+	handleStoreResult,
+	saveCurrentLapSettings,
+	showNotesDialog,
+} from "./storageHandlers";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage, LapSettings } from "../../utils/ParameterStorage";
+import type { ResultsStorage } from "../../utils/ResultsStorage";
 
 function addInput(id: string, value: string): void {
 	const el = document.createElement("input");
@@ -195,5 +200,107 @@ describe("showNotesDialog", () => {
 
 		expect(removed).toContain("keydown");
 		vi.restoreAllMocks();
+	});
+});
+
+/**
+ * CR-02. Two writers put DIFFERENT INDEX SPACES into `currentFilteredData`:
+ *
+ *   - `renderStandardVe.ts` writes the deduplicated ANALYZE SELECTION, which is
+ *     the space the trim sliders address (`trimEndSlider.max = length - 1`);
+ *   - `standardMode.summarize` overwrites it on every update with the
+ *     concatenation of the SURVIVING segments, and `mapTrimToSegments` drops any
+ *     segment the trim window leaves under MIN_TRIMMED_SEGMENT_SAMPLES.
+ *
+ * Narrow a 3-lap selection onto lap 3 and laps 1-2 leave `profiles` entirely:
+ * the array shrinks to ~300 samples while `trimStart` is still ~700. Slicing the
+ * new array with the old space's indices returned `[]`, so every average came
+ * out 0 and `filteredTimestamps[700]` was `undefined` —
+ * `new Date(NaN).toISOString()` threw, surfacing as "Failed to store result".
+ *
+ * The window is now derived from the space actually being read: what is on
+ * screen IS `currentFilteredData`, exactly as both segment modes already treat
+ * it. The slider values keep being RECORDED, because the stored `trimStart` /
+ * `trimEnd` columns are the user's chosen trim and the CSV export carries them.
+ */
+describe("handleStoreResult trim window", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	function makeResultsStorageStub(saved: Record<string, unknown>[]) {
+		return {
+			saveResult: async (data: Record<string, unknown>) => {
+				saved.push(data);
+			},
+		} as unknown as ResultsStorage;
+	}
+
+	/** A trim-mapped selection: 300 surviving samples, sliders still on lap 3. */
+	function makeTrimmedStandardState(): AppState {
+		const SURVIVING = 300;
+		return makeAppStateStub({
+			currentAnalyzedLaps: [1, 2, 3],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentVirtualDistances: [],
+			currentWindSource: "none",
+			currentFilteredData: {
+				power: new Array(SURVIVING).fill(250),
+				velocity: new Array(SURVIVING).fill(10),
+				temperature: new Array(SURVIVING).fill(20),
+				// 1970-01-02, so recordingDate is unambiguous.
+				timestamps: Array.from({ length: SURVIVING }, (_, i) => 86_400 + i),
+			},
+		} as unknown as Partial<AppState>);
+	}
+
+	async function storeWithNotes(
+		appState: AppState,
+		storage: ResultsStorage,
+	): Promise<void> {
+		const pending = handleStoreResult(appState, storage);
+		// The notes dialog opens on a microtask; accept it.
+		await Promise.resolve();
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+		await pending;
+	}
+
+	it("averages over the analysed samples when trim dropped whole laps", async () => {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		document.body.appendChild(button);
+		// Sliders still address the pre-trim selection: 700 > 300 samples.
+		addInput("trimStartSlider", "700");
+		addInput("trimEndSlider", "1000");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+
+		const saved: Record<string, unknown>[] = [];
+		await storeWithNotes(makeTrimmedStandardState(), makeResultsStorageStub(saved));
+
+		expect(saved).toHaveLength(1);
+		// Averaged over the 300 samples on screen, not over an empty slice.
+		expect(saved[0].avgPower).toBe(250);
+		expect(saved[0].avgSpeed).toBeCloseTo(36, 5);
+		// Derived from the first analysed sample, not from index 700.
+		expect(saved[0].recordingDate).toBe("1970-01-02");
+	});
+
+	it("still records the slider values the user chose", async () => {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "700");
+		addInput("trimEndSlider", "1000");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+
+		const saved: Record<string, unknown>[] = [];
+		await storeWithNotes(makeTrimmedStandardState(), makeResultsStorageStub(saved));
+
+		expect(saved[0].trimStart).toBe(700);
+		expect(saved[0].trimEnd).toBe(1000);
 	});
 });

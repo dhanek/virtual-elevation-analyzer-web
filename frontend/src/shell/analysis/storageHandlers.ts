@@ -179,9 +179,31 @@ export async function handleStoreResult(
         const filteredTemperature = appState.currentFilteredData.temperature;
         const filteredTimestamps = appState.currentFilteredData.timestamps;
 
-        const trimmedPower = filteredPower.slice(trimStart, trimEnd + 1);
-        const trimmedVelocity = filteredVelocity.slice(trimStart, trimEnd + 1);
-        const trimmedTemperature = filteredTemperature.slice(trimStart, trimEnd + 1);
+        // CR-02. THE WINDOW IS THE WHOLE OF `currentFilteredData`, in every mode.
+        //
+        // It used to be `slice(trimStart, trimEnd + 1)` with the SLIDER values,
+        // which are analyze-selection indices — a different space from what
+        // `standardMode.summarize` writes here on every update. `summarize`
+        // stores the concatenation of the SURVIVING segments, and
+        // `mapTrimToSegments` drops any segment the trim window leaves under
+        // MIN_TRIMMED_SEGMENT_SAMPLES, so narrowing a 3-lap selection onto lap 3
+        // shrank this array to ~300 samples while `trimStart` stayed ~700. The
+        // slice returned `[]`, every average came out 0, and
+        // `filteredTimestamps[700]` was `undefined` — `new Date(NaN)` threw and
+        // surfaced as the generic "Failed to store result".
+        //
+        // Deriving the window from the space actually being read removes the
+        // mismatch instead of detecting it: Standard's profiles are ALREADY
+        // trim-mapped by the time they land here, so what is on screen IS this
+        // concatenation. That is exactly how both segment modes have always
+        // treated it (`:126-127`, `:169-170`) — Standard was the odd one out.
+        //
+        // The slider values are still RECORDED as `trimStart` / `trimEnd`: they
+        // are the trim the user chose, the stored rows and the CSV export carry
+        // them, and reducing them to 0 / length-1 would empty that column.
+        const trimmedPower = filteredPower;
+        const trimmedVelocity = filteredVelocity;
+        const trimmedTemperature = filteredTemperature;
 
         const avgPower = calculateAverage(trimmedPower, false);
         const avgSpeed = calculateAverage(trimmedVelocity, false) * 3.6;
@@ -196,32 +218,25 @@ export async function handleStoreResult(
         // sample is excluded from the mean.
         const avgTemperature = calculateAverage(trimmedTemperature, true);
 
-        // The trim slider values are ANALYZE-SELECTION indices, and
-        // `currentFilteredData` is not always in that space (see CR-02 in
-        // 07-REVIEW.md: `standardMode.summarize` overwrites it with the
-        // concatenation of the SURVIVING segments, which is a different length
-        // and drops trimmed-out laps entirely). When the two disagree far
-        // enough, `filteredTimestamps[trimStart]` is `undefined` and
-        // `new Date(NaN).toISOString()` throws a bare RangeError that surfaces
-        // as "Failed to store result".
+        // The FIRST ANALYSED SAMPLE, not `filteredTimestamps[trimStart]`.
         //
-        // This assertion does NOT fix that mismatch — it only refuses to store
-        // a record whose averages would be taken over an empty slice and whose
-        // recordingDate would be invented. The index-space fix itself is still
-        // open.
-        const firstTimestamp = filteredTimestamps[trimStart];
-        if (
-            trimStart < 0 ||
-            trimEnd >= filteredTimestamps.length ||
-            !Number.isFinite(firstTimestamp)
-        ) {
+        // Same reasoning as the window above: indexing this array with a slider
+        // value read it in the wrong space, and when the two diverged far enough
+        // the lookup was `undefined` and `new Date(NaN).toISOString()` threw.
+        // Index 0 is the first sample actually on screen, which is what the
+        // segment modes have always recorded.
+        //
+        // The emptiness guard at the top of this function has already
+        // established `length > 0`, so this only has to reject a non-finite
+        // reading rather than an out-of-range index.
+        const firstTimestamp = filteredTimestamps[0];
+        if (!Number.isFinite(firstTimestamp)) {
             log.error(
-                `Cannot store: trim window [${trimStart}, ${trimEnd}] is outside the ` +
-                `${filteredTimestamps.length}-sample analysed selection.`,
+                `Cannot store: first analysed timestamp is ${firstTimestamp}.`,
             );
             alert(
-                'Cannot store result: the trim window no longer matches the analysed ' +
-                'samples. Please re-run the analysis.',
+                'Cannot store result: the analysed samples have no usable ' +
+                'timestamp. Please re-run the analysis.',
             );
             return;
         }
