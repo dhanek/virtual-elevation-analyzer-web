@@ -9,7 +9,6 @@ import {
 	AnalysisParametersComponent,
 	DEFAULT_PARAMETERS,
 } from "../../components/AnalysisParameters";
-import { setupTabSwitching } from "../dom/tabs";
 import { bindActionFooter } from "../dom/actionFooter";
 import { getSelectedWindSource } from "../dom/windSource";
 import { createPlotContext } from "../../plots/PlotContext";
@@ -503,7 +502,20 @@ export async function showVirtualElevationAnalysisInline(
 		trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
 	}
 
-	setupTabSwitching();
+	// NO bare `setupTabSwitching()` here. `setupTabSwitching` assigns
+	// `currentRenderMap = renderMap` unconditionally (`tabs.ts:86`), so calling
+	// it with no argument WIPED the map — including the real one that
+	// `createStandardUpdateCallbacks.renderVe` installs
+	// (`bindStandardSliders.ts:241`). It only appeared to work because
+	// `scheduleRecompute` defers to `setTimeout(..., 0)`, so the dispatch above
+	// lands `renderVe` on the NEXT macrotask, after this line. Any path where
+	// the scheduled pass does not reach `renderVe` — every segment under
+	// MIN_SEGMENT_SAMPLES, every calculator throwing, a trim window at its
+	// clamp, an invisible VE section — left the map empty for the panel's
+	// lifetime and Wind/Power/VD rendered nothing at all.
+	//
+	// `renderVe` binds the buttons as well as the map (the binding is
+	// idempotent, guarded by a WeakSet), so that is the ONE registration site.
 	bindLapViewToggle();
 
 	bindActionFooter({
