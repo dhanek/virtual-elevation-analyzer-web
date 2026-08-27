@@ -181,7 +181,16 @@ export const MODE_CONTROL_TABLE: readonly ModeControlSpec[] = [
 	{
 		reason: "autoAdjustCalibration",
 		kind: "button",
-		elements: { buttonId: "autoAdjustCalibration" },
+		// The button DRIVES the calibration pair, so the pair is named here
+		// rather than hard-coded in the binder. Without this the "declarative
+		// table" claim in the file header did not hold for this row: a second
+		// `button` row would have silently driven the air-speed calibration
+		// slider, which is the forget-to-wire class the table exists to remove.
+		elements: {
+			buttonId: "autoAdjustCalibration",
+			rangeId: "airSpeedCalibrationSlider",
+			numberId: "airSpeedCalibrationValue",
+		},
 		modes: ALL_MODES,
 		writes: "appStateCalibration",
 		persistsSettings: true,

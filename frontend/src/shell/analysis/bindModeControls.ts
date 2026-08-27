@@ -370,8 +370,13 @@ export function bindModeControls(
 					const percent = options.getAutoCalibrationPercent?.();
 					if (percent === null || percent === undefined) return;
 					const value = clampAirSpeedCalibrationPercent(percent);
-					const slider = input("airSpeedCalibrationSlider");
-					const number = input("airSpeedCalibrationValue");
+					// From THIS ROW's own elements, not hard-coded ids.
+					const slider = spec.elements.rangeId
+						? input(spec.elements.rangeId)
+						: null;
+					const number = spec.elements.numberId
+						? input(spec.elements.numberId)
+						: null;
 					if (slider) slider.value = value.toFixed(1);
 					if (number) number.value = value.toFixed(1);
 					appState.airSpeedCalibrationPercent = value;
