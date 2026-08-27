@@ -109,6 +109,25 @@ export interface ModeSegment {
 	/** Human label, e.g. "Lap 3" or "Section 2 outbound". */
 	label: string;
 	range: LapIndexRange;
+	/**
+	 * The mode's own number for this segment — the REAL lap number for GPS-lap,
+	 * not an ordinal.
+	 *
+	 * Carried here because the number can only be resolved against the RANGE
+	 * ORDINAL (the position in `resolveActiveGpsLapRanges`), and by the time
+	 * `summarize` runs the profile list has been thinned: the primitive drops
+	 * segments under `MIN_SEGMENT_SAMPLES`, drops segments whose calculator
+	 * threw, and `mapTrimToSegments` drops segments the trim window does not
+	 * cover. Re-deriving the number from the PROFILE ordinal at that point
+	 * labels every lap after the first drop with the previous lap's number, and
+	 * that number is the key `currentAnalyzedLaps` / `saveCurrentLapSettings` /
+	 * Store Result are all written under.
+	 *
+	 * Set where the ordinal is still correct — in `getUpdateSegments` — and read
+	 * downstream. `mapTrimToSegments` spreads the segment, so it survives the
+	 * trim mapping.
+	 */
+	itemNumber?: number;
 	trim?: { start: number; end: number };
 }
 

@@ -22,7 +22,7 @@ import type {
 import type { LapVEProfile } from "./types";
 import type { GpsLapHeaderStats } from "./gpsLapPlots";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
+import { gpsLapNumberForProfile } from "../../modes/analysis/gpsLapMode";
 import {
 	renderGpsLapVEPlots,
 	renderGpsLapWindPlot,
@@ -191,9 +191,14 @@ export function createGpsLapUpdateCallbacks(
 				return {
 					// The handler labels from the same lookup; relabelling here
 					// keeps the summary table and the stored result agreeing.
-					lapNumber:
-						appState.currentOverlayLapNumbers?.[i] ??
-						resolveGpsLapNumber(appState, profile.segment.range, i + 1),
+					//
+					// `i` is the PROFILE ordinal, and the profile list is thinned
+					// (short segments, throwing calculators, trimmed-out
+					// segments), so indexing `currentOverlayLapNumbers` by it
+					// labelled every lap after the first drop with the previous
+					// lap's number. The number resolved against the RANGE ordinal
+					// rides on the segment instead.
+					lapNumber: gpsLapNumberForProfile(appState, profile, i),
 					distances: profile.distancesKm,
 					virtualElevation: profile.virtualElevation,
 					// Carried straight through from the primitive: non-null iff
