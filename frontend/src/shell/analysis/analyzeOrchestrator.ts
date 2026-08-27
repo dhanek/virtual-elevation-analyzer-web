@@ -27,7 +27,6 @@ import {
 } from "../section3/section3Orchestration";
 import { resolveRhoArray } from "./rhoArrayResolver";
 import { waitForPlotly } from "./plotlyLoader";
-import { configureRecomputeRunner } from "./recomputeRunner";
 import { requestModeUpdate } from "./requestModeUpdate";
 import { configureParameterMerge } from "./parametersSync";
 import {
@@ -73,7 +72,6 @@ export function configureAnalyzeOrchestrator(
 	nextDependencies: AnalyzeOrchestratorDependencies,
 ): void {
 	dependencies = nextDependencies;
-	configureRecomputeRunner(nextDependencies.appState);
 	// Route out-of-form parameter writes (e.g. Crr temp controls in GPS-lap /
 	// out-and-back sidebars) through the parameters component so its private
 	// copy stays in sync and later form edits don't revert them.

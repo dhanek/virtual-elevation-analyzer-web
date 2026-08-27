@@ -22,14 +22,35 @@ import { AppState } from "../../state/AppState";
 import * as recomputeRunnerModule from "./recomputeRunner";
 import {
 	RECOMPUTE_THROTTLE_MS,
-	type RecomputeMode,
 	cancelActiveRecompute,
-	configureRecomputeRunner,
 	resetRecomputeThrottle,
 	scheduleRecompute,
 } from "./recomputeRunner";
 
-const ALL_MODES: RecomputeMode[] = ["standard", "gps-lap", "out-and-back"];
+/**
+ * READ THE PILL, NOT A MIRROR FIELD.
+ *
+ * These assertions used to read `appState.recomputeStatus`, which nothing in
+ * production ever read back — `setRecomputeStatus` wrote it and then rendered
+ * from its own argument. Asserting on it proved only that an unread field held
+ * a value. The pill is what the user actually sees, so that is what the
+ * serialisation evidence is now anchored to.
+ */
+function pillState(): "idle" | "running" | "handoff" | "updated" | "absent" {
+	const node = document.getElementById("veRecomputeStatus");
+	if (!node) return "absent";
+	if ((node as HTMLElement).hidden) return "idle";
+	switch (node.textContent) {
+		case "Recomputing…":
+			return "running";
+		case "Input updated — running latest values…":
+			return "handoff";
+		case "Updated":
+			return "updated";
+		default:
+			return "absent";
+	}
+}
 
 describe("recomputeRunner", () => {
 	beforeEach(() => {
@@ -43,7 +64,6 @@ describe("recomputeRunner", () => {
 		root.appendChild(controls);
 		document.body.appendChild(root);
 
-		configureRecomputeRunner(new AppState());
 		resetRecomputeThrottle();
 	});
 
@@ -57,7 +77,6 @@ describe("recomputeRunner", () => {
 	it("runs the FIRST event on the next macrotask, not after an interval", async () => {
 		let runs = 0;
 		scheduleRecompute({
-			mode: "gps-lap",
 			run: () => {
 				runs += 1;
 			},
@@ -85,7 +104,6 @@ describe("recomputeRunner", () => {
 
 		for (let i = 0; i < EVENT_COUNT; i++) {
 			scheduleRecompute({
-				mode: "gps-lap",
 				run: () => {
 					runs += 1;
 				},
@@ -110,16 +128,16 @@ describe("recomputeRunner", () => {
 		const calls: number[] = [];
 
 		// Leading edge consumes the first.
-		scheduleRecompute({ mode: "gps-lap", run: () => { calls.push(0); } });
+		scheduleRecompute({ run: () => { calls.push(0); } });
 		await vi.advanceTimersByTimeAsync(0);
 		expect(calls).toEqual([0]);
 
 		// Three more inside the SAME interval yield exactly one further run.
-		scheduleRecompute({ mode: "gps-lap", run: () => { calls.push(1); } });
+		scheduleRecompute({ run: () => { calls.push(1); } });
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ mode: "gps-lap", run: () => { calls.push(2); } });
+		scheduleRecompute({ run: () => { calls.push(2); } });
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ mode: "gps-lap", run: () => { calls.push(3); } });
+		scheduleRecompute({ run: () => { calls.push(3); } });
 
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS * 2);
 
@@ -133,11 +151,11 @@ describe("recomputeRunner", () => {
 		// A drag that stops abruptly. The last event arrives mid-interval, so a
 		// pure leading-edge throttle would drop it and leave the plot showing
 		// the second-to-last value forever.
-		scheduleRecompute({ mode: "standard", run: () => { values.push(1); } });
+		scheduleRecompute({ run: () => { values.push(1); } });
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 2);
-		scheduleRecompute({ mode: "standard", run: () => { values.push(2); } });
+		scheduleRecompute({ run: () => { values.push(2); } });
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ mode: "standard", run: () => { values.push(999); } });
+		scheduleRecompute({ run: () => { values.push(999); } });
 
 		// User lets go. Nothing more is scheduled.
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS * 5);
@@ -161,14 +179,14 @@ describe("recomputeRunner", () => {
 			runs += 1;
 		};
 
-		scheduleRecompute({ mode: "gps-lap", run });
+		scheduleRecompute({ run });
 		await vi.advanceTimersByTimeAsync(0);
 		expect(runs).toBe(1);
 
 		// The clock steps back a minute, mid-gesture.
 		vi.setSystemTime(new Date(Date.now() - 60_000));
 
-		scheduleRecompute({ mode: "gps-lap", run });
+		scheduleRecompute({ run });
 		await vi.advanceTimersByTimeAsync(0);
 		expect(runs).toBe(2);
 	});
@@ -187,8 +205,6 @@ describe("recomputeRunner", () => {
 	 * is the one the name always claimed: the LAST input is what finally lands.
 	 */
 	it("latest-input-wins, and never runs two passes at once", async () => {
-		const appState = new AppState();
-		configureRecomputeRunner(appState);
 		resetRecomputeThrottle();
 
 		let resolveFirst!: () => void;
@@ -201,7 +217,6 @@ describe("recomputeRunner", () => {
 		let secondStartedWhileFirstInFlight = false;
 
 		scheduleRecompute({
-			mode: "gps-lap",
 			run: async () => {
 				await firstDone;
 				firstFinished = true;
@@ -211,7 +226,6 @@ describe("recomputeRunner", () => {
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS);
 
 		scheduleRecompute({
-			mode: "gps-lap",
 			run: () => {
 				secondRan = true;
 				if (!firstFinished) {
@@ -231,7 +245,7 @@ describe("recomputeRunner", () => {
 
 		expect(secondRan).toBe(true);
 		expect(secondStartedWhileFirstInFlight).toBe(false);
-		expect(appState.recomputeStatus).toBe("idle");
+		expect(pillState()).toBe("idle");
 	});
 
 	/**
@@ -248,8 +262,6 @@ describe("recomputeRunner", () => {
 	 * here.
 	 */
 	it("announces handoff while a superseding input waits out the interval", async () => {
-		const appState = new AppState();
-		configureRecomputeRunner(appState);
 		resetRecomputeThrottle();
 
 		let releaseFirst!: () => void;
@@ -259,22 +271,21 @@ describe("recomputeRunner", () => {
 
 		// Leading edge: runs on the next macrotask and blocks on the promise.
 		scheduleRecompute({
-			mode: "gps-lap",
 			run: async () => {
 				await firstRun;
 			},
 		});
 		await vi.advanceTimersByTimeAsync(0);
-		expect(appState.recomputeStatus).toBe("running");
+		expect(pillState()).toBe("running");
 
 		// Superseded from INSIDE the window, so the replacement is deferred.
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ mode: "gps-lap", run: () => {} });
-		expect(appState.recomputeStatus).toBe("handoff");
+		scheduleRecompute({ run: () => {} });
+		expect(pillState()).toBe("handoff");
 
 		// It stays announced for the rest of the window, not for one tick.
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		expect(appState.recomputeStatus).toBe("handoff");
+		expect(pillState()).toBe("handoff");
 
 		// Still handoff once the window expires: the runner serialises, so the
 		// replacement is queued behind the blocked first pass rather than
@@ -283,63 +294,70 @@ describe("recomputeRunner", () => {
 		// genuinely is still waiting, but it now waits on the pass rather than
 		// on the interval.)
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS);
-		expect(appState.recomputeStatus).toBe("handoff");
+		expect(pillState()).toBe("handoff");
 
-		// Releasing the first pass lets the replacement start and announce.
+		// Releasing the first pass lets the replacement run to completion, which
+		// announces "Updated".
+		//
+		// This assertion read `running` while it was pointed at
+		// `appState.recomputeStatus`, and that was the mirror field being wrong
+		// rather than the copy being right: the replacement's `run` is
+		// synchronous, so within this same tick it starts AND finishes, and
+		// `flashUpdatedStatus` writes "Updated" straight to the node without
+		// going through `setRecomputeStatus`. The field was therefore left
+		// reading "running" while the user was already looking at "Updated" —
+		// a divergence no assertion on the field could ever have caught.
 		releaseFirst();
 		await vi.advanceTimersByTimeAsync(0);
-		expect(appState.recomputeStatus).toBe("running");
+		expect(pillState()).toBe("updated");
 	});
 
 	it("latest completion returns status to idle", async () => {
-		const appState = new AppState();
-		configureRecomputeRunner(appState);
 		resetRecomputeThrottle();
 
-		scheduleRecompute({ mode: "standard", run: () => {} });
+		scheduleRecompute({ run: () => {} });
 
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS);
 		await vi.advanceTimersByTimeAsync(300);
 
-		expect(appState.recomputeStatus).toBe("idle");
+		expect(pillState()).toBe("idle");
 	});
 
-	// D-15: every mode schedules through the same constant. Written against the
-	// exported constant so plan 04 (D-16) can ratify a different value without
-	// touching this test. Non-vacuous against the per-mode table it replaced:
-	// out-and-back was 200 ms, so under that table it would NOT have kept pace
-	// with a 5 ms event spacing the way the other two did.
-	it.each(ALL_MODES)(
-		"%s throttles on the one uniform constant, not a per-mode value",
-		async (mode) => {
-			resetRecomputeThrottle();
-			let runs = 0;
+	// D-15: one interval for every mode. This used to run once per member of a
+	// `RecomputeMode` union, which was the only way to state "no per-mode table"
+	// while the request still carried a mode. It no longer does — a per-mode
+	// throttle is now unconstructible without re-adding that field, so the
+	// parameterisation was asserting over a dimension that does not exist and
+	// the property collapses to the single timing below.
+	//
+	// Written against the exported constant so plan 04 (D-16) can ratify a
+	// different value without touching this test.
+	it("throttles on the one uniform constant", async () => {
+		resetRecomputeThrottle();
+		let runs = 0;
 
-			// Leading edge.
-			scheduleRecompute({
-				mode,
-				run: () => {
-					runs += 1;
-				},
-			});
-			await vi.advanceTimersByTimeAsync(0);
-			expect(runs).toBe(1);
+		// Leading edge.
+		scheduleRecompute({
+			run: () => {
+				runs += 1;
+			},
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(runs).toBe(1);
 
-			// Inside the window: no second run.
-			scheduleRecompute({
-				mode,
-				run: () => {
-					runs += 1;
-				},
-			});
-			await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS - 1);
-			expect(runs).toBe(1);
+		// Inside the window: no second run.
+		scheduleRecompute({
+			run: () => {
+				runs += 1;
+			},
+		});
+		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS - 1);
+		expect(runs).toBe(1);
 
-			// The window closes and the pending one lands.
-			await vi.advanceTimersByTimeAsync(1);
-			expect(runs).toBe(2);
-		},
-	);
+		// The window closes and the pending one lands.
+		await vi.advanceTimersByTimeAsync(1);
+		expect(runs).toBe(2);
+	});
 
 	it("no longer exports a per-mode debounce table, nor the debounce name", () => {
 		const exportedNames = Object.keys(recomputeRunnerModule);
@@ -352,5 +370,17 @@ describe("recomputeRunner", () => {
 		expect(exportedNames).not.toContain("HEAVY_RECOMPUTE_DEBOUNCE_MS");
 		expect(exportedNames).not.toContain("STANDARD_RECOMPUTE_DEBOUNCE_MS");
 		expect(exportedNames).not.toContain("GPS_LAP_RECOMPUTE_DEBOUNCE_MS");
+	});
+
+	// WR-11. The write-only carriers are gone, and the type that made a per-mode
+	// throttle expressible went with them.
+	it("no longer exports the unread RecomputeMode type", () => {
+		expect(Object.keys(recomputeRunnerModule)).not.toContain("RecomputeMode");
+	});
+
+	it("does not mirror status onto AppState", () => {
+		const appState = new AppState();
+
+		expect("recomputeStatus" in appState).toBe(false);
 	});
 });

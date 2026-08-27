@@ -189,7 +189,6 @@ export interface AnalysisState {
 	currentVirtualDistances: SegmentVirtualDistance[];
 	currentWindSource: WindSource;
 	airSpeedCalibrationPercent: number;
-	recomputeStatus: "idle" | "running" | "handoff";
 	isCalculatingAutoRho: boolean;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
@@ -261,7 +260,6 @@ export class AppState {
 		currentVirtualDistances: [],
 		currentWindSource: "none",
 		airSpeedCalibrationPercent: 0,
-		recomputeStatus: "idle",
 		isCalculatingAutoRho: false,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
@@ -461,14 +459,6 @@ export class AppState {
 
 	set currentWindSource(windSource: WindSource) {
 		this.analysis.currentWindSource = windSource;
-	}
-
-	get recomputeStatus(): "idle" | "running" | "handoff" {
-		return this.analysis.recomputeStatus;
-	}
-
-	set recomputeStatus(status: "idle" | "running" | "handoff") {
-		this.analysis.recomputeStatus = status;
 	}
 
 	get currentAnalyzedLaps(): number[] {

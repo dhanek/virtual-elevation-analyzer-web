@@ -1,4 +1,3 @@
-import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
 
 // One interval for every mode (D-15). The per-mode table it replaces gave
@@ -21,8 +20,8 @@ import { log } from "../../utils/log";
 // a floor of 5, no visible freeze in any measured row. The measurements are in
 // .planning/phases/07-mode-pipeline-unification/07-PROFILE-REPORT.md; the
 // one-word decision is in the sibling 07-GATE-RESULT. One interval, not a
-// per-mode table, per D-15; `RecomputeMode` stays for cancel semantics and
-// logging only.
+// per-mode table, per D-15 — and since the request no longer carries a mode at
+// all, that table cannot be reintroduced without first re-adding one.
 //
 // WHAT THE GATE COVERS, stated because a bare "ratified" reads broader than the
 // evidence: gps-lap only, in both wind sources, at 6 and 18 laps. Standard mode
@@ -58,16 +57,25 @@ import { log } from "../../utils/log";
 // 07-PROFILE-REPORT.md section "Corrections to 3-PROFILE-REPORT.md".)
 export const RECOMPUTE_THROTTLE_MS = 20;
 
-export type RecomputeMode = "standard" | "gps-lap" | "out-and-back";
 export type RecomputeStatus = "idle" | "running" | "handoff";
 
+/**
+ * NO `mode` FIELD, deliberately. It carried a `RecomputeMode` that this module
+ * read nowhere — the comment above claimed it stayed "for cancel semantics and
+ * logging only", and there was neither. Its absence is also what makes the D-15
+ * ruling structural rather than merely tested: a per-mode throttle table cannot
+ * be reintroduced without first re-adding a mode to this request.
+ *
+ * NO `cancel` EITHER. No caller ever supplied one, so the runner's cancel path
+ * was unreachable, and `cancelActiveRecompute` nulled the handle while an
+ * in-flight pass still owned it — a bug that would have surfaced the moment
+ * anyone did supply one. Serialisation through `inFlight` is what actually keeps
+ * passes apart; an in-flight pass always runs to completion.
+ */
 export interface RecomputeRequest {
-	mode: RecomputeMode;
 	run: (token: number) => Promise<void> | void;
-	cancel?: () => void;
 }
 
-let appState: AppState | null = null;
 let activeToken = 0;
 let runningToken: number | null = null;
 let pendingToken: number | null = null;
@@ -78,22 +86,17 @@ let throttleTimer: ReturnType<typeof setTimeout> | null = null;
  * finish, so a slow update does not push the next one an extra interval away.
  */
 let lastRunStartedAt = Number.NEGATIVE_INFINITY;
-let activeCancel: (() => void) | null = null;
 let statusFlashTimer: ReturnType<typeof setTimeout> | null = null;
 
 const RUNNING_COPY = "Recomputing…";
 const HANDOFF_COPY = "Input updated — running latest values…";
 const UPDATED_COPY = "Updated";
 
-export function configureRecomputeRunner(nextAppState: AppState): void {
-	appState = nextAppState;
-}
-
 export function setRecomputeStatus(status: RecomputeStatus): void {
-	if (appState) {
-		appState.recomputeStatus = status;
-	}
-
+	// This used to mirror `status` into `appState.recomputeStatus` as well.
+	// Nothing ever read that field back — not even this function, which renders
+	// from its own argument — so it was the same write-only class `3fed12d`
+	// deleted for `currentRhoArray`. The pill below IS the status.
 	const node = ensureStatusNode();
 	if (!node) return;
 
@@ -120,11 +123,6 @@ export function cancelActiveRecompute(
 	}
 	pendingToken = null;
 	pendingRequest = null;
-
-	if (activeCancel) {
-		activeCancel();
-	}
-	activeCancel = null;
 }
 
 /**
@@ -250,9 +248,8 @@ export function resetRecomputeThrottle(): void {
  * other's numbers — the stored result and the plot could disagree, which is the
  * invariant the D1 anti-drift seam exists to establish.
  *
- * Cancellation cannot substitute for this: no caller supplies `cancel` (see
- * `requestModeUpdate`), so `activeCancel` is always null in production and an
- * in-flight pass always runs to completion.
+ * Cancellation cannot substitute for this: the request carries no `cancel` hook
+ * at all, so an in-flight pass always runs to completion.
  */
 let inFlight: Promise<void> = Promise.resolve();
 
@@ -277,7 +274,6 @@ async function runPending(): Promise<void> {
 		}
 
 		runningToken = token;
-		activeCancel = request.cancel ?? null;
 		setRecomputeStatus("running");
 
 		try {
@@ -285,7 +281,6 @@ async function runPending(): Promise<void> {
 		} catch (error) {
 			log.error("Recompute runner failed:", error);
 		} finally {
-			activeCancel = null;
 			// Guarded rather than unconditional: an unconditional null here was
 			// how the old bookkeeping corrupted, clearing the flag out from under
 			// a pass that was still running.

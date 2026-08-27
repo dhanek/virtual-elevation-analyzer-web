@@ -25,7 +25,7 @@ import {
 	getAnalysisModeHandler,
 	getAnalysisModeHandlerById,
 } from "../../modes/analysis/AnalysisModes";
-import type { AnalysisModeId, ModeSegment } from "../../modes/analysis/types";
+import type { ModeSegment } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
 import { getSelectedWindSource, toWindSource } from "../dom/windSource";
@@ -33,7 +33,7 @@ import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
 import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
-import { scheduleRecompute, type RecomputeMode } from "./recomputeRunner";
+import { scheduleRecompute } from "./recomputeRunner";
 import { updateModeVEPlots } from "./updateModeVEPlots";
 
 /** Defaults the two GPS update paths already used when a slider was missing. */
@@ -76,17 +76,6 @@ export function isVeSectionVisible(): boolean {
 		!veSection.classList.contains("hidden") &&
 		!veSection.classList.contains("workflow-section--inactive")
 	);
-}
-
-function recomputeModeFor(id: AnalysisModeId): RecomputeMode {
-	switch (id) {
-		case "gpsLap":
-			return "gps-lap";
-		case "outAndBack":
-			return "out-and-back";
-		default:
-			return "standard";
-	}
 }
 
 function readNumber(
@@ -250,7 +239,6 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	log.debug(`requestModeUpdate(${reason}) -> ${handler.id}`);
 
 	scheduleRecompute({
-		mode: recomputeModeFor(handler.id),
 		run: async () => {
 			await updateModeVEPlots({
 				appState,
