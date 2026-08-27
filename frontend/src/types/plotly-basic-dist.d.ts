@@ -8,7 +8,6 @@
  * declaration exists to make the import resolve, nothing more.
  */
 declare module "plotly.js-basic-dist" {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const Plotly: any;
+	const Plotly: unknown;
 	export default Plotly;
 }

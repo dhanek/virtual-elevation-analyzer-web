@@ -28,8 +28,7 @@
  * The promise is cached so concurrent callers share one chunk fetch.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PlotlyHandle = any;
+type PlotlyHandle = unknown;
 
 let pending: Promise<PlotlyHandle> | null = null;
 
