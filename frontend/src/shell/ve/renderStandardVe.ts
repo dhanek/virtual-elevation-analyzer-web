@@ -36,6 +36,7 @@ import {
 } from "./vdHeader";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
+import { bindTabButtons } from "../dom/tabs";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -502,20 +503,24 @@ export async function showVirtualElevationAnalysisInline(
 		trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
 	}
 
-	// NO bare `setupTabSwitching()` here. `setupTabSwitching` assigns
-	// `currentRenderMap = renderMap` unconditionally (`tabs.ts:86`), so calling
-	// it with no argument WIPED the map — including the real one that
-	// `createStandardUpdateCallbacks.renderVe` installs
+	// BIND THE BUTTONS, DO NOT TOUCH THE MAP.
+	//
+	// This was a bare `setupTabSwitching()`, which assigned
+	// `currentRenderMap = renderMap` unconditionally and so WIPED the real map
+	// that `createStandardUpdateCallbacks.renderVe` installs
 	// (`bindStandardSliders.ts:241`). It only appeared to work because
 	// `scheduleRecompute` defers to `setTimeout(..., 0)`, so the dispatch above
-	// lands `renderVe` on the NEXT macrotask, after this line. Any path where
-	// the scheduled pass does not reach `renderVe` — every segment under
-	// MIN_SEGMENT_SAMPLES, every calculator throwing, a trim window at its
-	// clamp, an invisible VE section — left the map empty for the panel's
-	// lifetime and Wind/Power/VD rendered nothing at all.
+	// lands `renderVe` on the NEXT macrotask, after this line.
 	//
-	// `renderVe` binds the buttons as well as the map (the binding is
-	// idempotent, guarded by a WeakSet), so that is the ONE registration site.
+	// Deleting the call outright fixed the wipe but took the button binding with
+	// it, which left the tabs UNBOUND on exactly the paths that motivated the
+	// fix — every segment under MIN_SEGMENT_SAMPLES, every calculator throwing,
+	// a trim window at its clamp — where the scheduled pass never reaches
+	// `renderVe` to bind them. `bindTabButtons` is the half that is always safe
+	// to run: idempotent (WeakSet-guarded) and map-preserving, so the tabs
+	// respond even when the first pass produces nothing to draw.
+	bindTabButtons();
+
 	bindLapViewToggle();
 
 	bindActionFooter({
