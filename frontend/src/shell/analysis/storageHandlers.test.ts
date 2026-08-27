@@ -9,8 +9,8 @@
  * handleParametersChange -> synthetic trim-slider "input") used to persist the
  * previous lap's trim values under the newly selected lap's key.
  */
-import { describe, it, expect, beforeEach } from "vitest";
-import { saveCurrentLapSettings } from "./storageHandlers";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { saveCurrentLapSettings, showNotesDialog } from "./storageHandlers";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage, LapSettings } from "../../utils/ParameterStorage";
 
@@ -120,5 +120,80 @@ describe("saveCurrentLapSettings", () => {
 			crr: 0.0045,
 			airSpeedCalibration: 1.5,
 		});
+	});
+});
+
+/**
+ * WR-09. The dialog is a MODAL OVERLAY, so the two ordinary ways out of a modal
+ * have to work: Escape, and clicking the backdrop.
+ *
+ * Escape used to be bound to the INPUT, which meant it only fired while the
+ * text field held focus — click the backdrop once and the modal had no keyboard
+ * dismissal at all. The backdrop itself was inert.
+ */
+describe("showNotesDialog", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	function dialogIsOpen(): boolean {
+		return !!document.querySelector(".notes-dialog");
+	}
+
+	it("resolves empty on Escape pressed outside the input", async () => {
+		const notes = showNotesDialog();
+		expect(dialogIsOpen()).toBe(true);
+
+		// Focus deliberately NOT in the input — this is the case the old
+		// input-scoped listener could not see.
+		(document.querySelector(".notes-dialog__overlay") as HTMLElement).focus();
+		document.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+		);
+
+		await expect(notes).resolves.toBe("");
+		expect(dialogIsOpen()).toBe(false);
+	});
+
+	it("resolves empty when the backdrop is clicked", async () => {
+		const notes = showNotesDialog();
+
+		(document.querySelector(".notes-dialog__overlay") as HTMLElement).click();
+
+		await expect(notes).resolves.toBe("");
+		expect(dialogIsOpen()).toBe(false);
+	});
+
+	it("still resolves the typed value on OK", async () => {
+		const notes = showNotesDialog();
+
+		const input = document.getElementById("notesInput") as HTMLInputElement;
+		input.value = "  test_config_A  ";
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+
+		await expect(notes).resolves.toBe("test_config_A");
+	});
+
+	/**
+	 * A document-level listener outlives the node it was opened for, so it has
+	 * to come off on the way out — otherwise every Store Result leaks one and
+	 * they accumulate for the session.
+	 */
+	it("removes its document keydown listener on close", async () => {
+		const removed: string[] = [];
+		const realRemove = document.removeEventListener.bind(document);
+		vi.spyOn(document, "removeEventListener").mockImplementation(
+			(type, listener, options) => {
+				removed.push(type);
+				return realRemove(type, listener, options);
+			},
+		);
+
+		const notes = showNotesDialog();
+		(document.getElementById("notesCancelBtn") as HTMLButtonElement).click();
+		await notes;
+
+		expect(removed).toContain("keydown");
+		vi.restoreAllMocks();
 	});
 });

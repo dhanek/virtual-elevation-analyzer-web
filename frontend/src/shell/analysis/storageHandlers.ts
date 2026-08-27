@@ -326,7 +326,7 @@ function calculateAverage(values: number[], excludeZero: boolean = false): numbe
     return sum / validValues.length;
 }
 
-function showNotesDialog(): Promise<string> {
+export function showNotesDialog(): Promise<string> {
     return new Promise((resolve) => {
         const dialog = document.createElement('div');
         dialog.className = 'notes-dialog';
@@ -359,21 +359,38 @@ function showNotesDialog(): Promise<string> {
         const cleanup = (notes: string) => {
             if (done) return;
             done = true;
+            // Paired with the listener below. A document-level listener outlives
+            // the nodes it was opened for, so leaving it attached would leak one
+            // per Store Result for the lifetime of the session.
+            document.removeEventListener('keydown', onKeyDown);
             overlay.remove();
             dialog.remove();
             resolve(notes);
+        };
+
+        // ON THE DOCUMENT, not on the input.
+        //
+        // `keydown` rather than `keypress` because keypress does not fire for
+        // non-printing keys, which made the Escape branch unreachable. But
+        // fixing that on the INPUT only moved the problem: the listener then saw
+        // Escape solely while the text field held focus, so clicking the
+        // backdrop once left this modal with no keyboard dismissal at all.
+        //
+        // Enter stays input-scoped in spirit — it means "accept what I typed" —
+        // but reading the value here costs nothing and keeps one handler.
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') cleanup('');
+            else if (e.key === 'Enter') cleanup(input?.value.trim() ?? '');
         };
 
         input?.focus();
 
         okBtn?.addEventListener('click', () => cleanup(input?.value.trim() ?? ''));
         cancelBtn?.addEventListener('click', () => cleanup(''));
-        // `keydown`, NOT `keypress`: keypress does not fire for non-printing
-        // keys, so the Escape branch was unreachable and this modal overlay had
-        // no keyboard dismissal at all.
-        input?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') cleanup(input.value.trim());
-            else if (e.key === 'Escape') cleanup('');
-        });
+        // Clicking the backdrop is the other ordinary way out of a modal. It
+        // cancels rather than accepts: a stray click outside the box is not an
+        // expression of intent to save what is in it.
+        overlay.addEventListener('click', () => cleanup(''));
+        document.addEventListener('keydown', onKeyDown);
     });
 }
