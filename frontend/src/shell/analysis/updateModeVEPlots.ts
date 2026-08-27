@@ -89,13 +89,18 @@ export interface ModeUpdateOutcome {
  * Guarded so the primitive stays callable from node, which is what lets the
  * golden harness assert real numbers against it with no browser environment.
  *
- * Exported because Standard's `compare` branch used to import it rather than
- * carry a second copy of the class-name check. Plan 07-04 folded that branch
- * into this primitive, so the export currently has no production consumer — it
- * is kept as the ONE definition any future caller must import, which is what
- * D-14 exists to enforce.
+ * NOT exported. Standard's `compare` branch used to import it rather than carry
+ * a second copy of the class-name check; plan 07-04 folded that branch into this
+ * primitive, and the export then had no consumer anywhere in `src/`. Keeping it
+ * exported "as the ONE definition a future caller must import" made the D-14
+ * claim an assertion rather than a checked property — an unused export is not
+ * evidence of anything. Module-private makes it enforceable now: a second copy
+ * of this check cannot be written without either importing nothing (and being
+ * visibly a second copy) or re-exporting this one deliberately.
+ *
+ * `args.isTabActive` remains the injection point for tests.
  */
-export function isVeTabActive(tabId: string): boolean {
+function isVeTabActive(tabId: string): boolean {
 	if (typeof document === "undefined") {
 		return false;
 	}

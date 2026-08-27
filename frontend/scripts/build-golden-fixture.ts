@@ -270,8 +270,6 @@ export interface Options {
      * the final lap in half.
      */
     windowLaps: { first: number; last: number } | null
-    /** True when --window was passed explicitly, so a lap range can reject it. */
-    windowLengthExplicit: boolean
     outDir: string
 }
 
@@ -1066,7 +1064,9 @@ function parseArgs(argv: string[]): Options {
     return {
         fitPath: resolvePath(positional[0]),
         windowLength,
-        windowLengthExplicit: windowRaw !== null,
+        // `windowLengthExplicit` used to be computed here and read nowhere. The
+        // mutual-exclusion check it was presumably for is implemented directly
+        // against `windowLapsRaw`/`windowRaw` above.
         windowStart: parseIndexFlag(windowStartRaw, 'window-start', 0),
         windowStartLap: parseIndexFlag(windowStartLapRaw, 'window-start-lap', 1),
         windowLaps,
