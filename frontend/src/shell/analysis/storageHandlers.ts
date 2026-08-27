@@ -97,8 +97,15 @@ export async function handleStoreResult(
         return;
     }
 
-    if (!appState.currentFilteredData) {
-        alert('Cannot store result: filtered data not available. Please run analysis first.');
+    // EMPTY counts as absent. `buildFilteredDataFromProfiles` returns empty
+    // arrays unconditionally when `currentFitData` is falsy
+    // (`segmentSummary.ts:77-80`), and both segment-mode branches below then
+    // compute `trimEnd = 0 - 1 = -1`, slice nothing, and hand
+    // `new Date(undefined * 1000)` to `.toISOString()` — a RangeError caught by
+    // the outer catch and reported as the generic "Failed to store result",
+    // which says nothing about the real cause.
+    if (!appState.currentFilteredData || appState.currentFilteredData.power.length === 0) {
+        alert('Cannot store result: no analysed samples. Please run analysis first.');
         return;
     }
 
@@ -189,7 +196,35 @@ export async function handleStoreResult(
         // sample is excluded from the mean.
         const avgTemperature = calculateAverage(trimmedTemperature, true);
 
+        // The trim slider values are ANALYZE-SELECTION indices, and
+        // `currentFilteredData` is not always in that space (see CR-02 in
+        // 07-REVIEW.md: `standardMode.summarize` overwrites it with the
+        // concatenation of the SURVIVING segments, which is a different length
+        // and drops trimmed-out laps entirely). When the two disagree far
+        // enough, `filteredTimestamps[trimStart]` is `undefined` and
+        // `new Date(NaN).toISOString()` throws a bare RangeError that surfaces
+        // as "Failed to store result".
+        //
+        // This assertion does NOT fix that mismatch — it only refuses to store
+        // a record whose averages would be taken over an empty slice and whose
+        // recordingDate would be invented. The index-space fix itself is still
+        // open.
         const firstTimestamp = filteredTimestamps[trimStart];
+        if (
+            trimStart < 0 ||
+            trimEnd >= filteredTimestamps.length ||
+            !Number.isFinite(firstTimestamp)
+        ) {
+            log.error(
+                `Cannot store: trim window [${trimStart}, ${trimEnd}] is outside the ` +
+                `${filteredTimestamps.length}-sample analysed selection.`,
+            );
+            alert(
+                'Cannot store result: the trim window no longer matches the analysed ' +
+                'samples. Please re-run the analysis.',
+            );
+            return;
+        }
         const recordingDate = new Date(firstTimestamp * 1000).toISOString().split('T')[0];
 
         // Crr from the slider is 22 °C-referenced; record the temperature-
