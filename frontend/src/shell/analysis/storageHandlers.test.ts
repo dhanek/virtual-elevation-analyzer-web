@@ -145,7 +145,7 @@ describe("showNotesDialog", () => {
 		return !!document.querySelector(".notes-dialog");
 	}
 
-	it("resolves empty on Escape pressed outside the input", async () => {
+	it("reports cancellation on Escape pressed outside the input", async () => {
 		const notes = showNotesDialog();
 		expect(dialogIsOpen()).toBe(true);
 
@@ -156,16 +156,16 @@ describe("showNotesDialog", () => {
 			new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
 		);
 
-		await expect(notes).resolves.toBe("");
+		await expect(notes).resolves.toBeNull();
 		expect(dialogIsOpen()).toBe(false);
 	});
 
-	it("resolves empty when the backdrop is clicked", async () => {
+	it("reports cancellation when the backdrop is clicked", async () => {
 		const notes = showNotesDialog();
 
 		(document.querySelector(".notes-dialog__overlay") as HTMLElement).click();
 
-		await expect(notes).resolves.toBe("");
+		await expect(notes).resolves.toBeNull();
 		expect(dialogIsOpen()).toBe(false);
 	});
 
@@ -302,5 +302,104 @@ describe("handleStoreResult trim window", () => {
 
 		expect(saved[0].trimStart).toBe(700);
 		expect(saved[0].trimEnd).toBe(1000);
+	});
+});
+
+/**
+ * CANCEL IS NOT "OK WITH NO NOTES".
+ *
+ * `showNotesDialog` resolved `''` for both, so `handleStoreResult` could not
+ * tell them apart and stored the result either way: dismissing the dialog still
+ * flashed "✓ Stored" and still put a row in the CSV export. Found in the browser
+ * — the Cancel button always behaved this way, and adding Escape and
+ * backdrop-click as dismissals widened the surface.
+ */
+describe("cancelling the notes dialog", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	function makeResultsStorageStub(saved: Record<string, unknown>[]) {
+		return {
+			saveResult: async (data: Record<string, unknown>) => {
+				saved.push(data);
+			},
+		} as unknown as ResultsStorage;
+	}
+
+	function storableState(): AppState {
+		return makeAppStateStub({
+			currentAnalyzedLaps: [1],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentVirtualDistances: [],
+			currentWindSource: "none",
+			currentFilteredData: {
+				power: [250, 250],
+				velocity: [10, 10],
+				temperature: [20, 20],
+				timestamps: [86_400, 86_401],
+			},
+		} as unknown as Partial<AppState>);
+	}
+
+	function setUpStoreDom(): HTMLButtonElement {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		button.textContent = "Store Result";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "0");
+		addInput("trimEndSlider", "1");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+		return button;
+	}
+
+	it("distinguishes an empty note from a cancellation", async () => {
+		const notes = showNotesDialog();
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+
+		// OK with nothing typed is a real, empty note — not a cancellation.
+		await expect(notes).resolves.toBe("");
+	});
+
+	it("reports cancellation from the Cancel button", async () => {
+		const notes = showNotesDialog();
+		(document.getElementById("notesCancelBtn") as HTMLButtonElement).click();
+
+		await expect(notes).resolves.toBeNull();
+	});
+
+	it("stores nothing when the dialog is cancelled", async () => {
+		setUpStoreDom();
+		const saved: Record<string, unknown>[] = [];
+
+		const pending = handleStoreResult(
+			storableState(),
+			makeResultsStorageStub(saved),
+		);
+		await Promise.resolve();
+		(document.getElementById("notesCancelBtn") as HTMLButtonElement).click();
+		await pending;
+
+		expect(saved).toHaveLength(0);
+	});
+
+	it("leaves the button alone when the dialog is cancelled", async () => {
+		const button = setUpStoreDom();
+		const saved: Record<string, unknown>[] = [];
+
+		const pending = handleStoreResult(
+			storableState(),
+			makeResultsStorageStub(saved),
+		);
+		await Promise.resolve();
+		(document.querySelector(".notes-dialog__overlay") as HTMLElement).click();
+		await pending;
+
+		// Not "✓ Stored", and not left disabled mid-flight either.
+		expect(button.textContent).toBe("Store Result");
+		expect(button.disabled).toBe(false);
 	});
 });

@@ -117,6 +117,16 @@ export async function handleStoreResult(
     try {
         const notes = await showNotesDialog();
 
+        // DISMISSED — store nothing and touch nothing.
+        //
+        // Returning before the button is disabled and relabelled is deliberate:
+        // there is no "Cancelled" state to show because nothing was started.
+        // The button is still reading its original label at this point, so the
+        // user simply gets their panel back.
+        if (notes === null) {
+            return;
+        }
+
         let trimStart: number;
         let trimEnd: number;
         let cda: number;
@@ -341,7 +351,16 @@ function calculateAverage(values: number[], excludeZero: boolean = false): numbe
     return sum / validValues.length;
 }
 
-export function showNotesDialog(): Promise<string> {
+/**
+ * Ask for the note to file the result under.
+ *
+ * Resolves the note, or `null` if the user DISMISSED the dialog — Cancel,
+ * Escape, or a backdrop click. The distinction is load-bearing: this used to
+ * resolve `''` for a dismissal, which is indistinguishable from pressing OK
+ * with an empty field, so `handleStoreResult` stored the result anyway. Cancel
+ * flashed "✓ Stored" and put a row in the CSV export.
+ */
+export function showNotesDialog(): Promise<string | null> {
     return new Promise((resolve) => {
         const dialog = document.createElement('div');
         dialog.className = 'notes-dialog';
@@ -371,7 +390,7 @@ export function showNotesDialog(): Promise<string> {
         // Enter, Escape after Cancel) used to surface as "Failed to store
         // result" with the dialog gone and nothing stored.
         let done = false;
-        const cleanup = (notes: string) => {
+        const cleanup = (notes: string | null) => {
             if (done) return;
             done = true;
             // Paired with the listener below. A document-level listener outlives
@@ -394,18 +413,18 @@ export function showNotesDialog(): Promise<string> {
         // Enter stays input-scoped in spirit — it means "accept what I typed" —
         // but reading the value here costs nothing and keeps one handler.
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') cleanup('');
+            if (e.key === 'Escape') cleanup(null);
             else if (e.key === 'Enter') cleanup(input?.value.trim() ?? '');
         };
 
         input?.focus();
 
         okBtn?.addEventListener('click', () => cleanup(input?.value.trim() ?? ''));
-        cancelBtn?.addEventListener('click', () => cleanup(''));
+        cancelBtn?.addEventListener('click', () => cleanup(null));
         // Clicking the backdrop is the other ordinary way out of a modal. It
         // cancels rather than accepts: a stray click outside the box is not an
         // expression of intent to save what is in it.
-        overlay.addEventListener('click', () => cleanup(''));
+        overlay.addEventListener('click', () => cleanup(null));
         document.addEventListener('keydown', onKeyDown);
     });
 }
