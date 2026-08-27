@@ -31,7 +31,7 @@
  */
 
 import { randomInt } from 'node:crypto'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
 
@@ -304,14 +304,23 @@ async function main(): Promise<void> {
 
     const { fixture, key } = anonymise(source, rawLaps, options)
 
-    await mkdir(options.outDir, { recursive: true })
+    // 0700 / 0600, because the default out-dir is under the SHARED system temp
+    // directory and the key file below "undoes the anonymisation of
+    // golden-ride.json completely" (its own WARNING string). At the default
+    // umask that secret was world-readable to every local account, and it is
+    // left on disk indefinitely — the script only prints a reminder.
+    await mkdir(options.outDir, { recursive: true, mode: 0o700 })
     const jsonPath = join(options.outDir, 'golden-ride.json')
     const htmlPath = join(options.outDir, 'golden-ride-review.html')
     const keyPath = join(options.outDir, 'golden-ride-anonymisation-key.json')
 
     await writeFile(jsonPath, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8')
     await writeFile(htmlPath, buildReviewHtml(fixture), 'utf8')
-    await writeFile(keyPath, `${JSON.stringify(key, null, 2)}\n`, 'utf8')
+    await writeFile(keyPath, `${JSON.stringify(key, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+    // `mode` on writeFile is only honoured when the file is CREATED, so a key
+    // left over from a previous run at a looser mode would keep it. Tighten
+    // unconditionally.
+    await chmod(keyPath, 0o600)
 
     process.stdout.write('\nD-12 candidate fixture written to a SCRATCH path (not the repo):\n')
     process.stdout.write(`  candidate JSON : ${jsonPath}\n`)
