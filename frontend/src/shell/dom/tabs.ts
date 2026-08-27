@@ -103,6 +103,29 @@ export function setTabRenderMap(renderMap: TabRenderMap = {}): void {
 }
 
 /**
+ * Drop the render map because the panel it belonged to is being replaced.
+ *
+ * CALL THIS WHERE THE PANEL MARKUP IS REBUILT, next to the
+ * `veAnalysisContent.innerHTML = ...` assignment — not near the recompute.
+ *
+ * The map's callbacks close over a specific `profiles` array
+ * (`bindStandardSliders.ts:241`) and draw into element ids that every panel
+ * reuses. Once the markup is replaced they describe data the user is no longer
+ * looking at, so leaving them installed means Wind/Power/VD render the PREVIOUS
+ * selection into the new panel whenever the first scheduled pass does not reach
+ * `renderVe` — every segment under MIN_SEGMENT_SAMPLES, every calculator
+ * throwing, a trim window at its clamp.
+ *
+ * Same effect as `setTabRenderMap({})`, named separately because the call site
+ * is a lifecycle boundary rather than an installation: a reader at the
+ * `innerHTML` line should not have to work out why an empty map is being
+ * installed there.
+ */
+export function resetTabRenderMapForNewPanel(): void {
+    currentRenderMap = {}
+}
+
+/**
  * Set up VE tab switching for the standard analysis panel: bind the buttons and
  * install the render map in one call.
  *

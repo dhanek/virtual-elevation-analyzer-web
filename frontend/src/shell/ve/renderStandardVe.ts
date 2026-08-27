@@ -36,7 +36,10 @@ import {
 } from "./vdHeader";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
-import { bindTabButtons } from "../dom/tabs";
+import {
+	bindTabButtons,
+	resetTabRenderMapForNewPanel,
+} from "../dom/tabs";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -289,6 +292,11 @@ export async function showVirtualElevationAnalysisInline(
 	const veAnalysisContent = document.getElementById("veAnalysisContent");
 	if (!veAnalysisContent) return;
 
+	// WR-01. The outgoing panel's tab callbacks close over ITS profiles and draw
+	// into element ids this new markup reuses, so they must not outlive it.
+	// Without this, any first pass that does not reach `renderVe` leaves
+	// Wind/Power/VD rendering the PREVIOUS selection into this panel.
+	resetTabRenderMapForNewPanel();
 	veAnalysisContent.innerHTML = `
         <div class="ve-inline-container">
             <div class="ve-layout">

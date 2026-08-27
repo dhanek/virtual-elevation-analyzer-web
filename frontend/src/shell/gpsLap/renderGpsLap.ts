@@ -29,7 +29,10 @@ import {
 	saveCurrentMultiSegmentSettings,
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
-import { setupTabSwitching } from "../dom/tabs";
+import {
+	resetTabRenderMapForNewPanel,
+	setupTabSwitching,
+} from "../dom/tabs";
 import {
 	bindModeControls,
 	type BindModeControlsResult,
@@ -369,6 +372,11 @@ export async function showGpsLapVEPlot(
 		defaultAirSpeedOffset,
 		elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
 	});
+	// WR-01. The outgoing panel's tab callbacks close over ITS profiles and draw
+	// into element ids this new markup reuses, so they must not outlive it.
+	// Without this, any first pass that does not reach `renderVe` leaves
+	// Wind/Power/VD rendering the PREVIOUS selection into this panel.
+	resetTabRenderMapForNewPanel();
 	veAnalysisContent.innerHTML = veAnalysisTemplate;
 
 	// Bind the stitched/stacked toggle when this overlay was reached from an

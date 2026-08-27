@@ -2,7 +2,12 @@
  * @vitest-environment jsdom
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { bindTabButtons, setTabRenderMap, setupTabSwitching } from './tabs'
+import {
+    bindTabButtons,
+    resetTabRenderMapForNewPanel,
+    setTabRenderMap,
+    setupTabSwitching,
+} from './tabs'
 
 describe('setupTabSwitching', () => {
     // WR-09. `currentRenderMap` is MODULE state and nothing reset it, so each
@@ -189,6 +194,40 @@ describe('setupTabSwitching', () => {
             expect(shouldNotRender).not.toHaveBeenCalled()
 
             document.body.removeChild(container)
+        })
+
+        /**
+         * WR-01. The WR-13 split traded one failure for a worse one.
+         *
+         * `bindTabButtons()` deliberately does not touch `currentRenderMap`, so
+         * on every path where the newly scheduled pass does not reach
+         * `renderVe`, the PREVIOUS panel's map survives verbatim. Its callbacks
+         * close over that panel's `profiles` array, and the Standard panel
+         * reuses the same element ids on every render — so Wind/Power/VD draw
+         * the previous lap selection's data into the new panel, unlabelled.
+         *
+         * The bare `setupTabSwitching()` this replaced failed SAFE here: an
+         * empty map renders nothing. This one fails unsafe, which is worse.
+         * The map must die with the nodes its callbacks draw into.
+         */
+        it('drops the previous panel map when the panel is rebuilt', () => {
+            const first = createTabs()
+            const previousPanelRenderer = vi.fn()
+            setTabRenderMap({ power: previousPanelRenderer })
+            bindTabButtons()
+            document.body.removeChild(first.container)
+
+            // A new panel replaces the old markup, as `veAnalysisContent.innerHTML = ...`
+            // does, and binds its buttons before its first recompute lands.
+            const second = createTabs()
+            resetTabRenderMapForNewPanel()
+            bindTabButtons()
+
+            second.buttons[1].click()
+
+            expect(previousPanelRenderer).not.toHaveBeenCalled()
+
+            document.body.removeChild(second.container)
         })
 
         it('keeps the map installed when binding is repeated', () => {
