@@ -80,7 +80,12 @@ export function buildFilteredDataFromProfiles(
 	}
 
 	const normalized = getNormalizedActivityArrays(fitData);
-	const hasTemperature = Boolean(fitData.temperature);
+	// `Boolean([])` is TRUE, so an activity carrying an EMPTY temperature array
+	// used to take the branch below and push a fabricated 0 for every sample —
+	// which Store Result then reported as `avgTemperature: 0`, indistinguishable
+	// from a genuine 0 °C ride. Presence is a non-empty array, not truthiness.
+	const source = fitData.temperature;
+	const hasTemperature = Array.isArray(source) && source.length > 0;
 
 	for (const profile of profiles) {
 		for (const index of profile.indices) {
@@ -88,7 +93,12 @@ export function buildFilteredDataFromProfiles(
 			velocity.push(normalized.velocity[index]);
 			timestamps.push(normalized.timestamps[index]);
 			if (hasTemperature) {
-				temperature.push(fitData.temperature![index] || 0);
+				// NaN for a missing/garbage sample, not `|| 0`. `|| 0` collapsed
+				// NaN and a legitimate 0 °C onto the same value, so the averager
+				// could only discard both or neither. NaN is the one marker that
+				// says "no reading" without also claiming a temperature.
+				const value = source[index];
+				temperature.push(Number.isFinite(value) ? value : Number.NaN);
 			}
 		}
 	}

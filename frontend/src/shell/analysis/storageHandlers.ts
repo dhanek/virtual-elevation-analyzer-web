@@ -178,6 +178,15 @@ export async function handleStoreResult(
 
         const avgPower = calculateAverage(trimmedPower, false);
         const avgSpeed = calculateAverage(trimmedVelocity, false) * 3.6;
+        // STILL zero-skipping, deliberately. `buildFilteredDataFromProfiles`
+        // now marks a missing reading as NaN (which `calculateAverage` drops
+        // anyway), so for the two segment modes this flag could be dropped —
+        // but `prepareAnalysisPayload.ts:88` and `ActivityLoader.ts:242` still
+        // fabricate a 0 for a missing sample, and Standard's analyze path and
+        // every CSV ride go through those. Turning the zero-skip off before
+        // they are fixed too would drag Standard's stored avgTemperature toward
+        // 0 rather than away from it. Cost of leaving it on: a genuine 0 °C
+        // sample is excluded from the mean.
         const avgTemperature = calculateAverage(trimmedTemperature, true);
 
         const firstTimestamp = filteredTimestamps[trimStart];
