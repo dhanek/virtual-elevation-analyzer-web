@@ -52,6 +52,23 @@ function pillState(): "idle" | "running" | "handoff" | "updated" | "absent" {
 	}
 }
 
+/**
+ * WR-11's type half, checked AT THE TYPE LEVEL — the only level where it means
+ * anything.
+ *
+ * This was `expect(Object.keys(module)).not.toContain("RecomputeMode")`, which
+ * could never fail: `RecomputeMode` was a TypeScript type, types are erased
+ * before runtime, and an erased type is absent from a module namespace whether
+ * or not anyone deleted it. The assertion was as green before the deletion as
+ * after.
+ *
+ * `@ts-expect-error` inverts that. It requires the next line to be a type
+ * error, so this compiles only while `RecomputeMode` does NOT exist —
+ * re-introducing the type makes the directive unused and fails `tsc`.
+ */
+// @ts-expect-error - RecomputeMode must not exist; re-adding it breaks this line.
+export type _RecomputeModeMustNotExist = import("./recomputeRunner").RecomputeMode;
+
 describe("recomputeRunner", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -370,12 +387,6 @@ describe("recomputeRunner", () => {
 		expect(exportedNames).not.toContain("HEAVY_RECOMPUTE_DEBOUNCE_MS");
 		expect(exportedNames).not.toContain("STANDARD_RECOMPUTE_DEBOUNCE_MS");
 		expect(exportedNames).not.toContain("GPS_LAP_RECOMPUTE_DEBOUNCE_MS");
-	});
-
-	// WR-11. The write-only carriers are gone, and the type that made a per-mode
-	// throttle expressible went with them.
-	it("no longer exports the unread RecomputeMode type", () => {
-		expect(Object.keys(recomputeRunnerModule)).not.toContain("RecomputeMode");
 	});
 
 	it("does not mirror status onto AppState", () => {
