@@ -56,7 +56,7 @@ export interface SaveResultData {
     recordingDate: string; // yyyy-mm-dd format from FIT file
     avgPower: number;
     avgSpeed: number;
-    avgTemperature: number;
+    avgTemperature?: number;
     notes: string;
 }
 
@@ -89,7 +89,7 @@ export interface StoredVEResult {
     virtualDistances?: SegmentVirtualDistance[];
     avgPower: number;
     avgSpeed: number;
-    avgTemperature: number;
+    avgTemperature?: number;
     notes: string;
     recordingDate: string; // yyyy-mm-dd
     timestamp: string; // ISO timestamp when entry was added to DB
@@ -189,7 +189,7 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
             ...virtualDistanceCsvCells(result.virtualDistances),
             result.avgPower.toFixed(1),
             result.avgSpeed.toFixed(2),
-            result.avgTemperature.toFixed(1),
+            result.avgTemperature !== undefined ? result.avgTemperature.toFixed(1) : '',
             `"${result.notes.replace(/"/g, '""')}"`, // Escape quotes in notes
             result.timestamp
         ];
@@ -359,7 +359,7 @@ export class ResultsStorage {
                         virtualDistances: oldRecord.virtualDistances,
                         avgPower: oldRecord.avgPower ?? 0,
                         avgSpeed: oldRecord.avgSpeed ?? 0,
-                        avgTemperature: oldRecord.avgTemperature ?? 0,
+                        avgTemperature: oldRecord.avgTemperature,
                         notes: oldRecord.notes || '',
                         recordingDate: oldRecord.recordingDate || '', // V5: New field
                         timestamp: oldRecord.timestamp || new Date().toISOString()

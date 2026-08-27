@@ -151,14 +151,20 @@ export function buildFilteredDataFromIndexGroups(
 			power.push(normalized.power[index]);
 			velocity.push(normalized.velocity[index]);
 			timestamps.push(normalized.timestamps[index]);
-			if (hasTemperature) {
-				// NaN for a missing/garbage sample, not `|| 0`. `|| 0` collapsed
-				// NaN and a legitimate 0 °C onto the same value, so the averager
-				// could only discard both or neither. NaN is the one marker that
-				// says "no reading" without also claiming a temperature.
-				const value = source[index];
-				temperature.push(Number.isFinite(value) ? value : Number.NaN);
-			}
+			// NaN for a missing/garbage sample, not `|| 0`. `|| 0` collapsed NaN
+			// and a legitimate 0 °C onto the same value, so the averager could
+			// only discard both or neither. NaN is the one marker that says "no
+			// reading" without also claiming a temperature.
+			//
+			// PUSHED UNCONDITIONALLY, including when the activity has no
+			// temperature channel at all. `FilteredAnalysisData` declares four
+			// `number[]` with an implied common length (`AppState.ts:121-126`)
+			// and consumers index them in parallel; leaving this one empty
+			// against three full-length siblings broke that, and an empty array
+			// reaching `calculateAverage` came back as 0 — persisted as
+			// `avgTemperature: 0`, indistinguishable from a genuine 0 °C ride.
+			const value = hasTemperature ? source[index] : Number.NaN;
+			temperature.push(Number.isFinite(value) ? value : Number.NaN);
 		}
 	}
 

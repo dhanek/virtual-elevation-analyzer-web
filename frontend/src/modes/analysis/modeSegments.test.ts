@@ -461,3 +461,40 @@ describe('buildFilteredDataFromProfiles honours the trim window', () => {
         expect(filtered.timestamps[10]).toBe(50);
     });
 });
+
+/**
+ * WR-05. `FilteredAnalysisData` declares four `number[]` with an implied common
+ * length (`AppState.ts:121-126`), and consumers index them in parallel. When the
+ * activity carries no temperature channel the loop pushed nothing, so
+ * `temperature` was `[]` against three full-length siblings — and
+ * `calculateAverage` returns 0 for an empty array, so Store Result persisted
+ * `avgTemperature: 0`, indistinguishable from a genuine 0 °C ride.
+ *
+ * That is the same confusion the earlier `Boolean([])` fix removed, one level
+ * along: there the fabricated 0 came from `|| 0` per sample, here from an empty
+ * array meeting a defaulting averager.
+ */
+describe('buildFilteredDataFromProfiles keeps temperature aligned', () => {
+    function stateWithoutTemperature(count: number): AppState {
+        const appState = new AppState();
+        appState.currentFitData = {
+            timestamps: Array.from({ length: count }, (_, i) => i),
+            power: Array.from({ length: count }, () => 250),
+            velocity: Array.from({ length: count }, () => 10),
+            // no temperature channel at all
+        } as any;
+        return appState;
+    }
+
+    function fullProfile(count: number): any {
+        const indices = Array.from({ length: count }, (_, i) => i);
+        return { segment: { key: 's', label: 'Lap 1', range: { startIdx: 0, endIdx: count - 1 } }, indices }
+    }
+
+    it('emits a NaN per sample rather than an empty array', () => {
+        const filtered = buildFilteredDataFromProfiles(stateWithoutTemperature(50), [fullProfile(50)])
+
+        expect(filtered.temperature).toHaveLength(filtered.power.length)
+        expect(filtered.temperature.every(Number.isNaN)).toBe(true)
+    })
+})

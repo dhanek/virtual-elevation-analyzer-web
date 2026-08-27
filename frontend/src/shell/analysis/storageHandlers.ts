@@ -226,7 +226,13 @@ export async function handleStoreResult(
         // they are fixed too would drag Standard's stored avgTemperature toward
         // 0 rather than away from it. Cost of leaving it on: a genuine 0 °C
         // sample is excluded from the mean.
-        const avgTemperature = calculateAverage(trimmedTemperature, true);
+        // ABSENT, not 0, when the ride carries no usable reading. `calculateAverage`
+        // returns 0 for an all-NaN array, and a stored 0 is indistinguishable from
+        // a genuine 0 °C ride — the same confusion the NaN marker exists to avoid.
+        const hasAnyTemperature = trimmedTemperature.some(Number.isFinite);
+        const avgTemperature = hasAnyTemperature
+            ? calculateAverage(trimmedTemperature, true)
+            : undefined;
 
         // The FIRST ANALYSED SAMPLE, not `filteredTimestamps[trimStart]`.
         //

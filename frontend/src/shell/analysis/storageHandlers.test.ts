@@ -403,3 +403,55 @@ describe("cancelling the notes dialog", () => {
 		expect(button.disabled).toBe(false);
 	});
 });
+
+/**
+ * WR-05, the persisted half. `calculateAverage` returns 0 for an array with no
+ * finite values, so a ride carrying no temperature channel was stored as
+ * `avgTemperature: 0` — indistinguishable in the results table and the CSV from
+ * a genuine 0 °C ride.
+ */
+describe("avgTemperature when the ride has no temperature channel", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("is absent rather than zero", async () => {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		button.textContent = "Store Result";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "0");
+		addInput("trimEndSlider", "1");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+
+		const saved: Record<string, unknown>[] = [];
+		const appState = makeAppStateStub({
+			currentAnalyzedLaps: [1],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentVirtualDistances: [],
+			currentWindSource: "none",
+			currentFilteredData: {
+				power: [250, 250],
+				velocity: [10, 10],
+				// aligned with the others, all-NaN: no channel on this ride
+				temperature: [Number.NaN, Number.NaN],
+				timestamps: [86_400, 86_401],
+			},
+		} as unknown as Partial<AppState>);
+
+		const pending = handleStoreResult(appState, {
+			saveResult: async (data: Record<string, unknown>) => {
+				saved.push(data);
+			},
+		} as unknown as ResultsStorage);
+		await Promise.resolve();
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+		await pending;
+
+		expect(saved).toHaveLength(1);
+		expect(saved[0].avgTemperature).toBeUndefined();
+	});
+});
