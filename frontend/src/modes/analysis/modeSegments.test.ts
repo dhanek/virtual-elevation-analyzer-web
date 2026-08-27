@@ -498,3 +498,52 @@ describe('buildFilteredDataFromProfiles keeps temperature aligned', () => {
         expect(filtered.temperature.every(Number.isNaN)).toBe(true)
     })
 })
+
+/**
+ * WR-06. `selectedItems` was the RAW `appState.selectedLaps`, and
+ * `standardMode.render` hands it straight to `currentAnalyzedLaps`
+ * (`renderStandardVe.ts:264`). That value is the key
+ * `parameterStorage.saveLapSettings` / `loadLapSettings` use and the `laps`
+ * field Store Result persists — so a lap number with no entry in `currentLaps`
+ * (a stale selection after a file reload) keyed the saved trim/CdA/Crr under a
+ * lap set that did not match the segments actually analysed.
+ *
+ * `getUpdateSegments` already re-filtered for its labels; filtering once at the
+ * source makes that re-filter redundant and stops the two lists disagreeing.
+ */
+describe('standardMode filters unknown lap numbers at the source', () => {
+    function stateWithStaleSelection(): AppState {
+        const appState = new AppState()
+        appState.currentFitData = makeFitData()
+        appState.currentLaps = [makeLap(0, 9), makeLap(10, 19)]
+        // Lap 7 does not exist — e.g. a selection left over from another file.
+        appState.selectedLaps = [1, 7]
+        appState.currentAnalyzedLaps = [1, 7]
+        return appState
+    }
+
+    it('drops the unknown lap from the analyze selection', () => {
+        const handler = getAnalysisModeHandler(null)
+
+        const selection = handler.prepareSelection(stateWithStaleSelection())
+
+        expect(selection.selectedItems).toEqual([1])
+        expect(selection.timeRanges).toHaveLength(1)
+    })
+
+    it('drops it from the update selection too', () => {
+        const handler = getAnalysisModeHandler(null)
+
+        const selection = handler.prepareUpdateSelection!(stateWithStaleSelection())
+
+        expect(selection.selectedItems).toEqual([1])
+    })
+
+    it('keeps selectedItems and timeRanges the same length', () => {
+        const handler = getAnalysisModeHandler(null)
+
+        const selection = handler.prepareSelection(stateWithStaleSelection())
+
+        expect(selection.selectedItems).toHaveLength(selection.timeRanges!.length)
+    })
+})

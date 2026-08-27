@@ -54,13 +54,29 @@ function selectionForLaps(
 	appState: AppState,
 	lapNumbers: number[],
 ): PreparedAnalysisSelection {
-	const selectedEntries = lapNumbers
-		.map((lapNumber) => appState.currentLaps[lapNumber - 1])
-		.filter(Boolean);
+	// FILTERED ONCE, HERE, so `selectedItems` and `selectedEntries` cannot
+	// disagree about how many laps there are (WR-06).
+	//
+	// `selectedItems` used to be the raw lap-number list while `selectedEntries`
+	// dropped the ones with no entry in `currentLaps`. `standardMode.render`
+	// hands `selectedItems` straight to `currentAnalyzedLaps`
+	// (`renderStandardVe.ts:264`), which is the key `saveLapSettings` /
+	// `loadLapSettings` use and the `laps` field Store Result persists — so a
+	// stale lap number, e.g. a selection left over from another file, keyed the
+	// saved trim/CdA/Crr under a lap set that did not match the segments
+	// actually analysed. `getUpdateSegments` re-filtered for its own labels,
+	// which fixed the labels and left the stored key wrong.
+	const entries = lapNumbers
+		.map((lapNumber) => ({
+			lapNumber,
+			lap: appState.currentLaps[lapNumber - 1],
+		}))
+		.filter((entry) => Boolean(entry.lap));
+	const selectedEntries = entries.map((entry) => entry.lap);
 
 	return {
 		mode: "standard",
-		selectedItems: lapNumbers,
+		selectedItems: entries.map((entry) => entry.lapNumber),
 		selectedEntries,
 		indexRanges: null,
 		timeRanges: selectedEntries.map((lap) => ({
@@ -178,17 +194,13 @@ export const standardMode: AnalysisModeHandler = {
 		const selection = selectionForLaps(appState, updateLaps(appState));
 		const timeRanges = selection.timeRanges ?? [];
 
-		// ALIGNED with `timeRanges`, which is derived from the FILTERED entries.
-		// `selection.selectedItems` is the RAW `appState.selectedLaps`, so a
-		// selected lap number with no entry in `currentLaps` (a stale selection
-		// after a file reload, or an off-by-one lap number) makes the two lists
-		// different lengths and shifts every later lap's number by one — into the
-		// segment `key`, the `label`, the VD header rows and the stored virtual
-		// distances. Apply the same filter here rather than indexing the
-		// unfiltered list by a filtered slot.
-		const alignedLapNumbers = selection.selectedItems.filter((lapNumber) =>
-			Boolean(appState.currentLaps[lapNumber - 1]),
-		);
+		// No re-filter here any more. `selectionForLaps` drops lap numbers with
+		// no entry in `currentLaps` at the source (WR-06), so `selectedItems` is
+		// already aligned with `timeRanges` — both are built from the same
+		// filtered list. This used to re-derive that alignment locally, which
+		// fixed the segment labels while leaving the STORED key
+		// (`currentAnalyzedLaps`, via `render`) built from the unfiltered list.
+		const alignedLapNumbers = selection.selectedItems;
 
 		const segments: ModeSegment[] = [];
 		timeRanges.forEach((timeRange, lapSlot) => {
