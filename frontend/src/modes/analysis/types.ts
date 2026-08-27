@@ -261,6 +261,22 @@ export interface AnalysisModeHandler {
 	getSelectedItems(appState: AppState): number[];
 	validate(appState: AppState): string | null;
 	prepareSelection(appState: AppState): PreparedAnalysisSelection;
+	/**
+	 * The selection the UPDATE path belongs to, when it differs from the one the
+	 * ANALYZE path reads (WR-06).
+	 *
+	 * Only Standard needs this. Its `prepareSelection` reads the live lap
+	 * checkboxes, which is right at analyze time and wrong afterwards: the
+	 * rendered panel and its trim sliders belong to whatever was last analyzed,
+	 * so recomputing against a checkbox the user has since ticked updates a
+	 * selection they never asked for.
+	 *
+	 * The two GPS modes resolve from index ranges that are themselves written at
+	 * analyze time (`currentGpsLapIndexRanges`, the out-and-back sections), so
+	 * their selection is already the analyzed one and they omit this. Callers on
+	 * the update path must fall back to `prepareSelection` when it is absent.
+	 */
+	prepareUpdateSelection?(appState: AppState): PreparedAnalysisSelection;
 	syncState(appState: AppState, selection: PreparedAnalysisSelection): void;
 	render(args: ModeRenderArgs): Promise<void> | void;
 

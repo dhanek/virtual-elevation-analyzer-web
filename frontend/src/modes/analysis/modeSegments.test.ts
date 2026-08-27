@@ -322,3 +322,69 @@ describe('the registry carries the update members for every mode', () => {
         }
     });
 });
+
+/**
+ * WR-06. THE UPDATE PATH BELONGS TO THE ANALYZED SELECTION, not to the live
+ * checkboxes.
+ *
+ * `getUpdateSegments` resolved Standard's laps through `prepareSelection`, which
+ * reads `appState.selectedLaps` — the LIVE checkbox state. But the panel being
+ * updated, its trim sliders and `currentAnalyzedLaps` all belong to the
+ * previously analyzed selection. `veSelectionGuard.veViewMatchesSelection`
+ * exists precisely because those two diverge, and it was consulted only for map
+ * markers.
+ *
+ * So ticking a different lap and then nudging CdA — without pressing Analyze —
+ * computed segments for the NEW laps, mapped a trim window sized for the OLD
+ * selection onto them, and let `summarize` overwrite `currentVEResult` /
+ * `currentFilteredData` for a selection the user never analyzed.
+ */
+describe('standardMode update path vs live checkbox selection', () => {
+    function divergedState(analyzed: number[], ticked: number[]): AppState {
+        const appState = new AppState();
+        appState.currentFitData = makeFitData();
+        appState.currentLaps = [
+            makeLap(0, 9),
+            makeLap(10, 19),
+            makeLap(20, 29),
+            makeLap(30, 39),
+        ];
+        appState.currentAnalyzedLaps = analyzed;
+        appState.selectedLaps = ticked;
+        return appState;
+    }
+
+    it('updates the ANALYZED laps when the checkboxes have moved on', () => {
+        const handler = getAnalysisModeHandler(null);
+
+        // Analyzed lap 1; user has since ticked lap 4 without re-analyzing.
+        const segments = handler.getUpdateSegments(divergedState([1], [4]));
+
+        expect(segments).toHaveLength(1);
+        expect(segments[0].range).toEqual({ startIdx: 0, endIdx: 9 });
+        expect(segments[0].label).toBe('Lap 1');
+    });
+
+    it('follows the checkboxes once they have been analyzed', () => {
+        const handler = getAnalysisModeHandler(null);
+
+        // After Analyze the two agree, which is the ordinary case.
+        const segments = handler.getUpdateSegments(divergedState([4], [4]));
+
+        expect(segments).toHaveLength(1);
+        expect(segments[0].range).toEqual({ startIdx: 30, endIdx: 39 });
+    });
+
+    /**
+     * The analyze path is the one place `selectedLaps` IS the right source —
+     * it is what the user just asked to analyze, and `currentAnalyzedLaps` still
+     * holds the previous run at that moment.
+     */
+    it('leaves prepareSelection reading the live checkboxes for the analyze path', () => {
+        const handler = getAnalysisModeHandler(null);
+
+        const selection = handler.prepareSelection(divergedState([1], [4]));
+
+        expect(selection.selectedItems).toEqual([4]);
+    });
+});

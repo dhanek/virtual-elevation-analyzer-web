@@ -136,8 +136,14 @@ function withTrim(
 	}
 
 	const normalized = getNormalizedActivityArrays(fitData);
+	// The UPDATE path, so the ANALYZED selection (WR-06). Mapping the window
+	// through the live checkbox selection would place a trim sized for the
+	// panel on screen onto laps that panel does not describe.
 	const selectedIndices = collectSelectionIndices(
-		handler.prepareSelection(appState),
+		(handler.prepareUpdateSelection ?? handler.prepareSelection).call(
+			handler,
+			appState,
+		),
 		normalized.timestamps,
 	);
 

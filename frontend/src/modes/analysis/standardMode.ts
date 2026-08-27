@@ -1,5 +1,5 @@
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import type { LapIndexRange } from "../../state/AppState";
+import type { AppState, LapIndexRange } from "../../state/AppState";
 import { collectSelectionIndices } from "./selectionIndices";
 import {
 	buildCombinedSegmentResult,
@@ -45,6 +45,43 @@ export function indicesToRanges(indices: number[]): LapIndexRange[] {
 	return ranges;
 }
 
+/**
+ * The shared body of `prepareSelection` and `prepareUpdateSelection`. The two
+ * differ ONLY in which lap list they resolve, so keeping one builder is what
+ * stops the analyze and update paths drifting into different shapes.
+ */
+function selectionForLaps(
+	appState: AppState,
+	lapNumbers: number[],
+): PreparedAnalysisSelection {
+	const selectedEntries = lapNumbers
+		.map((lapNumber) => appState.currentLaps[lapNumber - 1])
+		.filter(Boolean);
+
+	return {
+		mode: "standard",
+		selectedItems: lapNumbers,
+		selectedEntries,
+		indexRanges: null,
+		timeRanges: selectedEntries.map((lap) => ({
+			start: lap.start_time,
+			end: lap.end_time,
+		})),
+		outAndBackSections: null,
+		emptySelectionMessage: EMPTY_SELECTION_MESSAGE,
+	};
+}
+
+/**
+ * Which lap list the UPDATE path belongs to. Falls back to `selectedLaps`
+ * before the first analyze, when `currentAnalyzedLaps` is still empty and there
+ * is no rendered panel for it to contradict.
+ */
+function updateLaps(appState: AppState): number[] {
+	const analyzed = appState.currentAnalyzedLaps;
+	return analyzed.length > 0 ? analyzed : appState.selectedLaps;
+}
+
 export const standardMode: AnalysisModeHandler = {
 	id: "standard",
 
@@ -57,23 +94,36 @@ export const standardMode: AnalysisModeHandler = {
 	},
 
 	prepareSelection(appState): PreparedAnalysisSelection {
-		const selectedItems = appState.selectedLaps;
-		const selectedEntries = selectedItems
-			.map((lapNumber) => appState.currentLaps[lapNumber - 1])
-			.filter(Boolean);
+		// THE LIVE CHECKBOXES, and correctly so: this is the analyze path, where
+		// `selectedLaps` is precisely what the user just asked to analyze and
+		// `currentAnalyzedLaps` still holds the PREVIOUS run. The update path
+		// wants the opposite and uses `prepareUpdateSelection` below.
+		return selectionForLaps(appState, appState.selectedLaps);
+	},
 
-		return {
-			mode: "standard",
-			selectedItems,
-			selectedEntries,
-			indexRanges: null,
-			timeRanges: selectedEntries.map((lap) => ({
-				start: lap.start_time,
-				end: lap.end_time,
-			})),
-			outAndBackSections: null,
-			emptySelectionMessage: EMPTY_SELECTION_MESSAGE,
-		};
+	/**
+	 * THE ANALYZED SELECTION — what the panel on screen actually belongs to.
+	 *
+	 * The update path used to go through `prepareSelection` too, and so resolved
+	 * segments from the LIVE checkbox state while the trim sliders,
+	 * `currentAnalyzedLaps` and the whole rendered panel still belonged to the
+	 * previously analyzed selection. Tick a different lap without pressing
+	 * Analyze, nudge CdA, and the primitive computed segments for the NEW laps,
+	 * mapped a trim window sized for the OLD selection onto them, and let
+	 * `summarize` overwrite `currentVEResult` / `currentFilteredData` for a
+	 * selection the user never analyzed (WR-06).
+	 *
+	 * `veSelectionGuard.veViewMatchesSelection` exists because these two
+	 * diverge, but gating the funnel on it would have silently no-opped the
+	 * user's slider drag. Resolving from the analyzed laps instead keeps the
+	 * controls live and makes the panel self-consistent: a checkbox change now
+	 * does nothing until Analyze is pressed, which is the honest model.
+	 *
+	 * Falls back to `selectedLaps` before the first analyze, when
+	 * `currentAnalyzedLaps` is still empty and there is no panel to contradict.
+	 */
+	prepareUpdateSelection(appState): PreparedAnalysisSelection {
+		return selectionForLaps(appState, updateLaps(appState));
 	},
 
 	syncState(appState) {
@@ -124,7 +174,8 @@ export const standardMode: AnalysisModeHandler = {
 		}
 
 		const normalized = getNormalizedActivityArrays(fitData);
-		const selection = this.prepareSelection(appState);
+		// The UPDATE path: the analyzed laps, not the live checkboxes (WR-06).
+		const selection = selectionForLaps(appState, updateLaps(appState));
 		const timeRanges = selection.timeRanges ?? [];
 
 		// ALIGNED with `timeRanges`, which is derived from the FILTERED entries.
