@@ -311,23 +311,34 @@ function showNotesDialog(): Promise<string> {
         document.body.appendChild(overlay);
         document.body.appendChild(dialog);
 
-        const input = document.getElementById('notesInput') as HTMLInputElement;
-        const okBtn = document.getElementById('notesOkBtn') as HTMLButtonElement;
-        const cancelBtn = document.getElementById('notesCancelBtn') as HTMLButtonElement;
+        const input = document.getElementById('notesInput') as HTMLInputElement | null;
+        const okBtn = document.getElementById('notesOkBtn') as HTMLButtonElement | null;
+        const cancelBtn = document.getElementById('notesCancelBtn') as HTMLButtonElement | null;
 
-        input.focus();
-
+        // IDEMPOTENT. `removeChild` on an already-removed node throws, and this
+        // executor's throw rejects showNotesDialog() straight into
+        // handleStoreResult's generic catch — so a second activation (OK after
+        // Enter, Escape after Cancel) used to surface as "Failed to store
+        // result" with the dialog gone and nothing stored.
+        let done = false;
         const cleanup = (notes: string) => {
-            document.body.removeChild(overlay);
-            document.body.removeChild(dialog);
+            if (done) return;
+            done = true;
+            overlay.remove();
+            dialog.remove();
             resolve(notes);
         };
 
-        okBtn.addEventListener('click', () => cleanup(input.value.trim()));
-        cancelBtn.addEventListener('click', () => cleanup(''));
-        input.addEventListener('keypress', (e) => {
+        input?.focus();
+
+        okBtn?.addEventListener('click', () => cleanup(input?.value.trim() ?? ''));
+        cancelBtn?.addEventListener('click', () => cleanup(''));
+        // `keydown`, NOT `keypress`: keypress does not fire for non-printing
+        // keys, so the Escape branch was unreachable and this modal overlay had
+        // no keyboard dismissal at all.
+        input?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') cleanup(input.value.trim());
-            if (e.key === 'Escape') cleanup('');
+            else if (e.key === 'Escape') cleanup('');
         });
     });
 }
