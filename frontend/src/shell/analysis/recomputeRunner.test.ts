@@ -22,7 +22,6 @@ import { AppState } from "../../state/AppState";
 import * as recomputeRunnerModule from "./recomputeRunner";
 import {
 	RECOMPUTE_THROTTLE_MS,
-	cancelActiveRecompute,
 	resetRecomputeThrottle,
 	scheduleRecompute,
 } from "./recomputeRunner";
@@ -85,7 +84,7 @@ describe("recomputeRunner", () => {
 	});
 
 	afterEach(() => {
-		cancelActiveRecompute("mode-switch");
+		resetRecomputeThrottle();
 		vi.useRealTimers();
 		vi.restoreAllMocks();
 		document.body.replaceChildren();

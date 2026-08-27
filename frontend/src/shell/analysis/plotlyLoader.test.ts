@@ -15,7 +15,24 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const BUNDLED_PLOTLY = { newPlot: () => {}, __bundled: true };
 
-vi.mock("plotly.js-basic-dist", () => ({ default: BUNDLED_PLOTLY }));
+/**
+ * Flipped by the retry test to make the chunk fetch fail.
+ *
+ * A GETTER rather than a throwing factory: `vi.mock` factories are evaluated
+ * once and cached by the module registry, so toggling a flag around them does
+ * nothing. The loader reads `module.default` inside its `.then`, so a getter
+ * that throws rejects exactly the promise under test, on every access.
+ */
+let chunkFails = false;
+
+vi.mock("plotly.js-basic-dist", () => ({
+	get default() {
+		if (chunkFails) {
+			throw new Error("Failed to fetch dynamically imported module");
+		}
+		return BUNDLED_PLOTLY;
+	},
+}));
 
 describe("waitForPlotly", () => {
 	beforeEach(async () => {
@@ -78,5 +95,23 @@ describe("waitForPlotly", () => {
 		const plotly = await waitForPlotly();
 
 		expect(plotly).toBe(preexisting);
+	});
+
+	/**
+	 * WR-02. The cached promise is what makes concurrent callers share one
+	 * chunk fetch, but caching a REJECTED one turned a transient failure into a
+	 * permanent one — a hashed chunk 404 after a redeploy, with the tab still
+	 * open, would fail every later Analyze until reload.
+	 */
+	it("retries after a failed chunk fetch instead of caching the rejection", async () => {
+		chunkFails = true;
+		const { waitForPlotly, resetPlotlyLoader } = await import("./plotlyLoader");
+		resetPlotlyLoader();
+
+		await expect(waitForPlotly()).rejects.toThrow();
+
+		// The next attempt must go back to the chunk, not replay the rejection.
+		chunkFails = false;
+		await expect(waitForPlotly()).resolves.toBe(BUNDLED_PLOTLY);
 	});
 });

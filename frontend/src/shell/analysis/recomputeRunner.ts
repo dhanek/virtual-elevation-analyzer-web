@@ -114,9 +114,17 @@ export function setRecomputeStatus(status: RecomputeStatus): void {
 	node.textContent = status === "handoff" ? HANDOFF_COPY : RUNNING_COPY;
 }
 
-export function cancelActiveRecompute(
-	_reason: "new-input" | "mode-switch",
-): void {
+/**
+ * Drop the pending request and disarm the throttle timer.
+ *
+ * NO `reason` PARAMETER. It took `"new-input" | "mode-switch"`, ignored it, and
+ * gave both callers identical behaviour — a union type documenting a
+ * distinction the function did not make. Not exported either: the only callers
+ * are `scheduleRecompute` and `resetRecomputeThrottle`, both in this file. If
+ * the two reasons should ever differ, the parameter comes back WITH the
+ * behaviour that makes it mean something.
+ */
+function cancelActiveRecompute(): void {
 	if (throttleTimer) {
 		clearTimeout(throttleTimer);
 		throttleTimer = null;
@@ -142,7 +150,7 @@ export function cancelActiveRecompute(
  *   READ THE NEXT PARAGRAPH BEFORE CHANGING EITHER THE GUARD OR THE DELAY. An
  *   earlier revision of this comment claimed "the timer is armed ONCE and NOT
  *   re-armed by later events". THAT IS NOT WHAT THE CODE DOES. Whenever a pass
- *   is running, `scheduleRecompute` calls `cancelActiveRecompute("new-input")`,
+ *   is running, `scheduleRecompute` calls `cancelActiveRecompute()`,
  *   which CLEARS `throttleTimer`; the `if (throttleTimer !== null) return`
  *   guard below then sees null and arms a fresh timer. A gps-lap cycle costs
  *   ~45-49 ms against a 20 ms interval (see the file header), so during a
@@ -168,7 +176,7 @@ export function scheduleRecompute(request: RecomputeRequest): void {
 
 	if (runningToken !== null) {
 		setRecomputeStatus("handoff");
-		cancelActiveRecompute("new-input");
+		cancelActiveRecompute();
 	}
 
 	pendingToken = token;
@@ -231,7 +239,7 @@ export function scheduleRecompute(request: RecomputeRequest): void {
  * before resetting if that matters to the test.
  */
 export function resetRecomputeThrottle(): void {
-	cancelActiveRecompute("mode-switch");
+	cancelActiveRecompute();
 	lastRunStartedAt = Number.NEGATIVE_INFINITY;
 }
 

@@ -44,11 +44,23 @@ export function waitForPlotly(): Promise<PlotlyHandle> {
 	}
 
 	if (!pending) {
-		pending = import("plotly.js-basic-dist").then((module) => {
-			const Plotly = module.default;
-			(window as unknown as Record<string, unknown>).Plotly = Plotly;
-			return Plotly;
-		});
+		pending = import("plotly.js-basic-dist")
+			.then((module) => {
+				const Plotly = module.default;
+				(window as unknown as Record<string, unknown>).Plotly = Plotly;
+				return Plotly;
+			})
+			.catch((error) => {
+				// A REJECTION IS NOT MEMOISED. Caching the promise is what makes
+				// concurrent callers share one chunk fetch, but caching a
+				// REJECTED one turns a transient failure into a permanent one:
+				// the common case for a static deploy is a hashed chunk 404
+				// after the site is redeployed while a tab is open, and every
+				// later Analyze would then fail with reload as the only
+				// recovery. Clearing the slot lets the next call retry.
+				pending = null;
+				throw error;
+			});
 	}
 
 	return pending;
