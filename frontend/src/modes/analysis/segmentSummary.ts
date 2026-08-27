@@ -69,12 +69,35 @@ export function buildFilteredDataFromProfiles(
 	timestamps: number[];
 	temperature: number[];
 } {
-	// Only `indices` is read off a profile, which is why the analyze path can
-	// share this writer without first constructing profiles it has no reason to
-	// build. See `buildFilteredDataFromIndexGroups`.
+	// THE TRIM WINDOW IS APPLIED HERE, and it has to be.
+	//
+	// `mapTrimToSegments` does NOT narrow `segment.range` — it spreads the range
+	// unchanged and adds a `trim` field (`standardSegments.ts:132`) — and
+	// `updateModeVEPlots.ts:218-224` builds `profile.indices` from `range`
+	// alone, because the calculator wants the FULL slice plus separate trim
+	// boundaries (`:257-258`). So `profile.indices` is the UNTRIMMED range, and
+	// walking it directly yields the whole selection.
+	//
+	// That mattered the moment `handleStoreResult` stopped slicing with the
+	// trim-slider values: the averages then covered samples the rider had
+	// explicitly trimmed off — their acceleration and roll-out — and persisted
+	// them to IndexedDB and the CSV export. Applying the window at this one
+	// concatenation is what makes `currentFilteredData` mean "the samples on
+	// screen" for every mode, which is the space Store Result now reads.
+	//
+	// `trim.start` / `trim.end` are LOCAL offsets into the segment
+	// (`standardSegments.ts:124-125`), so they index `profile.indices` directly.
 	return buildFilteredDataFromIndexGroups(
 		appState,
-		profiles.map((profile) => profile.indices),
+		profiles.map((profile) => {
+			const trim = profile.segment.trim;
+			if (!trim) {
+				return profile.indices;
+			}
+			const start = Math.max(0, trim.start);
+			const end = Math.min(trim.end, profile.indices.length - 1);
+			return profile.indices.slice(start, end + 1);
+		}),
 	);
 }
 

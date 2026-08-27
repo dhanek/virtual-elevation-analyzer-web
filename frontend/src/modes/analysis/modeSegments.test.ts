@@ -12,6 +12,7 @@ import type { DetectedLap, OutAndBackSection } from '../../utils/GpsLapDetection
 import { getAnalysisModeHandler } from './AnalysisModes';
 import { indicesToRanges } from './standardMode';
 import type { ModeAggregateStats, ResolvedUpdateInputs, SegmentVeProfile } from './types';
+import { buildFilteredDataFromProfiles } from './segmentSummary'
 
 const SAMPLE_COUNT = 40;
 
@@ -386,5 +387,77 @@ describe('standardMode update path vs live checkbox selection', () => {
         const selection = handler.prepareSelection(divergedState([1], [4]));
 
         expect(selection.selectedItems).toEqual([4]);
+    });
+});
+
+/**
+ * THE TRIM WINDOW MUST REACH `currentFilteredData`.
+ *
+ * `mapTrimToSegments` does NOT narrow `segment.range` — it spreads the range
+ * unchanged and adds a `trim` field (`standardSegments.ts:132`), and
+ * `updateModeVEPlots.ts:218-224` builds `profile.indices` from `range` alone
+ * because the calculator wants the full slice plus separate trim boundaries.
+ *
+ * So `profile.indices` is the UNTRIMMED range. A concatenation that walks it
+ * without applying `trim` produces the whole selection, and Store Result then
+ * averages power, speed and temperature over samples the rider explicitly
+ * trimmed off — their acceleration and roll-out — and persists that to
+ * IndexedDB and the CSV export.
+ */
+describe('buildFilteredDataFromProfiles honours the trim window', () => {
+    function appStateWithSamples(count: number): AppState {
+        const appState = new AppState();
+        appState.currentFitData = {
+            timestamps: Array.from({ length: count }, (_, i) => i),
+            power: Array.from({ length: count }, (_, i) => i * 10),
+            velocity: Array.from({ length: count }, (_, i) => i),
+            temperature: Array.from({ length: count }, () => 20),
+        } as any;
+        return appState;
+    }
+
+    function profileWithTrim(
+        startIdx: number,
+        endIdx: number,
+        trim: { start: number; end: number } | undefined,
+    ): any {
+        const indices: number[] = [];
+        for (let i = startIdx; i <= endIdx; i++) indices.push(i);
+        return { segment: { key: 's', label: 'Lap 1', range: { startIdx, endIdx }, trim }, indices };
+    }
+
+    it('emits only the trimmed samples of a segment', () => {
+        const appState = appStateWithSamples(100);
+        // Lap covers 0..99; the rider trimmed to the middle 20 samples.
+        const profiles = [profileWithTrim(0, 99, { start: 40, end: 59 })];
+
+        const filtered = buildFilteredDataFromProfiles(appState, profiles);
+
+        expect(filtered.power).toHaveLength(20);
+        expect(filtered.timestamps[0]).toBe(40);
+        expect(filtered.timestamps[19]).toBe(59);
+    });
+
+    it('emits the whole segment when no trim is set', () => {
+        const appState = appStateWithSamples(100);
+        const profiles = [profileWithTrim(0, 99, undefined)];
+
+        const filtered = buildFilteredDataFromProfiles(appState, profiles);
+
+        expect(filtered.power).toHaveLength(100);
+    });
+
+    it('applies each segment its own trim across a multi-lap selection', () => {
+        const appState = appStateWithSamples(100);
+        const profiles = [
+            profileWithTrim(0, 49, { start: 10, end: 19 }),
+            profileWithTrim(50, 99, { start: 0, end: 4 }),
+        ];
+
+        const filtered = buildFilteredDataFromProfiles(appState, profiles);
+
+        expect(filtered.power).toHaveLength(15);
+        expect(filtered.timestamps[0]).toBe(10);
+        expect(filtered.timestamps[10]).toBe(50);
     });
 });
