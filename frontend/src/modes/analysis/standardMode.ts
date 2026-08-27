@@ -127,9 +127,21 @@ export const standardMode: AnalysisModeHandler = {
 		const selection = this.prepareSelection(appState);
 		const timeRanges = selection.timeRanges ?? [];
 
+		// ALIGNED with `timeRanges`, which is derived from the FILTERED entries.
+		// `selection.selectedItems` is the RAW `appState.selectedLaps`, so a
+		// selected lap number with no entry in `currentLaps` (a stale selection
+		// after a file reload, or an off-by-one lap number) makes the two lists
+		// different lengths and shifts every later lap's number by one — into the
+		// segment `key`, the `label`, the VD header rows and the stored virtual
+		// distances. Apply the same filter here rather than indexing the
+		// unfiltered list by a filtered slot.
+		const alignedLapNumbers = selection.selectedItems.filter((lapNumber) =>
+			Boolean(appState.currentLaps[lapNumber - 1]),
+		);
+
 		const segments: ModeSegment[] = [];
 		timeRanges.forEach((timeRange, lapSlot) => {
-			const lapNumber = selection.selectedItems[lapSlot] ?? lapSlot + 1;
+			const lapNumber = alignedLapNumbers[lapSlot] ?? lapSlot + 1;
 			const lapIndices = collectSelectionIndices(
 				{ ...selection, indexRanges: null, timeRanges: [timeRange] },
 				normalized.timestamps,
