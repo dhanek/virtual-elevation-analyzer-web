@@ -26,6 +26,7 @@ import {
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
 import { resolveRhoArray } from "./rhoArrayResolver";
+import { waitForPlotly } from "./plotlyLoader";
 import { configureRecomputeRunner } from "./recomputeRunner";
 import { requestModeUpdate } from "./requestModeUpdate";
 import { configureParameterMerge } from "./parametersSync";
@@ -66,60 +67,6 @@ function getServices(deps: AnalyzeOrchestratorDependencies) {
 		hideLoading: deps.hideLoading,
 		showError: deps.showError,
 	};
-}
-
-// Helper function to dynamically load and wait for Plotly
-function waitForPlotly(): Promise<any> {
-	return new Promise((resolve, reject) => {
-		// Check if already loaded
-		if (typeof (window as any).Plotly !== "undefined") {
-			resolve((window as any).Plotly);
-			return;
-		}
-
-		// Load Plotly script dynamically
-		const script = document.createElement("script");
-		script.src = "https://cdn.plot.ly/plotly-basic-2.27.0.min.js"; // Use basic bundle (no eval required)
-		script.async = false;
-		// SUBRESOURCE INTEGRITY, not just CORS. `crossOrigin` alone buys nothing
-		// here: it only makes the response readable, it does not check it. A
-		// compromised or DNS-hijacked cdn.plot.ly would otherwise execute
-		// arbitrary script in this origin, with access to the IndexedDB stores
-		// (`ParameterStorage`, `ResultsStorage`) holding the user's ride data —
-		// which is the whole privacy claim of the app.
-		//
-		// SHA-384 of plotly-basic-2.27.0.min.js. Cross-checked against the
-		// `dist/plotly-basic.min.js` inside the plotly.js@2.27.0 npm tarball,
-		// which is a different origin with its own integrity chain — a hash
-		// taken from one fetch of the CDN would just pin whatever that fetch
-		// returned. The version is pinned, so the digest is stable.
-		//
-		// `crossOrigin` MUST stay: SRI is only enforced on a CORS-enabled
-		// response, and without it the browser refuses the script outright.
-		script.integrity =
-			"sha384-C21rxKmXDHRC0bKRfO4BhLiAheJB5GEbL2ohT8ER/IW4/oXhpHW1iygb4d6p7vsb";
-		script.crossOrigin = "anonymous";
-
-		script.onload = () => {
-			// Give it a moment to initialize
-			setTimeout(() => {
-				if (typeof (window as any).Plotly !== "undefined") {
-					resolve((window as any).Plotly);
-				} else {
-					log.error("Plotly script loaded but Plotly is not on window object");
-					reject(new Error("Plotly loaded but not available"));
-				}
-			}, 100);
-		};
-
-		script.onerror = (error) => {
-			log.error("Failed to load Plotly script:", error);
-			log.error("Network error or CSP blocking the script");
-			reject(new Error("Failed to load Plotly script from CDN"));
-		};
-
-		document.head.appendChild(script);
-	});
 }
 
 export function configureAnalyzeOrchestrator(
