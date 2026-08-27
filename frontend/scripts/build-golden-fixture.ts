@@ -983,6 +983,25 @@ function escapeHtml(value: string): string {
         .replace(/"/g, '&quot;')
 }
 
+/**
+ * An integer flag, REJECTED rather than coerced when it is not one.
+ *
+ * `Number('abc')` is NaN, and NaN propagates silently through the window
+ * placement: `chooseWindow` computes `Math.max(0, Math.min(NaN, ...))` = NaN and
+ * `slice(NaN, NaN + 1)` returns the WHOLE array, so `--window-start=abc`
+ * skipped the fragmenting step of the anonymisation and emitted the full ride
+ * with no warning. `--window` was validated against MIN_WINDOW/MAX_WINDOW;
+ * these two were not.
+ */
+function parseIndexFlag(raw: string | null, name: string, min: number): number | null {
+    if (raw === null) return null
+    const value = Number(raw)
+    if (!Number.isInteger(value) || value < min) {
+        throw new Error(`--${name} must be an integer >= ${min} (got "${raw}").`)
+    }
+    return value
+}
+
 function parseArgs(argv: string[]): Options {
     const args = argv[0] === '--' ? argv.slice(1) : argv
     const positional = args.filter(a => !a.startsWith('--'))
@@ -1048,8 +1067,8 @@ function parseArgs(argv: string[]): Options {
         fitPath: resolvePath(positional[0]),
         windowLength,
         windowLengthExplicit: windowRaw !== null,
-        windowStart: windowStartRaw === null ? null : Number(windowStartRaw),
-        windowStartLap: windowStartLapRaw === null ? null : Number(windowStartLapRaw),
+        windowStart: parseIndexFlag(windowStartRaw, 'window-start', 0),
+        windowStartLap: parseIndexFlag(windowStartLapRaw, 'window-start-lap', 1),
         windowLaps,
         outDir: flag('out-dir') ?? join(tmpdir(), 'golden-fixture-candidate'),
     }
