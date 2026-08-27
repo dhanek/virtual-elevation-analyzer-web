@@ -139,10 +139,26 @@ export function cancelActiveRecompute(
  *   before it had applied its own state, and a tab switch would recompute
  *   against the previously active tab. See the comment at the setTimeout.
  *
- *   THROTTLED — while events keep arriving, at most one run per interval. The
- *   timer is armed ONCE and NOT re-armed by later events; re-arming is exactly
- *   what made the previous implementation a resetting debounce that starved the
- *   drag completely.
+ *   THROTTLED — while events keep arriving, at most one run per interval.
+ *
+ *   READ THE NEXT PARAGRAPH BEFORE CHANGING EITHER THE GUARD OR THE DELAY. An
+ *   earlier revision of this comment claimed "the timer is armed ONCE and NOT
+ *   re-armed by later events". THAT IS NOT WHAT THE CODE DOES. Whenever a pass
+ *   is running, `scheduleRecompute` calls `cancelActiveRecompute("new-input")`,
+ *   which CLEARS `throttleTimer`; the `if (throttleTimer !== null) return`
+ *   guard below then sees null and arms a fresh timer. A gps-lap cycle costs
+ *   ~45-49 ms against a 20 ms interval (see the file header), so during a
+ *   sustained drag the runner is in the running state for most of the gesture
+ *   and the timer is in fact cleared and re-armed on essentially EVERY input
+ *   event.
+ *
+ *   What stops that from being the resetting debounce that starved the drag is
+ *   NOT the guard — it is the DELAY FORMULA. The re-armed delay is measured
+ *   from `lastRunStartedAt`, not from the event, so it can only shrink as time
+ *   passes and reaches 0 once the interval has elapsed. The window therefore
+ *   converges instead of receding. Anyone changing `sinceLastRun` /
+ *   `intervalElapsed` to a delay measured from the EVENT reintroduces the
+ *   starvation, and the guard will not save them.
  *
  *   TRAILING — the newest request always replaces the pending one, so whatever
  *   was armed runs with the LATEST values. Without this the plot would settle
@@ -161,8 +177,12 @@ export function scheduleRecompute(request: RecomputeRequest): void {
 	pendingRequest = request;
 
 	// Already armed: this newer request has just replaced the pending one above,
-	// and the armed timer will run it. Re-arming here would reset the window and
-	// turn the throttle back into a debounce.
+	// and the armed timer will run it.
+	//
+	// NOTE this is reached with `throttleTimer === null` on most events of a
+	// sustained drag, because the `cancelActiveRecompute` call above clears it
+	// whenever a pass is running. The re-arm that follows is bounded by the
+	// delay formula, not by this guard — see THROTTLED in the doc comment.
 	if (throttleTimer !== null) {
 		return;
 	}
@@ -203,6 +223,14 @@ export function scheduleRecompute(request: RecomputeRequest): void {
  * Test seam. The throttle carries state ACROSS calls by design — that is what
  * makes it a throttle — so a suite that drives it repeatedly needs to be able to
  * start from a known point.
+ *
+ * PARTIAL, and knowing it matters when reading a flaky suite: this clears the
+ * pending request and the armed timer, and rewinds `lastRunStartedAt`. It does
+ * NOT touch `runningToken`, `activeToken` or the `inFlight` chain, so a call
+ * made while a pass is queued or running does not actually return the runner to
+ * a known point — the queued pass still resolves against the old `activeToken`
+ * and the next scheduled pass still queues behind it. Await the in-flight work
+ * before resetting if that matters to the test.
  */
 export function resetRecomputeThrottle(): void {
 	cancelActiveRecompute("mode-switch");
