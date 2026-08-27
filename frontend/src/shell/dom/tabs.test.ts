@@ -1,10 +1,21 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { bindTabButtons, setTabRenderMap, setupTabSwitching } from './tabs'
 
 describe('setupTabSwitching', () => {
+    // WR-09. `currentRenderMap` is MODULE state and nothing reset it, so each
+    // case inherited the previous case's map. The worst of it was silent: the
+    // 'bound before any render map is set' case ran with `{ power }` still
+    // installed and clicked the power button, invoking the previous case's spy
+    // while asserting only on class toggling — it passed while testing the
+    // opposite of its title.
+    beforeEach(() => {
+        document.body.replaceChildren()
+        setTabRenderMap({})
+    })
+
     function createTabs(): { container: HTMLElement; buttons: HTMLElement[]; contents: HTMLElement[] } {
         const container = document.createElement('div')
 
@@ -164,6 +175,9 @@ describe('setupTabSwitching', () => {
 
         it('switches tabs when bound before any render map is set', () => {
             const { container, buttons, contents } = createTabs()
+            const shouldNotRender = vi.fn()
+            setTabRenderMap({ power: shouldNotRender })
+            setTabRenderMap({})
 
             bindTabButtons()
 
@@ -171,6 +185,8 @@ describe('setupTabSwitching', () => {
 
             expect(buttons[1].classList.contains('ve-tab-button--active')).toBe(true)
             expect(contents[1].classList.contains('ve-tab-content--active')).toBe(true)
+            // The title's actual claim: no map is installed, so nothing renders.
+            expect(shouldNotRender).not.toHaveBeenCalled()
 
             document.body.removeChild(container)
         })
