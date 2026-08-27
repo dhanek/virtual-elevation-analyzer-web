@@ -61,6 +61,7 @@ import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
+import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -580,6 +581,24 @@ export async function showOutAndBackVEPlot(
 	preservedWindSource: string | null = null,
 ) {
 	const { appState } = services;
+
+	// CR-01. THE PANEL AND THE ANALYSED SAMPLES GO ON SCREEN TOGETHER.
+	//
+	// `currentFilteredData` had no analyze-time writer for this mode: the only
+	// other one is `summarize`, which first runs when the user touches a
+	// control. So Analyze -> Store Result with nothing in between either
+	// refused ("no analysed samples"), or — if a Standard analysis had run
+	// earlier in the session — averaged THAT selection's power, speed and
+	// recording date while persisting this ride's result and sections.
+	//
+	// Seeded here rather than in `showOutAndBackVEAnalysis` because this is the
+	// entry point every path to a rendered out-and-back panel passes through,
+	// including a re-render from preserved profiles. Goes through
+	// `seedSegmentModeFilteredData` so the arrays are built by the same
+	// concatenation `summarize` uses — a second assembly would be one more
+	// writer of a field whose writers disagreeing was CR-02.
+	seedSegmentModeFilteredData(appState, outAndBackRanges(appState));
+
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
 	const showWindTab = hasWindSpeed || hasConstantWind;

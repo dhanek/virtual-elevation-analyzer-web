@@ -612,6 +612,61 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 		return seen;
 	}
 
+	/**
+	 * CR-01. THE INVARIANT IS ESTABLISHED BY ANALYZE, not by the first control
+	 * interaction.
+	 *
+	 * `currentFilteredData` had exactly one analyze-time writer
+	 * (`renderStandardVe.ts:265`) and it is Standard-only. The two segment modes
+	 * computed their profiles locally and painted them directly, so `summarize`
+	 * — the only other writer — first ran when the user touched a control.
+	 *
+	 * Analyze then Store Result, with nothing in between, therefore either
+	 * aborted with "no analysed samples. Please run analysis first" on a fresh
+	 * session, or silently averaged a PREVIOUS Standard analysis's samples while
+	 * persisting this ride's result and sections.
+	 *
+	 * Every other assertion in this block opens with `await drag(...)`, which is
+	 * precisely why the phase never caught it.
+	 */
+	it("seeds the analysed samples at analyze time, before any control is touched", async () => {
+		expect(appState.currentFilteredData).not.toBeNull();
+
+		const totalSamples = ride.sections.reduce(
+			(sum, section) =>
+				sum +
+				(section.outboundEndIdx - section.outboundStartIdx + 1) +
+				(section.inboundEndIdx - section.inboundStartIdx + 1),
+			0,
+		);
+		expect(appState.currentFilteredData!.power).toHaveLength(totalSamples);
+		expect(appState.currentFilteredData!.timestamps).toHaveLength(totalSamples);
+	});
+
+	/**
+	 * THE ANTI-DRIFT HALF OF CR-01, and the reason the seed goes through
+	 * `buildFilteredDataFromIndexGroups` rather than assembling its own arrays.
+	 *
+	 * A seed that produced DIFFERENT samples from the ones `summarize` writes on
+	 * the first recompute would be a fourth writer of this field in a fourth
+	 * index space — which is CR-02 all over again, and would show up as Store
+	 * Result reporting one average before the user touches a control and another
+	 * one after.
+	 */
+	it("seeds exactly the samples the first recompute goes on to write", async () => {
+		const seeded = {
+			power: [...appState.currentFilteredData!.power],
+			velocity: [...appState.currentFilteredData!.velocity],
+			timestamps: [...appState.currentFilteredData!.timestamps],
+		};
+
+		await drag("cdaSlider", DRAGGED_CDA);
+
+		expect(appState.currentFilteredData!.power).toEqual(seeded.power);
+		expect(appState.currentFilteredData!.velocity).toEqual(seeded.velocity);
+		expect(appState.currentFilteredData!.timestamps).toEqual(seeded.timestamps);
+	});
+
 	it("a CdA drag writes the on-screen result into AppState through the summarize seam", async () => {
 		expect(appState.currentVEResult).toBeNull();
 

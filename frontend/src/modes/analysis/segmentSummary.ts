@@ -69,6 +69,42 @@ export function buildFilteredDataFromProfiles(
 	timestamps: number[];
 	temperature: number[];
 } {
+	// Only `indices` is read off a profile, which is why the analyze path can
+	// share this writer without first constructing profiles it has no reason to
+	// build. See `buildFilteredDataFromIndexGroups`.
+	return buildFilteredDataFromIndexGroups(
+		appState,
+		profiles.map((profile) => profile.indices),
+	);
+}
+
+/**
+ * THE ONE PLACE the analysed sample arrays are concatenated, for both the
+ * analyze path and the update path (CR-01).
+ *
+ * `currentFilteredData` used to have three writers in different index spaces —
+ * that divergence was CR-02 — and only ONE of them ran at analyze time, and
+ * only for Standard. The two segment modes computed their profiles locally and
+ * painted them directly, so this array was first written when the user touched
+ * a control. Analyze then Store Result, with nothing in between, either refused
+ * or averaged the previous analysis's samples.
+ *
+ * Taking index GROUPS rather than profiles is what lets both callers share the
+ * implementation: the analyze path already holds `{startIdx, endIdx}` ranges for
+ * its laps or legs, and the update path holds profiles. Neither has to fabricate
+ * the other's shape, and there is no second concatenation to drift from this
+ * one.
+ */
+export function buildFilteredDataFromIndexGroups(
+	appState: AppState,
+	indexGroups: number[][],
+): {
+	power: number[];
+	velocity: number[];
+	timestamps: number[];
+	temperature: number[];
+} {
+	const profiles = indexGroups.map((indices) => ({ indices }));
 	const power: number[] = [];
 	const velocity: number[] = [];
 	const timestamps: number[] = [];
@@ -115,6 +151,49 @@ export function resolveRecordedWindSource(
 	resolved: "constant" | "fit" | "none",
 ): WindSource {
 	return requested === "compare" ? "compare" : resolved;
+}
+
+/**
+ * Establish `currentFilteredData` at ANALYZE time for a segment mode, from the
+ * index ranges the render already resolved (CR-01).
+ *
+ * The invariant this exists to make true: once a segment mode's panel is on
+ * screen, the analysed samples behind it are in AppState — so Store Result
+ * describes what the user is looking at whether or not they have touched a
+ * control yet.
+ *
+ * It goes through `buildFilteredDataFromIndexGroups`, the same concatenation
+ * `summarize` uses, rather than assembling the arrays here. That is the point:
+ * a second assembly would be a fourth writer of this field, and writers of this
+ * field disagreeing with each other is exactly what CR-02 was.
+ *
+ * Ranges are clamped to the activity length because a range is an inclusive
+ * `{startIdx, endIdx}` pair resolved from GPS geometry, and a trailing lap can
+ * name an index one past the last sample.
+ */
+export function seedSegmentModeFilteredData(
+	appState: AppState,
+	ranges: Array<{ startIdx: number; endIdx: number }>,
+): void {
+	const fitData = appState.currentFitData;
+	if (!fitData) {
+		return;
+	}
+
+	const sampleCount = getNormalizedActivityArrays(fitData).timestamps.length;
+	const indexGroups = ranges.map((range) => {
+		const indices: number[] = [];
+		const end = Math.min(range.endIdx, sampleCount - 1);
+		for (let i = Math.max(range.startIdx, 0); i <= end; i++) {
+			indices.push(i);
+		}
+		return indices;
+	});
+
+	appState.currentFilteredData = buildFilteredDataFromIndexGroups(
+		appState,
+		indexGroups,
+	);
 }
 
 /**

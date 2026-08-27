@@ -391,6 +391,28 @@ describe.each(MODES)(
 			resetModeUpdateRequests();
 		});
 
+		/**
+		 * CR-01, for BOTH segment modes through their real entry points.
+		 *
+		 * Neither mode had an analyze-time writer of `currentFilteredData` — the
+		 * only one is `renderStandardVe.ts:265`, which is Standard-only. So the
+		 * field was first written by `summarize`, on the first control
+		 * interaction, and Analyze -> Store Result with nothing in between
+		 * either refused ("no analysed samples") or averaged a previous Standard
+		 * analysis's power, speed and recording date while persisting THIS
+		 * ride's result.
+		 *
+		 * The `beforeEach` above renders and then clears the spies, so reaching
+		 * this assertion means the panel is up and NOTHING has been dragged.
+		 */
+		it("has the analysed samples in AppState before any control is touched", () => {
+			expect(appState.currentFilteredData).not.toBeNull();
+			expect(appState.currentFilteredData!.power.length).toBeGreaterThan(0);
+			expect(appState.currentFilteredData!.timestamps).toHaveLength(
+				appState.currentFilteredData!.power.length,
+			);
+		});
+
 		it("redraws the VE plot when the CdA slider is dragged", async () => {
 			await drag("cdaSlider", DRAGGED_CDA);
 

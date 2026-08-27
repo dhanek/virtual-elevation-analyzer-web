@@ -54,6 +54,7 @@ import {
 import type { GpsLapHeaderStats } from "./gpsLapPlots";
 import { createGpsLapUpdateCallbacks } from "./updateGpsLap";
 import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
+import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
@@ -304,6 +305,21 @@ export async function showGpsLapVEPlot(
 	preservedWindSource: string | null = null,
 ) {
 	const { appState } = services;
+
+	// CR-01. THE PANEL AND THE ANALYSED SAMPLES GO ON SCREEN TOGETHER.
+	//
+	// Identical to the seed in `showOutAndBackVEPlot`, and for the identical
+	// reason: this mode had no analyze-time writer of `currentFilteredData`, so
+	// the field was first written by `summarize` when the user touched a
+	// control. Analyze -> Store Result with nothing in between therefore either
+	// refused, or averaged a previous Standard analysis's samples while
+	// persisting this ride's laps.
+	//
+	// `resolveActiveGpsLapRanges` is the same resolver the update path measures
+	// its per-segment readouts over (`:442`), so the seeded samples are the ones
+	// the first recompute will reproduce.
+	seedSegmentModeFilteredData(appState, resolveActiveGpsLapRanges(appState));
+
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
 	const showWindTab = hasWindSpeed || hasConstantWind;
