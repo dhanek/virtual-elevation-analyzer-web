@@ -31,7 +31,7 @@
  */
 
 import { randomInt } from 'node:crypto'
-import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises'
+import { readFile, mkdir, mkdtemp, chmod, open, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
 
@@ -270,7 +270,96 @@ export interface Options {
      * the final lap in half.
      */
     windowLaps: { first: number; last: number } | null
-    outDir: string
+    /**
+     * NULL means "make me a fresh private directory" (WR-03), which is the
+     * default. It is not a path here because the default has to be created with
+     * `mkdtemp` — see `resolveOutDir`, and note that `parseArgs` is synchronous.
+     */
+    outDir: string | null
+}
+
+/**
+ * Where the run writes, and why the default is not a fixed path.
+ *
+ * The old default was `join(tmpdir(), 'golden-fixture-candidate')` — FIXED and
+ * GUESSABLE, under the SHARED system temp directory — created with
+ * `mkdir(dir, { recursive: true, mode: 0o700 })`. `mode` applies only to
+ * directories the call CREATES, and with `recursive: true` an existing
+ * `/tmp/golden-fixture-candidate` is a silent success whose mode is left
+ * untouched. Any local account could pre-create that path `0777` and read
+ * `golden-ride-anonymisation-key.json`, which carries `sourceCentroidLat` /
+ * `sourceCentroidLong` — the maintainer's home or training venue, and enough to
+ * undo the anonymisation of `golden-ride.json` completely.
+ *
+ * `mkdtemp` is the fix for the default: it creates a directory with a random
+ * suffix at mode 0700, and it fails rather than reusing anything. Nobody can
+ * pre-create a path they cannot predict.
+ *
+ * An EXPLICIT `--out-dir` is the user's own choice and may legitimately already
+ * exist, so it is only rejected when it is group- or world-writable — the
+ * property that makes pre-planting possible in the first place.
+ *
+ * Exported for the same reason `anonymise` and `buildReviewHtml` are: so the
+ * behaviour can be exercised without a .fit file.
+ */
+export async function resolveOutDir(requested: string | null): Promise<string> {
+    if (requested === null) {
+        return mkdtemp(join(tmpdir(), 'golden-fixture-'))
+    }
+
+    const existing = await stat(requested).catch(() => null)
+    if (existing) {
+        if (!existing.isDirectory()) {
+            throw new Error(`--out-dir=${requested} exists and is not a directory.`)
+        }
+        // 0o022 = group-write | other-write.
+        if ((existing.mode & 0o022) !== 0) {
+            throw new Error(
+                `--out-dir=${requested} is group- or world-writable (mode ` +
+                `${(existing.mode & 0o777).toString(8)}). The anonymisation key written ` +
+                'there would be exposed to every account that can write the directory. ' +
+                'Tighten it with `chmod 700`, or omit --out-dir to get a fresh private one.',
+            )
+        }
+        return requested
+    }
+
+    await mkdir(requested, { recursive: true, mode: 0o700 })
+    return requested
+}
+
+/**
+ * Create-exclusive write: refuses to write THROUGH an existing entry, and in
+ * particular through a SYMLINK (WR-03).
+ *
+ * `writeFile` follows symlinks. A pre-planted
+ * `golden-ride-anonymisation-key.json -> /home/attacker/loot` meant the centroid
+ * was written straight into an attacker-owned file, and the `chmod` that
+ * followed followed the link too — so it succeeded and left no trace. `'wx'` is
+ * `O_CREAT | O_EXCL`, which fails with EEXIST on a symlink rather than
+ * traversing it, so the file mode below is load-bearing again: this process is
+ * always the one that created the file.
+ *
+ * The `rm` keeps re-runs into the same `--out-dir` working. It unlinks the ENTRY
+ * (a symlink is removed, never its target), so the `open` that follows still
+ * creates the file itself. An entry re-planted in the gap between the two loses
+ * the race loudly, with EEXIST, instead of silently.
+ */
+export async function writeExclusive(
+    path: string,
+    contents: string,
+    mode: number,
+): Promise<void> {
+    await rm(path, { force: true })
+    const handle = await open(path, 'wx', mode)
+    try {
+        await handle.writeFile(contents, 'utf8')
+    } finally {
+        await handle.close()
+    }
+    // `mode` on `open` is masked by the process umask, so an unusual umask could
+    // still widen or narrow it. State the intent unconditionally.
+    await chmod(path, mode)
 }
 
 async function main(): Promise<void> {
@@ -307,18 +396,19 @@ async function main(): Promise<void> {
     // golden-ride.json completely" (its own WARNING string). At the default
     // umask that secret was world-readable to every local account, and it is
     // left on disk indefinitely — the script only prints a reminder.
-    await mkdir(options.outDir, { recursive: true, mode: 0o700 })
-    const jsonPath = join(options.outDir, 'golden-ride.json')
-    const htmlPath = join(options.outDir, 'golden-ride-review.html')
-    const keyPath = join(options.outDir, 'golden-ride-anonymisation-key.json')
+    //
+    // The directory is now UNPREDICTABLE by default and every write is
+    // CREATE-EXCLUSIVE, because neither half of that mitigation actually held on
+    // its own: `mkdir`'s `mode` does not tighten a directory that already exists,
+    // and `writeFile` follows symlinks. See `resolveOutDir` and `writeExclusive`.
+    const outDir = await resolveOutDir(options.outDir)
+    const jsonPath = join(outDir, 'golden-ride.json')
+    const htmlPath = join(outDir, 'golden-ride-review.html')
+    const keyPath = join(outDir, 'golden-ride-anonymisation-key.json')
 
-    await writeFile(jsonPath, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8')
-    await writeFile(htmlPath, buildReviewHtml(fixture), 'utf8')
-    await writeFile(keyPath, `${JSON.stringify(key, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-    // `mode` on writeFile is only honoured when the file is CREATED, so a key
-    // left over from a previous run at a looser mode would keep it. Tighten
-    // unconditionally.
-    await chmod(keyPath, 0o600)
+    await writeExclusive(jsonPath, `${JSON.stringify(fixture, null, 2)}\n`, 0o600)
+    await writeExclusive(htmlPath, buildReviewHtml(fixture), 0o600)
+    await writeExclusive(keyPath, `${JSON.stringify(key, null, 2)}\n`, 0o600)
 
     process.stdout.write('\nD-12 candidate fixture written to a SCRATCH path (not the repo):\n')
     process.stdout.write(`  candidate JSON : ${jsonPath}\n`)
@@ -1070,7 +1160,9 @@ function parseArgs(argv: string[]): Options {
         windowStart: parseIndexFlag(windowStartRaw, 'window-start', 0),
         windowStartLap: parseIndexFlag(windowStartLapRaw, 'window-start-lap', 1),
         windowLaps,
-        outDir: flag('out-dir') ?? join(tmpdir(), 'golden-fixture-candidate'),
+        // NULL, not a fixed path under `tmpdir()` (WR-03). `resolveOutDir` turns
+        // this into a fresh `mkdtemp` directory nobody can have pre-created.
+        outDir: flag('out-dir') ?? null,
     }
 }
 
@@ -1087,7 +1179,10 @@ const USAGE =
     '  (omit all three)        auto-score a window for lap-boundary + dropout coverage.\n' +
     '\n' +
     '  --window=<n>            window length, 1200-2000 (default 1600). Not with --window-laps.\n' +
-    '  --out-dir=<path>        scratch output dir\n' +
+    '  --out-dir=<path>        scratch output dir. Omit it and a fresh private (0700)\n' +
+    '                          directory is created under the system temp dir; a path\n' +
+    '                          given here is REJECTED if it is group- or world-writable,\n' +
+    '                          because the anonymisation key is written into it.\n' +
     '\n' +
     'The coordinate rotation, destination origin and altitude offset are drawn per run\n' +
     'from a CSPRNG and deliberately have no flags: they are withheld from the fixture, so\n' +
