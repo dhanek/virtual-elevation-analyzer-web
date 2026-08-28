@@ -31,6 +31,7 @@ import {
 	formatPower,
 } from "../dem/demHandlers";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
+import { clearModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -99,6 +100,13 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
 		}
 	}
 
+	// The VE panel belongs to the mode that rendered it, so a real mode change
+	// invalidates it (GPS-02 / v1.1 audit finding BL-1). BEFORE the re-render,
+	// so the panel is gone before Section 3 repaints.
+	if (previousMode !== mode) {
+		tearDownVeAnalysisPanel(deps.appState);
+	}
+
 	// Re-render Section 3 to show/hide GPS detection panels based on new mode
 	rerenderSection3();
 
@@ -114,6 +122,65 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
 	}
 
 	log.debug(`GPS analysis mode changed: ${previousMode} -> ${mode}`);
+}
+
+/**
+ * Invalidate the VE analysis panel after a real Section-3 mode change.
+ *
+ * GPS-02 / v1.1 audit finding BL-1. The panel on screen was rendered by ONE
+ * mode's renderer and its update callbacks were registered under that mode's
+ * id, but `resolveActiveModeHandler` (`requestModeUpdate.ts:180-186`) picks the
+ * handler fresh on every control event:
+ *
+ *     appState.isGpsLapModeActive ? gpsLap : getAnalysisModeHandler(getGpsAnalysisMode())
+ *
+ * Changing the dropdown moved that choice without moving the panel, and it
+ * broke in TWO different directions:
+ *
+ *  1. Standard or out-and-back analyzed, dropdown -> a GPS mode. The flag is
+ *     false, so the dropdown wins and the funnel points at a mode with no
+ *     registered callbacks: the sliders move and the plot never updates. With a
+ *     `gpsLap` factory left over from an earlier analyze — `FACTORIES` was never
+ *     cleared in production — it instead reached the primitive with zero
+ *     segments. Dead either way, but visibly so.
+ *
+ *  2. GPS-lap analyzed, dropdown -> None. The flag is STILL true (only
+ *     `gpsLapMode.syncState` sets it, and nothing here reset it), so the flag
+ *     branch short-circuits and the funnel kept RECOMPUTING against detections
+ *     this very function had just cleared. Silently wrong rather than visibly
+ *     dead, which is why `isGpsLapModeActive` is in the reset list below and why
+ *     making the dropdown authoritative would NOT have been a fix.
+ *
+ * Consistent with what this function already does to detections and map
+ * markers: the basis is gone, so the results computed from it go too. The user
+ * re-Analyzes.
+ */
+function tearDownVeAnalysisPanel(appState: AppState): void {
+	// The exact class the three render files remove to show the panel, and one
+	// of the two `isVeSectionVisible` (`requestModeUpdate.ts:73-78`) checks.
+	// `#veAnalysisContent.innerHTML` is deliberately left alone — the next
+	// render replaces it wholesale, and the stale controls it still holds are
+	// unreachable behind the visibility gate.
+	document.getElementById("veAnalysisSection")?.classList.add("hidden");
+
+	// First production caller. Stops a previous mode's renderer factory staying
+	// reachable for the life of the session.
+	clearModeUpdateCallbacks();
+
+	// Everything Store Result and Export read, so neither can persist a record
+	// describing an analysis whose basis no longer exists.
+	appState.isGpsLapModeActive = false;
+	appState.currentVEResult = null;
+	appState.currentFilteredData = null;
+	appState.currentAnalyzedLaps = [];
+	// null, not [] — the documented "coverage unknown" value (WR-01/WR-02).
+	appState.currentCoveredItems = null;
+	appState.currentWindSource = "none";
+	appState.currentVirtualDistances = [];
+	// Not read by Store Result, but the segment/overlay state every `syncState`
+	// already nulls; leaving it would keep a stale segment list alive.
+	appState.currentGpsLapIndexRanges = null;
+	appState.currentOverlayLapNumbers = null;
 }
 
 /**
