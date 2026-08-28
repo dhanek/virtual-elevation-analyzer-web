@@ -110,6 +110,7 @@ import type { ShellServices } from "./types";
 import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
 import { showVirtualElevationAnalysisInline } from "../ve/renderStandardVe";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
+import { resetRecomputeThrottle } from "./recomputeRunner";
 import { resetModeUpdateRequests } from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
@@ -379,6 +380,22 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	// FIRST, and before `useRealTimers` — this is cross-test state, not
+	// per-test cleanup.
+	//
+	// `scheduleRecompute` guards with `if (throttleTimer !== null) return` on a
+	// MODULE-LEVEL handle. A test that ends with a recompute still armed leaves
+	// that handle set, and `useRealTimers` then discards the fake timer it was
+	// scheduled on — so the callback that would have nulled it never runs. The
+	// NEXT test is then silently unable to arm its own recompute: it observes no
+	// recompute at all and its assertion fails for a reason that has nothing to
+	// do with what it tests. That is why several tests below drain with
+	// `settle()`; this hook makes the leak impossible rather than each test
+	// remembering to avoid it.
+	//
+	// Ordering matters: `resetRecomputeThrottle` clears the timeout, so it has
+	// to run while the fake timers it was scheduled on are still installed.
+	resetRecomputeThrottle();
 	vi.useRealTimers();
 	clearModeUpdateCallbacks();
 	resetModeUpdateRequests();
@@ -559,18 +576,20 @@ describe("standard: currentFilteredData after the analyze render (CR-01)", () =>
 	 * holding the reference is enough — the returned value is not mutated by the
 	 * pass that follows.
 	 *
-	 * The `settle()` is not decoration. `showVirtualElevationAnalysisInline`
-	 * leaves a recompute armed on a fake timer, and `scheduleRecompute`'s
-	 * `if (throttleTimer !== null) return` guard reads a MODULE-LEVEL handle: a
-	 * test that ends with one still armed leaves the next test unable to arm its
-	 * own, and that next test then silently observes no recompute at all.
+	 * `showVirtualElevationAnalysisInline` leaves a recompute armed on a fake
+	 * timer, which used to have to be drained here: `scheduleRecompute`'s
+	 * `if (throttleTimer !== null) return` guard reads a MODULE-LEVEL handle, so
+	 * a test that ends with one still armed left the NEXT test unable to arm its
+	 * own — and that test then silently observed no recompute at all. The
+	 * `afterEach` `resetRecomputeThrottle()` now clears the handle for every
+	 * test in the file, so no drain is needed here. Verified by removing the
+	 * hook: the clamp test below fails `expected 400 to be less than 400`.
 	 */
 	async function seedFromRender(): Promise<
 		NonNullable<AppState["currentFilteredData"]>
 	> {
 		await renderStitched();
 		const seeded = appState.currentFilteredData!;
-		await settle();
 		return seeded;
 	}
 
