@@ -31,7 +31,30 @@ export interface VEAnalysisResult {
 
 export interface SaveResultData {
     fileName: string;
+    /**
+     * WHAT THE USER SELECTED AND ANALYZED. One meaning, in all three modes.
+     *
+     * This column used to mean different things per mode (WR-02): Standard wrote
+     * the selection while narrowing everything computed alongside it, and the two
+     * segment modes wrote the SURVIVING items — so a 3-lap selection that lost
+     * lap 2 read `laps: [1,2,3]` in one mode and `laps: [3]` in the others, and a
+     * consumer of the results table or the CSV could not read the column
+     * consistently. It is the selection everywhere now; coverage is
+     * `lapsCovered`.
+     */
     laps: number[];
+    /**
+     * WHICH OF `laps` THE STORED NUMBERS ACTUALLY DESCRIBE.
+     *
+     * A segment can drop out — under `MIN_SEGMENT_SAMPLES`, or because its
+     * calculator threw — and when one does, `avgPower` / `avgSpeed` /
+     * `avgTemperature` / `result` cover only what survived. Without this column
+     * nothing in the row or the export says so.
+     *
+     * Optional, and absent (not equal to `laps`) when no `summarize` has run, so
+     * "coverage unknown" stays distinguishable from "covered everything".
+     */
+    lapsCovered?: number[];
     trimStart: number;
     trimEnd: number;
     cda: number;
@@ -63,6 +86,12 @@ export interface SaveResultData {
 export interface StoredVEResult {
     fileName: string;
     lapKey: string; // e.g., "1", "2", "1,2"
+    /**
+     * The `lapsCovered` subset, '-'-joined like `lapKey` so the two columns read
+     * alike. ABSENT on every record written before WR-02, and on any record whose
+     * caller ran no `summarize` — every read is guarded and yields an empty cell.
+     */
+    lapsCoveredKey?: string;
     trimStart: number;
     trimEnd: number;
     cda: number;
@@ -96,7 +125,11 @@ export interface StoredVEResult {
 }
 
 export const CSV_HEADERS = [
-    'RecordingDate', 'FileName', 'Laps', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
+    // `Laps` is what was SELECTED; `LapsCovered` is which of them the numbers in
+    // this row actually describe (WR-02). Empty when no segment was dropped is
+    // NOT the convention — empty means "unknown", i.e. a pre-WR-02 record or one
+    // stored before any recompute ran.
+    'RecordingDate', 'FileName', 'Laps', 'LapsCovered', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
     'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
     'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
     'R2', 'RMSE', 'VEGain', 'ActualGain',
@@ -168,6 +201,7 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
             result.recordingDate,
             result.fileName,
             result.lapKey,
+            result.lapsCoveredKey ?? '',
             result.trimStart,
             result.trimEnd,
             result.cda.toFixed(3),
@@ -338,6 +372,10 @@ export class ResultsStorage {
                     const migratedRecord: StoredVEResult = {
                         fileName: oldRecord.fileName || 'unknown.fit',
                         lapKey: oldRecord.lapKey || 'all',
+                        // Pre-WR-02 records carry no coverage. Carried through
+                        // rather than defaulted to `lapKey`, so a migrated record
+                        // stays honest about not knowing.
+                        lapsCoveredKey: oldRecord.lapsCoveredKey,
                         trimStart: oldRecord.trimStart ?? 0,
                         trimEnd: oldRecord.trimEnd ?? 0,
                         cda: oldRecord.cda ?? 0,
@@ -487,6 +525,10 @@ export class ResultsStorage {
         const storedResult: StoredVEResult = {
             fileName: data.fileName,
             lapKey: lapKey,
+            // UNDEFINED, not the full selection, when the caller supplies none:
+            // "coverage unknown" and "covered everything" are different claims,
+            // and only one of them is true of a record stored before a recompute.
+            lapsCoveredKey: data.lapsCovered ? data.lapsCovered.join('-') : undefined,
             trimStart: data.trimStart,
             trimEnd: data.trimEnd,
             cda: data.cda,

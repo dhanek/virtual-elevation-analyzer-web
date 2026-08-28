@@ -180,6 +180,43 @@ describe("records stored before entry (h) still load and export", () => {
 	});
 });
 
+/**
+ * WR-02: `Laps` and `LapsCovered` are two different facts, and the export says
+ * both.
+ *
+ * Before this, `laps` meant "what was selected" in Standard and "what survived"
+ * in the two GPS modes, so the same dropped lap produced `[1,2,3]` in one column
+ * and `[3]` in the other with nothing to distinguish them. A consumer of the
+ * results table could not read the column across modes.
+ */
+describe("the CSV separates the selection from what it covers (WR-02)", () => {
+	it("writes the covered subset alongside the selection", () => {
+		const cells = cellsOf(
+			generateCSVFromResults([
+				legacyRecord({ lapKey: "1-2-3", lapsCoveredKey: "1-3" }),
+			]),
+		);
+
+		expect(cells[headerIndex("Laps")]).toBe("1-2-3");
+		// Lap 2 dropped, so the row's averages describe laps 1 and 3 only — which
+		// the row now states rather than leaving to be inferred.
+		expect(cells[headerIndex("LapsCovered")]).toBe("1-3");
+	});
+
+	it("leaves the column EMPTY for a record that predates it", () => {
+		const old = legacyRecord();
+		expect(old.lapsCoveredKey).toBeUndefined();
+
+		const cells = cellsOf(generateCSVFromResults([old]));
+
+		// Empty means UNKNOWN, not "covered everything". Defaulting it to `lapKey`
+		// would put a claim in the file that the record never made.
+		expect(cells[headerIndex("LapsCovered")]).toBe("");
+		expect(cells[headerIndex("Laps")]).toBe("2-3");
+		expect(cells).toHaveLength(CSV_HEADERS.length);
+	});
+});
+
 describe("Store Result persists what was on screen", () => {
 	it("writes the per-segment virtual distances into the stored record", async () => {
 		const storage = new ResultsStorage();
@@ -225,6 +262,50 @@ describe("Store Result persists what was on screen", () => {
 			{ label: "Lap 2", airKm: 0.108, groundKm: 0.09, differencePercent: 20 },
 			{ label: "Lap 3", airKm: 0.126, groundKm: 0.09, differencePercent: 40 },
 		]);
+		// No `lapsCovered` was supplied, so none is claimed (WR-02).
+		expect(captured[0].lapsCoveredKey).toBeUndefined();
+	});
+
+	it("keys the covered subset separately from the selection (WR-02)", async () => {
+		const storage = new ResultsStorage();
+		const captured: Record<string, unknown>[] = [];
+		(storage as unknown as { db: unknown }).db = fakeDb(captured);
+
+		await storage.saveResult({
+			fileName: "ride.fit",
+			laps: [1, 2, 3],
+			// Lap 2 fell under MIN_SEGMENT_SAMPLES; the averages below cover 1
+			// and 3 only.
+			lapsCovered: [1, 3],
+			trimStart: 0,
+			trimEnd: 100,
+			cda: 0.25,
+			crr: 0.004,
+			windSource: "fit",
+			parameters: { system_mass: 80, rho: 1.225, eta: 0.97 } as never,
+			result: {
+				virtual_elevation: new Float64Array(0),
+				r2: 0.98,
+				rmse: 1.23,
+				ve_elevation_diff: 4,
+				actual_elevation_diff: 5,
+				virtual_distance_air: 0,
+				virtual_distance_ground: 0,
+				vd_difference_percent: 0,
+			},
+			timestamp: new Date("2026-08-04T10:00:00.000Z"),
+			recordingDate: "2026-08-04",
+			avgPower: 250,
+			avgSpeed: 36,
+			notes: "test",
+		} satisfies SaveResultData);
+
+		expect(captured).toHaveLength(1);
+		// The record is still KEYED on the selection — `[fileName, lapKey, notes]`
+		// is the composite primary key, so moving it would split one analysis
+		// into two rows the moment a lap dropped.
+		expect(captured[0].lapKey).toBe("1-2-3");
+		expect(captured[0].lapsCoveredKey).toBe("1-3");
 	});
 });
 

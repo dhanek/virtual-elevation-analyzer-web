@@ -279,7 +279,22 @@ export async function handleStoreResult(
 
         const saveData = {
             fileName: appState.selectedFile.name,
+            // WHAT THE USER SELECTED, in all three modes (WR-02). Standard used
+            // to write the selection while the two segment modes wrote whatever
+            // survived, so the same drop produced `laps: [1,2,3]` here and
+            // `laps: [3]` there — one column, two meanings, and nothing saying
+            // which. It is the selection everywhere now.
             laps: appState.currentAnalyzedLaps,
+            // WHICH OF THEM THE NUMBERS IN THIS ROW DESCRIBE. `avgPower`,
+            // `avgSpeed`, `avgTemperature`, `result` and `virtualDistances` all
+            // come from the SURVIVING profiles, so a dropped lap silently
+            // narrowed them with no column to say so.
+            //
+            // `?? undefined`, never `?? appState.currentAnalyzedLaps`: before the
+            // first recompute the coverage is genuinely unknown, and claiming
+            // full coverage there would be exactly the fabrication this column
+            // exists to prevent.
+            lapsCovered: appState.currentCoveredItems ?? undefined,
             trimStart: trimStart,
             trimEnd: trimEnd,
             cda: cda,

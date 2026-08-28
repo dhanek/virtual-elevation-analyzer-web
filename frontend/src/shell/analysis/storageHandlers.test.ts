@@ -303,6 +303,54 @@ describe("handleStoreResult trim window", () => {
 		expect(saved[0].trimStart).toBe(700);
 		expect(saved[0].trimEnd).toBe(1000);
 	});
+
+	/**
+	 * WR-02. The scenario the fixture above already documents — a 3-lap selection
+	 * narrowed onto lap 3 — used to persist `laps: [1,2,3]` with an `avgPower`
+	 * over lap 3 alone, and nothing in the row or the CSV said which laps the
+	 * averages covered. In the two GPS modes the SAME drop produced `laps: [3]`
+	 * instead, so the column could not be read across modes at all.
+	 */
+	it("records the selection and the coverage as two separate facts", async () => {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "700");
+		addInput("trimEndSlider", "1000");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+
+		const appState = makeTrimmedStandardState();
+		// What `summarize` reports once laps 1 and 2 have left `profiles`.
+		appState.currentCoveredItems = [3];
+
+		const saved: Record<string, unknown>[] = [];
+		await storeWithNotes(appState, makeResultsStorageStub(saved));
+
+		expect(saved[0].laps).toEqual([1, 2, 3]);
+		expect(saved[0].lapsCovered).toEqual([3]);
+	});
+
+	it("claims NO coverage when no recompute has run", async () => {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "0");
+		addInput("trimEndSlider", "299");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+
+		const appState = makeTrimmedStandardState();
+		appState.currentCoveredItems = null;
+
+		const saved: Record<string, unknown>[] = [];
+		await storeWithNotes(appState, makeResultsStorageStub(saved));
+
+		expect(saved[0].laps).toEqual([1, 2, 3]);
+		// UNDEFINED, not `[1,2,3]`: "covered everything" is a claim this record
+		// cannot make, and defaulting to the selection would make it anyway.
+		expect(saved[0].lapsCovered).toBeUndefined();
+	});
 });
 
 /**
