@@ -189,8 +189,16 @@ export function createGpsLapUpdateCallbacks(
 				const first = profile.indices[0];
 				const last = profile.indices[profile.indices.length - 1];
 				return {
-					// The samples this profile actually consumed (WR-03).
-					range: { startIdx: first, endIdx: last },
+					// NOT COMPUTED ON THIS PATH (WR-04). `range` exists for the
+					// analyze-time seed of `currentFilteredData`
+					// (`renderGpsLap.ts:327`) and has no reader here — the update
+					// path's own seed comes from `summarize`, off the profiles
+					// themselves. The derivation that used to sit here was the same
+					// dead surface this phase deleted for `RecomputeMode`,
+					// `AppState.recomputeStatus` and `cancelActiveRecompute`'s
+					// parameter, and it was unguarded where `duration` below is
+					// guarded.
+					range: null,
 					// The handler labels from the same lookup; relabelling here
 					// keeps the summary table and the stored result agreeing.
 					//

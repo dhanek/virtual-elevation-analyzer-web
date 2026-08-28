@@ -59,10 +59,13 @@ function toOutAndBackProfiles(
 
 		result.push({
 			sectionNumber: section.sectionNumber,
-			// The samples each leg actually consumed, null when it produced
-			// nothing — the seed of currentFilteredData must match (WR-03).
-			outboundRange: profileRange(outbound),
-			inboundRange: profileRange(inbound),
+			// NOT COMPUTED ON THIS PATH (WR-04). The two range fields exist for
+			// the analyze-time seed of `currentFilteredData`
+			// (`renderOutAndBack.ts:613-621`) and have no reader here — the update
+			// path's own seed comes from `summarize`, off the profiles themselves.
+			// The `profileRange` helper that used to fill them in was dead surface.
+			outboundRange: null,
+			inboundRange: null,
 			outboundDistances: outbound?.distancesKm ?? [],
 			outboundVE: outbound?.virtualElevation ?? [],
 			// Carried straight through from the primitive, PER LEG: non-null iff
@@ -226,18 +229,5 @@ export function createOutAndBackUpdateCallbacks(
 				compareMarker.textContent = compare ? " (FIT / Constant)" : "";
 			}
 		},
-	};
-}
-
-/** The full-activity range a primitive profile consumed, or null if it has none. */
-function profileRange(
-	profile: { indices: number[] } | undefined,
-): { startIdx: number; endIdx: number } | null {
-	if (!profile || profile.indices.length === 0) {
-		return null;
-	}
-	return {
-		startIdx: profile.indices[0],
-		endIdx: profile.indices[profile.indices.length - 1],
 	};
 }

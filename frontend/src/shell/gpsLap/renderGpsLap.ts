@@ -324,7 +324,12 @@ export async function showGpsLapVEPlot(
 	// the first recompute will reproduce.
 	seedSegmentModeFilteredData(
 		appState,
-		lapProfiles.map((profile) => profile.range),
+		lapProfiles
+			.map((profile) => profile.range)
+			.filter(
+				(range): range is { startIdx: number; endIdx: number } =>
+					range !== null,
+			),
 	);
 
 	const selectedWindSource =
