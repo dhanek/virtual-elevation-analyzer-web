@@ -610,6 +610,13 @@ export async function showOutAndBackVEPlot(
 	// `seedSegmentModeFilteredData` so the arrays are built by the same
 	// concatenation `summarize` uses — a second assembly would be one more
 	// writer of a field whose writers disagreeing was CR-02.
+	//
+	// The seed covers the LEGS THAT PRODUCED OUTPUT, not the selected sections
+	// (WR-03/WR-06). Either leg of a section can come back null — its calculator
+	// threw (`:223`, `:289`) — and a section keeps its place in the profile list
+	// as long as ONE leg survived. Ranging over the sections would therefore seed
+	// samples no plotted leg describes, which is why the filter below is on the
+	// per-leg ranges rather than on `resolveActiveOutAndBackSections`.
 	seedSegmentModeFilteredData(
 		appState,
 		profiles.flatMap((profile) =>

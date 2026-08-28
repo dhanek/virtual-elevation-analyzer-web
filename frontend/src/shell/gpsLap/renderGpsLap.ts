@@ -319,9 +319,17 @@ export async function showGpsLapVEPlot(
 	// refused, or averaged a previous Standard analysis's samples while
 	// persisting this ride's laps.
 	//
-	// `resolveActiveGpsLapRanges` is the same resolver the update path measures
-	// its per-segment readouts over (`:442`), so the seeded samples are the ones
-	// the first recompute will reproduce.
+	// Seeded from the SURVIVING profiles, NOT from `resolveActiveGpsLapRanges`
+	// (WR-03). The analyze pass above skips a lap under 10 samples (`:181-186`)
+	// and one whose calculator threw (`:255-257`), so the active-range list is a
+	// SUPERSET of what is on any plot — seeding from it put samples into
+	// `currentFilteredData` that no rendered profile describes. `profile.range`
+	// is what this lap was actually computed over.
+	//
+	// (This comment used to name `resolveActiveGpsLapRanges` and assert that the
+	// seed matches what the first recompute reproduces. That claim is what WR-03
+	// refuted, and it outlived the code it justified. `gpsModeRealChain.test.ts`
+	// and `outAndBackFixtureChain.test.ts` now hold the corrected property.)
 	seedSegmentModeFilteredData(
 		appState,
 		lapProfiles
