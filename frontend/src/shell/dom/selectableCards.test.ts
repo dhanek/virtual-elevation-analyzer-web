@@ -18,7 +18,7 @@ describe('renderSelectableCards', () => {
         ]
         const result = renderSelectableCards(items, 'gps-lap-checkbox')
 
-        expect(result).toContain('class="lap-checkbox-item selected"')
+        expect(result).toContain('class="lap-checkbox-item lap-checkbox-item--selected"')
         expect(result).toContain('data-gps-lap="1"')
         expect(result).toContain('class="gps-lap-checkbox"')
         expect(result).toContain('id="gps-lap-1"')
@@ -34,7 +34,7 @@ describe('renderSelectableCards', () => {
         const result = renderSelectableCards(items, 'oab-section-checkbox')
 
         expect(result).toContain('class="lap-checkbox-item"')
-        expect(result).not.toContain('class="lap-checkbox-item selected"')
+        expect(result).not.toContain('class="lap-checkbox-item lap-checkbox-item--selected"')
         expect(result).not.toContain('checked>')
         expect(result).toContain('data-oab-section="2"')
     })
@@ -119,12 +119,12 @@ describe('bindSelectableCardEvents', () => {
 
         const checkbox = container.querySelector('#item-1') as HTMLInputElement
         const cardItem = container.querySelector('.lap-checkbox-item') as HTMLElement
-        expect(cardItem.classList.contains('selected')).toBe(true)
+        expect(cardItem.classList.contains('lap-checkbox-item--selected')).toBe(true)
 
         checkbox.checked = false
         checkbox.dispatchEvent(new Event('change'))
 
-        expect(cardItem.classList.contains('selected')).toBe(false)
+        expect(cardItem.classList.contains('lap-checkbox-item--selected')).toBe(false)
         document.body.removeChild(container)
     })
 })

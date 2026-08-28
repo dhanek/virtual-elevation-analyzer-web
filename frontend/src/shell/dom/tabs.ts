@@ -21,20 +21,27 @@ let currentRenderMap: TabRenderMap = {}
 // so rebuilt panels get freshly bound while in-place recomputes do not.
 const boundButtons = new WeakSet<Element>()
 
-function handleTabClick(e: Event): void {
-    const target = e.currentTarget as HTMLElement
-    const tabName = target.getAttribute('data-tab')
-    if (!tabName) return
-
+/**
+ * Make one tab the active one, exactly as a click on its button would.
+ *
+ * Exported because a click is no longer the only way a tab becomes active.
+ * `syncFitWindControlsVisibility` hides the VD tab when the wind source is
+ * constant, and `.ve-tab-content--active` and `[hidden]` are different axes —
+ * a hidden pane that is still the active one leaves the panel showing nothing
+ * at all. The guard needs to move the user, and it must move them the same way
+ * a click does, render callback included, or the tab it moves them to would be
+ * active-but-undrawn.
+ */
+export function activateTab(tabName: string): void {
     // Update button active states (re-query in case the DOM changed)
-    document.querySelectorAll('.ve-tab-button').forEach(b => b.classList.remove('active'))
-    target.classList.add('active')
+    document.querySelectorAll('.ve-tab-button').forEach(b => b.classList.remove('ve-tab-button--active'))
+    document.querySelector(`.ve-tab-button[data-tab="${tabName}"]`)?.classList.add('ve-tab-button--active')
 
     // Update tab content active states
     document.querySelectorAll('.ve-tab-content').forEach(content => {
-        content.classList.remove('active')
+        content.classList.remove('ve-tab-content--active')
     })
-    document.getElementById(`${tabName}-tab`)?.classList.add('active')
+    document.getElementById(`${tabName}-tab`)?.classList.add('ve-tab-content--active')
 
     const showWindTab = !!document.getElementById('wind-tab')
     const showVdTab = !!document.getElementById('vd-tab')
@@ -55,25 +62,82 @@ function handleTabClick(e: Event): void {
     }
 }
 
-/**
- * Set up VE tab switching for the standard analysis panel.
- * Finds all .ve-tab-button elements and .ve-tab-content elements,
- * and wires click handlers that toggle active classes and invoke
- * optional render callbacks from the renderMap.
- *
- * Idempotent: each button is bound exactly once, and repeated calls only swap in
- * the latest renderMap. This lets the GPS-lap recompute path refresh its tab
- * callbacks on every slider update without leaking click handlers.
- *
- * This replaces setupGpsLapTabSwitching, setupOutAndBackTabSwitching,
- * and the inline tab block in the standard VE render path.
- */
-export function setupTabSwitching(renderMap: TabRenderMap = {}): void {
-    currentRenderMap = renderMap
+function handleTabClick(e: Event): void {
+    const target = e.currentTarget as HTMLElement
+    const tabName = target.getAttribute('data-tab')
+    if (!tabName) return
+    activateTab(tabName)
+}
 
+/**
+ * Bind the click handler to every tab button that does not already have one.
+ *
+ * SEPARATE FROM THE RENDER MAP, and that separation is the whole point (WR-13).
+ * These were one function, so a caller that only wanted the buttons live had to
+ * call `setupTabSwitching()` with no argument — which defaulted `renderMap` to
+ * `{}` and WIPED whatever map was installed. `renderStandardVe` did exactly
+ * that, and only escaped it because `scheduleRecompute` defers to a macrotask
+ * so the real map landed afterwards. On any path where the scheduled pass never
+ * reached `renderVe`, Wind/Power/VD were dead for the panel's lifetime.
+ *
+ * Idempotent: a button is bound exactly once. Safe to call on every render.
+ */
+export function bindTabButtons(): void {
     document.querySelectorAll('.ve-tab-button').forEach(button => {
         if (boundButtons.has(button)) return
         boundButtons.add(button)
         button.addEventListener('click', handleTabClick)
     })
+}
+
+/**
+ * Install the callbacks the next tab activation renders through.
+ *
+ * Replaces the map wholesale rather than merging: only one VE panel is live at
+ * a time, and merging would leak a previous mode's callbacks into it — a
+ * GPS-lap `vd` renderer surviving into a fresh Standard panel would draw the
+ * wrong thing rather than nothing.
+ */
+export function setTabRenderMap(renderMap: TabRenderMap = {}): void {
+    currentRenderMap = renderMap
+}
+
+/**
+ * Drop the render map because the panel it belonged to is being replaced.
+ *
+ * CALL THIS WHERE THE PANEL MARKUP IS REBUILT, next to the
+ * `veAnalysisContent.innerHTML = ...` assignment — not near the recompute.
+ *
+ * The map's callbacks close over a specific `profiles` array
+ * (`bindStandardSliders.ts:241`) and draw into element ids that every panel
+ * reuses. Once the markup is replaced they describe data the user is no longer
+ * looking at, so leaving them installed means Wind/Power/VD render the PREVIOUS
+ * selection into the new panel whenever the first scheduled pass does not reach
+ * `renderVe` — every segment under MIN_SEGMENT_SAMPLES, every calculator
+ * throwing, a trim window at its clamp.
+ *
+ * Same effect as `setTabRenderMap({})`, named separately because the call site
+ * is a lifecycle boundary rather than an installation: a reader at the
+ * `innerHTML` line should not have to work out why an empty map is being
+ * installed there.
+ */
+export function resetTabRenderMapForNewPanel(): void {
+    currentRenderMap = {}
+}
+
+/**
+ * Set up VE tab switching for the standard analysis panel: bind the buttons and
+ * install the render map in one call.
+ *
+ * Retained because the recompute paths legitimately want both on every pass —
+ * they rebuild the panel and hand over fresh callbacks together. A caller that
+ * wants ONLY the buttons must use `bindTabButtons`; calling this one bare still
+ * resets the map to `{}`, which is what WR-13 was about.
+ *
+ * This replaces setupGpsLapTabSwitching, setupOutAndBackTabSwitching,
+ * and the inline tab block in the standard VE render path.
+ */
+export function setupTabSwitching(renderMap: TabRenderMap = {}): void {
+    setTabRenderMap(renderMap)
+    bindTabButtons()
 }

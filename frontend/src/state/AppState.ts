@@ -7,6 +7,7 @@ import type {
 } from "../utils/GpsLapDetection";
 import type { DEMSourceResult } from "../utils/MultiDEMManager";
 import type { DEMSourceType } from "../utils/RemoteDEMConfig";
+import type { SegmentVirtualDistance } from "../analysis/VirtualDistance";
 import type { VEAnalysisResult } from "../utils/ResultsStorage";
 import type {
 	ElevationDisplayProfile,
@@ -149,7 +150,6 @@ export interface ActivityState {
 	currentFitResult: ActivityResult | null;
 	currentLaps: ActivityLapLike[];
 	currentCdaReference: number[] | null;
-	currentRhoArray: number[] | null;
 }
 
 export interface SelectionState {
@@ -158,7 +158,30 @@ export interface SelectionState {
 	filteredVEData: FilteredVEData | null;
 	presetTrimStart: number;
 	presetTrimEnd: number | null;
+	/**
+	 * WHAT THE USER SELECTED AND PRESSED ANALYZE ON. A PERSISTENCE KEY.
+	 *
+	 * `saveLapSettings` / `loadLapSettings` are keyed on this array, so it must
+	 * NOT move after analyze. `writeSegmentModeResultState` used to overwrite it
+	 * with the SURVIVING items (WR-01): drop one lap — under
+	 * `MIN_SEGMENT_SAMPLES`, or a calculator that threw — and the first slider
+	 * move re-keyed the tuned CdA/Crr from `[1,2,3,4]` to `[1,2,4]`, a key
+	 * `resolveMultiSegmentAnalysisParams` never asks for again. Re-analyzing the
+	 * same selection then came back with the defaults.
+	 *
+	 * Coverage lives on `currentCoveredItems` instead.
+	 */
 	currentAnalyzedLaps: number[];
+	/**
+	 * WHAT THE ANALYSED NUMBERS ACTUALLY DESCRIBE — the subset of
+	 * `currentAnalyzedLaps` that produced a rendered segment (WR-01/WR-02).
+	 *
+	 * Null until a `summarize` has run, and reset to null at analyze time so a
+	 * previous analysis's coverage cannot leak onto a new selection. All three
+	 * modes write it, so the stored `lapsCovered` column means the same thing in
+	 * every one of them.
+	 */
+	currentCoveredItems: number[] | null;
 	currentFilteredData: FilteredAnalysisData | null;
 	currentGpsLapIndexRanges: LapIndexRange[] | null;
 	/**
@@ -175,9 +198,20 @@ export interface SelectionState {
 export interface AnalysisState {
 	currentParameters: AnalysisParameters | null;
 	currentVEResult: VEAnalysisResult | null;
+	/**
+	 * One virtual distance per independently-integrated segment, in analysis
+	 * order — what the VD header shows and what Store Result / Export CSV now
+	 * persist (change-list entry (h)).
+	 *
+	 * It is a separate field rather than a field of `currentVEResult` because
+	 * that object is sometimes the raw wasm-bindgen `VEResult` (single-segment
+	 * Standard), whose properties live on a prototype and cannot be extended
+	 * without losing them. It is written by the same `summarize` seam that
+	 * writes `currentVEResult`, for every mode.
+	 */
+	currentVirtualDistances: SegmentVirtualDistance[];
 	currentWindSource: WindSource;
 	airSpeedCalibrationPercent: number;
-	recomputeStatus: "idle" | "running" | "handoff";
 	isCalculatingAutoRho: boolean;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
@@ -226,7 +260,6 @@ export class AppState {
 		currentFitResult: null,
 		currentLaps: [],
 		currentCdaReference: null,
-		currentRhoArray: null,
 	};
 
 	readonly selection: SelectionState = {
@@ -236,6 +269,7 @@ export class AppState {
 		presetTrimStart: 0,
 		presetTrimEnd: null,
 		currentAnalyzedLaps: [],
+		currentCoveredItems: null,
 		currentFilteredData: null,
 		currentGpsLapIndexRanges: null,
 		currentOverlayLapNumbers: null,
@@ -247,9 +281,9 @@ export class AppState {
 	readonly analysis: AnalysisState = {
 		currentParameters: null,
 		currentVEResult: null,
+		currentVirtualDistances: [],
 		currentWindSource: "none",
 		airSpeedCalibrationPercent: 0,
-		recomputeStatus: "idle",
 		isCalculatingAutoRho: false,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
@@ -355,14 +389,6 @@ export class AppState {
 		this.activity.currentCdaReference = cdaReference;
 	}
 
-	get currentRhoArray(): number[] | null {
-		return this.activity.currentRhoArray;
-	}
-
-	set currentRhoArray(rhoArray: number[] | null) {
-		this.activity.currentRhoArray = rhoArray;
-	}
-
 	get filteredLapData(): FilteredLapData | null {
 		return this.selection.filteredLapData;
 	}
@@ -443,6 +469,14 @@ export class AppState {
 		this.analysis.currentVEResult = result;
 	}
 
+	get currentVirtualDistances(): SegmentVirtualDistance[] {
+		return this.analysis.currentVirtualDistances;
+	}
+
+	set currentVirtualDistances(distances: SegmentVirtualDistance[]) {
+		this.analysis.currentVirtualDistances = distances;
+	}
+
 	get currentWindSource(): WindSource {
 		return this.analysis.currentWindSource;
 	}
@@ -451,20 +485,20 @@ export class AppState {
 		this.analysis.currentWindSource = windSource;
 	}
 
-	get recomputeStatus(): "idle" | "running" | "handoff" {
-		return this.analysis.recomputeStatus;
-	}
-
-	set recomputeStatus(status: "idle" | "running" | "handoff") {
-		this.analysis.recomputeStatus = status;
-	}
-
 	get currentAnalyzedLaps(): number[] {
 		return this.selection.currentAnalyzedLaps;
 	}
 
 	set currentAnalyzedLaps(analyzedLaps: number[]) {
 		this.selection.currentAnalyzedLaps = analyzedLaps;
+	}
+
+	get currentCoveredItems(): number[] | null {
+		return this.selection.currentCoveredItems;
+	}
+
+	set currentCoveredItems(coveredItems: number[] | null) {
+		this.selection.currentCoveredItems = coveredItems;
 	}
 
 	get currentFilteredData(): FilteredAnalysisData | null {

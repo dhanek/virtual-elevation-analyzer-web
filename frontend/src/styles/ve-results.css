@@ -1,0 +1,592 @@
+/* Shared action buttons — single canonical definition (05-08 audit).
+   Consolidated from the former duplicate sets in analysis-params.css and
+   this file; each declaration is the value that won the pre-consolidation
+   cascade (flex/font-size/letter-spacing and the :disabled +
+   :hover:not(:disabled) rules survived from analysis-params.css, the rest
+   from the later ve-results.css set). */
+.primary-btn {
+	flex: 1;
+	background: var(--color-primary);
+	color: white;
+	border: none;
+	padding: var(--space-md) var(--space-xl);
+	border-radius: 6px;
+	font-size: clamp(1rem, 1.8vw, 1.125rem);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	cursor: pointer;
+	transition: background 0.3s ease;
+}
+
+.primary-btn:hover:not(:disabled) {
+	background: #2952cc;
+}
+
+.primary-btn:disabled {
+	background: #e5e5e5;
+	color: #9ca3af;
+	cursor: not-allowed;
+}
+
+.secondary-btn {
+	background: var(--color-border);
+	color: var(--color-text-secondary);
+	border: none;
+	padding: var(--space-md) var(--space-xl);
+	border-radius: 6px;
+	font-size: clamp(1rem, 1.8vw, 1.125rem);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	cursor: pointer;
+	transition: background 0.3s ease;
+}
+
+.secondary-btn:hover {
+	background: #cbd5e0;
+}
+
+/* Virtual Elevation Analysis Styles */
+.ve-inline-container {
+	width: 100%;
+	position: static;
+	display: block;
+}
+
+.ve-control-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 0; /* Remove gap, use margin on control-group instead */
+	margin-bottom: var(--space-xl);
+}
+
+/* Consolidated with the former duplicate "VE Results" rules (05-08 audit):
+   flex: 1, the h4 underline, and padding-bottom survived from the earlier
+   set because the later set never overrode them. */
+.ve-controls {
+	background: var(--color-surface-alt);
+	padding: var(--space-xl);
+	border-radius: var(--radius-md);
+	border: 1px solid #e9ecef;
+	flex: 1;
+}
+
+.ve-controls h4 {
+	margin: 0 0 var(--space-lg) 0;
+	color: var(--color-text);
+	font-size: 1.1rem;
+	border-bottom: 2px solid var(--color-primary);
+	padding-bottom: var(--space-sm);
+}
+
+.ve-elevation-profile-cycle,
+.ve-elevation-profile-switch {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-sm);
+	margin-bottom: var(--space-lg);
+	padding: var(--space-md);
+	background: #fff;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+}
+
+.ve-elevation-profile-cycle label,
+.ve-elevation-profile-switch label {
+	font-size: 0.9rem;
+	font-weight: 500;
+}
+
+.ve-control-group {
+	margin-bottom: 1.25rem;
+}
+
+.ve-control-group:last-child {
+	margin-bottom: 0;
+}
+
+.ve-control-group label {
+	display: block;
+	margin-bottom: var(--space-sm);
+	font-weight: 500;
+	color: var(--color-text-heading);
+	font-size: 0.9rem;
+}
+
+.ve-slider {
+	width: 100%;
+	margin-bottom: var(--space-xs);
+	accent-color: var(--color-primary);
+}
+
+.ve-control-group span {
+	font-family: monospace;
+	font-size: 0.9rem;
+	color: var(--color-text-secondary);
+	background: white;
+	padding: var(--space-xs) var(--space-sm);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	display: inline-block;
+	min-width: 60px;
+	text-align: center;
+}
+
+.ve-value-input {
+	font-family: monospace;
+	font-size: 0.9rem;
+	color: var(--color-text);
+	background: white;
+	padding: var(--space-xs) var(--space-sm);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	width: 100px;
+	text-align: center;
+}
+
+.ve-value-input:focus {
+	outline: none;
+	border-color: var(--color-primary);
+	box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.ve-plots {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xl);
+	margin-top: var(--space-2xl);
+}
+
+.ve-plot-container {
+	background: white;
+	border: 1px solid #e9ecef;
+	border-radius: var(--radius-md);
+	padding: var(--space-md);
+	flex: 1;
+}
+
+.ve-plot-container h4 {
+	margin: 0 0 var(--space-sm) 0;
+	color: var(--color-text);
+	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+/* Fixed-height Plotly canvases inside .ve-plot-container (de-inlined from
+   renderGpsLap.ts / renderOutAndBack.ts) */
+.ve-plot-container__plot {
+	width: 100%;
+}
+
+.ve-plot-container__plot--ve {
+	height: 380px;
+}
+
+.ve-plot-container__plot--residuals {
+	height: 200px;
+}
+
+.ve-plot {
+	width: 100%;
+	height: 400px;
+	border: 1px solid #f0f0f0;
+	border-radius: var(--radius-sm);
+}
+
+/* Tall variant used by the wind/power/VD tab plots in the GPS-lap and
+   out-and-back templates (de-inlined height: 600px) */
+.ve-plot--tall {
+	height: 600px;
+}
+
+.ve-wind-source {
+	background: white;
+	padding: var(--space-lg);
+	border-radius: var(--radius-md);
+	border: 1px solid #e9ecef;
+	margin-top: var(--space-xl);
+	margin-bottom: var(--space-xl);
+}
+
+.ve-wind-source h4 {
+	margin: 0 0 var(--space-md) 0;
+	color: var(--color-text);
+	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+.ve-radio-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-md);
+}
+
+.ve-radio-label {
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	padding: var(--space-sm);
+	background: white;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	transition: all 0.2s ease;
+}
+
+.ve-radio-label:hover {
+	background: var(--color-surface-alt);
+	border-color: var(--color-primary);
+}
+
+.ve-radio-label input[type="radio"] {
+	margin-right: var(--space-sm);
+	accent-color: var(--color-primary);
+	cursor: pointer;
+}
+
+.ve-radio-label span {
+	font-size: 0.9rem;
+	color: var(--color-text-heading);
+}
+
+/* Air-speed calibration parameter (de-inlined from renderStandardVe.ts) */
+.ve-param-header__value {
+	width: 60px;
+	text-align: right;
+}
+
+.ve-parameter__auto-btn {
+	width: 100%;
+	margin-top: var(--space-sm);
+}
+
+/* Air-speed time-offset panel on the wind tab (de-inlined from
+   renderGpsLap.ts / renderOutAndBack.ts); off-palette #ddd/#f9f9f9 kept as
+   literals to match the previous inline values */
+.ve-parameter--panel {
+	margin-top: var(--space-xl);
+	padding: var(--space-lg);
+	border: 1px solid #ddd;
+	border-radius: var(--radius-md);
+	background: #f9f9f9;
+}
+
+.ve-parameter__title {
+	margin: 0 0 var(--space-lg) 0;
+	font-size: 1rem;
+	font-weight: 500;
+}
+
+.ve-parameter__grid {
+	display: grid;
+	grid-template-columns: 1fr auto auto;
+	gap: var(--space-sm);
+	align-items: center;
+	margin-bottom: var(--space-sm);
+}
+
+.ve-parameter__slider {
+	width: 100%;
+}
+
+.ve-parameter__value {
+	width: 60px;
+	text-align: right;
+}
+
+.ve-parameter__unit {
+	font-weight: 500;
+}
+
+/*
+ * Readout under the air-speed offset control: the ground/air speed sync error
+ * the offset is tuned to minimise (N-3). Secondary to the control itself, so it
+ * is smaller and muted rather than competing with the slider value.
+ */
+.ve-parameter__metric {
+	font-size: 0.85em;
+	color: var(--color-text-muted, #666);
+}
+
+.ve-parameter__metric span {
+	font-weight: 600;
+	margin-left: var(--space-xs, 4px);
+}
+
+/* Sidebar footer action buttons (de-inlined from renderStandardVe.ts) */
+.ve-sidebar-footer__btn {
+	width: 100%;
+}
+
+.ve-sidebar-footer__btn--spaced {
+	margin-bottom: var(--space-sm);
+}
+
+.ve-sidebar-footer__btn--compact {
+	font-size: 0.9rem;
+}
+
+.ve-tabs {
+	display: flex;
+	gap: var(--space-xs);
+	margin-bottom: var(--space-md);
+	border-bottom: 1px solid #e9ecef;
+}
+
+.ve-tab-button {
+	padding: 0.4rem var(--space-md);
+	background: white;
+	border: none;
+	border-bottom: 2px solid transparent;
+	cursor: pointer;
+	font-size: 0.85rem;
+	color: var(--color-text-muted);
+	transition: all 0.15s ease;
+	font-weight: 400;
+}
+
+.ve-tab-button:hover {
+	color: var(--color-primary);
+	background: var(--color-surface-alt);
+}
+
+/* Pure modifier (0,1,0) is safe: :hover declares the same color, and
+   border/font-weight win over the base rule by source order. */
+.ve-tab-button--active {
+	color: var(--color-primary);
+	border-bottom-color: var(--color-primary);
+	font-weight: 500;
+}
+
+.ve-tab-content {
+	display: none;
+}
+
+.ve-tab-content--active {
+	display: block;
+}
+
+/* The VD tab follows the wind source in the two GPS sidebars (07-03): it is
+   hidden under constant wind, where those sidebars did not render it at all
+   before the migration. `hidden` alone is NOT enough for the pane — the UA
+   default [hidden] { display: none } is (0,0,0) and .ve-tab-content--active is
+   (0,1,0), so an active pane that becomes hidden would stay on screen. The
+   repeated-class form matches the specificity guard used in analysis-params.css
+   and out-ranks the modifier. The tab BUTTON sets no display of its own, so the
+   UA rule would already cover it; stating it anyway means adding a display to
+   .ve-tab-button later cannot silently un-hide the control.
+
+   The active-tab guard in windSourceVisibility.ts moves the user off a pane
+   that becomes hidden, so in practice both rules should be belt and braces —
+   which is exactly why they are worth having: the guard failing open shows an
+   empty panel, not a stale one. */
+.ve-tab-content[hidden].ve-tab-content[hidden] {
+	display: none;
+}
+
+.ve-tab-button[hidden].ve-tab-button[hidden] {
+	display: none;
+}
+
+/* Same reasoning for the FIT-only sidebar blocks (air-speed offset, air-speed
+   calibration + Auto Adjust), which are hidden under constant wind because the
+   physics ignores them there. */
+.ve-parameter[hidden].ve-parameter[hidden] {
+	display: none;
+}
+
+/* Compact metrics and plot header */
+.ve-plot-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: var(--space-sm);
+}
+
+.ve-plot-header h4 {
+	margin: 0;
+	font-size: 0.95rem;
+	font-weight: 500;
+}
+
+/* Stitched/Stacked lap-view toggle (ordinary 2+ lap selections) */
+.lap-view-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: var(--space-sm);
+}
+
+.lap-view-toggle-label {
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
+}
+
+.lap-view-toggle-btn {
+	padding: var(--space-xs) 0.7rem;
+	background: white;
+	border: 1px solid #d0d4dc;
+	cursor: pointer;
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
+	transition: all 0.15s ease;
+}
+
+.lap-view-toggle-btn:first-of-type {
+	border-radius: 4px 0 0 4px;
+}
+
+.lap-view-toggle-btn:last-of-type {
+	border-radius: 0 4px 4px 0;
+	border-left: none;
+}
+
+.lap-view-toggle-btn:hover {
+	background: var(--color-surface-alt);
+	color: var(--color-primary);
+}
+
+/* Compound (0,2,0) so a hovered active button keeps the primary background —
+   :hover (0,1,1) would otherwise beat a pure modifier (0,1,0). */
+.lap-view-toggle-btn.lap-view-toggle-btn--active {
+	background: var(--color-primary);
+	border-color: var(--color-primary);
+	color: white;
+	font-weight: 500;
+}
+
+.ve-metrics-compact {
+	font-family: monospace;
+	font-size: 0.75rem;
+	color: var(--color-text-muted);
+	white-space: nowrap;
+	margin-bottom: var(--space-sm);
+	padding: var(--space-xs) 0;
+}
+
+.ve-metrics-compact span {
+	font-weight: 600;
+	color: var(--color-text);
+	margin-left: 0.15rem;
+	margin-right: 0.35rem;
+}
+
+.ve-metrics-compact--spaced {
+	margin-bottom: var(--space-lg);
+}
+
+/* Virtual-distance header. Under D-19 Option B each selected lap is integrated
+   independently, so a multi-lap selection has N virtual distances and the header
+   carries one line per lap rather than one invented total. Capped in height so a
+   long GPS-lap selection scrolls instead of pushing the plot off-screen. */
+.ve-vd-header {
+	max-height: 7.5rem;
+	overflow: auto;
+}
+
+.ve-metrics-compact__line + .ve-metrics-compact__line {
+	margin-top: 0.15rem;
+}
+
+/* The "Lap 3:" prefix is a label, not a value -- keep it out of the value
+   weight/colour the bare-span rule above applies. */
+.ve-metrics-compact__segment.ve-metrics-compact__segment {
+	font-weight: 400;
+	color: var(--color-text-muted);
+	margin-left: 0;
+}
+
+/* Says what the combined integral is, on the two paths that have no per-lap
+   decomposition. It must never look like a per-lap figure. */
+.ve-metrics-compact__caveat {
+	font-style: italic;
+	margin-bottom: 0.15rem;
+	white-space: normal;
+}
+
+/* VD difference sign colors (D-07 discrete states, de-inlined from
+   renderStandardVe.ts). Doubled class (0,2,0) out-ranks the
+   .ve-metrics-compact span color (0,1,1). Off-palette green/red kept
+   as literals (match the previous inline values). */
+.ve-metrics-compact__value--positive.ve-metrics-compact__value--positive {
+	color: #4caf50;
+}
+
+.ve-metrics-compact__value--negative.ve-metrics-compact__value--negative {
+	color: #f44336;
+}
+
+/* GPS-lap detected-laps summary panel + table (de-inlined from
+   renderGpsLap.ts / gpsLapPlots.ts). The per-lap color swatch background is
+   runtime data (shared Plotly lap palette) and stays imperative per D-07. */
+.ve-lap-summary {
+	margin-top: var(--space-lg);
+	padding: var(--space-lg);
+	background: var(--color-surface);
+	border-radius: var(--radius-md);
+}
+
+.ve-lap-summary__title {
+	margin-bottom: var(--space-sm);
+}
+
+.ve-lap-summary__table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.85rem;
+}
+
+.ve-lap-summary__row {
+	border-bottom: 1px solid var(--color-border);
+}
+
+.ve-lap-summary__row--head {
+	border-bottom-width: 2px;
+}
+
+.ve-lap-summary__cell {
+	padding: var(--space-sm);
+	text-align: right;
+}
+
+.ve-lap-summary__cell--label {
+	text-align: left;
+}
+
+.ve-lap-summary__swatch {
+	display: inline-block;
+	width: 12px;
+	height: 12px;
+	border-radius: var(--radius-sm);
+	margin-right: var(--space-sm);
+}
+
+/* Out-and-back closing-error summary (de-inlined from renderOutAndBack.ts).
+   Initially hidden via the shared .hidden utility in the markup; no display
+   declaration here, so .hidden wins unaided. Off-palette #f5f5f5 kept. */
+.ve-closing-error {
+	margin-top: var(--space-sm);
+	padding: var(--space-sm) var(--space-lg);
+	background: #f5f5f5;
+	border-radius: var(--radius-md);
+	font-size: 0.9rem;
+}
+
+.ve-recompute-status {
+	color: var(--color-primary);
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 8px 0;
+	font-size: 16px;
+	font-weight: 400;
+	line-height: 1.5;
+}
+
+/* recomputeRunner drives this pill purely through the `hidden` IDL attribute, so
+   it hits the same trap as .ve-tab-content above: the UA default
+   [hidden] { display: none } is (0,0,0) and the display: inline-flex here is
+   (0,1,0). Without this guard the pill is a permanently laid-out box that reads
+   "Updated" forever, because setRecomputeStatus('idle') only sets node.hidden. */
+.ve-recompute-status[hidden].ve-recompute-status[hidden] {
+	display: none;
+}

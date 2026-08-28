@@ -50,8 +50,8 @@ describe("lapViewToggle", () => {
 		document.body.innerHTML = lapViewToggleMarkup("stacked");
 		const stitchedBtn = document.querySelector('[data-view="stitched"]')!;
 		const stackedBtn = document.querySelector('[data-view="stacked"]')!;
-		expect(stackedBtn.classList.contains("active")).toBe(true);
-		expect(stitchedBtn.classList.contains("active")).toBe(false);
+		expect(stackedBtn.classList.contains("lap-view-toggle-btn--active")).toBe(true);
+		expect(stitchedBtn.classList.contains("lap-view-toggle-btn--active")).toBe(false);
 	});
 
 	it("invokes renderStacked when the user picks the stacked button", async () => {

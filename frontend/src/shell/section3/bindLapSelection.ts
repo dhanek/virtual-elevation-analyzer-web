@@ -69,9 +69,9 @@ export function bindSelectAllButton(
 			const item = cb.closest(".lap-checkbox-item");
 			if (item) {
 				if (cb.checked) {
-					item.classList.add("selected");
+					item.classList.add("lap-checkbox-item--selected");
 				} else {
-					item.classList.remove("selected");
+					item.classList.remove("lap-checkbox-item--selected");
 				}
 			}
 		});

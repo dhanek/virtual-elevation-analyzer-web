@@ -39,7 +39,7 @@ describe("renderSection3Template lap selection reflection", () => {
 	it("renders all FIT laps unchecked when nothing is selected", () => {
 		const html = renderSection3Template({ ...baseInput, selectedLaps: [] });
 		const checkedCards = lapCardCount(html, (card) =>
-			card.startsWith(" selected"),
+			card.startsWith(" lap-checkbox-item--selected"),
 		);
 		expect(checkedCards).toBe(0);
 		expect(html).not.toContain("checked");
@@ -51,7 +51,7 @@ describe("renderSection3Template lap selection reflection", () => {
 			selectedLaps: [1, 2, 3],
 		});
 		const selectedCards = lapCardCount(html, (card) =>
-			card.startsWith(" selected"),
+			card.startsWith(" lap-checkbox-item--selected"),
 		);
 		expect(selectedCards).toBe(3);
 	});

@@ -53,8 +53,8 @@ export function elevationSmoothingToggleMarkup(appState: AppState): string {
         <div class="ve-elevation-profile-switch">
             <label>Elevation profile smoothing</label>
             <div class="lap-view-toggle" id="elevationProfileSwitchToggle" role="group" aria-label="Elevation profile smoothing">
-                <button type="button" class="lap-view-toggle-btn ${on ? "" : "active"}" data-smoothing="off">OFF</button>
-                <button type="button" class="lap-view-toggle-btn ${on ? "active" : ""}" data-smoothing="on">ON</button>
+                <button type="button" class="lap-view-toggle-btn ${on ? "" : "lap-view-toggle-btn--active"}" data-smoothing="off">OFF</button>
+                <button type="button" class="lap-view-toggle-btn ${on ? "lap-view-toggle-btn--active" : ""}" data-smoothing="on">ON</button>
             </div>
         </div>
     `;
@@ -64,14 +64,18 @@ export function elevationSmoothingToggleMarkup(appState: AppState): string {
  * Bind the elevation-smoothing toggle buttons. On change, updates the active
  * profile and the button styling, then invokes `onToggle` so the caller can
  * recompute its plots. Safe to call when the control is absent (no-op).
+ *
+ * RETURNS whether a toggle button was actually bound, so `bindModeControls` can
+ * report this row as bound or skipped from what happened rather than from a
+ * duplicated element lookup.
  */
 export function bindElevationSmoothingToggle(
 	appState: AppState,
 	onToggle: (enabled: boolean) => void,
-): void {
+): boolean {
 	const container = document.getElementById("elevationProfileSwitchToggle");
 	if (!container) {
-		return;
+		return false;
 	}
 
 	const buttons = container.querySelectorAll(
@@ -87,8 +91,12 @@ export function bindElevationSmoothingToggle(
 				return;
 			}
 			setDemDisplayProfileEnabled(appState, enabled);
-			buttons.forEach((b) => b.classList.toggle("active", b === button));
+			buttons.forEach((b) =>
+				b.classList.toggle("lap-view-toggle-btn--active", b === button),
+			);
 			onToggle(enabled);
 		});
 	});
+
+	return buttons.length > 0;
 }

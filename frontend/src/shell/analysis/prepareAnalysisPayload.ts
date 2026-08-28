@@ -85,7 +85,15 @@ export function prepareAnalysisPayload(
 		filteredAltitude.push(resolvedElevationProfile.altitude[index]);
 		filteredDistance.push(normalized.distance[index]);
 		filteredWindSpeed.push(resolvedWindSpeed[index]);
-		filteredTemperature.push(normalized.temperature[index] || 0);
+		// NaN for "no reading", never `|| 0` (CR-01). `getNormalizedActivityArrays`
+		// returns an empty array for a ride with no temperature channel, so `|| 0`
+		// pushed a fabricated 0 °C at every index — and it also collapsed a
+		// genuine 0 °C onto the same value, so no consumer could tell the two
+		// apart. `segmentSummary.ts:154-167` uses NaN as the one marker that says
+		// "no reading" without claiming a temperature; this is the analyze path
+		// agreeing with it rather than contradicting it.
+		const reading = normalized.temperature[index];
+		filteredTemperature.push(Number.isFinite(reading) ? reading : Number.NaN);
 	}
 
 	if (filteredTimestamps.length === 0) {

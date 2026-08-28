@@ -25,8 +25,9 @@ import {
 	isGpsLapSelectionMode,
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
-import { calculateRhoArrayFromFitData } from "../dem/demHandlers";
-import { configureRecomputeRunner } from "./recomputeRunner";
+import { resolveRhoArray } from "./rhoArrayResolver";
+import { waitForPlotly } from "./plotlyLoader";
+import { requestModeUpdate } from "./requestModeUpdate";
 import { configureParameterMerge } from "./parametersSync";
 import {
 	clearLapViewToggle,
@@ -67,48 +68,10 @@ function getServices(deps: AnalyzeOrchestratorDependencies) {
 	};
 }
 
-// Helper function to dynamically load and wait for Plotly
-function waitForPlotly(): Promise<any> {
-	return new Promise((resolve, reject) => {
-		// Check if already loaded
-		if (typeof (window as any).Plotly !== "undefined") {
-			resolve((window as any).Plotly);
-			return;
-		}
-
-		// Load Plotly script dynamically
-		const script = document.createElement("script");
-		script.src = "https://cdn.plot.ly/plotly-basic-2.27.0.min.js"; // Use basic bundle (no eval required)
-		script.async = false;
-		script.crossOrigin = "anonymous";
-
-		script.onload = () => {
-			// Give it a moment to initialize
-			setTimeout(() => {
-				if (typeof (window as any).Plotly !== "undefined") {
-					resolve((window as any).Plotly);
-				} else {
-					log.error("Plotly script loaded but Plotly is not on window object");
-					reject(new Error("Plotly loaded but not available"));
-				}
-			}, 100);
-		};
-
-		script.onerror = (error) => {
-			log.error("Failed to load Plotly script:", error);
-			log.error("Network error or CSP blocking the script");
-			reject(new Error("Failed to load Plotly script from CDN"));
-		};
-
-		document.head.appendChild(script);
-	});
-}
-
 export function configureAnalyzeOrchestrator(
 	nextDependencies: AnalyzeOrchestratorDependencies,
 ): void {
 	dependencies = nextDependencies;
-	configureRecomputeRunner(nextDependencies.appState);
 	// Route out-of-form parameter writes (e.g. Crr temp controls in GPS-lap /
 	// out-and-back sidebars) through the parameters component so its private
 	// copy stays in sync and later form edits don't revert them.
@@ -152,7 +115,9 @@ export function initializeAnalysisParameters(): void {
  * Orchestrator-triggered parameters (saved with files via parameter storage layer):
  * - All parameters that go through setParameters() → trigger this function
  * - These are persisted with the analysis file
- * - When VE section is visible, dispatch input event on trimStartSlider to trigger recalculation
+ * - Recalculation goes through the one funnel, `requestModeUpdate("parameters")`,
+ *   which resolves the handler from the mode that is on screen and performs the
+ *   VE-visibility check itself. This function no longer knows any mode's markup.
  *
  * Local-only parameters (runtime adjustments in AppState):
  * - airSpeedCalibrationPercent: Lives in AppState, not persisted per-file
@@ -234,23 +199,21 @@ export function handleParametersChange(parameters: AnalysisParameters): void {
 		}, 100);
 	}
 
-	// If VE analysis is already visible, recalculate when parameters change
-	const veSection =
-		document.getElementById("veAnalysisSection") ??
-		document.getElementById("veSection");
-	const isVeVisible =
-		!!veSection &&
-		!veSection.classList.contains("hidden") &&
-		!veSection.classList.contains("inactive");
-	if (isVeVisible) {
-		const trimStartSlider = document.getElementById(
-			"trimStartSlider",
-		) as HTMLInputElement;
-
-		if (trimStartSlider) {
-			trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
-		}
-	}
+	// Recalculate, in whichever mode is on screen (N-4).
+	//
+	// This used to fake an `input` event on Standard's trim-start slider. That
+	// element exists in ONE template -- Standard's -- so in GPS-lap and
+	// out-and-back the lookup returned null and every form-driven parameter
+	// change (rho, system mass, eta, velodrome, constant wind speed/direction,
+	// air-speed offset) silently did nothing at all. No element id belonging to
+	// one mode's markup appears in this mode-agnostic file any more; the funnel
+	// resolves the handler from the live mode, so one call reaches all three.
+	//
+	// The VE-visibility check is not lost, it MOVED: `requestModeUpdate` runs it
+	// through `isVeSectionVisible`, which is the same class-name test lifted
+	// verbatim. Keeping a second copy here is how two copies of one answer drift
+	// apart, so this asks unconditionally and the funnel answers.
+	requestModeUpdate("parameters");
 
 	// Update analyze button state
 	updateAnalyzeButton();
@@ -441,29 +404,14 @@ export async function handleAnalyze(): Promise<void> {
 			cda: deps.appState.currentParameters.cda,
 			crr: deps.appState.currentParameters.crr,
 			getNormalizedActivityArrays,
-			calculateRhoArray: (fd) => {
-				const currentNormalized = getNormalizedActivityArrays(fd);
-				const hasAirDensityData = currentNormalized.airDensity.some(
-					(rho) => !isNaN(rho) && rho > 0,
-				);
-				if (hasAirDensityData) {
-					log.debug("💨 Found air density data, using it for calculations");
-					return currentNormalized.airDensity;
-				}
-
-				if (hasEnvironmentalData) {
-					const calculated = calculateRhoArrayFromFitData(fd);
-					if (calculated) {
-						log.debug("💨 Calculated air density from environmental data");
-					}
-					return calculated;
-				}
-
-				log.debug(
-					"💨 No air density found, using constant value from weather API",
-				);
-				return null;
-			},
+			// One shared resolver, so the analyze path and the update path can
+			// never diverge on how rho is obtained (D-06).
+			calculateRhoArray: (fd) =>
+				resolveRhoArray(
+					fd,
+					getNormalizedActivityArrays(fd),
+					hasEnvironmentalData,
+				),
 		});
 
 		const powerDataPoints = payload.filteredData.power.filter(
@@ -477,7 +425,6 @@ export async function handleAnalyze(): Promise<void> {
 
 		deps.hideLoading();
 
-		deps.appState.currentRhoArray = payload.rhoArray;
 		deps.appState.currentVEResult = payload.initialResult;
 		deps.appState.filteredVEData = {
 			positionLat: payload.filteredData.positionLat,

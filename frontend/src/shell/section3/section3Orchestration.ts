@@ -152,14 +152,21 @@ function rerenderSection3(): void {
 		resultsDiv.classList.remove("hidden");
 	}
 
-	// Re-setup handlers after re-render
+	// Re-setup handlers after re-render.
+	//
+	// Section 3's own controls are restored FIRST and in their own try, before any
+	// of the fallible map work. They used to sit at the tail of a single try that
+	// began by tearing down and re-awaiting a Leaflet map against DOM that had just
+	// been replaced underneath it; any throw there aborted the whole hook and left
+	// Section 3 inert -- the mode dropdown unbound, the Analyze button stuck at the
+	// template's hard-coded `disabled`, and the trim sliders stuck at the
+	// template's hard-coded `hidden`. Nothing about re-binding a checkbox handler
+	// depends on the map succeeding, so nothing about it should be sequenced behind
+	// the map.
 	setTimeout(async () => {
-		try {
-			// Setup GPS mode selector handler
-			if (hasGpsData) {
-				bindGpsModeSelector();
-			}
+		restoreSection3Controls(hasGpsData);
 
+		try {
 			// Setup map visualization if GPS data available
 			if (hasGpsData) {
 				const mapViz = deps.getMapVisualization();
@@ -235,19 +242,48 @@ function rerenderSection3(): void {
 				}
 			}
 
-			// Setup lap selection handlers
-			const lapListEl = document.getElementById("lapList");
-			if (lapListEl) {
-				bindLapSelection(lapListEl, () => updateSelectedLaps());
-				bindSelectAllButton("selectAllLaps", "lapList", () =>
-					updateSelectedLaps(),
-				);
-			}
-			deps.setupAnalyzeButton();
 		} catch (error) {
-			log.error("Error re-rendering section 3:", error);
+			log.error("Error re-initializing the section 3 map:", error);
 		}
 	}, 100);
+}
+
+/**
+ * Re-bind everything Section 3 owns after its DOM has been replaced.
+ *
+ * `renderSection3Template` emits the Analyze button hard-coded `disabled` and the
+ * map trim controls hard-coded `hidden`, while re-rendering the FIT lap
+ * checkboxes *checked* from `appState.selectedLaps`. So a re-render always leaves
+ * the markup disagreeing with the retained selection, and only
+ * `updateSelectedLaps()` reconciles the two: it re-derives the selection from the
+ * checkboxes, shows and initialises the trim controls when the mode allows them,
+ * and re-evaluates the Analyze button. That is precisely what the user's
+ * deselect-and-reselect workaround was triggering by hand.
+ *
+ * Deliberately free of any map dependency and wrapped in its own try, so a
+ * failure in the map teardown/re-init cannot take Section 3's controls with it.
+ */
+function restoreSection3Controls(hasGpsData: boolean): void {
+	const deps = getDependencies();
+
+	try {
+		// The mode dropdown first: losing it means the user cannot even switch back.
+		if (hasGpsData) {
+			bindGpsModeSelector();
+		}
+
+		const lapListEl = document.getElementById("lapList");
+		if (lapListEl) {
+			bindLapSelection(lapListEl, () => updateSelectedLaps());
+			bindSelectAllButton("selectAllLaps", "lapList", () =>
+				updateSelectedLaps(),
+			);
+		}
+		deps.setupAnalyzeButton();
+		updateSelectedLaps();
+	} catch (error) {
+		log.error("Error re-binding section 3 controls:", error);
+	}
 }
 
 interface Section3Dependencies {
@@ -496,18 +532,18 @@ export function updateGpsDetectedLapsUI(): void {
 	if (!lapsInfo || !lapCountSpan || !lapList) return;
 
 	if (deps.appState.gpsDetectedLaps.length === 0) {
-		lapsInfo.style.display = "none";
+		lapsInfo.classList.add("hidden");
 		return;
 	}
 
-	lapsInfo.style.display = "block";
+	lapsInfo.classList.remove("hidden");
 	lapCountSpan.textContent = deps.appState.gpsDetectedLaps.length.toString();
 
 	// Populate lap list
 	lapList.innerHTML = deps.appState.gpsDetectedLaps
 		.map(
 			(lap) => `
-        <div class="lap-checkbox-item selected" data-gps-lap="${lap.lapNumber}">
+        <div class="lap-checkbox-item lap-checkbox-item--selected" data-gps-lap="${lap.lapNumber}">
             <input type="checkbox" class="gps-lap-checkbox" id="gps-lap-${lap.lapNumber}" checked>
             <div class="lap-info">
                 <div class="lap-number">Lap ${lap.lapNumber}</div>
@@ -568,9 +604,9 @@ export function handleGpsLapSelectionChange(): void {
 				".gps-lap-checkbox",
 			) as HTMLInputElement;
 			if (checkbox?.checked) {
-				item.classList.add("selected");
+				item.classList.add("lap-checkbox-item--selected");
 			} else {
-				item.classList.remove("selected");
+				item.classList.remove("lap-checkbox-item--selected");
 			}
 		});
 
@@ -683,11 +719,11 @@ export function updateOutAndBackSectionsUI(): void {
 	if (!sectionsInfo || !sectionCountSpan || !sectionList) return;
 
 	if (deps.appState.outAndBackSections.length === 0) {
-		sectionsInfo.style.display = "none";
+		sectionsInfo.classList.add("hidden");
 		return;
 	}
 
-	sectionsInfo.style.display = "block";
+	sectionsInfo.classList.remove("hidden");
 	sectionCountSpan.textContent =
 		deps.appState.outAndBackSections.length.toString();
 
@@ -695,7 +731,7 @@ export function updateOutAndBackSectionsUI(): void {
 	sectionList.innerHTML = deps.appState.outAndBackSections
 		.map(
 			(section) => `
-        <div class="lap-checkbox-item selected" data-oab-section="${section.sectionNumber}">
+        <div class="lap-checkbox-item lap-checkbox-item--selected" data-oab-section="${section.sectionNumber}">
             <input type="checkbox" class="oab-section-checkbox" id="oab-section-${section.sectionNumber}" checked>
             <div class="lap-info">
                 <div class="lap-number">Section ${section.sectionNumber}</div>
@@ -756,9 +792,9 @@ export function handleOutAndBackSectionSelectionChange(): void {
 				".oab-section-checkbox",
 			) as HTMLInputElement;
 			if (checkbox?.checked) {
-				item.classList.add("selected");
+				item.classList.add("lap-checkbox-item--selected");
 			} else {
-				item.classList.remove("selected");
+				item.classList.remove("lap-checkbox-item--selected");
 			}
 		});
 
@@ -838,7 +874,7 @@ export function updateSelectedLaps(): void {
 	const mapTrimControls = document.getElementById("mapTrimControls");
 	if (mapTrimControls) {
 		if (shouldShowSelectionTrimControls) {
-			mapTrimControls.style.display = "flex";
+			mapTrimControls.classList.remove("hidden");
 			void initializeMapTrimControlsForSelectedLaps();
 
 			if (
@@ -856,7 +892,7 @@ export function updateSelectedLaps(): void {
 				}, 500);
 			}
 		} else {
-			mapTrimControls.style.display = "none";
+			mapTrimControls.classList.add("hidden");
 		}
 	}
 
@@ -1228,8 +1264,12 @@ export function initializeSection3(): void {
 		resultsDiv.classList.remove("hidden");
 	}
 
-	// Initialize map visualization only if GPS data is available
+	// Initialize map visualization only if GPS data is available.
+	// Controls first, map second, separate trys -- same reasoning as
+	// rerenderSection3: a map failure must not leave Section 3 inert.
 	setTimeout(async () => {
+		restoreSection3Controls(hasGpsData);
+
 		try {
 			if (hasGpsData) {
 				const mapVisualization = new MapVisualization("mapView");
@@ -1269,21 +1309,6 @@ export function initializeSection3(): void {
 				log.debug("No GPS data - skipping map initialization");
 				deps.setMapVisualization(null);
 			}
-
-			// Setup GPS mode selector handler (if GPS data available)
-			if (hasGpsData) {
-				bindGpsModeSelector();
-			}
-
-			// Setup lap selection handlers using shell helpers
-			const lapListEl = document.getElementById("lapList");
-			if (lapListEl) {
-				bindLapSelection(lapListEl, () => updateSelectedLaps());
-				bindSelectAllButton("selectAllLaps", "lapList", () =>
-					updateSelectedLaps(),
-				);
-			}
-			deps.setupAnalyzeButton();
 
 			log.debug(
 				"Section 3 initialized (GPS:",

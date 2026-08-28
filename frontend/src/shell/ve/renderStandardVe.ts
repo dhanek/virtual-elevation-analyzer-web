@@ -9,14 +9,8 @@ import {
 	AnalysisParametersComponent,
 	DEFAULT_PARAMETERS,
 } from "../../components/AnalysisParameters";
-import { setupTabSwitching } from "../dom/tabs";
 import { bindActionFooter } from "../dom/actionFooter";
 import { getSelectedWindSource } from "../dom/windSource";
-import {
-	AIR_SPEED_CALIBRATION_MAX_PERCENT,
-	AIR_SPEED_CALIBRATION_MIN_PERCENT,
-	AIR_SPEED_CALIBRATION_STEP_PERCENT,
-} from "../../analysis/AirSpeedCalibration";
 import { createPlotContext } from "../../plots/PlotContext";
 import {
 	buildVirtualElevationFigures,
@@ -27,12 +21,27 @@ import {
 import { setupVESliders } from "./bindStandardSliders";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "./crrTempControls";
+import { windHeightControlsMarkup } from "./windHeightControls";
+import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
+import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
+import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { applyAirSpeedOffset } from "../../analysis/WindSourceResolver";
+import { resolveSelectionWindSeries } from "./standardSegments";
+import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
+import { standardMode } from "../../modes/analysis/standardMode";
+import {
+	selectedLapCount,
+	updateCombinedVirtualDistanceHeader,
+	virtualDistanceHeaderMarkup,
+} from "./vdHeader";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
+import {
+	bindTabButtons,
+	resetTabRenderMapForNewPanel,
+} from "../dom/tabs";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -52,7 +61,7 @@ export interface StandardVeCallbacks {
 export async function initializeVEAnalysis(
 	appState: AppState,
 	analysisInput: AnalysisInput,
-	defaultAirSpeedOffset: number,
+	selectedIndices: number[],
 ) {
 	const trimStart = appState.presetTrimStart;
 	const trimEnd = appState.presetTrimEnd ?? analysisInput.timestamps.length - 1;
@@ -104,15 +113,25 @@ export async function initializeVEAnalysis(
 		crrLabel: appliedInitialCrr.toFixed(4),
 	});
 
-	const hasWindSpeed = analysisInput.windSpeed.some(
+	// D-05: the last of the five inline wind copies is gone from here too. This
+	// one applied the offset but NOT the calibration, so the initial Standard
+	// wind plot disagreed with the VE fit above it whenever the calibration
+	// slider was non-zero -- and disagreed with `updateSecondaryPlots`, which
+	// applied both. All three now read one resolved series.
+	//
+	// The series is resolved over the FULL activity and sliced afterwards, which
+	// is the ordering that keeps the offset from crossing a lap boundary in a
+	// multi-lap selection (D-09 change-list entry c).
+	const resolvedWindSpeed = resolveSelectionWindSeries(
+		appState,
+		selectedIndices,
+		initialWindSource === "fit" ? "fit" : "constant",
+	);
+	const hasWindSpeed = resolvedWindSpeed.some(
 		(value) => !isNaN(value) && value !== 0,
 	);
-	const windSpeedOffset =
-		appState.currentParameters?.air_speed_offset ?? defaultAirSpeedOffset;
 	const fitWindSpeedKmh = hasWindSpeed
-		? applyAirSpeedOffset(analysisInput.windSpeed, windSpeedOffset).map(
-				(value) => (isNaN(value) ? null : value * 3.6),
-			)
+		? resolvedWindSpeed.map((value) => (isNaN(value) ? null : value * 3.6))
 		: new Array<number | null>(analysisInput.velocity.length).fill(null);
 
 	const windSpeedFigure = buildWindSpeedFigure({
@@ -127,13 +146,18 @@ export async function initializeVEAnalysis(
 		power: analysisInput.power,
 	});
 
-	const virtualDistanceFigure = buildVirtualDistanceFigure({
+	// D-21: the builder no longer takes (or applies) a calibration percentage.
+	// It integrates exactly the series it is handed, which is already offset and
+	// calibrated. A second application is now a compile error.
+	const virtualDistanceInput = {
 		context,
 		timestamps: analysisInput.timestamps,
 		velocity: analysisInput.velocity,
-		windSpeed: analysisInput.windSpeed,
-		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
-	});
+		windSpeed: resolvedWindSpeed,
+	};
+	const virtualDistanceFigure = buildVirtualDistanceFigure(
+		virtualDistanceInput,
+	);
 
 	Plotly.newPlot(
 		"vePlot",
@@ -165,6 +189,19 @@ export async function initializeVEAnalysis(
 		virtualDistanceFigure.layout,
 		virtualDistanceFigure.config,
 	);
+	// The template leaves the header empty on purpose; fill it from the same
+	// integration that just drew the curve, so the first paint and every later
+	// slider-driven redraw agree.
+	//
+	// This placeholder paint has no per-segment decomposition -- it integrates
+	// the concatenated selection in one pass -- so a multi-lap selection gets the
+	// labelled combined figure here. The synthetic `input` dispatch on
+	// #trimStartSlider (below) immediately routes through the primitive and
+	// replaces it with the honest per-lap lines.
+	updateCombinedVirtualDistanceHeader(
+		virtualDistanceInput,
+		selectedLapCount(appState),
+	);
 
 	appState.filteredVEData = {
 		positionLat: analysisInput.positionLat,
@@ -193,7 +230,18 @@ export async function showVirtualElevationAnalysisInline(
 	altitude: number[],
 	distance: number[],
 	windSpeed: number[],
-	temperature: number[] = [],
+	/**
+	 * UNREAD since CR-01, and kept only to hold its place in this positional
+	 * signature: `standardMode.render` spreads the whole payload
+	 * (`...args.filteredData`) and `analyzeOrchestrator` forwards it field by
+	 * field, so dropping the parameter would silently shift `cdaReference` and
+	 * `defaultAirSpeedOffset` up by one at every call site.
+	 *
+	 * The seed below reads temperature from `fitData` through
+	 * `buildFilteredDataFromIndexGroups` instead — the same source, but with the
+	 * NaN "no reading" marker rather than a fabricated 0 °C.
+	 */
+	_temperature: number[] = [],
 	cdaReference: number[] | null = null,
 	defaultAirSpeedOffset: number = 0,
 ) {
@@ -230,7 +278,36 @@ export async function showVirtualElevationAnalysisInline(
 	}
 
 	appState.currentAnalyzedLaps = analyzedLaps;
-	appState.currentFilteredData = { power, velocity, temperature, timestamps };
+	// Coverage is unknown until the first `summarize` (WR-01); the previous
+	// analysis's must not ride along into this one.
+	appState.currentCoveredItems = null;
+	// THE FOURTH WRITER, CONVERTED (CR-01).
+	//
+	// This used to be `{ power, velocity, temperature, timestamps }` — the raw
+	// analyze payload — which made `segmentSummary.ts`'s "THE ONE PLACE the
+	// analysed sample arrays are concatenated" false for Standard, and carried
+	// both defects that header's fixes closed downstream:
+	//
+	//   - UNTRIMMED. The payload is the whole deduplicated selection, so a lap the
+	//     user had narrowed to a 30-sample window still stored averages over the
+	//     acceleration and the roll-out.
+	//   - 0 °C FABRICATED. `prepareAnalysisPayload` pushed `… || 0` for a missing
+	//     reading, so a ride with no temperature channel produced an all-zero
+	//     array that `handleStoreResult` reported as `avgTemperature: 0`,
+	//     indistinguishable from a genuine 0 °C ride.
+	//
+	// It was reachable: `handleTrim` declines to run the pipeline when a saved
+	// trim already sits at its clamp, so `summarize` had never run and this was
+	// the value Store Result read. Seeding through the shared concatenation gives
+	// Standard the NaN "no reading" marker for free, and `getUpdateSegments`
+	// supplies exactly the per-lap ranges the first recompute will use.
+	//
+	// `getUpdateSegments` reads `currentAnalyzedLaps`, which is why it is assigned
+	// above this and not below it.
+	seedSegmentModeFilteredData(
+		appState,
+		standardMode.getUpdateSegments(appState).map((segment) => segment.range),
+	);
 	appState.currentCdaReference = cdaReference;
 
 	const hasWindSpeed = windSpeed.some((val) => !isNaN(val) && val !== 0);
@@ -239,14 +316,29 @@ export async function showVirtualElevationAnalysisInline(
 		appState.currentParameters.wind_speed !== 0 &&
 		appState.currentParameters.wind_direction !== undefined;
 
+	// The source the wind-source radios below open on. It decides only the
+	// INITIAL hidden state of the source-dependent blocks — the bind-time sync in
+	// `bindWindSourceRadios` settles them either way — so it is the difference
+	// between no flash and a flash, never between right and wrong.
+	const initialWindSource = hasWindSpeed
+		? "fit"
+		: hasConstantWind
+			? "constant"
+			: "fit";
+
 	const veSection = document.getElementById("veAnalysisSection");
 	if (veSection) {
-		veSection.classList.remove("hidden", "inactive");
+		veSection.classList.remove("hidden", "workflow-section--inactive");
 	}
 
 	const veAnalysisContent = document.getElementById("veAnalysisContent");
 	if (!veAnalysisContent) return;
 
+	// WR-01. The outgoing panel's tab callbacks close over ITS profiles and draw
+	// into element ids this new markup reuses, so they must not outlive it.
+	// Without this, any first pass that does not reach `renderVe` leaves
+	// Wind/Power/VD rendering the PREVIOUS selection into this panel.
+	resetTabRenderMapForNewPanel();
 	veAnalysisContent.innerHTML = `
         <div class="ve-inline-container">
             <div class="ve-layout">
@@ -277,6 +369,7 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
+                                ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}
                             </div>
 
                             ${
@@ -311,44 +404,56 @@ export async function showVirtualElevationAnalysisInline(
 
                             ${
 															hasWindSpeed
-																? `
-                            <div class="ve-parameter">
-                                <div class="ve-param-header">
-                                    <label for="airSpeedCalibration">Air Speed Calibration</label>
-                                    <input type="number" id="airSpeedCalibrationValue" value="${appState.airSpeedCalibrationPercent.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}"
-                                           style="width: 60px; text-align: right;" />
-                                    <span>%</span>
-                                </div>
-                                <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${appState.airSpeedCalibrationPercent.toFixed(1)}" />
-                                <button id="autoAdjustCalibration" class="secondary-btn" style="width: 100%; margin-top: 0.5rem;">Auto Adjust</button>
-                            </div>
-                            `
+																? airSpeedCalibrationControlMarkup(
+																		appState.airSpeedCalibrationPercent.toFixed(1),
+																	)
 																: ""
 														}
                         </div>
                     </div>
                     <div class="ve-sidebar-footer">
-                        <button id="saveScreenshot" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Save Screenshot</button>
-                        <button id="storeResult" class="primary-btn" style="width: 100%; margin-bottom: 0.5rem;">Store Result</button>
-                        <button id="exportAllResults" class="secondary-btn" style="width: 100%; font-size: 0.9rem;">Export All Results to CSV</button>
+                        <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
+                        <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
                     </div>
                 </div>
                 <div class="ve-plots-main">
                     <div class="ve-plots">
                         <div class="ve-tabs">
-                            <button class="ve-tab-button active" data-tab="ve">VE</button>
+                            <button class="ve-tab-button ve-tab-button--active" data-tab="ve">VE</button>
                             ${cdaReference ? `<button class="ve-tab-button" data-tab="cda-validation">CdA Validation</button>` : ""}
                             ${hasWindSpeed || hasConstantWind ? `<button class="ve-tab-button" data-tab="wind">Wind</button>` : ""}
                             <button class="ve-tab-button" data-tab="power">Power</button>
-                            ${hasWindSpeed ? `<button class="ve-tab-button" data-tab="vd">VD</button>` : ""}
+                            ${
+															/*
+															 * The VD tab follows the wind source, exactly as both
+															 * GPS sidebars already do (maintainer ruling
+															 * 2026-08-14, REVERSING the 2026-08-05 one that had
+															 * Standard keep it).
+															 *
+															 * The computation is untouched and is still correct
+															 * under constant: VD integrates `apparentWindSpeedMps`,
+															 * which the constant path computes from the configured
+															 * wind. What was wrong was the POLICY. Standard's
+															 * STACKED lap view is the GPS-lap overlay, whose
+															 * template tags this tab, so within one mode the tab
+															 * appeared under Stitched and vanished under Stacked as
+															 * the user toggled views. Tagging here makes the two
+															 * views agree, and makes all three modes agree.
+															 */
+															hasWindSpeed
+																? `<button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(initialWindSource)}>VD</button>`
+																: ""
+														}
                         </div>
-                        <div class="ve-tab-content active" id="ve-tab">
+                        <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
                             <div class="ve-metrics-compact">
                                 R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
                                 RMSE:<span id="rmseValue">${initialResult.rmse.toFixed(2)}m</span> |
                                 VE:<span id="veGainValue">${initialResult.ve_elevation_diff.toFixed(2)}m</span> |
-                                Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span>
+                                Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span> |
+                                Laps:<span id="lapsCoveredValue">${analyzedLaps.length}</span>
                             </div>
                             <div id="vePlot" class="ve-plot-container"></div>
                             <div id="veResidualsPlot" class="ve-plot-container"></div>
@@ -365,16 +470,41 @@ export async function showVirtualElevationAnalysisInline(
 												}
                         <div class="ve-tab-content" id="wind-tab">
                             <div id="windSpeedPlot" class="ve-plot-container"></div>
+                            ${
+															/*
+															 * N-3 (maintainer ruling, plan 07-03): Standard gains
+															 * the offset control the two GPS sidebars already had,
+															 * from the one shared markup helper so it reads as the
+															 * same control. Gated on hasWindSpeed only -- the offset
+															 * shifts the FIT air-speed channel, so with no such
+															 * channel there is nothing to shift -- and deliberately
+															 * NOT on the selected wind source: this template is not
+															 * rebuilt when the source changes, so a source-gated
+															 * control would be absent at bind time and stay unbound.
+															 */
+															hasWindSpeed
+																? airSpeedOffsetControlMarkup(
+																		appState.currentParameters?.air_speed_offset,
+																		defaultAirSpeedOffset,
+																	)
+																: ""
+														}
                         </div>
                         <div class="ve-tab-content" id="power-tab">
                             <div id="speedPowerPlot" class="ve-plot-container"></div>
                         </div>
-                        <div class="ve-tab-content" id="vd-tab">
-                             <div class="ve-metrics-compact" style="margin-bottom: 1rem;">
-                                VD (Air):<span id="vdAirValue">${(initialResult.virtual_distance_air / 1000).toFixed(3)} km</span> |
-                                VD (Ground):<span id="vdGroundValue">${(initialResult.virtual_distance_ground / 1000).toFixed(3)} km</span> |
-                                Difference:<span id="vdDiffValue" style="${initialResult.vd_difference_percent >= 0 ? "color: #4caf50;" : "color: #f44336;"}">${initialResult.vd_difference_percent >= 0 ? "+" : ""}${initialResult.vd_difference_percent.toFixed(2)}%</span>
-                            </div>
+                        <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(initialWindSource)}>
+                             <!--
+                                Deliberately EMPTY, and owned by vdHeader.ts. The
+                                numbers used to be interpolated here from the
+                                analyze-time result and never written again, so
+                                they stayed frozen while the trim sliders moved
+                                the curve below them. They are now written from
+                                the same integration that draws that curve, on
+                                every VD draw including the first -- and, for a
+                                multi-lap selection, one line per lap.
+                             -->
+                            ${virtualDistanceHeaderMarkup()}
                             <div id="vdPlot" class="ve-plot-container"></div>
                         </div>
                     </div>
@@ -396,7 +526,7 @@ export async function showVirtualElevationAnalysisInline(
 
 	// Create empty placeholder plots first (so Plotly divs exist)
 	// The actual VE calculation will happen after sliders are set up
-	await initializeVEAnalysis(appState, analysisInput, defaultAirSpeedOffset);
+	await initializeVEAnalysis(appState, analysisInput, selectedIndices);
 
 	// Now set up sliders - this binds event handlers that read from sliders
 	// and recalculate VE with the correct parameter values
@@ -406,14 +536,10 @@ export async function showVirtualElevationAnalysisInline(
 		services,
 		mapVisualization,
 		callbacks.saveCurrentLapSettings,
-		selectedIndices,
 		timestamps,
-		power,
 		velocity,
 		positionLat,
 		positionLong,
-		altitude,
-		distance,
 		windSpeed,
 		defaultAirSpeedOffset,
 	);
@@ -427,7 +553,24 @@ export async function showVirtualElevationAnalysisInline(
 		trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
 	}
 
-	setupTabSwitching();
+	// BIND THE BUTTONS, DO NOT TOUCH THE MAP.
+	//
+	// This was a bare `setupTabSwitching()`, which assigned
+	// `currentRenderMap = renderMap` unconditionally and so WIPED the real map
+	// that `createStandardUpdateCallbacks.renderVe` installs
+	// (`bindStandardSliders.ts:241`). It only appeared to work because
+	// `scheduleRecompute` defers to `setTimeout(..., 0)`, so the dispatch above
+	// lands `renderVe` on the NEXT macrotask, after this line.
+	//
+	// Deleting the call outright fixed the wipe but took the button binding with
+	// it, which left the tabs UNBOUND on exactly the paths that motivated the
+	// fix — every segment under MIN_SEGMENT_SAMPLES, every calculator throwing,
+	// a trim window at its clamp — where the scheduled pass never reaches
+	// `renderVe` to bind them. `bindTabButtons` is the half that is always safe
+	// to run: idempotent (WeakSet-guarded) and map-preserving, so the tabs
+	// respond even when the first pass produces nothing to draw.
+	bindTabButtons();
+
 	bindLapViewToggle();
 
 	bindActionFooter({

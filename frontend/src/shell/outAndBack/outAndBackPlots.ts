@@ -11,6 +11,9 @@ import {
     buildMultiSegmentPowerFigure,
     buildMultiSegmentVirtualDistanceFigure,
 } from '../../plots/MultiSegmentPlotBuilders';
+import { renderVirtualDistanceHeader, sectionVirtualDistanceRows } from '../ve/vdHeader';
+import { anchorSeriesTo } from '../../plots/comparisonTraces';
+import { log } from '../../utils/log';
 
 /**
  * Calculate mean actual elevation profile for Out and Back (with inbound mirrored)
@@ -162,6 +165,20 @@ export function renderOutAndBackPowerPlot(profiles: OutAndBackVEProfile[]) {
 /**
  * Render stacked VD plot for Out and Back mode
  */
+/**
+ * Render the stacked VD plot for out-and-back, and the per-section readouts
+ * above it.
+ *
+ * This tab used to render a bare plot with no header at all -- the same hole
+ * that was fixed for the GPS-lap sidebar, left open here because the shape was
+ * a real design question: two legs per section means per-segment would be 2N
+ * lines. The maintainer ruled per-section total, so there is one labelled line
+ * per section combining both its legs.
+ *
+ * As in the other two modes, the header is filled from the SAME cumulative
+ * series the plot below draws, so the numbers cannot drift from the curve they
+ * label -- which was the original defect.
+ */
 export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
     const Plotly = (window as any).Plotly;
     if (!Plotly) return;
@@ -175,18 +192,98 @@ export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
     });
 
     Plotly.newPlot('oabVdPlot', figure.data, figure.layout, figure.config);
+    renderVirtualDistanceHeader(
+        sectionVirtualDistanceRows(
+            profiles.map(profile => ({
+                label: `Section ${profile.sectionNumber}`,
+                outbound: profile.outboundSeries,
+                inbound: profile.inboundSeries,
+            })),
+        ),
+    );
 }
 
 /**
- * Calculate statistics for Out and Back analysis
+ * Which wind model's two legs a scorer or figure builder reads.
+ *
+ * Out-and-back keeps its comparison series PER LEG (`outboundVECompare` /
+ * `inboundVECompare`), so every consumer that used to reach for `outboundVE`
+ * and `inboundVE` directly now goes through one of these two picks. That is
+ * what makes the FIT and constant passes literally the same code over
+ * different arrays, rather than two loops that can drift apart.
  */
-export function calculateOutAndBackStats(profiles: OutAndBackVEProfile[], meanElevation: { distances: number[]; elevation: number[] }): {
-    rmse: number; avgVeGain: number; avgActualGain: number; avgDiff: number;
-} {
-    if (profiles.length === 0 || meanElevation.distances.length === 0) {
-        return { rmse: 0, avgVeGain: 0, avgActualGain: 0, avgDiff: 0 };
-    }
+type OutAndBackLegPick = (profile: OutAndBackVEProfile) => {
+    outbound: number[];
+    inbound: number[];
+};
 
+const FIT_LEGS: OutAndBackLegPick = profile => ({
+    outbound: profile.outboundVE,
+    inbound: profile.inboundVE,
+});
+
+const COMPARE_LEGS: OutAndBackLegPick = profile => ({
+    outbound: profile.outboundVECompare ?? [],
+    inbound: profile.inboundVECompare ?? [],
+});
+
+/**
+ * Do ALL sections carry a comparison series on every leg they actually have?
+ *
+ * A leg the primitive skipped (under 10 samples) has no VE either, so it is not
+ * evidence of a missing comparison — the condition is "every leg that was
+ * computed was computed twice". A partial set is a bug upstream and renders as
+ * the single-source figure with a warning.
+ */
+export function everySectionHasCompareSeries(profiles: OutAndBackVEProfile[]): boolean {
+    return (
+        profiles.length > 0 &&
+        profiles.every(profile =>
+            (profile.outboundVE.length === 0 || profile.outboundVECompare != null) &&
+            (profile.inboundVE.length === 0 || profile.inboundVECompare != null)
+        )
+    );
+}
+
+/** How many sections carry a comparison series on at least one leg. */
+function sectionsCarryingCompare(profiles: OutAndBackVEProfile[]): number {
+    return profiles.filter(
+        profile => profile.outboundVECompare != null || profile.inboundVECompare != null
+    ).length;
+}
+
+export interface OutAndBackStats {
+    rmse: number;
+    avgVeGain: number;
+    avgActualGain: number;
+    avgDiff: number;
+    /**
+     * The same four numbers over the SECOND wind model, present iff the update
+     * ran under `compare` (ruling 2, plan 07-04). The fields above always
+     * describe the FIT series and are numerically untouched by its presence —
+     * switching the radio must not move the numbers the user was reading.
+     */
+    compare?: {
+        rmse: number;
+        avgVeGain: number;
+        avgActualGain: number;
+        avgDiff: number;
+    };
+}
+
+/**
+ * Score ONE wind model's legs against the mean elevation profile.
+ *
+ * Verbatim maths from the single-model version, with the two hand-rolled offset
+ * lines replaced by `anchorSeriesTo` (07-04 Task 1) and the leg arrays supplied
+ * by `pick`. The inbound leg is anchored to THIS model's outbound last value,
+ * which is the whole reason the pick exists.
+ */
+function scoreOutAndBackLegs(
+    profiles: OutAndBackVEProfile[],
+    meanElevation: { distances: number[]; elevation: number[] },
+    pick: OutAndBackLegPick
+): { rmse: number; avgVeGain: number; avgActualGain: number; avgDiff: number } {
     let sumSquaredError = 0;
     let errorCount = 0;
     let totalClosingError = 0;
@@ -199,14 +296,14 @@ export function calculateOutAndBackStats(profiles: OutAndBackVEProfile[], meanEl
     const avgActualGain = 0;  // Always 0 for out-and-back (we return to start)
 
     for (const profile of profiles) {
+        const legs = pick(profile);
+
         // Track the last outbound VE for continuity
         let outboundLastVE = endElev;
 
         // Process outbound
-        if (profile.outboundVE.length > 0 && profile.outboundDistances.length > 0) {
-            const calibratedOutboundVE = profile.outboundVE.map((ve) =>
-                ve - profile.outboundVE[0] + startElev
-            );
+        if (legs.outbound.length > 0 && profile.outboundDistances.length > 0) {
+            const calibratedOutboundVE = anchorSeriesTo(legs.outbound, startElev);
             outboundLastVE = calibratedOutboundVE[calibratedOutboundVE.length - 1];
 
             // RMSE calculation for outbound
@@ -222,14 +319,12 @@ export function calculateOutAndBackStats(profiles: OutAndBackVEProfile[], meanEl
         }
 
         // Process inbound (mirrored) - continues from outbound's last VE
-        if (profile.inboundVE.length > 0 && profile.inboundDistances.length > 0) {
+        if (legs.inbound.length > 0 && profile.inboundDistances.length > 0) {
             const maxDist = profile.inboundDistances[profile.inboundDistances.length - 1];
             const mirroredDistances = profile.inboundDistances.map(d => maxDist - d);
 
             // Inbound VE starts from where outbound ended (continuity)
-            const calibratedInboundVE = profile.inboundVE.map((ve) =>
-                ve - profile.inboundVE[0] + outboundLastVE
-            );
+            const calibratedInboundVE = anchorSeriesTo(legs.inbound, outboundLastVE);
 
             // VE Gain (closing error) = last inbound VE - start elevation
             // This is the difference at gate A between end of inbound and start of outbound
@@ -264,20 +359,32 @@ export function calculateOutAndBackStats(profiles: OutAndBackVEProfile[], meanEl
 }
 
 /**
- * Render Out and Back plots
+ * Calculate statistics for Out and Back analysis
  */
-export function renderOutAndBackPlots(
-    Plotly: any,
+export function calculateOutAndBackStats(
     profiles: OutAndBackVEProfile[],
     meanElevation: { distances: number[]; elevation: number[] }
-) {
-    const veTraces: any[] = [];
-    const residualTraces: any[] = [];
+): OutAndBackStats {
+    if (profiles.length === 0 || meanElevation.distances.length === 0) {
+        return { rmse: 0, avgVeGain: 0, avgActualGain: 0, avgDiff: 0 };
+    }
 
-    // Color palette
-    const colors = ['#4363d8', '#e6194b', '#3cb44b', '#f58231', '#911eb4', '#46f0f0', '#f032e6'];
+    const primary = scoreOutAndBackLegs(profiles, meanElevation, FIT_LEGS);
+    if (!everySectionHasCompareSeries(profiles)) {
+        return primary;
+    }
 
-    // Find max distance for plot range
+    return {
+        ...primary,
+        compare: scoreOutAndBackLegs(profiles, meanElevation, COMPARE_LEGS),
+    };
+}
+
+/** The section palette. Index is section ORDER, and it means section identity. */
+const SECTION_COLORS = ['#4363d8', '#e6194b', '#3cb44b', '#f58231', '#911eb4', '#46f0f0', '#f032e6'];
+
+/** The x-range both figures share: the longest leg across all sections. */
+function maxOutAndBackDistance(profiles: OutAndBackVEProfile[]): number {
     let maxDist = 0;
     for (const profile of profiles) {
         if (profile.outboundDistances.length > 0) {
@@ -287,37 +394,114 @@ export function renderOutAndBackPlots(
             maxDist = Math.max(maxDist, profile.inboundDistances[profile.inboundDistances.length - 1]);
         }
     }
+    return maxDist;
+}
 
-    // Plot mean actual elevation
+/** The mean actual elevation reference, identical in both VE figures. */
+function meanElevationTrace(meanElevation: { distances: number[]; elevation: number[] }) {
+    return {
+        x: meanElevation.distances,
+        y: meanElevation.elevation,
+        mode: 'lines',
+        name: 'Mean Actual Elevation',
+        line: { color: 'black', width: 1 }
+    };
+}
+
+/**
+ * Residuals at the sampled distances, dropping points the mean profile does not
+ * cover. The drop is why this is not `residualsAgainst`: an uncovered point has
+ * no reference, and today's figure omits it rather than drawing a gap.
+ */
+function residualsOverMean(
+    distances: number[],
+    calibrated: number[],
+    meanElevation: { distances: number[]; elevation: number[] }
+): { x: number[]; y: number[] } {
+    const x: number[] = [];
+    const y: number[] = [];
+    for (let j = 0; j < distances.length; j++) {
+        const dist = distances[j];
+        const meanElev = interpolateElevation(dist, meanElevation.distances, meanElevation.elevation);
+        if (!isNaN(meanElev)) {
+            y.push(calibrated[j] - meanElev);
+            x.push(dist);
+        }
+    }
+    return { x, y };
+}
+
+function outAndBackLayouts(maxDist: number, titleSuffix: string) {
+    return {
+        veLayout: {
+            title: `Out & Back Virtual Elevation${titleSuffix}`,
+            xaxis: { title: 'Distance (km)', range: [0, maxDist * 1.02] },
+            yaxis: { title: 'Elevation (m)' },
+            legend: { orientation: 'h', y: -0.15 },
+            margin: { t: 40, b: 80, l: 60, r: 20 },
+            hovermode: 'closest'
+        },
+        residualLayout: {
+            title: `VE Residuals${titleSuffix} (VE - Mean Elevation)`,
+            xaxis: { title: 'Distance (km)', range: [0, maxDist * 1.02] },
+            yaxis: { title: 'Residual (m)' },
+            margin: { t: 40, b: 60, l: 60, r: 20 },
+            hovermode: 'closest',
+            shapes: [{
+                type: 'line', x0: 0, x1: maxDist, y0: 0, y1: 0,
+                line: { color: 'gray', width: 1, dash: 'dot' }
+            }]
+        },
+    };
+}
+
+/**
+ * The traces for ONE wind model: `2N` section traces per figure, plus the mean
+ * elevation reference on the VE figure.
+ *
+ * Every visual channel is a verbatim lift — colour is section identity, solid is
+ * outbound, dashed is inbound, and the inbound leg is drawn against a MIRRORED
+ * x-axis so both legs read left-to-right from gate A. The one thing that varies
+ * per call is which arrays `pick` hands over, so the constant-wind figure is
+ * literally the same drawing of different numbers.
+ *
+ * The continuity calibration is PER MODEL: `outboundLastVE` is this model's own
+ * outbound last value. Anchoring a constant-wind inbound leg to the FIT
+ * outbound would splice half of one model onto half of another and draw a curve
+ * that belongs to neither — plausible on screen, silently wrong. That is the
+ * D-10 mutation site this task owns.
+ */
+function buildOutAndBackModelTraces(
+    profiles: OutAndBackVEProfile[],
+    meanElevation: { distances: number[]; elevation: number[] },
+    pick: OutAndBackLegPick
+): {
+    veTraces: any[];
+    residualTraces: any[];
+    closingErrors: { sectionNumber: number; error: number }[];
+} {
+    const veTraces: any[] = [];
+    const residualTraces: any[] = [];
+    const closingErrors: { sectionNumber: number; error: number }[] = [];
+
     if (meanElevation.distances.length > 0) {
-        veTraces.push({
-            x: meanElevation.distances,
-            y: meanElevation.elevation,
-            mode: 'lines',
-            name: 'Mean Actual Elevation',
-            line: { color: 'black', width: 1 }
-        });
+        veTraces.push(meanElevationTrace(meanElevation));
     }
 
     const startElev = meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
     const endElev = meanElevation.elevation.length > 0 ? meanElevation.elevation[meanElevation.elevation.length - 1] : 0;
 
-    // Track closing errors for each section (VE at end of inbound vs actual start elevation)
-    const closingErrors: { sectionNumber: number; error: number }[] = [];
-
-    // Plot each section
     for (let i = 0; i < profiles.length; i++) {
         const profile = profiles[i];
-        const color = colors[i % colors.length];
+        const color = SECTION_COLORS[i % SECTION_COLORS.length];
+        const legs = pick(profile);
 
         // Track the last VE value from outbound for inbound continuity
         let outboundLastVE = endElev;  // Default to end elevation if no outbound data
 
         // Plot outbound VE (solid line)
-        if (profile.outboundVE.length > 0) {
-            const calibratedOutboundVE = profile.outboundVE.map((ve) =>
-                ve - profile.outboundVE[0] + startElev
-            );
+        if (legs.outbound.length > 0) {
+            const calibratedOutboundVE = anchorSeriesTo(legs.outbound, startElev);
 
             // Store the last calibrated VE value for inbound continuity
             outboundLastVE = calibratedOutboundVE[calibratedOutboundVE.length - 1];
@@ -330,20 +514,10 @@ export function renderOutAndBackPlots(
                 line: { color, width: 3 }
             });
 
-            // Outbound residuals
-            const residuals: number[] = [];
-            const residualDists: number[] = [];
-            for (let j = 0; j < profile.outboundDistances.length; j++) {
-                const dist = profile.outboundDistances[j];
-                const meanElev = interpolateElevation(dist, meanElevation.distances, meanElevation.elevation);
-                if (!isNaN(meanElev)) {
-                    residuals.push(calibratedOutboundVE[j] - meanElev);
-                    residualDists.push(dist);
-                }
-            }
+            const residuals = residualsOverMean(profile.outboundDistances, calibratedOutboundVE, meanElevation);
             residualTraces.push({
-                x: residualDists,
-                y: residuals,
+                x: residuals.x,
+                y: residuals.y,
                 mode: 'lines',
                 name: `Section ${profile.sectionNumber} (A→B)`,
                 line: { color, width: 2 },
@@ -352,22 +526,19 @@ export function renderOutAndBackPlots(
         }
 
         // Plot inbound VE (dashed line, mirrored on x-axis)
-        if (profile.inboundVE.length > 0) {
+        if (legs.inbound.length > 0) {
             const inboundMaxDist = profile.inboundDistances[profile.inboundDistances.length - 1];
             const mirroredDistances = profile.inboundDistances.map(d => inboundMaxDist - d);
 
             // Calibrate: inbound VE starts from where outbound VE ended (continuity)
             // The first inbound point (at turnaround B) should equal the last outbound VE value
-            const calibratedInboundVE = profile.inboundVE.map((ve) =>
-                ve - profile.inboundVE[0] + outboundLastVE
-            );
+            const calibratedInboundVE = anchorSeriesTo(legs.inbound, outboundLastVE);
 
             // Calculate closing error: last inbound VE vs actual start elevation
             const inboundLastVE = calibratedInboundVE[calibratedInboundVE.length - 1];
-            const closingError = inboundLastVE - startElev;
             closingErrors.push({
                 sectionNumber: profile.sectionNumber,
-                error: closingError
+                error: inboundLastVE - startElev
             });
 
             veTraces.push({
@@ -378,20 +549,10 @@ export function renderOutAndBackPlots(
                 line: { color, width: 3, dash: 'dash' }
             });
 
-            // Inbound residuals
-            const residuals: number[] = [];
-            const residualDists: number[] = [];
-            for (let j = 0; j < mirroredDistances.length; j++) {
-                const dist = mirroredDistances[j];
-                const meanElev = interpolateElevation(dist, meanElevation.distances, meanElevation.elevation);
-                if (!isNaN(meanElev)) {
-                    residuals.push(calibratedInboundVE[j] - meanElev);
-                    residualDists.push(dist);
-                }
-            }
+            const residuals = residualsOverMean(mirroredDistances, calibratedInboundVE, meanElevation);
             residualTraces.push({
-                x: residualDists,
-                y: residuals,
+                x: residuals.x,
+                y: residuals.y,
                 mode: 'lines',
                 name: `Section ${profile.sectionNumber} (B→A)`,
                 line: { color, width: 2, dash: 'dash' },
@@ -400,7 +561,75 @@ export function renderOutAndBackPlots(
         }
     }
 
-    // Display closing errors in a summary element
+    return { veTraces, residualTraces, closingErrors };
+}
+
+export interface OutAndBackFigures {
+    ve: { data: any[]; layout: any };
+    residuals: { data: any[]; layout: any };
+    /** The constant-wind subplots, present only under compare. */
+    compareVe?: { data: any[]; layout: any };
+    compareResiduals?: { data: any[]; layout: any };
+    /** Closing errors of the FIT series — what `#oabClosingError` has always shown. */
+    closingErrors: { sectionNumber: number; error: number }[];
+}
+
+/** The single-source figures — one pair of plots, exactly as before. */
+function buildOutAndBackSingleSourceFigures(
+    profiles: OutAndBackVEProfile[],
+    meanElevation: { distances: number[]; elevation: number[] }
+): OutAndBackFigures {
+    const { veLayout, residualLayout } = outAndBackLayouts(maxOutAndBackDistance(profiles), '');
+    const traces = buildOutAndBackModelTraces(profiles, meanElevation, FIT_LEGS);
+
+    return {
+        ve: { data: traces.veTraces, layout: veLayout },
+        residuals: { data: traces.residualTraces, layout: residualLayout },
+        closingErrors: traces.closingErrors,
+    };
+}
+
+/**
+ * The out-and-back comparison figures (D-20 ruling, plan 07-04 Task 4).
+ *
+ * OPTION-B, AS RULED: a second stacked subplot, the constant-wind view BELOW the
+ * FIT view. Neither plot spends a channel on the wind model, so each keeps
+ * exactly today's encoding and today's readability — colour is section, solid is
+ * outbound, dashed is inbound. The alternatives were declined for reasons
+ * recorded in `07-GOLDEN-BASELINE.md` §"Task 3 ruling"; do not re-encode this as
+ * an overlay.
+ *
+ * Four figures, `2N` section traces each (the VE figures also carry the single
+ * mean-elevation reference they have always carried). The residual pair is what
+ * makes "residuals carry both without ambiguity" true: putting both models'
+ * residuals in one axis would reintroduce exactly the channel conflict — and the
+ * 64-traces-at-16-sections crowding — that option-a was rejected for.
+ */
+export function buildOutAndBackComparisonFigures(
+    profiles: OutAndBackVEProfile[],
+    meanElevation: { distances: number[]; elevation: number[] }
+): OutAndBackFigures {
+    const maxDist = maxOutAndBackDistance(profiles);
+    // Under compare the primary figure is titled, because an untitled plot above
+    // a "(Constant Wind)" plot would leave the reader guessing which model it is.
+    // The non-compare path keeps the bare title it has always had.
+    const primary = outAndBackLayouts(maxDist, ' (FIT Wind)');
+    const secondary = outAndBackLayouts(maxDist, ' (Constant Wind)');
+
+    const fit = buildOutAndBackModelTraces(profiles, meanElevation, FIT_LEGS);
+    const constant = buildOutAndBackModelTraces(profiles, meanElevation, COMPARE_LEGS);
+
+    return {
+        ve: { data: fit.veTraces, layout: primary.veLayout },
+        residuals: { data: fit.residualTraces, layout: primary.residualLayout },
+        compareVe: { data: constant.veTraces, layout: secondary.veLayout },
+        compareResiduals: { data: constant.residualTraces, layout: secondary.residualLayout },
+        closingErrors: fit.closingErrors,
+    };
+}
+
+/** Paint `#oabClosingError` from the FIT series, exactly as before. */
+function renderOutAndBackClosingErrors(closingErrors: { sectionNumber: number; error: number }[]) {
     const closingErrorDiv = document.getElementById('oabClosingError');
     if (closingErrorDiv && closingErrors.length > 0) {
         const avgError = closingErrors.reduce((sum, e) => sum + e.error, 0) / closingErrors.length;
@@ -409,31 +638,56 @@ export function renderOutAndBackPlots(
         ).join(' | ');
         closingErrorDiv.innerHTML = `<strong>Closing Error:</strong> ${errorDetails}` +
             (closingErrors.length > 1 ? ` | <strong>Avg:</strong> ${avgError >= 0 ? '+' : ''}${avgError.toFixed(2)} m` : '');
-        closingErrorDiv.style.display = 'block';
+        closingErrorDiv.classList.remove('hidden');
+    }
+}
+
+/**
+ * Render Out and Back plots
+ *
+ * WHICH FIGURES ARE DRAWN IS A PROPERTY OF THE PROFILES, not a second entry
+ * point (the shape Task 2 settled for GPS-lap): every computed leg carrying a
+ * comparison series means compare, and anything else means the single-source
+ * pair this mode has always drawn.
+ */
+export function renderOutAndBackPlots(
+    Plotly: any,
+    profiles: OutAndBackVEProfile[],
+    meanElevation: { distances: number[]; elevation: number[] }
+) {
+    const withCompare = sectionsCarryingCompare(profiles);
+    const isCompare = everySectionHasCompareSeries(profiles);
+    if (withCompare > 0 && !isCompare) {
+        // Half a comparison is worse than none: the second subplot would claim a
+        // constant-wind view of sections it has no constant-wind data for.
+        log.warn(
+            `Out-and-back compare: ${withCompare} of ${profiles.length} sections carry a compare series; falling back to the single-source plot`,
+        );
     }
 
-    // Plot layouts
-    const veLayout = {
-        title: 'Out & Back Virtual Elevation',
-        xaxis: { title: 'Distance (km)', range: [0, maxDist * 1.02] },
-        yaxis: { title: 'Elevation (m)' },
-        legend: { orientation: 'h', y: -0.15 },
-        margin: { t: 40, b: 80, l: 60, r: 20 },
-        hovermode: 'closest'
-    };
+    const figures = isCompare
+        ? buildOutAndBackComparisonFigures(profiles, meanElevation)
+        : buildOutAndBackSingleSourceFigures(profiles, meanElevation);
 
-    const residualLayout = {
-        title: 'VE Residuals (VE - Mean Elevation)',
-        xaxis: { title: 'Distance (km)', range: [0, maxDist * 1.02] },
-        yaxis: { title: 'Residual (m)' },
-        margin: { t: 40, b: 60, l: 60, r: 20 },
-        hovermode: 'closest',
-        shapes: [{
-            type: 'line', x0: 0, x1: maxDist, y0: 0, y1: 0,
-            line: { color: 'gray', width: 1, dash: 'dot' }
-        }]
-    };
+    renderOutAndBackClosingErrors(figures.closingErrors);
 
-    Plotly.newPlot('oabVePlot', veTraces, veLayout, { responsive: true });
-    Plotly.newPlot('oabVeResidualsPlot', residualTraces, residualLayout, { responsive: true });
+    // Unhide BEFORE plotting: Plotly measures the container at draw time, and a
+    // `display: none` div measures zero.
+    const compareView = document.getElementById('oabCompareView');
+    if (compareView) {
+        compareView.classList.toggle('hidden', !isCompare);
+    }
+
+    Plotly.newPlot('oabVePlot', figures.ve.data, figures.ve.layout, { responsive: true });
+    Plotly.newPlot('oabVeResidualsPlot', figures.residuals.data, figures.residuals.layout, { responsive: true });
+
+    if (figures.compareVe && figures.compareResiduals) {
+        Plotly.newPlot('oabVeComparePlot', figures.compareVe.data, figures.compareVe.layout, { responsive: true });
+        Plotly.newPlot(
+            'oabVeCompareResidualsPlot',
+            figures.compareResiduals.data,
+            figures.compareResiduals.layout,
+            { responsive: true },
+        );
+    }
 }

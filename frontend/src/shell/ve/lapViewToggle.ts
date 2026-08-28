@@ -60,8 +60,8 @@ export function lapViewToggleMarkup(activeMode: LapViewMode): string {
 	return `
         <div class="lap-view-toggle" id="lapViewToggle" role="group" aria-label="Combine laps">
             <span class="lap-view-toggle-label">Combine laps:</span>
-            <button type="button" class="lap-view-toggle-btn ${activeMode === "stitched" ? "active" : ""}" data-view="stitched">Stitched</button>
-            <button type="button" class="lap-view-toggle-btn ${activeMode === "stacked" ? "active" : ""}" data-view="stacked">Stacked</button>
+            <button type="button" class="lap-view-toggle-btn ${activeMode === "stitched" ? "lap-view-toggle-btn--active" : ""}" data-view="stitched">Stitched</button>
+            <button type="button" class="lap-view-toggle-btn ${activeMode === "stacked" ? "lap-view-toggle-btn--active" : ""}" data-view="stacked">Stacked</button>
         </div>
     `;
 }

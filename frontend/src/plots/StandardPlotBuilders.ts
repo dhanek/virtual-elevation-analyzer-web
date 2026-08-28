@@ -1,4 +1,27 @@
+import { anchorSeriesTo, residualsAgainst } from './comparisonTraces';
 import { buildTrimBoundaryShapes, createContextSlices, type PlotContext } from './PlotContext';
+import {
+    computeVirtualDistanceWindowTotals,
+    integrateVirtualDistance,
+    type VirtualDistanceTotals,
+} from '../analysis/VirtualDistance';
+
+// The integration itself moved to analysis/VirtualDistance.ts once Store Result
+// and Export CSV started persisting these numbers (change-list entry (h)): the
+// `summarize` seam that writes them lives in modes/analysis/ and must not reach
+// into this layer. Re-exported here so every existing import site keeps working
+// and there is still exactly ONE integration.
+export {
+    computeVirtualDistanceWindowTotals,
+    integrateVirtualDistance,
+    virtualDistanceDifferencePercent,
+} from '../analysis/VirtualDistance';
+export type {
+    VirtualDistanceIntegration,
+    VirtualDistanceTotals,
+    VirtualDistanceWindow,
+    SegmentVirtualDistance,
+} from '../analysis/VirtualDistance';
 
 export type PlotTrace = Record<string, unknown>;
 export type PlotLayout = Record<string, unknown>;
@@ -43,12 +66,28 @@ export interface SpeedPowerPlotInput {
     power: number[];
 }
 
+/**
+ * D-21 / N-6: there is NO calibration field here, deliberately.
+ *
+ * `windSpeed` is an ALREADY-RESOLVED apparent-wind series — offset and the
+ * `1 + pct/100` calibration multiplier have both been applied upstream by
+ * `resolveWindSeries`, which after plan 07-02 is the only place in the update
+ * path that applies either. This builder used to re-apply the multiplier
+ * internally, which was harmless only while its callers happened to pass an
+ * un-calibrated series. Once the series arrives pre-calibrated that internal
+ * multiplier becomes a DOUBLE application, and 07-RESEARCH.md named it the
+ * single most likely silent numeric regression in the phase.
+ *
+ * Removing the field rather than passing 0 makes a second application a
+ * COMPILE error instead of a convention. Guarded by
+ * `virtualDistanceCalibration.test.ts`.
+ */
 export interface VirtualDistancePlotInput {
     context: PlotContext;
     timestamps: number[];
     velocity: number[];
+    /** Already offset AND calibrated. Do not scale it again — see above. */
     windSpeed: number[];
-    airSpeedCalibrationPercent: number;
 }
 
 export function getDefaultPlotConfig(): PlotConfig {
@@ -281,12 +320,15 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
     const constantSlices = createContextSlices(input.virtualElevationConstant, input.context);
     const actualSlices = createContextSlices(input.actualElevation, input.context);
 
-    const fitOffset = actualSlices.main[0] - fitSlices.main[0];
-    const constantOffset = actualSlices.main[0] - constantSlices.main[0];
-    const offsetFit = fitSlices.main.map(value => value + fitOffset);
-    const offsetConstant = constantSlices.main.map(value => value + constantOffset);
-    const fitResiduals = offsetFit.map((value, index) => value - actualSlices.main[index]);
-    const constantResiduals = offsetConstant.map((value, index) => value - actualSlices.main[index]);
+    // Each series is anchored INDEPENDENTLY on the first main-window actual
+    // sample, through the one shared helper the GPS comparison figures also use
+    // (07-04 Task 1). Output is unchanged: `comparisonTraces.test.ts` pins every
+    // y value of all six traces, and was green against the hand-rolled version
+    // before this call replaced it.
+    const offsetFit = anchorSeriesTo(fitSlices.main, actualSlices.main[0]);
+    const offsetConstant = anchorSeriesTo(constantSlices.main, actualSlices.main[0]);
+    const fitResiduals = residualsAgainst(offsetFit, actualSlices.main);
+    const constantResiduals = residualsAgainst(offsetConstant, actualSlices.main);
 
     return {
         elevation: {
@@ -322,8 +364,13 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
                 hovermode: 'closest',
+                // Must match buildVirtualElevationFigures. `.ve-plot-container`
+                // is flex:1 inside a display:block tab pane with no height, so a
+                // responsive figure with no layout.height collapses to unreadable.
+                margin: { l: 60, r: 20, t: 40, b: 5 },
+                height: 350,
             },
-            config: { responsive: true },
+            config: getDefaultPlotConfig(),
         },
         residuals: {
             data: [
@@ -358,8 +405,11 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 yaxis: { title: 'Residual (m)' },
                 showlegend: true,
                 hovermode: 'closest',
+                // Must match buildVirtualElevationFigures' residuals sizing.
+                margin: { l: 60, r: 20, t: 30, b: 60 },
+                height: 200,
             },
-            config: { responsive: true },
+            config: getDefaultPlotConfig(),
         },
     };
 }
@@ -623,24 +673,31 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
     };
 }
 
+/**
+ * The endpoint of each plotted curve at the trim end, in km.
+ *
+ * This is deliberately derived from the SAME integration the figure draws
+ * rather than from a VE result: the `#vdAirValue` / `#vdGroundValue` /
+ * `#vdDiffValue` spans sit directly above that curve, and a header sourced from
+ * anywhere else drifts away from it the moment a trim slider moves.
+ */
+export function computeVirtualDistanceTotals(input: VirtualDistancePlotInput): VirtualDistanceTotals {
+    return computeVirtualDistanceWindowTotals({
+        timestamps: input.timestamps,
+        velocity: input.velocity,
+        windSpeed: input.windSpeed,
+        trimStart: input.context.trimStart,
+        trimEnd: input.context.trimEnd,
+    });
+}
+
 export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {
-    const calibrationMultiplier = 1 + input.airSpeedCalibrationPercent / 100;
-    const calibratedWindSpeed = input.airSpeedCalibrationPercent !== 0
-        ? input.windSpeed.map(speed => speed * calibrationMultiplier)
-        : input.windSpeed;
-
-    const vdAir: number[] = new Array(input.timestamps.length).fill(0);
-    const vdGround: number[] = new Array(input.timestamps.length).fill(0);
-
-    for (let i = input.context.trimStart + 1; i < input.timestamps.length; i++) {
-        const dt = input.timestamps[i] - input.timestamps[i - 1];
-
-        const apparentSpeed = !isNaN(calibratedWindSpeed[i]) ? calibratedWindSpeed[i] : 0;
-        vdAir[i] = vdAir[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
-
-        const groundSpeed = !isNaN(input.velocity[i]) && input.velocity[i] > 0 ? input.velocity[i] : 0;
-        vdGround[i] = vdGround[i - 1] + groundSpeed * dt;
-    }
+    const { air: vdAir, ground: vdGround } = integrateVirtualDistance(
+        input.timestamps,
+        input.velocity,
+        input.windSpeed,
+        input.context.trimStart,
+    );
 
     const airSlices = createContextSlices(vdAir.map(value => value / 1000), input.context);
     const groundSlices = createContextSlices(vdGround.map(value => value / 1000), input.context);

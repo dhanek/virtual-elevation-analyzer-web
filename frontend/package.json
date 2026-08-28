@@ -9,12 +9,14 @@
     "check": "tsc --noEmit",
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run",
-    "profile:slider": "vite-node scripts/profile-slider-recompute.ts"
+    "profile:slider": "vite-node scripts/profile-slider-recompute.ts",
+    "profile:gps-lap-render": "vite-node scripts/profile-gps-lap-render.ts"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",
     "browser-fs-access": "^0.38.0",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "plotly.js-basic-dist": "^2.27.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -42,8 +42,8 @@ describe("elevationSmoothingToggleMarkup", () => {
 		);
 		const on = document.querySelector('[data-smoothing="on"]')!;
 		const off = document.querySelector('[data-smoothing="off"]')!;
-		expect(on.classList.contains("active")).toBe(true);
-		expect(off.classList.contains("active")).toBe(false);
+		expect(on.classList.contains("lap-view-toggle-btn--active")).toBe(true);
+		expect(off.classList.contains("lap-view-toggle-btn--active")).toBe(false);
 	});
 
 	it("lights OFF when raw is the active profile", () => {
@@ -51,9 +51,7 @@ describe("elevationSmoothingToggleMarkup", () => {
 			appStateWithProfiles("dem-raw-nearest"),
 		);
 		expect(
-			document.querySelector('[data-smoothing="off"]')!.classList.contains(
-				"active",
-			),
+			document.querySelector('[data-smoothing="off"]')!.classList.contains("lap-view-toggle-btn--active"),
 		).toBe(true);
 	});
 });
@@ -70,9 +68,7 @@ describe("bindElevationSmoothingToggle", () => {
 		expect(appState.activeDisplayProfile).toBe("dem-raw-nearest");
 		expect(onToggle).toHaveBeenCalledWith(false);
 		expect(
-			document.querySelector('[data-smoothing="off"]')!.classList.contains(
-				"active",
-			),
+			document.querySelector('[data-smoothing="off"]')!.classList.contains("lap-view-toggle-btn--active"),
 		).toBe(true);
 	});
 

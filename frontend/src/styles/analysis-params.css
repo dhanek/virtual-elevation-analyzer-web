@@ -1,0 +1,371 @@
+/* Analysis Parameters Styles */
+.analysis-parameters {
+	background: white;
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	padding: var(--space-lg);
+	margin: var(--space-lg) 0;
+	width: 100%;
+	max-width: none;
+}
+
+.analysis-parameters h4 {
+	color: var(--color-text);
+	margin: 0 0 clamp(1.5rem, 3vw, 2rem) 0;
+	font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+	font-weight: 300;
+	letter-spacing: -0.02em;
+	border-bottom: 1px solid var(--color-primary);
+	padding-bottom: var(--space-md);
+}
+
+.param-compact-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+	gap: var(--space-md);
+}
+
+.param-compact-grid--spaced {
+	margin-top: var(--space-lg);
+}
+
+.param-item {
+	display: flex;
+	flex-direction: column;
+}
+
+.param-item label {
+	font-size: 0.9rem;
+	font-weight: 500;
+	color: var(--color-text-heading);
+	margin-bottom: var(--space-xs);
+}
+
+.param-item input,
+.param-item select {
+	padding: clamp(0.5rem, 1vw, 0.75rem);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	font-size: clamp(0.9rem, 1.6vw, 1rem);
+	transition: border-color 0.2s ease;
+	background: white;
+	color: var(--color-text);
+}
+
+.param-item input:focus,
+.param-item select:focus {
+	outline: none;
+	border-color: var(--color-primary);
+	box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.param-item input:disabled {
+	background-color: var(--color-bg);
+	color: #9ca3af;
+	border-color: #e5e5e5;
+}
+
+.param-item input::placeholder {
+	color: #9ca3af;
+	font-style: normal;
+}
+
+.param-item__row {
+	display: flex;
+	gap: var(--space-sm);
+	align-items: center;
+}
+
+.param-item__row input {
+	flex: 1;
+}
+
+.param-item__row select {
+	width: 70px;
+}
+
+.param-item--checkbox {
+	flex-direction: row;
+	align-items: center;
+}
+
+.param-item--checkbox label {
+	display: flex;
+	align-items: center;
+	margin-bottom: 0;
+	cursor: pointer;
+}
+
+.param-item--checkbox input[type="checkbox"] {
+	margin-right: var(--space-sm);
+	width: auto;
+}
+
+.bounds-section {
+	margin-top: var(--space-lg);
+	padding: var(--space-lg);
+	background: white;
+	border-radius: 6px;
+	border: 1px solid var(--color-border);
+}
+
+.bounds-group {
+	margin-bottom: var(--space-md);
+}
+
+.bounds-group:last-child {
+	margin-bottom: 0;
+}
+
+.bounds-group label {
+	display: block;
+	font-size: 0.9rem;
+	font-weight: 500;
+	color: var(--color-text-heading);
+	margin-bottom: var(--space-sm);
+}
+
+.bounds-inputs {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+}
+
+.bounds-inputs input {
+	flex: 1;
+	padding: 0.4rem;
+	border: 1px solid #cbd5e0;
+	border-radius: var(--radius-md);
+	font-size: 0.85rem;
+}
+
+.bounds-inputs span {
+	color: var(--color-text-muted);
+	font-size: 0.9rem;
+	padding: 0 var(--space-xs);
+}
+
+/* Weather-data info panel (shown when auto-calculated rho carries API metadata).
+   No display declaration on the block: visibility uses the shared .hidden utility,
+   which must keep winning the cascade (base.css imports first). */
+.weather-info {
+	margin-top: var(--space-lg);
+	padding: var(--space-md);
+	background: #f5f5f5;
+	border-radius: var(--radius-md);
+	border-left: 3px solid #4caf50;
+}
+
+.weather-info__line {
+	font-size: 0.9em;
+	color: var(--color-text-muted);
+}
+
+.weather-info__line--secondary {
+	font-size: 0.85em;
+	margin-top: var(--space-xs);
+}
+
+.weather-info__line--meta {
+	font-size: 0.85em;
+	color: #888;
+	margin-top: var(--space-xs);
+}
+
+.weather-info__value {
+	margin-left: var(--space-sm);
+}
+
+.weather-info__value--tight {
+	margin-left: var(--space-xs);
+}
+
+.weather-info__source {
+	margin-left: var(--space-sm);
+	padding: 2px 6px;
+	border-radius: 3px;
+	font-size: 0.85em;
+	background: #e0e0e0;
+}
+
+.weather-info__source--cached {
+	background: #e3f2fd;
+	color: #1976d2;
+}
+
+.weather-info__source--api {
+	background: #fff3e0;
+	color: #e65100;
+}
+
+.param-actions {
+	display: flex;
+	gap: var(--space-lg);
+	margin-top: var(--space-xl);
+	padding-top: var(--space-xl);
+	border-top: 1px solid var(--color-border);
+}
+
+/* .primary-btn / .secondary-btn: canonical definition lives in
+   ve-results.css (05-08 audit consolidated the former duplicate set here). */
+
+/* Crr temperature correction controls (override .ve-control-group span/label box styling).
+   Specificity guard: analysis-params.css imports BEFORE ve-results.css, so rules that
+   must out-rank .ve-control-group label/span (0,1,1) repeat their own class (0,2,0) —
+   no descendant class selectors, per the pass-3 flatten rule. */
+.crr-temp-controls__toggle.crr-temp-controls__toggle {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-weight: 400;
+	margin-bottom: 0;
+	cursor: pointer;
+}
+
+.crr-temp-controls__toggle input[type="checkbox"] {
+	accent-color: var(--color-primary);
+	cursor: pointer;
+	flex: none;
+	margin: 0;
+}
+
+.crr-temp-controls__info.crr-temp-controls__info {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 15px;
+	height: 15px;
+	min-width: 0;
+	padding: 0;
+	background: none;
+	border: 1px solid #a0aec0;
+	border-radius: 50%;
+	color: #718096;
+	font-family: Georgia, serif;
+	font-style: italic;
+	font-size: 11px;
+	line-height: 1;
+	cursor: help;
+	flex: none;
+}
+
+.crr-temp-controls__fields {
+	display: block;
+	margin-top: var(--space-sm);
+}
+
+.crr-temp-controls__fields--hidden {
+	display: none;
+}
+
+.crr-temp-controls__row {
+	display: flex;
+	gap: var(--space-sm);
+	align-items: center;
+}
+
+.crr-temp-controls__row.crr-temp-controls__row label {
+	display: inline;
+	margin-bottom: 0;
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+.crr-temp-controls__row input[type="number"] {
+	width: 64px;
+	flex: none;
+}
+
+.crr-temp-controls__row select {
+	flex: 1;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.crr-temp-controls__readout {
+	font-size: 0.85em;
+	color: #555;
+	margin-top: 0.4rem;
+}
+
+/* Wind height factor controls (08-04): the k slider, its readout and the
+   D-05 / D-06 prompts. Same specificity guard as the Crr temperature block —
+   analysis-params.css imports BEFORE ve-results.css, so rules that must
+   out-rank .ve-control-group label/span (0,1,1) repeat their own class (0,2,0);
+   no descendant class selectors, per the pass-3 flatten rule. */
+/* The block is hidden under FIT wind, where the factor has nothing to transfer
+   from (D-01). The UA default [hidden] { display: none } already covers this
+   because .ve-control-group sets no display, but that is an accident of the
+   current cascade — stating it explicitly means adding a display to
+   .ve-control-group later cannot silently un-hide the control. Repeated class
+   for the same specificity reason as the block above. */
+.wind-height-controls[hidden].wind-height-controls[hidden] {
+	display: none;
+}
+
+.wind-height-controls__label.wind-height-controls__label {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: var(--space-sm);
+}
+
+.wind-height-controls__info.wind-height-controls__info {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 15px;
+	height: 15px;
+	min-width: 0;
+	padding: 0;
+	background: none;
+	border: 1px solid #a0aec0;
+	border-radius: 50%;
+	color: #718096;
+	font-family: Georgia, serif;
+	font-style: italic;
+	font-size: 11px;
+	line-height: 1;
+	cursor: help;
+	flex: none;
+}
+
+.wind-height-controls__row {
+	display: flex;
+	gap: var(--space-sm);
+	align-items: center;
+}
+
+/* The k row pairs a range with a number input, so the range must shrink out of
+   its .ve-slider width: 100% instead of pushing the number input off the row. */
+.wind-height-controls__row input[type="range"] {
+	flex: 1;
+	min-width: 0;
+	margin-bottom: 0;
+}
+
+.wind-height-controls__row input[type="number"] {
+	width: 64px;
+	flex: none;
+}
+
+.wind-height-controls__row.wind-height-controls__row label {
+	display: inline;
+	margin-bottom: 0;
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+.wind-height-controls__readout {
+	font-size: 0.85em;
+	color: #555;
+	margin-top: 0.4rem;
+}
+
+/* The D-05 hand-entry warning and the D-06 "unknown"-provenance prompt: a
+   "set the factor" nudge, not an error, so amber (the dem.css:190 inline
+   warning-text precedent) rather than the --color-danger red. */
+.wind-height-controls__readout--warning {
+	color: #f57c00;
+	font-weight: 500;
+}

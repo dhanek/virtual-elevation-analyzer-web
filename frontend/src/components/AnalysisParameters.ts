@@ -1,3 +1,9 @@
+import {
+	DEFAULT_WIND_HEIGHT_FACTOR,
+	LEGACY_WIND_HEIGHT_FACTOR,
+	type WindEntry,
+} from "../analysis/WindHeightTransfer";
+
 export interface AnalysisParameters {
 	system_mass: number;
 	rho: number;
@@ -21,6 +27,23 @@ export interface AnalysisParameters {
 	ambient_temp_c?: number | null;
 	tire_sensitivity?: "stiff" | "typical" | "supple";
 	rho_source?: "manual" | "weather_api" | "weather_cache";
+	// 10 m → rider wind height transfer (see analysis/WindHeightTransfer.ts).
+	//
+	// D-03: wind_speed keeps meaning "wind as reported, untransferred". The
+	// field shows 3.5 when the API reported 3.5; the factor is applied
+	// downstream at the WASM boundary. Applying it at store time was rejected:
+	// it would make the stored value's meaning depend on provenance, require
+	// rewriting state whenever the factor moves, and put the field in
+	// disagreement with the weather panel.
+	//
+	// D-06 (amended): wind_entry records which input last wrote the wind — an
+	// observable event, not a claim about what the number means. Deliberately
+	// not named wind_source and deliberately not merged with rho_source, which
+	// answers a staleness question instead. "unknown" exists for records saved
+	// before this feature so a later auto-rho fill cannot be mistaken for a
+	// first fill and re-seed a factor onto an analysis already read.
+	wind_height_factor?: number;
+	wind_entry?: WindEntry;
 	weather_metadata?: {
 		temperature: number;
 		dewPoint: number;
@@ -54,6 +77,15 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	crr_temp_correction: false, // opt-in tire temperature compensation, never applied silently
 	ambient_temp_c: null,
 	tire_sensitivity: "typical",
+	// D-02: maintainer-requested default of 0.5 for the height transfer.
+	// D-07 overrides it to LEGACY_WIND_HEIGHT_FACTOR for records saved before
+	// this feature — normalised on load in ParameterStorage.loadParameters,
+	// not here, so the single read path stays the one home for that rule.
+	wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+	// A freshly created record has no wind at all (wind_speed: null), so
+	// nothing has written one yet and "manual" is correct: the first weather
+	// fill then legitimately counts as a first fill and seeds the default.
+	wind_entry: "manual",
 };
 
 export class AnalysisParametersComponent {
@@ -103,7 +135,7 @@ export class AnalysisParametersComponent {
                                value="${this.parameters.rho}" title="Air density (1.225 at sea level, 15°C)">
                     </div>
 
-                    <div class="param-item checkbox-item">
+                    <div class="param-item param-item--checkbox">
                         <label for="auto_calculate_rho">
                             <input type="checkbox" id="auto_calculate_rho" ${this.parameters.auto_calculate_rho ? "checked" : ""}>
                             Auto-calculate from weather
@@ -153,13 +185,13 @@ export class AnalysisParametersComponent {
                     </div>
                 </div>
 
-                <div class="param-compact-grid" style="margin-top: 1rem;">
+                <div class="param-compact-grid param-compact-grid--spaced">
                     <div class="param-item">
                         <label for="wind_speed">Wind Speed:</label>
-                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <div class="param-item__row">
                             <input type="number" id="wind_speed" min="0" max="30" step="0.1"
-                                   placeholder="Optional" title="Wind speed (constant value)" style="flex: 1;">
-                            <select id="wind_speed_unit" style="width: 70px;" title="Wind speed unit">
+                                   placeholder="Optional" title="Wind speed (constant value)">
+                            <select id="wind_speed_unit" title="Wind speed unit">
                                 <option value="m/s" ${this.parameters.wind_speed_unit === "m/s" ? "selected" : ""}>m/s</option>
                                 <option value="km/h" ${this.parameters.wind_speed_unit === "km/h" ? "selected" : ""}>km/h</option>
                             </select>
@@ -172,7 +204,7 @@ export class AnalysisParametersComponent {
                                placeholder="Optional" title="Direction wind is coming FROM (0°=N, 90°=E, 180°=S, 270°=W)">
                     </div>
 
-                    <div class="param-item checkbox-item">
+                    <div class="param-item param-item--checkbox">
                         <label for="velodrome">
                             <input type="checkbox" id="velodrome" ${this.parameters.velodrome ? "checked" : ""}>
                             Velodrome (Zero Altitude)
@@ -182,20 +214,20 @@ export class AnalysisParametersComponent {
                     <!-- Note: GPS Analysis Mode moved to Section 3 UI -->
                 </div>
 
-                <div id="weather_info_container" style="display: none; margin-top: 1rem; padding: 0.75rem; background: #f5f5f5; border-radius: 4px; border-left: 3px solid #4CAF50;">
-                    <div style="font-size: 0.9em; color: #666;">
+                <div id="weather_info_container" class="weather-info hidden">
+                    <div class="weather-info__line">
                         <strong>Weather Data:</strong>
-                        <span id="weather_temp" style="margin-left: 0.5rem;">--</span>°C,
-                        <span id="weather_pressure" style="margin-left: 0.25rem;">--</span> hPa,
+                        <span id="weather_temp" class="weather-info__value">--</span>°C,
+                        <span id="weather_pressure" class="weather-info__value weather-info__value--tight">--</span> hPa,
                         Dew Point: <span id="weather_dewpoint">--</span>°C
-                        <span id="weather_source" style="margin-left: 0.5rem; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; background: #e0e0e0;">--</span>
+                        <span id="weather_source" class="weather-info__source">--</span>
                     </div>
-                    <div style="font-size: 0.85em; color: #666; margin-top: 0.25rem;">
+                    <div class="weather-info__line weather-info__line--secondary">
                         <strong>Wind:</strong>
-                        <span id="weather_windspeed" style="margin-left: 0.5rem;">--</span> m/s,
+                        <span id="weather_windspeed" class="weather-info__value">--</span> m/s,
                         Direction: <span id="weather_winddirection">--</span>°
                     </div>
-                    <div style="font-size: 0.85em; color: #888; margin-top: 0.25rem;">
+                    <div class="weather-info__line weather-info__line--meta">
                         Location: <span id="weather_location">--</span> |
                         Time: <span id="weather_timestamp">--</span>
                     </div>
@@ -218,6 +250,24 @@ export class AnalysisParametersComponent {
 		inputs.forEach((input) => {
 			input.addEventListener("input", () => this.handleParameterChange());
 		});
+
+		// IN-02: these cannot ride on the shared handler above. That handler is
+		// attached to *every* input and select in the container, so wiring the
+		// D-05 signal there would set wind_entry = "manual" when the user edits
+		// system_mass. The other half of the same fact is what makes these
+		// listeners safe: a programmatic `element.value = ...` assignment (how
+		// auto-rho fills the weather wind, and how updateUI rewrites the form)
+		// does NOT dispatch an "input" event, so a weather fill cannot trip them.
+		const windSpeedInput = this.container.querySelector(
+			"#wind_speed",
+		) as HTMLInputElement | null;
+		windSpeedInput?.addEventListener("input", () => this.markManualWindEntry());
+		// WR-04: #wind_direction deliberately gets NO manual-entry listener.
+		// D-09 scopes k to wind SPEED only, so a bearing edit says nothing about
+		// how the speed was measured. Marking manual here would un-transfer a
+		// weather-sourced speed the user never touched, changing the wind term by
+		// 2x because of an edit to an orthogonal field. The shared handler above
+		// already reads the new direction into the model.
 
 		// Reset button
 		const resetBtn = this.container.querySelector("#resetParams");
@@ -282,10 +332,49 @@ export class AnalysisParametersComponent {
 			crr_temp_correction: this.parameters.crr_temp_correction,
 			ambient_temp_c: this.parameters.ambient_temp_c,
 			tire_sensitivity: this.parameters.tire_sensitivity,
+			// The height factor lives in the VE sidebar and wind_entry is written
+			// by the dedicated wind listeners below - neither is rebuilt from this
+			// form, so carry them over or every keystroke in the mass field
+			// silently resets the factor to the fresh default and re-brands a
+			// reopened legacy record ("unknown") as something it is not.
+			wind_height_factor: this.parameters.wind_height_factor,
+			wind_entry: this.parameters.wind_entry,
 		};
 
 		// Validate and notify
 		this.validateParameters();
+		this.onParametersChange(this.parameters);
+	}
+
+	// D-05: the app does not guess what a hand-typed wind means. The weather API
+	// and the user write to the same input, and a typed number may be a 10 m
+	// forecast or an anemometer reading taken at the rider. Inferring the height
+	// from "the user touched the field" is a silent guess that is wrong for
+	// roughly half of users. So a manual edit sets the factor to 1.0 - the
+	// number is used exactly as typed - and the readout raises a warning; the
+	// factor slider is the resolution mechanism, not this listener.
+	//
+	// This is also the way out of "unknown": a user who hand-types a wind on a
+	// reopened legacy record has just told the app which input wrote it.
+	private markManualWindEntry(): void {
+		// Already in the target state - do not re-emit on every keystroke.
+		if (
+			this.parameters.wind_entry === "manual" &&
+			this.parameters.wind_height_factor === LEGACY_WIND_HEIGHT_FACTOR
+		) {
+			return;
+		}
+
+		// Deliberately NOT this.setParameters(...): that calls updateUI(), which
+		// rewrites #wind_speed.value from the parsed model, so a user midway
+		// through typing "3." would have their input rewritten to "3" under the
+		// cursor. This listener writes the model and re-emits, and leaves the
+		// DOM exactly as the user left it.
+		this.parameters = {
+			...this.parameters,
+			wind_entry: "manual",
+			wind_height_factor: LEGACY_WIND_HEIGHT_FACTOR,
+		};
 		this.onParametersChange(this.parameters);
 	}
 
@@ -378,7 +467,7 @@ export class AnalysisParametersComponent {
 			const metadata = this.parameters.weather_metadata;
 
 			// Show the weather info container
-			weatherInfoContainer.style.display = "block";
+			weatherInfoContainer.classList.remove("hidden");
 
 			// Update values
 			const tempSpan = this.container.querySelector("#weather_temp");
@@ -409,12 +498,8 @@ export class AnalysisParametersComponent {
 			if (sourceSpan) {
 				const isCached = metadata.source === "cache";
 				sourceSpan.textContent = isCached ? "💾 Cached" : "⬇️ API";
-				(sourceSpan as HTMLElement).style.background = isCached
-					? "#e3f2fd"
-					: "#fff3e0";
-				(sourceSpan as HTMLElement).style.color = isCached
-					? "#1976d2"
-					: "#e65100";
+				sourceSpan.classList.toggle("weather-info__source--cached", isCached);
+				sourceSpan.classList.toggle("weather-info__source--api", !isCached);
 			}
 
 			if (locationSpan) {
@@ -427,7 +512,7 @@ export class AnalysisParametersComponent {
 			}
 		} else {
 			// Hide the weather info container
-			weatherInfoContainer.style.display = "none";
+			weatherInfoContainer.classList.add("hidden");
 		}
 	}
 

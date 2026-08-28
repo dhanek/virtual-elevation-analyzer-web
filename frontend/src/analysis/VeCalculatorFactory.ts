@@ -1,4 +1,5 @@
 import type { AnalysisParameters } from '../components/AnalysisParameters';
+import { resolveAppliedWindSpeed } from './WindHeightTransfer';
 import {
     create_ve_calculator,
     create_ve_calculator_with_rho_array,
@@ -35,6 +36,21 @@ export function createVeCalculator(input: VeCalculatorInput): VirtualElevationCa
     const distance = toFloat64ArrayCached(input.distance);
     const windSpeed = toFloat64ArrayCached(input.windSpeed);
 
+    // D-04: single application point for the 10 m -> rider height transfer.
+    // create_ve_calculator and create_ve_calculator_with_rho_array are reached
+    // from this file alone (`grep -rn "create_ve_calculator" frontend/src
+    // --include="*.ts"` returns hits only here and in its test), so one hoisted
+    // local corrects all seven production createVeCalculator consumers across
+    // 11 call sites - and therefore all three analysis modes - with no WASM
+    // signature change. Rejected alternative: applying k in the Rust at
+    // virtual_elevation.rs:328, arguably the more honest home for physics, but
+    // it costs a new VirtualElevationParams field, signature changes across
+    // three WASM constructor wrappers, Rust tests and a wasm rebuild for an
+    // identical outcome.
+    // D-03: params.wind_speed keeps meaning "wind as reported, untransferred" -
+    // k is applied here, downstream, and is never folded into stored state.
+    const effectiveWindSpeed = resolveAppliedWindSpeed(input.params, input.params.wind_speed);
+
     if (input.rhoArray) {
         return create_ve_calculator_with_rho_array(
             timestamps,
@@ -55,7 +71,7 @@ export function createVeCalculator(input: VeCalculatorInput): VirtualElevationCa
             input.params.cda_max,
             input.params.crr_min,
             input.params.crr_max,
-            input.params.wind_speed,
+            effectiveWindSpeed,
             input.params.wind_direction,
             input.params.velodrome,
         );
@@ -79,7 +95,7 @@ export function createVeCalculator(input: VeCalculatorInput): VirtualElevationCa
         input.params.cda_max,
         input.params.crr_min,
         input.params.crr_max,
-        input.params.wind_speed,
+        effectiveWindSpeed,
         input.params.wind_direction,
         input.params.velodrome,
     );

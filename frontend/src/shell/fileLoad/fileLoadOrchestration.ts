@@ -381,13 +381,18 @@ export async function processFitFile(file: File): Promise<void> {
 			parametersComponent?.getParameters().auto_calculate_rho &&
 			result.parsing_statistics.has_gps_data
 		) {
-			// Delay slightly to ensure trim sliders are initialized
-			setTimeout(async () => {
-				await calculateAutoRho(deps.appState, parametersComponent, {
+			// Delay slightly to ensure trim sliders are initialized.
+			// The timer is detached, so nothing can await this promise — attach
+			// a .catch so a rejection cannot escape as an unhandled rejection
+			// (matches the other calculateAutoRho call sites).
+			setTimeout(() => {
+				calculateAutoRho(deps.appState, parametersComponent, {
 					appState: deps.appState,
 					showLoading: deps.showLoading,
 					hideLoading: deps.hideLoading,
 					showError: deps.showError,
+				}).catch((err) => {
+					log.error("Auto-rho calculation error after file load:", err);
 				});
 			}, 500);
 		}

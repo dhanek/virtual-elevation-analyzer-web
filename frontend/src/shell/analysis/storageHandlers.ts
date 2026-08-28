@@ -13,6 +13,14 @@ export async function saveCurrentLapSettings(
 ) {
     if (!appState.currentFileHash || !appState.selectedFile) return;
 
+    // Key the save by the laps the VE view (and its sliders) actually belong
+    // to — NOT the live checkbox selection. Between a lap-checkbox switch and
+    // the next analyze, appState.selectedLaps already points at the new lap
+    // while the sliders still hold the previous lap's trim values; saving
+    // under the selection key would poison the new lap's stored settings
+    // (stale trim loaded on the next analyze). No analysis yet → nothing to save.
+    if (appState.currentAnalyzedLaps.length === 0) return;
+
     const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
     const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
     const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
@@ -29,7 +37,7 @@ export async function saveCurrentLapSettings(
     };
 
     try {
-        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.selectedLaps, settings);
+        await parameterStorage.saveLapSettings(appState.currentFileHash, appState.currentAnalyzedLaps, settings);
     } catch (err) {
         log.error('Failed to save lap settings:', err);
     }
@@ -79,18 +87,36 @@ export async function handleSaveScreenshot(
  * Handle Store Result button click.
  * Extracted from main.ts.
  */
+/**
+ * SINGLE-FLIGHT. The Store button is deliberately not disabled until after the
+ * notes dialog resolves — that is what lets a cancel leave it untouched — so
+ * without this flag a second click opened a second dialog while the first was
+ * still up, and the result was stored twice.
+ */
+let storeInFlight = false;
+
 export async function handleStoreResult(
     appState: AppState,
     resultsStorage: ResultsStorage
 ) {
+    if (storeInFlight) {
+        return;
+    }
     if (!appState.selectedFile || !appState.currentParameters || !appState.currentVEResult) {
         log.error('Cannot store: missing required data');
         alert('Cannot store result: missing analysis data. Please run analysis first.');
         return;
     }
 
-    if (!appState.currentFilteredData) {
-        alert('Cannot store result: filtered data not available. Please run analysis first.');
+    // EMPTY counts as absent. `buildFilteredDataFromProfiles` returns empty
+    // arrays unconditionally when `currentFitData` is falsy
+    // (`segmentSummary.ts:77-80`), and both segment-mode branches below then
+    // compute `trimEnd = 0 - 1 = -1`, slice nothing, and hand
+    // `new Date(undefined * 1000)` to `.toISOString()` — a RangeError caught by
+    // the outer catch and reported as the generic "Failed to store result",
+    // which says nothing about the real cause.
+    if (!appState.currentFilteredData || appState.currentFilteredData.power.length === 0) {
+        alert('Cannot store result: no analysed samples. Please run analysis first.');
         return;
     }
 
@@ -99,8 +125,19 @@ export async function handleStoreResult(
 
     const originalText = storeBtn.textContent;
 
+    storeInFlight = true;
     try {
         const notes = await showNotesDialog();
+
+        // DISMISSED — store nothing and touch nothing.
+        //
+        // Returning before the button is disabled and relabelled is deliberate:
+        // there is no "Cancelled" state to show because nothing was started.
+        // The button is still reading its original label at this point, so the
+        // user simply gets their panel back.
+        if (notes === null) {
+            return;
+        }
 
         let trimStart: number;
         let trimEnd: number;
@@ -120,13 +157,41 @@ export async function handleStoreResult(
             const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
             const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
 
-            if (!trimStartSlider || !trimEndSlider || !cdaSlider || !crrSlider) {
+            if (!cdaSlider || !crrSlider) {
                 log.error('Cannot store: UI elements not found');
                 return;
             }
 
-            trimStart = parseInt(trimStartSlider.value);
-            trimEnd = parseInt(trimEndSlider.value);
+            if (trimStartSlider && trimEndSlider) {
+                trimStart = parseInt(trimStartSlider.value);
+                trimEnd = parseInt(trimEndSlider.value);
+            } else {
+                // D-09 entry (u), N-1. A TRIM WINDOW IS NOT UNIVERSAL, and this
+                // branch used to assume it was: it required `#trimStartSlider` and
+                // `#trimEndSlider`, which only Standard's template renders
+                // (`renderStandardVe.ts:303,308`). Out-and-back sets
+                // `isGpsLapModeActive = false` (`outAndBackMode.ts:44`) so it lands
+                // here, found neither slider, logged 'Cannot store: UI elements not
+                // found' and returned — Store Result persisted NOTHING at all, and
+                // Export CSV therefore had nothing of that ride to export.
+                //
+                // The window is the whole analysed selection, which is exactly what
+                // the GPS-lap branch above computes at `:119-120` for the same
+                // reason: a segment mode has no trim control, so what is on screen
+                // IS the full `currentFilteredData` that `segmentSummary`'s
+                // `buildFilteredDataFromProfiles` concatenated from the surviving
+                // legs. Deriving it any other way would let the two segment modes
+                // disagree, which is the drift `segmentSummary.ts` exists to stop.
+                //
+                // DO NOT "fix" this by setting `isGpsLapModeActive` in
+                // `outAndBackMode.syncState` instead. That field means "the GPS-lap
+                // overlay is on screen" and `requestModeUpdate.ts:188` routes the
+                // whole update to the gpsLap handler on it; flipping it would send
+                // out-and-back's recomputes to the wrong mode.
+                trimStart = 0;
+                trimEnd = appState.currentFilteredData.power.length - 1;
+            }
+
             cda = parseFloat(cdaSlider.value);
             crr = parseFloat(crrSlider.value);
         }
@@ -136,15 +201,73 @@ export async function handleStoreResult(
         const filteredTemperature = appState.currentFilteredData.temperature;
         const filteredTimestamps = appState.currentFilteredData.timestamps;
 
-        const trimmedPower = filteredPower.slice(trimStart, trimEnd + 1);
-        const trimmedVelocity = filteredVelocity.slice(trimStart, trimEnd + 1);
-        const trimmedTemperature = filteredTemperature.slice(trimStart, trimEnd + 1);
+        // CR-02. THE WINDOW IS THE WHOLE OF `currentFilteredData`, in every mode.
+        //
+        // It used to be `slice(trimStart, trimEnd + 1)` with the SLIDER values,
+        // which are analyze-selection indices — a different space from what
+        // `standardMode.summarize` writes here on every update. `summarize`
+        // stores the concatenation of the SURVIVING segments, and
+        // `mapTrimToSegments` drops any segment the trim window leaves under
+        // MIN_TRIMMED_SEGMENT_SAMPLES, so narrowing a 3-lap selection onto lap 3
+        // shrank this array to ~300 samples while `trimStart` stayed ~700. The
+        // slice returned `[]`, every average came out 0, and
+        // `filteredTimestamps[700]` was `undefined` — `new Date(NaN)` threw and
+        // surfaced as the generic "Failed to store result".
+        //
+        // Deriving the window from the space actually being read removes the
+        // mismatch instead of detecting it: Standard's profiles are ALREADY
+        // trim-mapped by the time they land here, so what is on screen IS this
+        // concatenation. That is exactly how both segment modes have always
+        // treated it (`:126-127`, `:169-170`) — Standard was the odd one out.
+        //
+        // The slider values are still RECORDED as `trimStart` / `trimEnd`: they
+        // are the trim the user chose, the stored rows and the CSV export carry
+        // them, and reducing them to 0 / length-1 would empty that column.
+        const trimmedPower = filteredPower;
+        const trimmedVelocity = filteredVelocity;
+        const trimmedTemperature = filteredTemperature;
 
         const avgPower = calculateAverage(trimmedPower, false);
         const avgSpeed = calculateAverage(trimmedVelocity, false) * 3.6;
-        const avgTemperature = calculateAverage(trimmedTemperature, true);
+        // STILL zero-skipping, deliberately. `buildFilteredDataFromProfiles`
+        // now marks a missing reading as NaN (which `calculateAverage` drops
+        // anyway), so for the two segment modes this flag could be dropped —
+        // but `prepareAnalysisPayload.ts:88` and `ActivityLoader.ts:242` still
+        // fabricate a 0 for a missing sample, and Standard's analyze path and
+        // every CSV ride go through those. Turning the zero-skip off before
+        // they are fixed too would drag Standard's stored avgTemperature toward
+        // 0 rather than away from it. Cost of leaving it on: a genuine 0 °C
+        // sample is excluded from the mean.
+        // ABSENT, not 0, when the ride carries no usable reading. `calculateAverage`
+        // returns 0 for an all-NaN array, and a stored 0 is indistinguishable from
+        // a genuine 0 °C ride — the same confusion the NaN marker exists to avoid.
+        const hasAnyTemperature = trimmedTemperature.some(Number.isFinite);
+        const avgTemperature = hasAnyTemperature
+            ? calculateAverage(trimmedTemperature, true)
+            : undefined;
 
-        const firstTimestamp = filteredTimestamps[trimStart];
+        // The FIRST ANALYSED SAMPLE, not `filteredTimestamps[trimStart]`.
+        //
+        // Same reasoning as the window above: indexing this array with a slider
+        // value read it in the wrong space, and when the two diverged far enough
+        // the lookup was `undefined` and `new Date(NaN).toISOString()` threw.
+        // Index 0 is the first sample actually on screen, which is what the
+        // segment modes have always recorded.
+        //
+        // The emptiness guard at the top of this function has already
+        // established `length > 0`, so this only has to reject a non-finite
+        // reading rather than an out-of-range index.
+        const firstTimestamp = filteredTimestamps[0];
+        if (!Number.isFinite(firstTimestamp)) {
+            log.error(
+                `Cannot store: first analysed timestamp is ${firstTimestamp}.`,
+            );
+            alert(
+                'Cannot store result: the analysed samples have no usable ' +
+                'timestamp. Please re-run the analysis.',
+            );
+            return;
+        }
         const recordingDate = new Date(firstTimestamp * 1000).toISOString().split('T')[0];
 
         // Crr from the slider is 22 °C-referenced; record the temperature-
@@ -156,7 +279,22 @@ export async function handleStoreResult(
 
         const saveData = {
             fileName: appState.selectedFile.name,
+            // WHAT THE USER SELECTED, in all three modes (WR-02). Standard used
+            // to write the selection while the two segment modes wrote whatever
+            // survived, so the same drop produced `laps: [1,2,3]` here and
+            // `laps: [3]` there — one column, two meanings, and nothing saying
+            // which. It is the selection everywhere now.
             laps: appState.currentAnalyzedLaps,
+            // WHICH OF THEM THE NUMBERS IN THIS ROW DESCRIBE. `avgPower`,
+            // `avgSpeed`, `avgTemperature`, `result` and `virtualDistances` all
+            // come from the SURVIVING profiles, so a dropped lap silently
+            // narrowed them with no column to say so.
+            //
+            // `?? undefined`, never `?? appState.currentAnalyzedLaps`: before the
+            // first recompute the coverage is genuinely unknown, and claiming
+            // full coverage there would be exactly the fabrication this column
+            // exists to prevent.
+            lapsCovered: appState.currentCoveredItems ?? undefined,
             trimStart: trimStart,
             trimEnd: trimEnd,
             cda: cda,
@@ -174,6 +312,11 @@ export async function handleStoreResult(
             windSource: appState.currentWindSource,
             parameters: appState.currentParameters,
             result: appState.currentVEResult,
+            // Entry (h): the per-segment virtual distances the VD header is
+            // showing, written by the same `summarize` seam that wrote
+            // `currentVEResult`. Multi-lap Standard used to persist nothing but
+            // the combined result's zeros here.
+            virtualDistances: appState.currentVirtualDistances,
             timestamp: new Date(),
             recordingDate: recordingDate,
             avgPower: avgPower,
@@ -199,6 +342,8 @@ export async function handleStoreResult(
 
         storeBtn.disabled = false;
         storeBtn.textContent = originalText || 'Store Result';
+    } finally {
+        storeInFlight = false;
     }
 }
 
@@ -241,62 +386,89 @@ function calculateAverage(values: number[], excludeZero: boolean = false): numbe
     return sum / validValues.length;
 }
 
-function showNotesDialog(): Promise<string> {
+/**
+ * Ask for the note to file the result under.
+ *
+ * Resolves the note, or `null` if the user DISMISSED the dialog — Cancel,
+ * Escape, or a backdrop click. The distinction is load-bearing: this used to
+ * resolve `''` for a dismissal, which is indistinguishable from pressing OK
+ * with an empty field, so `handleStoreResult` stored the result anyway. Cancel
+ * flashed "✓ Stored" and put a row in the CSV export.
+ */
+export function showNotesDialog(): Promise<string | null> {
     return new Promise((resolve) => {
         const dialog = document.createElement('div');
-        dialog.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            z-index: 10000;
-            min-width: 300px;
-        `;
+        dialog.className = 'notes-dialog';
 
         dialog.innerHTML = `
-            <h3 style="margin-top: 0;">Add Notes</h3>
-            <input type="text" id="notesInput" placeholder="e.g., test_config_A" style="width: 100%; padding: 8px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px;">
-            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px;">
-                <button id="notesCancelBtn" style="padding: 8px 16px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>
-                <button id="notesOkBtn" style="padding: 8px 16px; border: none; background: #007bff; color: white; border-radius: 4px; cursor: pointer;">OK</button>
+            <h3 class="notes-dialog__title">Add Notes</h3>
+            <input type="text" id="notesInput" placeholder="e.g., test_config_A" class="notes-dialog__input">
+            <div class="notes-dialog__actions">
+                <button id="notesCancelBtn" class="notes-dialog__button notes-dialog__button--cancel">Cancel</button>
+                <button id="notesOkBtn" class="notes-dialog__button notes-dialog__button--ok">OK</button>
             </div>
         `;
 
         const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 9999;
-        `;
+        overlay.className = 'notes-dialog__overlay';
 
         document.body.appendChild(overlay);
         document.body.appendChild(dialog);
 
-        const input = document.getElementById('notesInput') as HTMLInputElement;
-        const okBtn = document.getElementById('notesOkBtn') as HTMLButtonElement;
-        const cancelBtn = document.getElementById('notesCancelBtn') as HTMLButtonElement;
+        // QUERIED WITHIN THIS DIALOG, not by id off the document.
+        //
+        // The ids are fixed, and `getElementById` returns the FIRST match — so
+        // a second dialog opened while the first was up bound its listeners to
+        // the FIRST dialog's buttons and read the FIRST dialog's input. One
+        // click on the visible OK then resolved both promises. Scoping the
+        // lookups makes two dialogs incapable of sharing controls, which the
+        // single-flight guard above makes unreachable anyway; both are kept
+        // because the guard is a policy and this is a structural impossibility.
+        const input = dialog.querySelector('#notesInput') as HTMLInputElement | null;
+        const okBtn = dialog.querySelector('#notesOkBtn') as HTMLButtonElement | null;
+        const cancelBtn = dialog.querySelector('#notesCancelBtn') as HTMLButtonElement | null;
 
-        input.focus();
-
-        const cleanup = (notes: string) => {
-            document.body.removeChild(overlay);
-            document.body.removeChild(dialog);
+        // IDEMPOTENT. `removeChild` on an already-removed node throws, and this
+        // executor's throw rejects showNotesDialog() straight into
+        // handleStoreResult's generic catch — so a second activation (OK after
+        // Enter, Escape after Cancel) used to surface as "Failed to store
+        // result" with the dialog gone and nothing stored.
+        let done = false;
+        const cleanup = (notes: string | null) => {
+            if (done) return;
+            done = true;
+            // Paired with the listener below. A document-level listener outlives
+            // the nodes it was opened for, so leaving it attached would leak one
+            // per Store Result for the lifetime of the session.
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+            dialog.remove();
             resolve(notes);
         };
 
-        okBtn.addEventListener('click', () => cleanup(input.value.trim()));
-        cancelBtn.addEventListener('click', () => cleanup(''));
-        input.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') cleanup(input.value.trim());
-            if (e.key === 'Escape') cleanup('');
-        });
+        // ON THE DOCUMENT, not on the input.
+        //
+        // `keydown` rather than `keypress` because keypress does not fire for
+        // non-printing keys, which made the Escape branch unreachable. But
+        // fixing that on the INPUT only moved the problem: the listener then saw
+        // Escape solely while the text field held focus, so clicking the
+        // backdrop once left this modal with no keyboard dismissal at all.
+        //
+        // Enter stays input-scoped in spirit — it means "accept what I typed" —
+        // but reading the value here costs nothing and keeps one handler.
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') cleanup(null);
+            else if (e.key === 'Enter') cleanup(input?.value.trim() ?? '');
+        };
+
+        input?.focus();
+
+        okBtn?.addEventListener('click', () => cleanup(input?.value.trim() ?? ''));
+        cancelBtn?.addEventListener('click', () => cleanup(null));
+        // Clicking the backdrop is the other ordinary way out of a modal. It
+        // cancels rather than accepts: a stray click outside the box is not an
+        // expression of intent to save what is in it.
+        overlay.addEventListener('click', () => cleanup(null));
+        document.addEventListener('keydown', onKeyDown);
     });
 }
