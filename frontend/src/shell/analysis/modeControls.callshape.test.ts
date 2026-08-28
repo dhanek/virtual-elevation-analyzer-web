@@ -419,7 +419,7 @@ describe("standard: the trim window reaches the primitive as segment trim", () =
 		expect(el("trimStartSlider").value).toBe("60");
 	});
 
-	it("parks the sliders and SKIPS the update when the minimum window clamps", async () => {
+	it("parks the sliders at the clamp and still reaches the primitive ONCE (CR-01)", async () => {
 		setup();
 		const slider = el("trimStartSlider");
 		// Well inside the 30-sample minimum window.
@@ -427,7 +427,38 @@ describe("standard: the trim window reaches the primitive as segment trim", () =
 		slider.dispatchEvent(new Event("input"));
 		await settle();
 
-		expect(primitive).not.toHaveBeenCalled();
+		// The slider parks at the limit, as it always has.
+		expect(el("trimStartSlider").value).toBe((LAST_INDEX - 30).toString());
+		// But the clamped window still reaches the primitive. This branch used to
+		// `return` before `finish()`, and that swallowed the synthetic `input`
+		// dispatch `showVirtualElevationAnalysisInline` fires to force the first
+		// pass — so a lap whose SAVED trim already sat at the clamp never ran
+		// `summarize`, and Store Result averaged the whole untrimmed lap while the
+		// plot showed the 30-sample window.
+		const args = soleCall();
+		expect(args.segments[0].trim).toEqual({
+			start: LAST_INDEX - 30,
+			end: LAST_INDEX,
+		});
+	});
+
+	it("does NOT recompute a second time while parked at the clamp", async () => {
+		setup();
+		const slider = el("trimStartSlider");
+		slider.value = (LAST_INDEX - 5).toString();
+		slider.dispatchEvent(new Event("input"));
+		await settle();
+		expect(primitive).toHaveBeenCalledTimes(1);
+
+		// Dragging further into the end produces the SAME parked window, and the
+		// pipeline already has it. This is the half of the old behaviour worth
+		// keeping: dragging one edge into the other parks rather than recomputing
+		// the identical window over and over.
+		slider.value = (LAST_INDEX - 2).toString();
+		slider.dispatchEvent(new Event("input"));
+		await settle();
+
+		expect(primitive).toHaveBeenCalledTimes(1);
 		expect(el("trimStartSlider").value).toBe((LAST_INDEX - 30).toString());
 	});
 });

@@ -29,6 +29,8 @@ import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveSelectionWindSeries } from "./standardSegments";
+import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
+import { standardMode } from "../../modes/analysis/standardMode";
 import {
 	selectedLapCount,
 	updateCombinedVirtualDistanceHeader,
@@ -228,7 +230,18 @@ export async function showVirtualElevationAnalysisInline(
 	altitude: number[],
 	distance: number[],
 	windSpeed: number[],
-	temperature: number[] = [],
+	/**
+	 * UNREAD since CR-01, and kept only to hold its place in this positional
+	 * signature: `standardMode.render` spreads the whole payload
+	 * (`...args.filteredData`) and `analyzeOrchestrator` forwards it field by
+	 * field, so dropping the parameter would silently shift `cdaReference` and
+	 * `defaultAirSpeedOffset` up by one at every call site.
+	 *
+	 * The seed below reads temperature from `fitData` through
+	 * `buildFilteredDataFromIndexGroups` instead — the same source, but with the
+	 * NaN "no reading" marker rather than a fabricated 0 °C.
+	 */
+	_temperature: number[] = [],
 	cdaReference: number[] | null = null,
 	defaultAirSpeedOffset: number = 0,
 ) {
@@ -265,7 +278,33 @@ export async function showVirtualElevationAnalysisInline(
 	}
 
 	appState.currentAnalyzedLaps = analyzedLaps;
-	appState.currentFilteredData = { power, velocity, temperature, timestamps };
+	// THE FOURTH WRITER, CONVERTED (CR-01).
+	//
+	// This used to be `{ power, velocity, temperature, timestamps }` — the raw
+	// analyze payload — which made `segmentSummary.ts`'s "THE ONE PLACE the
+	// analysed sample arrays are concatenated" false for Standard, and carried
+	// both defects that header's fixes closed downstream:
+	//
+	//   - UNTRIMMED. The payload is the whole deduplicated selection, so a lap the
+	//     user had narrowed to a 30-sample window still stored averages over the
+	//     acceleration and the roll-out.
+	//   - 0 °C FABRICATED. `prepareAnalysisPayload` pushed `… || 0` for a missing
+	//     reading, so a ride with no temperature channel produced an all-zero
+	//     array that `handleStoreResult` reported as `avgTemperature: 0`,
+	//     indistinguishable from a genuine 0 °C ride.
+	//
+	// It was reachable: `handleTrim` declines to run the pipeline when a saved
+	// trim already sits at its clamp, so `summarize` had never run and this was
+	// the value Store Result read. Seeding through the shared concatenation gives
+	// Standard the NaN "no reading" marker for free, and `getUpdateSegments`
+	// supplies exactly the per-lap ranges the first recompute will use.
+	//
+	// `getUpdateSegments` reads `currentAnalyzedLaps`, which is why it is assigned
+	// above this and not below it.
+	seedSegmentModeFilteredData(
+		appState,
+		standardMode.getUpdateSegments(appState).map((segment) => segment.range),
+	);
 	appState.currentCdaReference = cdaReference;
 
 	const hasWindSpeed = windSpeed.some((val) => !isNaN(val) && val !== 0);

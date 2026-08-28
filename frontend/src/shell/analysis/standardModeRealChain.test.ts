@@ -540,3 +540,88 @@ describe("standard (None): the STACKED overlay's VD tab", () => {
 		expect(missingTargets).toEqual([]);
 	});
 });
+
+/**
+ * CR-01: what `appState.currentFilteredData` holds after Standard's ANALYZE
+ * render, which is the value Store Result reads when nothing has been touched
+ * yet — and, in the clamped-trim state below, the value it reads for the whole
+ * life of the panel.
+ *
+ * These drive the real `showVirtualElevationAnalysisInline`, so unlike
+ * `storageHandlers.test.ts` (which hand-builds the field) they actually execute
+ * the writer.
+ */
+describe("standard: currentFilteredData after the analyze render (CR-01)", () => {
+	/**
+	 * The seed, captured BEFORE the first recompute can overwrite it.
+	 *
+	 * `summarize` ASSIGNS a fresh object to `appState.currentFilteredData`, so
+	 * holding the reference is enough — the returned value is not mutated by the
+	 * pass that follows.
+	 *
+	 * The `settle()` is not decoration. `showVirtualElevationAnalysisInline`
+	 * leaves a recompute armed on a fake timer, and `scheduleRecompute`'s
+	 * `if (throttleTimer !== null) return` guard reads a MODULE-LEVEL handle: a
+	 * test that ends with one still armed leaves the next test unable to arm its
+	 * own, and that next test then silently observes no recompute at all.
+	 */
+	async function seedFromRender(): Promise<
+		NonNullable<AppState["currentFilteredData"]>
+	> {
+		await renderStitched();
+		const seeded = appState.currentFilteredData!;
+		await settle();
+		return seeded;
+	}
+
+	it("seeds through the shared concatenation, covering the analyzed laps", async () => {
+		const seeded = await seedFromRender();
+
+		// Both laps, one segment each — the segment convention
+		// `standardSegments.ts` documents.
+		expect(seeded.timestamps.length).toBe(SAMPLE_COUNT);
+		// Four arrays of equal length, which `FilteredAnalysisData` implies and
+		// every consumer indexes in parallel.
+		expect(seeded.power.length).toBe(seeded.timestamps.length);
+		expect(seeded.velocity.length).toBe(seeded.timestamps.length);
+		expect(seeded.temperature.length).toBe(seeded.timestamps.length);
+		expect(seeded.temperature.every((t) => t === 20)).toBe(true);
+	});
+
+	it("marks a missing temperature channel as NaN, never 0 \u00b0C", async () => {
+		// The ride carries no temperature at all. `prepareAnalysisPayload` used to
+		// push `\u2026 || 0` here and Standard's writer copied that array straight
+		// into AppState, so Store Result persisted `avgTemperature: 0` \u2014
+		// indistinguishable from a genuine 0 \u00b0C ride.
+		(appState.currentFitData as any).temperature = [];
+
+		const seeded = await seedFromRender();
+
+		expect(seeded.temperature.length).toBe(seeded.timestamps.length);
+		expect(seeded.temperature.every(Number.isNaN)).toBe(true);
+		// The marker `handleStoreResult`'s `.some(Number.isFinite)` guard reads to
+		// decide between a number and ABSENT.
+		expect(seeded.temperature.some(Number.isFinite)).toBe(false);
+	});
+
+	it("still applies a SAVED trim that already sits at the 30-sample clamp", async () => {
+		// The state the clamp itself parks users in: drag Trim Start into Trim End,
+		// the clamp writes `start = end - 30`, a later control nudge persists the
+		// pair exactly 30 apart, and re-analyzing reloads them. `handleTrim` then
+		// took its clamp branch on the very first synthetic dispatch and returned
+		// without `finish()`, so `summarize` never ran and `currentFilteredData`
+		// kept the whole untrimmed selection while the plot showed 30 samples.
+		appState.presetTrimEnd = SAMPLE_COUNT - 1;
+		appState.presetTrimStart = SAMPLE_COUNT - 1 - 30;
+
+		await renderStitched();
+		await settle();
+
+		const filtered = appState.currentFilteredData!;
+		expect(filtered.timestamps.length).toBeLessThan(SAMPLE_COUNT);
+		expect(filtered.timestamps[0]).toBe(SAMPLE_COUNT - 1 - 30);
+		expect(filtered.timestamps[filtered.timestamps.length - 1]).toBe(
+			SAMPLE_COUNT - 1,
+		);
+	});
+});

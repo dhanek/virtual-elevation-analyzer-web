@@ -244,6 +244,50 @@ export function bindModeControls(
 	}
 
 	/**
+	 * The trim window the pipeline has actually been told about, for this panel.
+	 *
+	 * A closure variable, so it resets with every `bindModeControls` call — i.e.
+	 * once per rendered panel, which is the lifetime `currentFilteredData` and the
+	 * plots belong to.
+	 */
+	let lastRequestedTrimWindow: { start: number; end: number } | null = null;
+
+	/**
+	 * Run the pipeline for a trim window unless it is the one the pipeline
+	 * already has (CR-01).
+	 *
+	 * The clamp branches below used to `return` unconditionally, and the comment
+	 * on `MIN_TRIM_WINDOW_SAMPLES` names the behaviour that bought: dragging one
+	 * edge into the other parks the slider rather than recomputing the same window
+	 * over and over. That part is worth keeping, and this keeps it — a repeat of
+	 * the window already sent is still skipped.
+	 *
+	 * What it stops is the FIRST clamped event being swallowed. `handleTrim` is
+	 * how the synthetic `input` dispatch in
+	 * `showVirtualElevationAnalysisInline` (`renderStandardVe.ts:511`) forces the
+	 * first real pass, and a lap whose SAVED trim already sits at the clamp — the
+	 * state the clamp itself parks users in, then `saveCurrentLapSettings`
+	 * persists — took the clamp branch on that very first event. No `finish()`, no
+	 * `requestModeUpdate`, no `summarize`: `currentFilteredData` kept its
+	 * analyze-time value for the panel's lifetime, and Store Result averaged the
+	 * whole untrimmed lap while the plot showed a 30-sample window.
+	 */
+	function requestTrim(
+		spec: ModeControlSpec,
+		trimWindow: { start: number; end: number },
+	): void {
+		if (
+			lastRequestedTrimWindow &&
+			lastRequestedTrimWindow.start === trimWindow.start &&
+			lastRequestedTrimWindow.end === trimWindow.end
+		) {
+			return;
+		}
+		lastRequestedTrimWindow = { ...trimWindow };
+		finish(spec, trimWindow);
+	}
+
+	/**
 	 * Shared by the `trim` rows and their `mapTrim` twins — the map sliders were
 	 * always a second face of the same control and delegated to these handlers.
 	 */
@@ -256,12 +300,14 @@ export function bindModeControls(
 			const limit = window.end - MIN_TRIM_WINDOW_SAMPLES;
 			const value = clamp(rawValue, 0, Number.POSITIVE_INFINITY);
 			if (value >= limit) {
-				// Clamped: park the slider and skip the update, as before.
+				// Clamped: park the slider at the limit. The update still goes
+				// through the first time this window is produced — see `requestTrim`.
 				writeTrim("start", limit);
+				requestTrim(spec, { start: limit, end: window.end });
 				return;
 			}
 			writeTrim("start", value);
-			finish(spec, { start: value, end: window.end });
+			requestTrim(spec, { start: value, end: window.end });
 			return;
 		}
 
@@ -273,10 +319,11 @@ export function bindModeControls(
 			: Math.min(rawValue, maxIndex);
 		if (value <= limit) {
 			writeTrim("end", limit);
+			requestTrim(spec, { start: window.start, end: limit });
 			return;
 		}
 		writeTrim("end", value);
-		finish(spec, { start: window.start, end: value });
+		requestTrim(spec, { start: window.start, end: value });
 	}
 
 	function handleRangeNumber(spec: ModeControlSpec, rawValue: number): void {
