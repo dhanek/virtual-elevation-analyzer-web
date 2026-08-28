@@ -224,6 +224,12 @@ export const standardMode: AnalysisModeHandler = {
 						ranges.length === 1
 							? `Lap ${lapNumber}`
 							: `Lap ${lapNumber} (part ${part + 1})`,
+					// Set HERE, where the lap number is still known, so `summarize`
+					// can report coverage without re-deriving it from the profile
+					// ordinal — which is wrong the moment the primitive drops a
+					// segment. A part-split lap puts the SAME number on each part;
+					// `summarize` dedupes.
+					itemNumber: lapNumber,
 					range,
 				});
 			});
@@ -248,11 +254,28 @@ export const standardMode: AnalysisModeHandler = {
 	 * because each lap is integrated over its OWN trim window, a lap the trim
 	 * window has dropped contributes no entry — the same rule that keeps it out
 	 * of the headline mean.
+	 *
+	 * WHICH LAPS THE NUMBERS COVER is reported on `currentCoveredItems`, the same
+	 * field the two segment modes write (WR-01/WR-02). Standard used to narrow
+	 * `currentVEResult`, `currentVirtualDistances` and `currentFilteredData` onto
+	 * the surviving profiles while saying nothing about which laps those were, so
+	 * a stored row could read `laps: [1,2,3]` with an `avgPower` over lap 3 alone
+	 * and nothing in the row or the CSV to say so.
 	 */
 	summarize(appState, profiles, aggregate, inputs) {
 		if (profiles.length === 0) {
 			return;
 		}
+
+		// Deduped, because a lap split into parts by a non-monotonic file
+		// contributes one profile per part under the SAME lap number.
+		appState.currentCoveredItems = Array.from(
+			new Set(
+				profiles
+					.map((profile) => profile.segment.itemNumber)
+					.filter((itemNumber): itemNumber is number => itemNumber !== undefined),
+			),
+		);
 
 		appState.currentVEResult =
 			profiles.length === 1

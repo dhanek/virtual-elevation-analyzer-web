@@ -82,6 +82,11 @@ export async function resolveMultiSegmentAnalysisParams(
 	});
 
 	appState.currentAnalyzedLaps = analyzedItems;
+	// The new selection has produced nothing yet, so it covers nothing yet
+	// (WR-01). Without this reset the PREVIOUS analysis's surviving items would
+	// ride along until the first recompute, and Store Result pressed in between
+	// would persist them as this analysis's coverage.
+	appState.currentCoveredItems = null;
 	appState.airSpeedCalibrationPercent = resolved.airSpeedCalibrationPercent;
 	return resolved.params;
 }

@@ -285,8 +285,12 @@ describe('outAndBackMode.getUpdateSegments', () => {
         expect(appState.currentVEResult).not.toBeNull();
         expect(appState.currentFilteredData).not.toBeNull();
         expect(appState.currentWindSource).toBe('fit');
-        // Section 2 produced no segment, so it is not reported as analysed.
-        expect(appState.currentAnalyzedLaps).toEqual([1]);
+        // Section 2 produced no segment, so it is not reported as COVERED.
+        // WR-01: coverage rides on its own field. `currentAnalyzedLaps` is the
+        // settings key and must not move after analyze — narrowing it here is what
+        // re-keyed the user's tuned CdA/Crr onto a key nothing asks for again.
+        expect(appState.currentCoveredItems).toEqual([1]);
+        expect(appState.currentAnalyzedLaps).toEqual([]);
     });
 
     it('reports a section whose legs were all skipped as NOT analysed', () => {
@@ -294,9 +298,13 @@ describe('outAndBackMode.getUpdateSegments', () => {
         const appState = oabState();
 
         // Only section 2's outbound (20..24) survived.
+        // The analyze-time selection, which must survive the narrowing (WR-01).
+        appState.currentAnalyzedLaps = [1, 2];
+
         handler.summarize(appState, [makeProfile(range(20, 24))], AGGREGATE, makeInputs());
 
-        expect(appState.currentAnalyzedLaps).toEqual([2]);
+        expect(appState.currentCoveredItems).toEqual([2]);
+        expect(appState.currentAnalyzedLaps).toEqual([1, 2]);
     });
 
     it('computes segments from the ON-SCREEN sections, not the checkbox state', () => {

@@ -158,7 +158,30 @@ export interface SelectionState {
 	filteredVEData: FilteredVEData | null;
 	presetTrimStart: number;
 	presetTrimEnd: number | null;
+	/**
+	 * WHAT THE USER SELECTED AND PRESSED ANALYZE ON. A PERSISTENCE KEY.
+	 *
+	 * `saveLapSettings` / `loadLapSettings` are keyed on this array, so it must
+	 * NOT move after analyze. `writeSegmentModeResultState` used to overwrite it
+	 * with the SURVIVING items (WR-01): drop one lap — under
+	 * `MIN_SEGMENT_SAMPLES`, or a calculator that threw — and the first slider
+	 * move re-keyed the tuned CdA/Crr from `[1,2,3,4]` to `[1,2,4]`, a key
+	 * `resolveMultiSegmentAnalysisParams` never asks for again. Re-analyzing the
+	 * same selection then came back with the defaults.
+	 *
+	 * Coverage lives on `currentCoveredItems` instead.
+	 */
 	currentAnalyzedLaps: number[];
+	/**
+	 * WHAT THE ANALYSED NUMBERS ACTUALLY DESCRIBE — the subset of
+	 * `currentAnalyzedLaps` that produced a rendered segment (WR-01/WR-02).
+	 *
+	 * Null until a `summarize` has run, and reset to null at analyze time so a
+	 * previous analysis's coverage cannot leak onto a new selection. All three
+	 * modes write it, so the stored `lapsCovered` column means the same thing in
+	 * every one of them.
+	 */
+	currentCoveredItems: number[] | null;
 	currentFilteredData: FilteredAnalysisData | null;
 	currentGpsLapIndexRanges: LapIndexRange[] | null;
 	/**
@@ -246,6 +269,7 @@ export class AppState {
 		presetTrimStart: 0,
 		presetTrimEnd: null,
 		currentAnalyzedLaps: [],
+		currentCoveredItems: null,
 		currentFilteredData: null,
 		currentGpsLapIndexRanges: null,
 		currentOverlayLapNumbers: null,
@@ -467,6 +491,14 @@ export class AppState {
 
 	set currentAnalyzedLaps(analyzedLaps: number[]) {
 		this.selection.currentAnalyzedLaps = analyzedLaps;
+	}
+
+	get currentCoveredItems(): number[] | null {
+		return this.selection.currentCoveredItems;
+	}
+
+	set currentCoveredItems(coveredItems: number[] | null) {
+		this.selection.currentCoveredItems = coveredItems;
 	}
 
 	get currentFilteredData(): FilteredAnalysisData | null {

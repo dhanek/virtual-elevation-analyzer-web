@@ -278,6 +278,9 @@ export async function showVirtualElevationAnalysisInline(
 	}
 
 	appState.currentAnalyzedLaps = analyzedLaps;
+	// Coverage is unknown until the first `summarize` (WR-01); the previous
+	// analysis's must not ride along into this one.
+	appState.currentCoveredItems = null;
 	// THE FOURTH WRITER, CONVERTED (CR-01).
 	//
 	// This used to be `{ power, velocity, temperature, timestamps }` — the raw

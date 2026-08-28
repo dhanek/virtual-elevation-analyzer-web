@@ -694,7 +694,10 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 		expect(appState.currentVEResult).not.toBeNull();
 		expect(appState.currentFilteredData).not.toBeNull();
 		expect(appState.currentWindSource).toBe("fit");
-		expect(appState.currentAnalyzedLaps).toEqual(
+		// Every section produced output, so coverage is the whole selection.
+		// WR-01: this reads `currentCoveredItems` now — `currentAnalyzedLaps` is
+		// the settings key and `summarize` no longer moves it.
+		expect(appState.currentCoveredItems).toEqual(
 			ride.sections.map((section) => section.sectionNumber),
 		);
 	});

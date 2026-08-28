@@ -256,5 +256,25 @@ export function writeSegmentModeResultState(
 		inputs.windSource,
 		inputs.wind.selectedWindSource,
 	);
-	appState.currentAnalyzedLaps = analyzedItems;
+	// COVERAGE, NOT THE SELECTION (WR-01).
+	//
+	// This used to be `appState.currentAnalyzedLaps = analyzedItems`, and
+	// `currentAnalyzedLaps` is the key `saveLapSettings` / `loadLapSettings` use.
+	// Both segment handlers pass the SURVIVING items, so on any analysis where
+	// the primitive drops a segment — a lap under `MIN_SEGMENT_SAMPLES`
+	// (`updateModeVEPlots.ts:210-215`), or a calculator that threw (`:318-320`) —
+	// the first slider move re-keyed the user's tuned CdA/Crr from `[1,2,3,4]` to
+	// `[1,2,4]`. `resolveMultiSegmentAnalysisParams` never asks for that key
+	// again, so re-analyzing the same selection came back with the defaults. The
+	// `length === 0` guard in `saveCurrentMultiSegmentSettings` does not help:
+	// the list is short, not empty.
+	//
+	// It was a phase-07 regression for OUT-AND-BACK specifically — before this
+	// phase that mode wrote none of these fields, so its key was stable at the
+	// analyze-time value. The seam made the two segment modes uniform on GPS-lap's
+	// behaviour rather than on the safe one.
+	//
+	// The selection and the coverage are separate facts, so they are separate
+	// fields. Store Result persists both.
+	appState.currentCoveredItems = analyzedItems;
 }
