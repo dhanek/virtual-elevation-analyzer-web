@@ -57,7 +57,12 @@ import { log } from "../../utils/log";
 // 07-PROFILE-REPORT.md section "Corrections to 3-PROFILE-REPORT.md".)
 export const RECOMPUTE_THROTTLE_MS = 20;
 
-export type RecomputeStatus = "idle" | "running" | "handoff";
+/**
+ * NOT EXPORTED (WR-05), for the same reason `setRecomputeStatus` below is not:
+ * it is that function's private parameter type and nothing outside this module
+ * names it.
+ */
+type RecomputeStatus = "idle" | "running" | "handoff";
 
 /**
  * NO `mode` FIELD, deliberately. It carried a `RecomputeMode` that this module
@@ -92,7 +97,21 @@ const RUNNING_COPY = "Recomputing…";
 const HANDOFF_COPY = "Input updated — running latest values…";
 const UPDATED_COPY = "Updated";
 
-export function setRecomputeStatus(status: RecomputeStatus): void {
+/**
+ * NOT EXPORTED, on exactly the ground `828ba2c` used to drop the `export` from
+ * `cancelActiveRecompute` (WR-05): the only callers are `scheduleRecompute`,
+ * `runPending` and `flashUpdatedStatus`, all in this file. No module in `src/`
+ * imported it, in production or in `recomputeRunner.test.ts` — the test asserts
+ * on the PILL'S RENDERED TEXT instead, which is the honest observation point and
+ * the reason this needed no test seam.
+ *
+ * `resetRecomputeThrottle` is the different case and stays exported: it is
+ * documented as a test seam and `recomputeRunner.test.ts:83,87` uses it.
+ *
+ * With this, the status pill has exactly one owner — which is what the comment
+ * below has been claiming.
+ */
+function setRecomputeStatus(status: RecomputeStatus): void {
 	// This used to mirror `status` into `appState.recomputeStatus` as well.
 	// Nothing ever read that field back — not even this function, which renders
 	// from its own argument — so it was the same write-only class `3fed12d`
