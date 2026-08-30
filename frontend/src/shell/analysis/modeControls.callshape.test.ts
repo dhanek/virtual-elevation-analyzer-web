@@ -175,8 +175,8 @@ function renderPanel(): void {
 				</div>
 			</div>
 
-			<input type="range" id="windHeightSlider" min="0.2" max="1.2" step="0.01" value="1">
-			<input type="number" id="windHeightValue" value="1">
+			<input type="range" id="windHeightSlider" min="0" max="100" step="1" value="100">
+			<input type="number" id="windHeightValue" value="100">
 			<div id="windHeightReadout"></div>
 		</div>
 	`;
@@ -513,7 +513,9 @@ describe("standard: veViewMatchesSelection still gates the map markers", () => {
 describe("standard: every slider redraws live during a drag, at one cadence", () => {
 	/** Positions the thumb passes through, all on-step and in-range for both. */
 	const CDA_DRAG = ["0.26", "0.27", "0.28"] as const;
-	const K_DRAG = ["0.55", "0.6", "0.65"] as const;
+	// D-b: k's thumb is on the 0-100% scale (the model still stores 0-1), so
+	// these are percent positions where CdA's are raw factor values.
+	const K_DRAG = ["55", "60", "65"] as const;
 
 	interface Cadence {
 		/** Primitive runs observed before the thumb was released. */

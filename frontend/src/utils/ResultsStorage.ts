@@ -103,6 +103,17 @@ export interface StoredVEResult {
     windSource: string;
     windSpeed: number | string;
     windDirection: number | string;
+    /**
+     * The 0-1 height factor the analysis was fitted at (WR-02). ABSENT on every
+     * record written before this column, exactly like `crrApplied` above, so
+     * every read of it is guarded — an old record must still load and export,
+     * with the cell empty rather than a fabricated 1.0 claiming "no transfer".
+     *
+     * Stored as the FACTOR and exported as a percent, matching the control.
+     * `windSpeed` beside it is the raw 10 m value; the wind that reached the
+     * physics is `windSpeed * windHeightFactor`.
+     */
+    windHeightFactor?: number;
     systemMass: number;
     rho: number;
     eta: number;
@@ -131,7 +142,7 @@ export const CSV_HEADERS = [
     // stored before any recompute ran.
     'RecordingDate', 'FileName', 'Laps', 'LapsCovered', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
     'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
-    'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
+    'WindSource', 'WindSpeed', 'WindDir', 'WindHeightPct', 'SystemMass', 'Rho', 'Eta',
     'R2', 'RMSE', 'VEGain', 'ActualGain',
     // Entry (h). One value per independently-integrated segment, ';'-separated
     // in analysis order, aligned position-for-position with VDSegments.
@@ -213,6 +224,9 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
             result.windSource,
             result.windSpeed,
             result.windDirection,
+            result.windHeightFactor !== undefined
+                ? Math.round(result.windHeightFactor * 100)
+                : '',
             result.systemMass,
             result.rho.toFixed(3),
             result.eta.toFixed(3),
@@ -540,6 +554,10 @@ export class ResultsStorage {
             windSource: data.windSource,
             windSpeed: data.parameters.wind_speed ?? '',
             windDirection: data.parameters.wind_direction ?? '',
+            // WR-02: carried across explicitly, like every other named column.
+            // `?? undefined` so a record whose params never held a factor stores
+            // no field at all and exports an empty cell.
+            windHeightFactor: data.parameters.wind_height_factor ?? undefined,
             systemMass: data.parameters.system_mass,
             rho: data.parameters.rho,
             eta: data.parameters.eta,
