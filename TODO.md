@@ -177,9 +177,26 @@ condition is met, so the GO does not yet authorise the work.
 
 ## Where the history lives
 
-`.planning/` holds the GSD record for v1.0 and v1.1 — phase plans, verifications, milestone audits
-and the decision log. It is gitignored and stays on disk; nothing above depends on it, but the
-reasoning behind any item can be traced through the *origin* notes.
+`.planning/` was pruned on 2026-08-30 from 308 files to 24 — only what the items above actually
+cite, plus the closing record. It is gitignored, so it lives on disk and not in git. What remains:
+
+| Path | Why it was kept |
+|---|---|
+| `phases/06-weather-spike/06-FINDINGS.md` | The measurement data behind both WEATH-02 conditions — axis results, method, the k = 0.5 fitting and its single-venue caveat. The re-measurement starts here. |
+| `phases/08-wind-height-transfer/08-VERIFICATION.md` | Origin of six items (WR-02/05/06/07, IN-01/02) with the evidence for each. |
+| `phases/07-mode-pipeline-unification/deferred-items.md` | Origin of the scripts/, out-and-back plotting and aggregation items. |
+| `milestones/v1.1-MILESTONE-AUDIT.md` | Origin of WR-1..WR-9 and NEW-2, with the corrected WEATH-02 framing. |
+| `phases/*/​*-CONTEXT.md` | The decision log (D-01..D-20) — why `compare` collapses in GPS modes, why the debounce is 20 ms, the Option B trim ruling. Answers "why is it like this" when you touch the code. |
+| `todos/pending/` | The three carried-forward investigations, in full. |
+| `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `MILESTONES.md`, `milestones/v1.0*`, `v1.1-{ROADMAP,REQUIREMENTS}.md` | Closing record for v1.0 and v1.1. |
+
+Removed: all phase plans and summaries, research, plan-checks, validations, gate artifacts,
+codebase maps, intel, graphs, UI reviews, debug sessions and the v1.0 phase archive. Superseded by
+the shipped code and by git history.
+
+**Full pre-prune copy:** `~/archive/vea-planning-full-2026-08-30.tar.gz` (308 files, 1.1 MB,
+verified readable). Nothing was lost irreversibly — restore with
+`tar -xzf ~/archive/vea-planning-full-2026-08-30.tar.gz`.
 
 Not carried over, deliberately: items that only concern the accuracy of `.planning/` documents
 themselves (a stale paragraph in a Phase 7 baseline doc, and a Phase 3 verification citing
