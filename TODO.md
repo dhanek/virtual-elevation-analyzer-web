@@ -30,7 +30,7 @@ dependency column below says what actually has to wait.
 |---|---|---|---|
 | **A** | Wind height factor k, end to end | S–M | Decisions D-a, D-b |
 | **B** | Make Store Result truthful | M | — |
-| **C** | Elevation resolver, and the test that should have caught it | S | — |
+| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **D** | Plot rendering and tab layout | M | — |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
@@ -38,8 +38,7 @@ dependency column below says what actually has to wait.
 | **H** | On-screen results view | M–L | **A** (k column), **B** |
 | — | Standalone work | varies | — |
 
-Suggested order from here: **C**, then **A**. E is done. C closes a correctness hole *and* the test
-hole that hid it; A unblocks both the k feature and bundle H.
+Suggested order from here: **A**, which unblocks both the k feature and bundle H. E and C are done.
 
 ---
 
@@ -133,25 +132,6 @@ view displays the same wrong numbers in a new place.*
       over the concatenated selection — while the GPS-lap panel displays N per-lap fits and
       out-and-back 2N leg fits. The first control nudge replaces it.
       `analyzeOrchestrator.ts:428` · *origin: audit WR-4*
-
-## Bundle C · Elevation resolver, and the test that should have caught it
-
-*Effort: S. Why together: the second item is precisely the test that would have caught the first.
-Do it as one TDD unit — write the real test, watch it fail, then fix the two call sites.*
-
-- [ ] **[S] The "three modes" elevation-smoothing test is one guard named three times.** The cases
-      called "standard mode", "gps-lap mode" and "out-and-back mode" all call
-      `resolveElevationProfile` directly with the same `fitData`; no mode module is imported.
-      `frontend/src/shell/analysis/elevationToggle.integration.test.ts:52-83` · *origin: audit WR-2*
-
-- [ ] **[S] The two GPS analyze legs bypass the elevation resolver.** `renderGpsLap` and
-      `renderOutAndBack` read `normalizedArrays.altitude` directly; `resolveElevationProfile` has
-      four production callers (`prepareAnalysisPayload.ts:47`, `updateModeVEPlots.ts:161`,
-      `updateGpsLap.ts:161`) and neither GPS analyze leg is among them. With a DEM applied, the
-      smoothing toggle renders **ON** while the first paint is computed from unsmoothed DEM-raw
-      data — the numbers then shift on the first control nudge when the primitive takes over. Not
-      reachable without a DEM, so verification needs one.
-      `renderGpsLap.ts:107-114`, `renderOutAndBack.ts:99-106` · *origin: audit WR-1*
 
 ## Bundle D · Plot rendering and tab layout
 
@@ -305,6 +285,43 @@ in a new surface.*
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle C · Elevation resolver, and the test that should have caught it — 2026-08-30
+
+Implemented in the working tree on branch `bundle-c-elevation-resolver`; **not yet committed**,
+pending an in-app check. 824 tests pass (up 8), `npm run check` and `npm run lint` clean.
+
+- [x] **[S] The two GPS analyze legs bypassed the elevation resolver.** Both now resolve exactly as
+      the update path does: `allAltitude = resolveElevationProfile(appState, fitData,
+      normalizedArrays.altitude).altitude`.
+      `renderGpsLap.ts:113-124`, `renderOutAndBack.ts:105-116` · *origin: audit WR-1*
+
+      The guard is in `gpsModeRealChain.test.ts` — "the analyze leg honours the active elevation
+      profile", three cases per mode. That file was the right home because it already exists to
+      answer vacuous guards, and because the analyze leg is **not** `showGpsLapVEPlot`: that entry
+      point is handed profiles already computed and never reaches a calculator. The real leg is
+      `showGpsLapVEAnalysis` / `showOutAndBackVEAnalysis`, now driven directly. The probe is the
+      `altitude` array recorded by the harness's calculator mock — the one place the choice of
+      profile is observable.
+
+      Watched fail, and re-checked per mode after the fixture changed: reverting only the GPS-lap
+      fix fails exactly the two GPS-lap DEM cases and leaves out-and-back green.
+
+- [x] **[S] The "three modes" elevation-smoothing test was one guard named three times.** Rewritten
+      as what it always was — unit tests for the toggle and the resolver — with a header naming
+      where the mode-level guards actually live. The three mode-named cases collapsed into an
+      `it.each` over the three profiles that asserts the **array**, not just the profile label: a
+      resolver returning the right name with another profile's samples would have satisfied the old
+      label-only assertion and still fed the physics the wrong elevation.
+      `elevationToggle.integration.test.ts` · *origin: audit WR-2*
+
+- [x] **Standard's leg was unguarded too** — not in the bundle, found while closing it. Standard
+      resolves in `prepareAnalysisPayload`, and that file's tests only ever exercised the no-DEM
+      path, so all three modes were in fact uncovered rather than two. Added "slices the ACTIVE
+      elevation profile, not the raw FIT channel". It passed on first run, so it is a
+      characterization test, not a TDD one — stated plainly; its value was confirmed by stubbing
+      the resolver out and watching it fail with the raw-channel values.
+      `prepareAnalysisPayload.test.ts`
 
 ### Bundle E · Cheap sweep — 2026-08-30
 
