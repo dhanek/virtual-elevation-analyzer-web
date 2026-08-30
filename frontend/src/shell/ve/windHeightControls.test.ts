@@ -22,9 +22,36 @@ const ANY_PROMPT = /by hand|needs setting|saved before/i;
 /** Claims of a hand entry — the "unknown" branch must make none of these. */
 const CLAIMS_HAND_ENTRY = /by hand|you typed|entered manually/i;
 
+describe("windHeightControlsMarkup", () => {
+	test("the k row contains no label of its own", () => {
+		// IN-01: `.wind-height-controls__row ... label` was styled in
+		// analysis-params.css but matched nothing — the control's only label is a
+		// SIBLING of the row, not a descendant. That rule is now deleted, so if a
+		// label is ever moved into the row it will arrive unstyled. This test is
+		// the note that says so. It passed before the deletion too: it pins the
+		// premise, it does not prove the removal.
+		const host = document.createElement("div");
+		host.innerHTML = windHeightControlsMarkup(makeParams());
+
+		expect(host.querySelector(".wind-height-controls__row")).not.toBeNull();
+		expect(host.querySelector(".wind-height-controls__row label")).toBeNull();
+		expect(host.querySelector("label.wind-height-controls__label")).not.toBeNull();
+	});
+});
+
 describe("formatWindHeightReadout", () => {
 	test("empty when no constant wind is configured", () => {
 		expect(formatWindHeightReadout(makeParams({ wind_speed: null }))).toBe("");
+	});
+
+	test("empty when the configured wind is not finite", () => {
+		// IN-02: the guard rejected null/undefined/NaN but not the infinities,
+		// so a non-finite wind reached toFixed and printed "Infinity m/s".
+		for (const raw of [Infinity, -Infinity]) {
+			expect(formatWindHeightReadout(makeParams({ wind_speed: raw }))).toBe(
+				"",
+			);
+		}
 	});
 
 	test("shows the rider-height wind, the factor and the raw 10 m wind", () => {

@@ -64,8 +64,11 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	crr: null, // null = optimize
 	cda_min: 0.15, // m² - aerodynamic drag bounds
 	cda_max: 0.5,
-	crr_min: 0.002, // rolling resistance bounds
-	crr_max: 0.015,
+	// Rolling resistance bounds. Opened from 0.002-0.015 (a road-tyre window) to
+	// 0.0015-0.030 on 2026-08-30 so gravel is reachable on the sidebar slider,
+	// which derives its min/max from these. `step` deliberately stays 0.0001.
+	crr_min: 0.0015,
+	crr_max: 0.03,
 	wind_speed: null, // m/s - null = no wind
 	wind_direction: null, // degrees - null = no wind
 	wind_speed_unit: "m/s", // unit for wind speed display

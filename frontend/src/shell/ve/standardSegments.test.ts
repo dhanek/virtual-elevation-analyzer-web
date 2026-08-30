@@ -11,6 +11,7 @@ import type { ModeSegment, SegmentVeProfile } from "../../modes/analysis/types";
 import {
 	MIN_TRIMMED_SEGMENT_SAMPLES,
 	mapTrimToSegments,
+	resolvePlaceholderWindSpeed,
 	stitchStandardProfiles,
 } from "./standardSegments";
 
@@ -181,5 +182,39 @@ describe("stitchStandardProfiles", () => {
 
 		expect(stitched.length).toBe(0);
 		expect(stitched.virtualElevation).toEqual([]);
+	});
+});
+
+describe("resolvePlaceholderWindSpeed", () => {
+	// The FIT air-speed channel exactly as recorded: no offset, no calibration.
+	const RAW = [10, 11, 12, 13];
+	// The same channel after resolveWindSeries -- shifted by the offset and
+	// scaled by the calibration. Deliberately unlike RAW at every index.
+	const RESOLVED = [20, 21, 22, 23];
+
+	it("hands the placeholder calculator the resolved series under FIT wind", () => {
+		// The plots drawn immediately below the placeholder read the resolved
+		// series, so a calculator fed the raw one fits a wind the panel never
+		// shows. Phase 7 recorded this as unobservable because a synthetic
+		// slider `input` replaces the paint at once -- unobservable is not the
+		// same as correct, and nothing stops a future caller reading the result.
+		expect(resolvePlaceholderWindSpeed("fit", RAW, RESOLVED)).toEqual(RESOLVED);
+	});
+
+	it("keeps the NaN fill when the wind is not from the FIT file", () => {
+		// Constant wind is derived inside the calculator from the params, so the
+		// per-sample channel must stay absent rather than carry a series.
+		const filled = resolvePlaceholderWindSpeed("constant", RAW, RESOLVED);
+
+		expect(filled).toHaveLength(RAW.length);
+		expect(filled.every((value) => Number.isNaN(value))).toBe(true);
+	});
+
+	it("falls back to the raw series when the resolved one is unusable", () => {
+		// resolveSelectionWindSeries returns [] with no loaded fitData, and slices
+		// to the selection otherwise. A short array under the calculator would be
+		// a length bug, which is worse than an un-offset one.
+		expect(resolvePlaceholderWindSpeed("fit", RAW, [])).toEqual(RAW);
+		expect(resolvePlaceholderWindSpeed("fit", RAW, [20, 21])).toEqual(RAW);
 	});
 });

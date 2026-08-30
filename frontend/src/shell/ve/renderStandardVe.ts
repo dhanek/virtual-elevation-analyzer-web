@@ -28,7 +28,10 @@ import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { resolveSelectionWindSeries } from "./standardSegments";
+import {
+	resolvePlaceholderWindSpeed,
+	resolveSelectionWindSeries,
+} from "./standardSegments";
 import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
 import { standardMode } from "../../modes/analysis/standardMode";
 import {
@@ -80,6 +83,20 @@ export async function initializeVEAnalysis(
 		trimEnd,
 	);
 
+	// D-05: resolved ONCE, above the calculator, and shared with the plots
+	// below. It used to be resolved after the fit, which left the calculator
+	// reading the raw FIT channel while the wind plotted beneath it read the
+	// offset-and-calibrated one.
+	//
+	// The series is resolved over the FULL activity and sliced afterwards, which
+	// is the ordering that keeps the offset from crossing a lap boundary in a
+	// multi-lap selection (D-09 change-list entry c).
+	const resolvedWindSpeed = resolveSelectionWindSeries(
+		appState,
+		selectedIndices,
+		initialWindSource === "fit" ? "fit" : "constant",
+	);
+
 	const calculator = createVeCalculator({
 		timestamps: analysisInput.timestamps,
 		power: analysisInput.power,
@@ -88,10 +105,11 @@ export async function initializeVEAnalysis(
 		positionLong: analysisInput.positionLong,
 		altitude: analysisInput.altitude,
 		distance: analysisInput.distance,
-		windSpeed:
-			initialWindSource === "fit"
-				? analysisInput.windSpeed
-				: new Array(analysisInput.windSpeed.length).fill(NaN),
+		windSpeed: resolvePlaceholderWindSpeed(
+			initialWindSource === "fit" ? "fit" : "constant",
+			analysisInput.windSpeed,
+			resolvedWindSpeed,
+		),
 		params: appState.currentParameters!,
 		cda: initialCdA,
 		crr: appliedInitialCrr,
@@ -117,16 +135,7 @@ export async function initializeVEAnalysis(
 	// one applied the offset but NOT the calibration, so the initial Standard
 	// wind plot disagreed with the VE fit above it whenever the calibration
 	// slider was non-zero -- and disagreed with `updateSecondaryPlots`, which
-	// applied both. All three now read one resolved series.
-	//
-	// The series is resolved over the FULL activity and sliced afterwards, which
-	// is the ordering that keeps the offset from crossing a lap boundary in a
-	// multi-lap selection (D-09 change-list entry c).
-	const resolvedWindSpeed = resolveSelectionWindSeries(
-		appState,
-		selectedIndices,
-		initialWindSource === "fit" ? "fit" : "constant",
-	);
+	// applied both. All four now read the one series resolved above.
 	const hasWindSpeed = resolvedWindSpeed.some(
 		(value) => !isNaN(value) && value !== 0,
 	);

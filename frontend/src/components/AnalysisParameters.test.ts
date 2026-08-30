@@ -34,6 +34,26 @@ beforeEach(() => {
 	onChange.mockClear();
 });
 
+describe("DEFAULT_PARAMETERS Crr bounds", () => {
+	test("the shipped range reaches gravel without editing Section 2", () => {
+		// The three sidebar sliders take their min/max straight from these two
+		// defaults, so whatever is not in this window cannot be dragged to. The
+		// old 0.002-0.015 was a road-tyre window: gravel (~0.010-0.020) fell off
+		// the top and a fast tubular (~0.0015-0.0020) sat on the floor.
+		// Maintainer ruling 2026-08-30: open it to 0.0015-0.030.
+		expect(DEFAULT_PARAMETERS.crr_min).toBeLessThanOrEqual(0.0015);
+		expect(DEFAULT_PARAMETERS.crr_max).toBeGreaterThanOrEqual(0.03);
+	});
+
+	test("the step stays fine enough to place a value inside that range", () => {
+		// Same ruling: the range widens, the step does not follow. 0.0001 over
+		// 0.0285 is 285 slider positions -- finer than a drag can resolve.
+		const positions =
+			(DEFAULT_PARAMETERS.crr_max - DEFAULT_PARAMETERS.crr_min) / 0.0001;
+		expect(positions).toBeGreaterThan(200);
+	});
+});
+
 describe("DEFAULT_PARAMETERS wind height fields", () => {
 	test("carries the fresh 0.5 default and a 'manual' provenance", () => {
 		expect(DEFAULT_PARAMETERS.wind_height_factor).toBe(0.5);
