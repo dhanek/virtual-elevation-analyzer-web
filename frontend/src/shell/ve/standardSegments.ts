@@ -86,6 +86,43 @@ export function resolveSelectionWindSeries(
 }
 
 /**
+ * Which wind series the Standard PLACEHOLDER calculator is handed (D-05, the
+ * last inline copy).
+ *
+ * `initializeVEAnalysis` paints once before the sliders are bound. Its plots
+ * already read `resolveSelectionWindSeries`, but its calculator used to read
+ * the RAW FIT channel — so the placeholder fit and the wind plotted under it
+ * described different winds whenever an offset or a calibration was set. Phase
+ * 7 filed this as unobservable, because a synthetic `input` on #trimStartSlider
+ * replaces the paint immediately and the placeholder result is never written to
+ * `appState`. Both remain true; neither makes the divergence correct, and both
+ * are properties of the CALLER that a future edit can remove.
+ *
+ * @param windSource   The selected source, already narrowed to fit/constant.
+ * @param rawWindSpeed The selection's FIT channel as recorded.
+ * @param resolved     `resolveSelectionWindSeries` over the same selection.
+ */
+export function resolvePlaceholderWindSpeed(
+	windSource: "fit" | "constant",
+	rawWindSpeed: number[],
+	resolved: number[],
+): number[] {
+	// Constant wind has no per-sample channel: the calculator derives it from
+	// the params, and a filled array would be a second, disagreeing source.
+	if (windSource !== "fit") {
+		return new Array<number>(rawWindSpeed.length).fill(NaN);
+	}
+	// `resolveSelectionWindSeries` yields [] with no loaded fitData, and slices
+	// to the selection otherwise. Anything but an exact length match means the
+	// two are not in the same index space, and a short array under the
+	// calculator is a worse bug than an un-offset one.
+	if (resolved.length !== rawWindSpeed.length) {
+		return rawWindSpeed;
+	}
+	return resolved;
+}
+
+/**
  * Map the global trim window onto each segment, dropping segments the window
  * does not meaningfully cover.
  *

@@ -349,13 +349,6 @@
 	flex: none;
 }
 
-.wind-height-controls__row.wind-height-controls__row label {
-	display: inline;
-	margin-bottom: 0;
-	font-weight: 400;
-	white-space: nowrap;
-}
-
 .wind-height-controls__readout {
 	font-size: 0.85em;
 	color: #555;

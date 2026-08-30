@@ -65,8 +65,12 @@ function windHeightPrompt(params: AnalysisParameters): WindHeightPrompt {
  */
 export function formatWindHeightReadout(params: AnalysisParameters): string {
 	const raw = params.wind_speed;
-	// No constant wind is configured, so there is nothing to report.
-	if (raw === null || raw === undefined || Number.isNaN(raw)) return "";
+	// No usable constant wind is configured, so there is nothing to report.
+	// `Number.isFinite` also rejects NaN and the infinities, which the earlier
+	// guard did not: +/-Infinity reached `toFixed` and printed "Infinity m/s"
+	// (IN-02). The null/undefined arms stay because `Number.isFinite` is typed
+	// `(value: unknown) => boolean` and so narrows nothing on its own.
+	if (raw === null || raw === undefined || !Number.isFinite(raw)) return "";
 
 	const factor = resolveWindHeightFactor(params);
 	const applied = resolveAppliedWindSpeed(params, raw);
