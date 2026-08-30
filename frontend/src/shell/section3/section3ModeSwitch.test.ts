@@ -715,6 +715,58 @@ describe("GPS-02: the VE panel after a Section 3 mode change", () => {
 		expect(appState.currentGpsLapIndexRanges).toBeNull();
 	});
 
+	/**
+	 * NEW-1, from the round-2 milestone audit.
+	 *
+	 * The teardown resets state SYNCHRONOUSLY, but `requestModeUpdate` resolves
+	 * `handler`/`callbacks`/`segments` BEFORE it schedules and captures them in a
+	 * closure. Neither `clearModeUpdateCallbacks()` nor the `hidden` class can
+	 * reach a pass that is already armed: the callbacks object is resolved, and
+	 * the visibility gate lives in `requestModeUpdate`, not in the scheduled run.
+	 *
+	 * So a drag landing inside the throttle's armed window, followed by a mode
+	 * change before it fires, used to let the pass complete and REPOPULATE six of
+	 * the nine fields the teardown had just cleared — falsifying the guarantee
+	 * `tearDownVeAnalysisPanel`'s own comment asserts.
+	 *
+	 * The window is narrow (~20ms of armed throttle) and Store Result lives inside
+	 * the hidden panel, so this was a warning rather than a blocker. It is closed
+	 * anyway, because "usually holds" is not what the comment claims.
+	 */
+	it("an already-armed recompute cannot repopulate the reset state (NEW-1)", async () => {
+		const appState = makeAppState();
+		await startInMode(appState, "GPS based lap splitting");
+		await analyzeGpsLap(appState);
+		await settle();
+
+		// Precondition: there is real state to lose.
+		expect(appState.currentVEResult).not.toBeNull();
+		expect(appState.currentFilteredData).not.toBeNull();
+
+		calculatorCalls.length = 0;
+		gpsLapDraw.ve.mockClear();
+
+		// ARM the recompute but do NOT let it fire — no settle here. This is the
+		// whole point: the pass is scheduled and its closure already holds the
+		// resolved callbacks.
+		const slider = document.getElementById("cdaSlider") as HTMLInputElement;
+		slider.value = "0.42";
+		slider.dispatchEvent(new Event("input", { bubbles: true }));
+
+		// The mode change lands INSIDE that armed window.
+		setGpsAnalysisMode("None");
+
+		// Now let every timer run to completion.
+		await settle();
+
+		// The teardown's guarantee must survive the pass that was already armed.
+		expect(appState.currentVEResult).toBeNull();
+		expect(appState.currentFilteredData).toBeNull();
+		expect(appState.currentWindSource).toBe("none");
+		expect(appState.currentCoveredItems).toBeNull();
+		expect(gpsLapDraw.ve).not.toHaveBeenCalled();
+	});
+
 	it("direction 1: Store Result cannot persist a record after the mode change", async () => {
 		const appState = makeAppState();
 		appState.selectedFile = { name: "ride.fit" } as unknown as File;

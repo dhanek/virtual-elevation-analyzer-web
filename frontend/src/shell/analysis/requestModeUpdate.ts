@@ -246,6 +246,25 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 
 	scheduleRecompute({
 		run: async () => {
+			// RE-CHECKED HERE, not only at the top of this function (NEW-1).
+			//
+			// Everything this closure needs — `handler`, `callbacks`, `segments` —
+			// was resolved BEFORE `scheduleRecompute`, so the panel can be torn
+			// down between arming and firing and this pass would still hold a live
+			// callbacks object pointing at renderers whose panel is gone. Clearing
+			// FACTORIES cannot reach it and neither can the `hidden` class, because
+			// the gate above already ran.
+			//
+			// `setGpsAnalysisMode`'s teardown also calls `resetRecomputeThrottle()`,
+			// which cancels a pass still sitting in the throttle. This second guard
+			// covers the rest: a pass that has already left the timer, and any
+			// future teardown path that forgets to disarm.
+			if (!isVeSectionVisible()) {
+				log.debug(
+					`requestModeUpdate(${reason}): VE section went away before the scheduled pass ran`,
+				);
+				return;
+			}
 			await updateModeVEPlots({
 				appState,
 				handler,

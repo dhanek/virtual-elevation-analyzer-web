@@ -245,9 +245,13 @@ export function scheduleRecompute(request: RecomputeRequest): void {
 }
 
 /**
- * Test seam. The throttle carries state ACROSS calls by design — that is what
- * makes it a throttle — so a suite that drives it repeatedly needs to be able to
- * start from a known point.
+ * Disarm the throttle.
+ *
+ * NOT test-only, despite what this comment said until NEW-1: production calls it
+ * from `setGpsAnalysisMode`'s `tearDownVeAnalysisPanel`, to stop a recompute
+ * armed before a Section-3 mode change from running against a panel that no
+ * longer exists. It remains a test seam too — the throttle carries state ACROSS
+ * calls by design, so a suite driving it repeatedly needs a known starting point.
  *
  * PARTIAL, and knowing it matters when reading a flaky suite: this clears the
  * pending request and the armed timer, and rewinds `lastRunStartedAt`. It does

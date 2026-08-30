@@ -32,6 +32,7 @@ import {
 } from "../dem/demHandlers";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
 import { clearModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import { resetRecomputeThrottle } from "../analysis/recomputeRunner";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -166,6 +167,14 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	// First production caller. Stops a previous mode's renderer factory staying
 	// reachable for the life of the session.
 	clearModeUpdateCallbacks();
+
+	// Disarm a recompute that is already scheduled (NEW-1). `requestModeUpdate`
+	// resolves its handler, callbacks and segments BEFORE scheduling and captures
+	// them in the closure, so a drag landing inside the throttle window followed
+	// by a mode change would otherwise let that pass run and repopulate the very
+	// fields reset below. `requestModeUpdate`'s scheduled run re-checks
+	// visibility as well; this disarms it earlier so the pass never starts.
+	resetRecomputeThrottle();
 
 	// Everything Store Result and Export read, so neither can persist a record
 	// describing an analysis whose basis no longer exists.
