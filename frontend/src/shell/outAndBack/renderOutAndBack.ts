@@ -21,6 +21,7 @@ import {
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -102,7 +103,17 @@ export async function showOutAndBackVEAnalysis(
 	const allVelocity = normalizedArrays.velocity;
 	const allPositionLat = normalizedArrays.positionLat;
 	const allPositionLong = normalizedArrays.positionLong;
-	const allAltitude = normalizedArrays.altitude;
+	// WR-1: the analyze leg resolves the elevation profile exactly as the update
+	// path does (`updateGpsLap.ts`, `updateModeVEPlots.ts`). Reading
+	// `normalizedArrays.altitude` straight through meant that, with a DEM
+	// applied, the smoothing toggle rendered ON while this first paint was
+	// computed from the raw FIT channel -- and the numbers then moved on the
+	// first control nudge, when the primitive took over.
+	const allAltitude = resolveElevationProfile(
+		appState,
+		fitData,
+		normalizedArrays.altitude,
+	).altitude;
 	const allDistance = normalizedArrays.distance;
 
 	// Handle wind/air speed via typed locals.

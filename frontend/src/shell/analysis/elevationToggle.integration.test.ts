@@ -1,3 +1,24 @@
+/**
+ * UNIT tests for the elevation toggle and the profile RESOLVER. Nothing here
+ * drives a mode, and nothing here should claim to.
+ *
+ * This file used to carry three cases named "standard mode", "gps-lap mode" and
+ * "out-and-back mode". All three called `resolveElevationProfile` directly with
+ * the same fixture and imported no mode module whatsoever, so the three names
+ * described one assertion repeated — and the suite stayed green while BOTH GPS
+ * analyze legs read the raw FIT channel instead of the resolved profile (WR-1).
+ * A test that names a mode it never loads is worse than no test: it answers the
+ * coverage question wrongly.
+ *
+ * The mode-level guards now live where the modes actually are:
+ *   - Standard          -> prepareAnalysisPayload.test.ts,
+ *                          "slices the ACTIVE elevation profile"
+ *   - GPS-lap           -> gpsModeRealChain.test.ts,
+ *   - out-and-back         "the analyze leg honours the active elevation profile"
+ *
+ * Each of those asserts the series that reached the physics, through the real
+ * entry point. Add mode coverage there, not here.
+ */
 import { describe, expect, it } from "vitest";
 import { AppState } from "../../state/AppState";
 import {
@@ -49,37 +70,39 @@ describe("elevation toggle integration", () => {
 		);
 	});
 
-	it("standard mode updates plot source when toggle turns ON", () => {
+	it("toggling ON selects the interpolated+5pt profile", () => {
 		const appState = withDemProfiles();
 		toggleDemDisplayProfile(appState);
+
 		const resolved = resolveElevationProfile(
 			appState,
 			fitData,
 			fitData.altitude,
 		);
+
 		expect(resolved.profile).toBe("dem-interpolated-smoothed-5pt");
+		expect(resolved.altitude).toEqual([13, 23, 33, 43]);
 	});
 
-	it("gps-lap mode uses interpolated+5pt profile when toggle is ON", () => {
+	it.each([
+		["dem-raw-nearest", [11, 21, 31, 41]],
+		["dem-interpolated-smoothed-5pt", [13, 23, 33, 43]],
+		["fit-raw", [10, 20, 30, 40]],
+	] as const)("resolves %s to its own series", (profile, expected) => {
+		// The ARRAY matters, not just the label: a resolver that named the right
+		// profile while handing back another one's samples would satisfy a
+		// label-only assertion and still feed the physics the wrong elevation.
 		const appState = withDemProfiles();
-		appState.activeDisplayProfile = "dem-interpolated-smoothed-5pt";
-		const resolved = resolveElevationProfile(
-			appState,
-			fitData,
-			fitData.altitude,
-		);
-		expect(resolved.profile).toBe("dem-interpolated-smoothed-5pt");
-	});
+		appState.activeDisplayProfile = profile;
 
-	it("out-and-back mode uses raw profile when toggle is OFF", () => {
-		const appState = withDemProfiles();
-		appState.activeDisplayProfile = "dem-raw-nearest";
 		const resolved = resolveElevationProfile(
 			appState,
 			fitData,
 			fitData.altitude,
 		);
-		expect(resolved.profile).toBe("dem-raw-nearest");
+
+		expect(resolved.profile).toBe(profile);
+		expect(resolved.altitude).toEqual(expected);
 	});
 
 	it("switch control is hidden when DEM profiles are unavailable", () => {

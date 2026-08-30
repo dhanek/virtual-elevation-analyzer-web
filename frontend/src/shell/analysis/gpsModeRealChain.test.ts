@@ -40,12 +40,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** Every `createVeCalculator` call the chain made, in order. */
 const calculatorCalls = vi.hoisted(
-	() => [] as Array<{ cda: number; crr: number }>,
+	() => [] as Array<{ cda: number; crr: number; altitude: number[] }>,
 );
 
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	createVeCalculator: (input: any) => {
-		calculatorCalls.push({ cda: input.cda, crr: input.crr });
+		calculatorCalls.push({
+			cda: input.cda,
+			crr: input.crr,
+			// WR-1's probe: WHICH elevation series reached the physics, which is
+			// the only place the analyze leg's choice of profile is observable.
+			altitude: Array.from(input.altitude ?? []),
+		});
 		const n = input.timestamps.length;
 		return {
 			calculate_virtual_elevation: () => ({
@@ -110,8 +116,11 @@ import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "./types";
-import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
-import { showOutAndBackVEPlot } from "../outAndBack/renderOutAndBack";
+import { showGpsLapVEAnalysis, showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
+import {
+	showOutAndBackVEAnalysis,
+	showOutAndBackVEPlot,
+} from "../outAndBack/renderOutAndBack";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
 import { resetModeUpdateRequests } from "./requestModeUpdate";
 
@@ -299,6 +308,13 @@ interface ModeUnderTest {
 	gpsAnalysisMode: string;
 	/** Renders the real sidebar and does the real binding. */
 	render: (appState: AppState) => Promise<void>;
+	/**
+	 * The ANALYZE leg — the entry point that COMPUTES the per-segment profiles
+	 * and only then renders. `render` above is handed profiles already computed,
+	 * so it never reaches a calculator and cannot see which elevation series the
+	 * physics was given.
+	 */
+	analyze: (appState: AppState) => Promise<unknown>;
 	drawSpy: ReturnType<typeof vi.fn>;
 	/** That mode's three secondary-tab draws, in tab order. */
 	secondary: {
@@ -318,6 +334,17 @@ const MODES: readonly ModeUnderTest[] = [
 			power: drawn.gpsLapPower,
 			vd: drawn.gpsLapVd,
 		},
+		analyze: (appState) =>
+			showGpsLapVEAnalysis(
+				makeServices(appState),
+				parameterStorage,
+				resultsStorage,
+				async () => ({}),
+				appState.currentGpsLapIndexRanges!,
+				appState.currentFitData,
+				appState.currentParameters!,
+				0,
+			),
 		render: (appState) =>
 			showGpsLapVEPlot(
 				makeServices(appState),
@@ -342,6 +369,17 @@ const MODES: readonly ModeUnderTest[] = [
 			power: drawn.outAndBackPower,
 			vd: drawn.outAndBackVd,
 		},
+		analyze: (appState) =>
+			showOutAndBackVEAnalysis(
+				makeServices(appState),
+				parameterStorage,
+				resultsStorage,
+				appState.outAndBackSections as any,
+				appState.currentFitData,
+				appState.currentParameters!,
+				0,
+				async () => ({}),
+			),
 		render: (appState) =>
 			showOutAndBackVEPlot(
 				makeServices(appState),
@@ -638,6 +676,103 @@ describe.each(MODES)(
 			expect(secondary.wind).toHaveBeenCalledTimes(1);
 			expect(secondary.power).toHaveBeenCalledTimes(0);
 			expect(secondary.vd).toHaveBeenCalledTimes(0);
+		});
+	},
+);
+
+/**
+ * WR-1 — THE ANALYZE LEG MUST HONOUR THE ACTIVE ELEVATION PROFILE.
+ *
+ * `resolveElevationProfile` is what turns "the smoothing toggle is ON" into an
+ * actual array. Four production callers route through it; the two GPS ANALYZE
+ * legs did not, reading `getNormalizedActivityArrays(fitData).altitude` — the
+ * raw FIT channel — straight into the per-lap calculators. With a DEM applied
+ * the toggle therefore rendered ON while the first paint was computed from
+ * something else, and the numbers moved on the first control nudge, when the
+ * update path (which DOES resolve) took over.
+ *
+ * `elevationToggle.integration.test.ts` claimed to cover exactly this in three
+ * cases named "standard mode", "gps-lap mode" and "out-and-back mode". All
+ * three called `resolveElevationProfile` directly with the same fixture and
+ * imported no mode module at all, so all three passed against both GPS legs
+ * being wired to the raw channel. That is the same vacuous-guard shape this
+ * file was created to answer, which is why the real guard belongs here: the
+ * assertion is on the series that reached the physics, through the real render.
+ */
+describe.each(MODES)(
+	"$name: the analyze leg honours the active elevation profile",
+	({ gpsAnalysisMode, analyze }) => {
+		/** Distinct per index, and distinct BETWEEN profiles, so a slice of one
+		 * can never be mistaken for the same slice of another. */
+		const FIT_RAW = Array.from({ length: SAMPLE_COUNT }, (_, i) => i);
+		const DEM_NEAREST = Array.from(
+			{ length: SAMPLE_COUNT },
+			(_, i) => 1000 + i,
+		);
+		const DEM_SMOOTHED = Array.from(
+			{ length: SAMPLE_COUNT },
+			(_, i) => 5000 + i,
+		);
+
+		/** Both modes compute their FIRST segment over indices 0..HALF-1 — lap 1
+		 * for GPS-lap, the outbound leg for out-and-back. */
+		const firstSegment = (profile: number[]) => profile.slice(0, HALF);
+
+		function appStateWithProfiles(
+			active: "fit-raw" | "dem-raw-nearest" | "dem-interpolated-smoothed-5pt",
+		): AppState {
+			const appState = makeAppState();
+			// Replaced wholesale rather than mutated: `altitude` is readonly on
+			// ActivityDataLike, and the resolver reads the normalized arrays that
+			// are derived from this object.
+			appState.currentFitData = {
+				...makeFitData(),
+				altitude: [...FIT_RAW],
+			} as unknown as AppState["currentFitData"];
+			appState.fitRawElevation = [...FIT_RAW];
+			appState.demRawNearestElevation = [...DEM_NEAREST];
+			appState.demInterpolatedSmoothed5ptElevation = [...DEM_SMOOTHED];
+			appState.demProfilesAvailable = true;
+			appState.activeDisplayProfile = active;
+			return appState;
+		}
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+			Element.prototype.scrollIntoView = () => {};
+			clearModeUpdateCallbacks();
+			resetModeUpdateRequests();
+			modeState.gps = gpsAnalysisMode;
+			calculatorCalls.length = 0;
+			renderHostPage();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+			clearModeUpdateCallbacks();
+			resetModeUpdateRequests();
+		});
+
+		it("computes the first paint from the smoothed DEM profile when that is active", async () => {
+			await analyze(appStateWithProfiles("dem-interpolated-smoothed-5pt"));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(calculatorCalls[0].altitude).toEqual(firstSegment(DEM_SMOOTHED));
+		});
+
+		it("computes the first paint from the nearest-DEM profile when that is active", async () => {
+			await analyze(appStateWithProfiles("dem-raw-nearest"));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(calculatorCalls[0].altitude).toEqual(firstSegment(DEM_NEAREST));
+		});
+
+		it("still uses the raw FIT channel when no DEM profile is active", async () => {
+			// The other half of the guard: resolving must not mean "always DEM".
+			await analyze(appStateWithProfiles("fit-raw"));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(calculatorCalls[0].altitude).toEqual(firstSegment(FIT_RAW));
 		});
 	},
 );

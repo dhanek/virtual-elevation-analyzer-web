@@ -158,6 +158,26 @@ describe("prepareAnalysisPayload", () => {
 		expect(result.filteredData.distance).toEqual([0, 10, 20]);
 	});
 
+	it("slices the ACTIVE elevation profile, not the raw FIT channel", () => {
+		// WR-1, Standard's leg. Standard resolves here rather than in its render,
+		// so this is where "the smoothing toggle is ON" has to become an actual
+		// array. The two GPS analyze legs are guarded the equivalent way in
+		// gpsModeRealChain.test.ts; before that work all three modes were
+		// "covered" by elevationToggle.integration.test.ts, which called the
+		// resolver directly and imported no mode at all.
+		const appState = new AppState();
+		appState.fitRawElevation = [100, 101, 102, 100, 103];
+		appState.demRawNearestElevation = [200, 201, 202, 200, 203];
+		appState.demInterpolatedSmoothed5ptElevation = [300, 301, 302, 300, 303];
+		appState.demProfilesAvailable = true;
+		appState.activeDisplayProfile = "dem-interpolated-smoothed-5pt";
+
+		const result = prepareAnalysisPayload(createInput({ appState }));
+
+		// The selection is indices 0..2, so the DEM profile sliced to match.
+		expect(result.filteredData.altitude).toEqual([300, 301, 302]);
+	});
+
 	it("returns correct defaultAirSpeedOffset from resolveWindSeries", () => {
 		const result = prepareAnalysisPayload(createInput());
 
