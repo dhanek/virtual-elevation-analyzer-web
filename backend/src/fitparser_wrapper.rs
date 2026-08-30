@@ -31,11 +31,17 @@ pub struct FitLap {
     pub start_time: f64,
     pub end_time: f64,
     pub total_elapsed_time: f64,
-    pub total_distance: f64,
-    pub avg_speed: f64,
-    pub max_speed: f64,
-    pub avg_power: f64,
-    pub max_power: f64,
+    // Every summary field below is optional in the FIT profile, and `None` has
+    // to stay distinguishable from a genuine zero: a lap that simply omits
+    // `total_distance` gets it derived from the records, whereas one that
+    // reports 0 m is reporting a measurement. Collapsing the two with
+    // `unwrap_or(0.0)` here is what made GoldenCheetah exports render as
+    // "0 m / N/A".
+    pub total_distance: Option<f64>,
+    pub avg_speed: Option<f64>,
+    pub max_speed: Option<f64>,
+    pub avg_power: Option<f64>,
+    pub max_power: Option<f64>,
     pub start_position_lat: Option<f64>,
     pub start_position_long: Option<f64>,
     pub avg_heart_rate: Option<f64>,
@@ -322,59 +328,48 @@ impl FitParserWrapper {
             }
         }
 
-        // Create lap: prefer start_time and derive end_time = start_time + total_elapsed_time.
-        // If start_time is missing but lap_timestamp and total_elapsed_time exist, derive start
-        // from lap_timestamp - total_elapsed_time. This handles a few FIT producers that only
-        // set a timestamp on the lap message.
-        if let (Some(st), Some(elapsed)) = (start_time, total_elapsed_time) {
-            let et = st + elapsed; // derive end from start + elapsed
+        // Resolve the lap's time span. Every field involved is optional in the FIT
+        // profile, so take whichever pair actually pins the span down:
+        //   - start_time + total_elapsed_time: the canonical case, end is derived.
+        //   - timestamp + total_elapsed_time: a few producers set only a timestamp
+        //     on the lap message; it is the end, so the start is derived.
+        //   - start_time + timestamp: no elapsed field at all, which is what
+        //     GoldenCheetah writes when it exports a selection out of a ride. The
+        //     span between the two IS the elapsed time.
+        // A lap that pins down none of these carries no usable range and is dropped.
+        let (raw_start, raw_end, explicit_elapsed) =
+            match (start_time, lap_timestamp, total_elapsed_time) {
+                (Some(st), _, Some(elapsed)) => (st, st + elapsed, Some(elapsed)),
+                (None, Some(ts), Some(elapsed)) => (ts - elapsed, ts, Some(elapsed)),
+                (Some(st), Some(ts), None) => (st, ts, None),
+                _ => return None,
+            };
 
-            // Ensure ordering start <= end
-            let (start_time_final, end_time_final) = if st <= et { (st, et) } else { (et, st) };
-
-            Some(FitLap {
-                start_time: start_time_final,
-                end_time: end_time_final,
-                total_elapsed_time: elapsed,
-                total_distance: total_distance.unwrap_or(0.0),
-                avg_speed: avg_speed.unwrap_or(0.0),
-                max_speed: max_speed.unwrap_or(0.0),
-                avg_power: avg_power.unwrap_or(0.0),
-                max_power: max_power.unwrap_or(0.0),
-                start_position_lat,
-                start_position_long,
-                avg_heart_rate,
-                max_heart_rate,
-                total_calories,
-                avg_cadence,
-                max_cadence,
-            })
-        } else if let (Some(ts), Some(elapsed)) = (lap_timestamp, total_elapsed_time) {
-            // Fallback: derive start from lap timestamp minus elapsed, and use timestamp as end
-            let st = ts - elapsed;
-            let et = ts;
-            let (start_time_final, end_time_final) = if st <= et { (st, et) } else { (et, st) };
-
-            Some(FitLap {
-                start_time: start_time_final,
-                end_time: end_time_final,
-                total_elapsed_time: elapsed,
-                total_distance: total_distance.unwrap_or(0.0),
-                avg_speed: avg_speed.unwrap_or(0.0),
-                max_speed: max_speed.unwrap_or(0.0),
-                avg_power: avg_power.unwrap_or(0.0),
-                max_power: max_power.unwrap_or(0.0),
-                start_position_lat,
-                start_position_long,
-                avg_heart_rate,
-                max_heart_rate,
-                total_calories,
-                avg_cadence,
-                max_cadence,
-            })
+        // Ensure ordering start <= end
+        let (start_time_final, end_time_final) = if raw_start <= raw_end {
+            (raw_start, raw_end)
         } else {
-            None
-        }
+            (raw_end, raw_start)
+        };
+
+        Some(FitLap {
+            start_time: start_time_final,
+            end_time: end_time_final,
+            total_elapsed_time: explicit_elapsed
+                .unwrap_or(end_time_final - start_time_final),
+            total_distance,
+            avg_speed,
+            max_speed,
+            avg_power,
+            max_power,
+            start_position_lat,
+            start_position_long,
+            avg_heart_rate,
+            max_heart_rate,
+            total_calories,
+            avg_cadence,
+            max_cadence,
+        })
     }
 
     fn extract_f64_value(&self, value: &Value) -> Option<f64> {

@@ -1,4 +1,4 @@
-use crate::fitparser_wrapper::FitParserWrapper;
+use crate::fitparser_wrapper::{FitParserWrapper, FitRecord};
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -368,19 +368,28 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         road_speed,
     };
 
-    // Convert FIT laps to our data structure
+    // Convert FIT laps to our data structure, filling in any summary field the
+    // lap message omitted from the records it covers.
     let mut laps = Vec::new();
     for fit_lap in &fit_laps {
+        let derived = derive_lap_summary(&fit_records, fit_lap.start_time, fit_lap.end_time);
+
         laps.push(LapData {
             start_time: fit_lap.start_time,
             end_time: fit_lap.end_time,
             total_elapsed_time: fit_lap.total_elapsed_time,
-            total_distance: fit_lap.total_distance,
-            avg_power: fit_lap.avg_power,
-            avg_speed: fit_lap.avg_speed,
-            max_speed: fit_lap.max_speed,
-            start_position_lat: fit_lap.start_position_lat.unwrap_or(0.0),
-            start_position_long: fit_lap.start_position_long.unwrap_or(0.0),
+            total_distance: fit_lap.total_distance.unwrap_or(derived.total_distance),
+            avg_power: fit_lap.avg_power.unwrap_or(derived.avg_power),
+            avg_speed: fit_lap.avg_speed.unwrap_or(derived.avg_speed),
+            max_speed: fit_lap.max_speed.unwrap_or(derived.max_speed),
+            start_position_lat: fit_lap
+                .start_position_lat
+                .or(derived.start_position_lat)
+                .unwrap_or(0.0),
+            start_position_long: fit_lap
+                .start_position_long
+                .or(derived.start_position_long)
+                .unwrap_or(0.0),
         });
     }
 
@@ -430,6 +439,80 @@ pub fn parse_fit_file(file_data: &[u8]) -> Result<ParsedFitFile, JsValue> {
         laps,
         parsing_statistics,
     })
+}
+
+/// Lap summary values recomputed from the record stream.
+///
+/// Every lap summary field is optional in the FIT profile, and some producers
+/// write none of them: GoldenCheetah's "export a selection" emits a lap message
+/// carrying only its start and end. The records still hold everything those
+/// fields would have summarised, so derive what the lap left out rather than
+/// showing zeros the user would read as real measurements.
+struct DerivedLapSummary {
+    total_distance: f64,
+    avg_power: f64,
+    avg_speed: f64,
+    max_speed: f64,
+    start_position_lat: Option<f64>,
+    start_position_long: Option<f64>,
+}
+
+/// Summarise the records inside `[start_time, end_time]`.
+///
+/// The span is INCLUSIVE at both ends, matching `deriveOverlayLaps` and
+/// `collectSelectionIndices` on the frontend, so a derived summary describes
+/// exactly the samples the analysis will slice for that lap.
+///
+/// Each averaging rule matches the one `parsing_statistics` already uses for
+/// the whole file, so a single-lap ride shows the same numbers in the lap row
+/// and in the stats cards above it: power averages over the samples that
+/// actually recorded power, speed averages over every sample.
+fn derive_lap_summary(records: &[FitRecord], start_time: f64, end_time: f64) -> DerivedLapSummary {
+    let in_lap: Vec<&FitRecord> = records
+        .iter()
+        .filter(|r| r.timestamp >= start_time && r.timestamp <= end_time)
+        .collect();
+
+    // `distance` is a cumulative odometer, so the lap's distance is the span
+    // between its first and last reading. Records without the channel are
+    // skipped rather than read as 0, which would zero the whole lap.
+    let odometer: Vec<f64> = in_lap.iter().filter_map(|r| r.distance).collect();
+    let total_distance = match (odometer.first(), odometer.last()) {
+        (Some(first), Some(last)) => last - first,
+        _ => 0.0,
+    };
+
+    let powered: Vec<f64> = in_lap
+        .iter()
+        .filter_map(|r| r.power)
+        .filter(|&p| p > 0.0)
+        .collect();
+    let avg_power = if powered.is_empty() {
+        0.0
+    } else {
+        powered.iter().sum::<f64>() / powered.len() as f64
+    };
+
+    let speeds: Vec<f64> = in_lap.iter().map(|r| r.speed.unwrap_or(0.0)).collect();
+    let avg_speed = if speeds.is_empty() {
+        0.0
+    } else {
+        speeds.iter().sum::<f64>() / speeds.len() as f64
+    };
+    let max_speed = speeds.iter().fold(0.0_f64, |a, &b| a.max(b));
+
+    let start_fix = in_lap
+        .iter()
+        .find(|r| r.position_lat.is_some() && r.position_long.is_some());
+
+    DerivedLapSummary {
+        total_distance,
+        avg_power,
+        avg_speed,
+        max_speed,
+        start_position_lat: start_fix.and_then(|r| r.position_lat),
+        start_position_long: start_fix.and_then(|r| r.position_long),
+    }
 }
 
 // Real FIT parsing now implemented - no more estimation needed

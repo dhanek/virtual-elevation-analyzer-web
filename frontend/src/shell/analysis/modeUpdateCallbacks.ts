@@ -50,7 +50,16 @@ export function getModeUpdateCallbacks(
 	return factory ? factory(context) : null;
 }
 
-/** Test seam — production never unregisters. */
+/**
+ * Drop every registered factory.
+ *
+ * NOT a test-only seam, despite what this comment said until GPS-02: production
+ * calls it from `setGpsAnalysisMode`'s `tearDownVeAnalysisPanel` on a real
+ * Section-3 mode change. Before that it had no production caller at all, so a
+ * factory registered by one analyze stayed reachable for the whole session —
+ * and after the user switched modes, `resolveActiveModeHandler` could hand the
+ * update funnel a renderer belonging to a panel that was no longer on screen.
+ */
 export function clearModeUpdateCallbacks(): void {
 	FACTORIES.clear();
 }
