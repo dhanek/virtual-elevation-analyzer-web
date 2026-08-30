@@ -28,17 +28,18 @@ dependency column below says what actually has to wait.
 
 | Bundle | What it is | Effort | Waits on |
 |---|---|---|---|
-| **A** | Wind height factor k, end to end | S–M | Decisions D-a, D-b |
+| ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **B** | Make Store Result truthful | M | — |
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **D** | Plot rendering and tab layout | M | — |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
 | **G** | Test infrastructure | M | — |
-| **H** | On-screen results view | M–L | **A** (k column), **B** |
+| **H** | On-screen results view | M–L | **B** (A's k column is done) |
 | — | Standalone work | varies | — |
 
-Suggested order from here: **A**, which unblocks both the k feature and bundle H. E and C are done.
+Suggested order from here: **B**, the last thing standing between bundle **H** and a correct results
+view. A, C and E are done.
 
 ---
 
@@ -46,71 +47,19 @@ Suggested order from here: **A**, which unblocks both the k feature and bundle H
 
 These block work below. None of them is a coding question.
 
-- [ ] **D-a · Is the manual-wind re-seed a defect or the intended policy?**
-      Phase 8 WR-05 recorded it as harm. The code documents it as correct:
-      *"A weather fill arriving after a manual entry does re-seed k to 0.5, which is correct: the
-      API has just overwritten the typed number with its own 10 m value."*
-      (`frontend/src/shell/ve/windHeightControls.ts:225-234`). One of the two is wrong. Blocks the
-      first item of bundle **A**.
-
-- [ ] **D-b · What does "expand k to 0–100" mean?** A 0–100 **%** scale over the existing factor
-      (0.00–1.00), or a genuinely unbounded 0–100 multiplier. They imply different
-      `WIND_HEIGHT_FACTOR_MAX` values and different storage semantics. Blocks bundle **A**, which
-      cannot fix the out-of-range render until it knows what the range is.
+- [x] **D-a · Is the manual-wind re-seed a defect or the intended policy?**
+      **Decided 2026-08-30, and the question was mis-framed by both sides.** Tracing it showed
+      auto-rho sets `wind_speed` from the API *unconditionally* (`autoRho.ts:236`) without ever
+      checking whether the user typed one; k only followed afterwards. So k following the wind was
+      correct, and the wind being replaced was the defect. Maintainer ruling: **a reload of a
+      previously analysed file must restore the exact conditions it was analysed under** — the
+      wind, its provenance, and k. Shipped in bundle A.
 
 - [x] **D-c · Does the Crr slider step follow the widened range?** **Decided 2026-08-30: no.**
       Range opens to **0.0015 – 0.030**, `step` stays **0.0001** — 285 slider positions, finer than
       a drag can resolve, and the number input stays the precise path. Shipped in bundle E.
 
 ---
-
-## Bundle A · Wind height factor k, end to end
-
-*Effort: S–M. Why together: four of the five live in `windHeightControls.ts` (448 lines) and all
-five hang off one bounds decision. Fixing the out-of-range render against today's 0.3–1.0 bounds
-and then widening them means doing the same work twice.*
-
-- [ ] **[S] Expand the k slider to a 0–100 scale for constant wind.** *(needs D-b)*
-      Today k is fixed at `WIND_HEIGHT_FACTOR_MIN = 0.3` … `MAX = 1.0`, step `0.05`
-      (`frontend/src/analysis/WindHeightTransfer.ts:46-48`), which is the right window for a *10 m
-      weather-API* wind being transferred down to rider height. A hand-typed constant wind is
-      already at whatever height the user meant, so that window is the wrong one for it.
-      *origin: maintainer, 2026-08-30*
-
-- [ ] **[S] A persisted out-of-range k renders narrowed, and the first slider touch commits the
-      narrowing.** Storage correctly never rewrites the persisted value, but a stored 1.5 renders
-      as slider 1.00 / number 1.50 / readout ×1.50 — three disagreeing views — and moving the
-      thumb commits 1.00.
-      `frontend/src/shell/ve/windHeightControls.ts:398-425` · *origin: Phase 8 WR-07*
-      Do this **after** the item above: widening the bounds changes which stored values are
-      out of range at all.
-
-- [ ] **[S] Reopening a saved analysis silently re-fits a hand-typed wind.** *(needs D-a)*
-      `syncWindHeightFromWeather` returns `{}` for `wind_entry: "weather"` and `"unknown"`, but
-      falls through for `"manual"` — returning `wind_entry: "weather"` and
-      `wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR`. So loading a saved analysis that used a
-      hand-typed wind, with `auto_calculate_rho: true`, overwrites the wind with the API value and
-      seeds k = 0.5. The user's own number is replaced without a prompt.
-      `frontend/src/shell/ve/windHeightControls.ts:235-244` · *origin: Phase 8 WR-05*
-
-- [ ] **[S] The height factor k is neither stored nor exported.**
-      `wind_height_factor` round-trips correctly through `ParameterStorage`, but
-      `ResultsStorage.saveResult` flattens `data.parameters` into cherry-picked named columns
-      (`wind_speed`, `wind_direction`, `system_mass`, `rho`, `eta`) and never carries k across. It
-      is absent from `StoredVEResult`, from `CSV_HEADERS` and from the CSV value row. Two results
-      fitted at k = 0.50 and k = 1.00 are indistinguishable in the table and the export, and the
-      stored `windSpeed` is the raw 10 m value while the physics used `wind_speed × k`.
-      `crrApplied` (`ResultsStorage.ts:99`) and `virtualDistances` (`:114`) are the exact
-      optional-field pattern to copy: interface field, `CSV_HEADERS` entry, value cell, guarded
-      read for old records.
-      `frontend/src/utils/ResultsStorage.ts:525-560` · *origin: Phase 8 WR-02 = audit WR-8*
-      **Bundle H depends on this** — do it before the results view exists, so the new table is not
-      born with a known-missing column.
-
-- [ ] **[S] `windFieldsBound` is a membership-only `WeakSet`**, so the wind-field listeners freeze
-      onto the first binding. Latent — harmless only while all three modes pass an identical
-      `getParams` closure.
-      `frontend/src/shell/ve/windHeightControls.ts` · *origin: Phase 8 WR-06*
 
 ## Bundle B · Make Store Result truthful
 
@@ -285,6 +234,52 @@ in a new surface.*
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle A · Wind height factor k, end to end — 2026-08-30
+
+Implemented in the working tree; **not yet committed**, pending an in-app check. 846 tests pass
+(up 19), `npm run check` and `npm run lint` clean.
+
+- [x] **[S] The k control now speaks 0–100%** (D-b). `WIND_HEIGHT_PERCENT_{MIN,MAX,STEP}` plus
+      `factorToPercent`/`percentToFactor` in `WindHeightTransfer.ts`; both inputs, the readout, the
+      fitted-range caveat and the info tooltip all converted. Storage stays the 0–1 factor, so no
+      record changes meaning and no migration is owed. Both converters round, because 0.01 steps
+      are not representable in IEEE754 and an unrounded round trip yields a readout of
+      "7.000000000000001%".
+
+      **One consequence worth your eye:** `resolveWindHeightFactor` mapped `factor <= 0` onto 1.0,
+      treating 0 as corruption. Once the slider reaches 0% that guard inverts the control — dragging
+      to zero would apply the FULL wind. The guard is now `factor < 0`, so a stored 0 means what it
+      reads as: no wind reaches the rider. A pre-existing record holding exactly 0 therefore changes
+      meaning; the UI could never write one (the floor was 0.3 and the number input clamped to it),
+      so this reaches only a corrupt or hand-edited row.
+
+- [x] **[S] A persisted out-of-range k no longer commits its own narrowing.** Not fixed by clamping
+      — clamping storage is the bug D-03 exists to prevent. The readout now names the stored value,
+      says the slider is parked at its limit because it cannot represent it, states that the stored
+      value is what the physics uses, and warns that moving the slider will replace it. It is styled
+      as a warning, and takes precedence over the manual/unknown prompts because it is the one that
+      has to arrive *before* the next gesture. `windHeightControls.ts` · *origin: Phase 8 WR-07*
+
+- [x] **[S] A stored wind is never overwritten by a weather fill** (D-a). New
+      `weatherMayFillWind` — one decision site, provenance not value: the API fills a wind that is
+      absent or that it wrote itself, and never one whose `wind_entry` is `"manual"` or
+      `"unknown"`. Note the bug was **wider than recorded**: the legacy `"unknown"` case was
+      protected for k but its *wind* was replaced too, so a legacy analysis was re-fitted on every
+      reload regardless. `autoRho.ts:230-245`, `windHeightControls.ts` · *origin: Phase 8 WR-05*
+
+- [x] **[S] k is stored and exported.** `windHeightFactor` on `StoredVEResult`, carried in
+      `saveResult`, and a new `WindHeightPct` column sited next to the wind it scales. Optional and
+      guarded exactly like `crrApplied`: a pre-column record exports an empty cell rather than a
+      fabricated 100 claiming it was fitted at no transfer.
+      `ResultsStorage.ts` · *origin: Phase 8 WR-02 = audit WR-8*
+
+- [x] **[S] The wind fields follow the current binding.** `windFieldsBound` was a membership-only
+      `WeakSet`, so the listener it guarded closed over the FIRST binding's `getParams` forever. Now
+      a `WeakMap` doing both jobs: membership still attaches the listener once per node, and the
+      value — overwritten on every bind, read back inside the listener — keeps it pointed at the
+      current binding. The test re-binds the same nodes with a second closure and asserts the
+      readout follows it. `windHeightControls.ts` · *origin: Phase 8 WR-06*
 
 ### Bundle C · Elevation resolver, and the test that should have caught it — 2026-08-30
 
