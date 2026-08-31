@@ -447,9 +447,26 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 // straight through it and they came out sliced in half. Dropping
                 // the title alone left that, because the labels were never the
                 // title's doing.
-                xaxis: { title: '', showticklabels: false },
+                xaxis: {
+                    title: '',
+                    showticklabels: false,
+                    // PINNED, like the non-compare pair's two axes. Two
+                    // autoranged plots agree only by luck, and this pair is read
+                    // as one stacked chart.
+                    range: [input.context.xMin, input.context.xMax],
+                },
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
+                // INSIDE THE PLOT AREA, at `buildVirtualElevationFigures`'
+                // coordinates. Plotly's default puts a legend outside on the
+                // right and shrinks the plot area to fit it, so the width taken
+                // depends on the longest entry — and this pair's two legends have
+                // different longest entries ("VE (FIT Air Speed)" against
+                // "Residuals (FIT Air Speed)"). The plots ended up with different
+                // domains and their gridlines no longer lined up, which is worse
+                // than the clipped labels it replaced: a stacked pair that does
+                // not share an x position is actively misleading.
+                legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
                 hovermode: 'closest',
                 // NO `height` HERE, and none in any other figure: the CSS
                 // sizes the graph div and Plotly autosizes into it. See the
@@ -487,9 +504,15 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
             ],
             layout: {
                 title: 'Residuals Comparison (Virtual - Actual)',
-                xaxis: { title: input.context.xAxisTitle },
+                xaxis: {
+                    title: input.context.xAxisTitle,
+                    range: [input.context.xMin, input.context.xMax],
+                },
                 yaxis: { title: 'Residual (m)' },
                 showlegend: true,
+                // Same placement as the elevation layout above, so neither plot
+                // gives up horizontal space and the two share a domain.
+                legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
                 hovermode: 'closest',
                 // Must match buildVirtualElevationFigures' residuals sizing.
                 margin: { l: 60, r: 20, t: 30, b: 60 },
