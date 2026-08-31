@@ -59,13 +59,27 @@ class FakeMap {
 	destroy(): void {
 		this.destroyed = true;
 	}
-	clearDetectedLaps(): void {}
-	clearGpsMarker(): void {}
-	clearOutAndBackMarkers(): void {}
+	// Counted, not ignored: the new-activity reset is supposed to clear all
+	// three, and a no-op stub cannot tell whether it did.
+	public cleared = { detectedLaps: 0, gpsMarker: 0, outAndBackMarkers: 0 };
+	clearDetectedLaps(): void {
+		this.cleared.detectedLaps++;
+	}
+	clearGpsMarker(): void {
+		this.cleared.gpsMarker++;
+	}
+	clearOutAndBackMarkers(): void {
+		this.cleared.outAndBackMarkers++;
+	}
 	showDetectedLaps(): void {}
 	showOutAndBackSections(): void {}
 	fitBoundsToTrimRegion(): void {}
 	setGpsMarker(): void {}
+	// Out-and-back's gate markers. Absent until the new-activity block exercised
+	// that mode, where the miss surfaced as an UNHANDLED rejection rather than a
+	// failing assertion -- noise that hides real failures in this file's output.
+	setGpsMarkerA(): void {}
+	setGpsMarkerB(): void {}
 	setOutAndBackMarkerA(): void {}
 	setOutAndBackMarkerB(): void {}
 	showWindIndicator(): void {}
@@ -133,7 +147,11 @@ vi.mock("../gpsLap/gpsLapPlots", async (importOriginal) => ({
 
 import {
 	configureSection3Orchestration,
+	getGpsAnalysisMode,
+	handleOutAndBackSectionSelectionChange,
+	resetAnalysisForNewActivity,
 	setGpsAnalysisMode,
+	updateSelectedLaps,
 } from "./section3Orchestration";
 import { AppState } from "../../state/AppState";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
@@ -933,5 +951,506 @@ describe("GPS-02: the VE panel after a Section 3 mode change", () => {
 		for (const call of calculatorCalls) {
 			expect(call.cda).toBeCloseTo(0.42, 6);
 		}
+	});
+});
+
+/**
+ * The VE panel after a Section-3 SELECTION change.
+ *
+ * Same argument as GPS-02 above, one step down. `tearDownVeAnalysisPanel`'s own
+ * comment gives the rule -- "the basis is gone, so the results computed from it
+ * go too. The user re-Analyzes." -- and a mode change is not the only way the
+ * basis goes. Changing the lap checkboxes, the out-and-back section checkboxes,
+ * or re-running gate detection all replace the input the panel was computed
+ * from, and none of them touched the panel: the plot kept the old selection's
+ * curve while the sidebar controls that read `selectedLaps` directly moved to
+ * the new one. Reported from the running app, 2026-08-31.
+ *
+ * THE GUARD IS THE INTERESTING HALF. `updateSelectedLaps()` is not only an event
+ * handler -- Section 3's post-render hook calls it to reconcile re-rendered
+ * markup with the retained selection (the first describe block in this file is
+ * about exactly that), and `rerenderSection3` runs on every mode change. So an
+ * unconditional teardown here would destroy a valid panel on ordinary
+ * re-renders, and the tests below pin both directions: it goes when the basis
+ * moved, and it STAYS when the call is a reconciliation that changed nothing.
+ */
+describe("the VE panel after a Section 3 selection change", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		setupDom();
+		mapInstances.length = 0;
+		mapInitializeBehaviour = () => Promise.resolve();
+		Element.prototype.scrollIntoView = () => {};
+		purged.length = 0;
+		(globalThis as unknown as { Plotly: unknown }).Plotly = {
+			newPlot: () => Promise.resolve(),
+			react: () => Promise.resolve(),
+			relayout: () => Promise.resolve(),
+			purge: (gd: Element) => {
+				purged.push((gd as HTMLElement).id);
+			},
+			Plots: { resize: () => Promise.resolve() },
+		};
+		window.alert = vi.fn();
+		calculatorCalls.length = 0;
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	afterEach(() => {
+		resetRecomputeThrottle();
+		vi.useRealTimers();
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	/**
+	 * The lap list Section 3 renders, reduced to the two attributes
+	 * `updateSelectedLaps` actually reads: `.lap-checkbox:checked` and the
+	 * enclosing `.lap-checkbox-item[data-lap]`.
+	 *
+	 * `#mapTrimControls` is deliberately absent, so the trim-control branch --
+	 * which would pull in Leaflet and auto-rho -- stays out of these tests.
+	 */
+	function renderLapCheckboxes(laps: number[], checked: number[]): void {
+		const results = document.getElementById("results");
+		if (!results) throw new Error("#results is not on the page");
+		results.innerHTML = laps
+			.map(
+				(lap) => `
+        <div class="lap-checkbox-item" data-lap="${lap}">
+            <input type="checkbox" class="lap-checkbox"${checked.includes(lap) ? " checked" : ""}>
+        </div>`,
+			)
+			.join("");
+	}
+
+	/** The same, for the out-and-back section list. */
+	function renderSectionCheckboxes(
+		sections: number[],
+		checked: number[],
+	): void {
+		const results = document.getElementById("results");
+		if (!results) throw new Error("#results is not on the page");
+		results.innerHTML = sections
+			.map(
+				(section) => `
+        <div class="lap-checkbox-item" data-oab-section="${section}">
+            <input type="checkbox" class="oab-section-checkbox"${checked.includes(section) ? " checked" : ""}>
+        </div>`,
+			)
+			.join("");
+	}
+
+	async function analyzedStandardPanel(): Promise<AppState> {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+		await analyzeStandard(appState);
+		await settle();
+		return appState;
+	}
+
+	it("tears the panel down when the lap selection moves off the analyzed laps", async () => {
+		const appState = await analyzedStandardPanel();
+
+		expect(veSectionHidden()).toBe(false);
+		expect(appState.currentVEResult).not.toBeNull();
+		expect(appState.currentAnalyzedLaps).toEqual([1]);
+
+		renderLapCheckboxes([1, 2, 3], [2]);
+		updateSelectedLaps();
+		await settle();
+
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
+		expect(appState.currentAnalyzedLaps).toEqual([]);
+	});
+
+	it("leaves the panel alone when the call is a re-render that changed nothing", async () => {
+		const appState = await analyzedStandardPanel();
+
+		// What Section 3's post-render hook does: re-derive the SAME selection
+		// from freshly rendered markup. Tearing down here is the regression the
+		// first describe block in this file was written against.
+		renderLapCheckboxes([1, 2, 3], [1]);
+		updateSelectedLaps();
+		await settle();
+
+		expect(veSectionHidden()).toBe(false);
+		expect(appState.currentVEResult).not.toBeNull();
+	});
+
+	it("stays torn down when the selection returns to the analyzed set", async () => {
+		const appState = await analyzedStandardPanel();
+
+		renderLapCheckboxes([1, 2, 3], [1, 2]);
+		updateSelectedLaps();
+		await settle();
+		expect(veSectionHidden()).toBe(true);
+
+		// Ending where you started does NOT resurrect the panel. The teardown
+		// cleared `currentAnalyzedLaps` on the way out, so the guard now reads
+		// "nothing analyzed" and does nothing -- which is right: the results are
+		// gone and only a re-Analyze can produce them. The user-visible contract
+		// is that the panel stays away until Analyze is pressed.
+		renderLapCheckboxes([1, 2, 3], [1]);
+		updateSelectedLaps();
+		await settle();
+
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
+		expect(appState.selectedLaps).toEqual([1]);
+	});
+
+	it("does not tear down when nothing has been analyzed yet", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		// Selecting laps for the FIRST analyze must not be treated as
+		// invalidating: there is no panel, and `currentAnalyzedLaps` is empty.
+		renderLapCheckboxes([1, 2, 3], [1, 2]);
+		expect(() => updateSelectedLaps()).not.toThrow();
+		expect(appState.selectedLaps).toEqual([1, 2]);
+	});
+
+	it("tears the panel down when the out-and-back section selection changes", async () => {
+		const appState = await analyzedStandardPanel();
+		// What `segmentSummary` writes as the analyzed set for the segment modes.
+		appState.currentCoveredItems = [1, 2];
+
+		renderSectionCheckboxes([1, 2, 3], [1, 3]);
+		handleOutAndBackSectionSelectionChange();
+		await settle();
+
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
+	});
+
+	it("does not tear the panel down when the section selection still matches", async () => {
+		const appState = await analyzedStandardPanel();
+		appState.currentCoveredItems = [1, 2];
+
+		renderSectionCheckboxes([1, 2, 3], [2, 1]);
+		handleOutAndBackSectionSelectionChange();
+		await settle();
+
+		expect(veSectionHidden()).toBe(false);
+		expect(appState.currentVEResult).not.toBeNull();
+	});
+
+	it("leaves an auto-rho recompute scheduled before the teardown unable to write", async () => {
+		const appState = await analyzedStandardPanel();
+
+		renderLapCheckboxes([1, 2, 3], [3]);
+		updateSelectedLaps();
+		await settle();
+		expect(appState.currentVEResult).toBeNull();
+
+		// `updateSelectedLaps` schedules auto-rho on a 500 ms timer, and auto-rho
+		// writes parameters, which reaches `requestModeUpdate("parameters")`.
+		// After the teardown the panel is hidden, so the primitive must bail at
+		// its visibility gate rather than repopulate the fields just cleared --
+		// the shape `resetRecomputeStatus` was added for.
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(appState.currentVEResult).toBeNull();
+		expect(veSectionHidden()).toBe(true);
+	});
+});
+
+/**
+ * Loading a DIFFERENT activity.
+ *
+ * The last and bluntest way the basis goes. `setLoadedActivity`
+ * (`AppState.ts:314`) swaps `currentFitData`, `currentFitResult` and
+ * `currentLaps` and stops there, so `selectedLaps` survived the swap --
+ * and `renderSection3Template` ticks `selectedLaps.includes(index + 1)`, so
+ * laps 2, 4 and 6 came back checked against a completely different ride and
+ * Analyze ran on them with no further gesture. Reported from the running app,
+ * 2026-08-31.
+ *
+ * `currentAnalyzedLaps` survived too, which is the half that does not show up
+ * as a wrong tick: the selection-change guard above compares the carried-over
+ * selection against the carried-over analyzed set, finds them equal, and leaves
+ * the PREVIOUS file's VE panel on screen over the new file's data.
+ *
+ * THE MODE RESET DOES NOT GO THROUGH `setGpsAnalysisMode`. That function is a
+ * deliberate no-op when the mode is already the one asked for
+ * (`previousMode !== mode` gates every branch), and "already None" is the most
+ * common case there is -- plain Standard mode, which is exactly what was
+ * reported. Routing the reset through it would do nothing on the reported path.
+ */
+describe("loading a new activity resets the analysis", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		setupDom();
+		mapInstances.length = 0;
+		mapInitializeBehaviour = () => Promise.resolve();
+		Element.prototype.scrollIntoView = () => {};
+		purged.length = 0;
+		(globalThis as unknown as { Plotly: unknown }).Plotly = {
+			newPlot: () => Promise.resolve(),
+			react: () => Promise.resolve(),
+			relayout: () => Promise.resolve(),
+			purge: (gd: Element) => {
+				purged.push((gd as HTMLElement).id);
+			},
+			Plots: { resize: () => Promise.resolve() },
+		};
+		window.alert = vi.fn();
+		calculatorCalls.length = 0;
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	afterEach(() => {
+		resetRecomputeThrottle();
+		vi.useRealTimers();
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	/** The mode `<select>` the reset has to put back in step with the module. */
+	function renderModeSelect(value: string): HTMLSelectElement {
+		const host = document.getElementById("analysisSection");
+		if (!host) throw new Error("#analysisSection is not on the page");
+		host.insertAdjacentHTML(
+			"afterbegin",
+			`<select id="gpsAnalysisMode">
+                <option value="None">None</option>
+                <option value="GPS based lap splitting">GPS based lap splitting</option>
+                <option value="GPS based out and back">GPS based out and back</option>
+            </select>`,
+		);
+		const select = document.getElementById(
+			"gpsAnalysisMode",
+		) as HTMLSelectElement;
+		select.value = value;
+		return select;
+	}
+
+	async function analyzedStandardPanel(): Promise<AppState> {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+		await analyzeStandard(appState);
+		await settle();
+		return appState;
+	}
+
+	it("clears the lap selection", async () => {
+		const appState = await analyzedStandardPanel();
+		appState.selectedLaps = [2, 4, 6];
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.selectedLaps).toEqual([]);
+	});
+
+	it("tears the panel down even though the mode is already None", async () => {
+		const appState = await analyzedStandardPanel();
+		appState.selectedLaps = [2, 4, 6];
+
+		expect(veSectionHidden()).toBe(false);
+		expect(appState.currentVEResult).not.toBeNull();
+
+		resetAnalysisForNewActivity();
+
+		// The reported path. A reset routed through `setGpsAnalysisMode("None")`
+		// would leave every one of these untouched.
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
+		expect(appState.currentAnalyzedLaps).toEqual([]);
+	});
+
+	it("leaves nothing for the selection guard to treat as analyzed", async () => {
+		const appState = await analyzedStandardPanel();
+		appState.selectedLaps = [2, 4, 6];
+
+		resetAnalysisForNewActivity();
+
+		// With both lists empty the guard reads "nothing analyzed" and stands
+		// down, which is what lets the NEW file's first selection through
+		// without the panel flickering.
+		expect(appState.currentAnalyzedLaps).toEqual([]);
+		expect(appState.currentCoveredItems).toBeNull();
+	});
+
+	it("returns the mode to None and puts the select back in step", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		const select = renderModeSelect("GPS based out and back");
+		setGpsAnalysisMode("GPS based out and back");
+		await settle();
+
+		resetAnalysisForNewActivity();
+
+		expect(getGpsAnalysisMode()).toBe("None");
+		expect(select.value).toBe("None");
+	});
+
+	it("clears GPS detections and out-and-back sections", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		appState.gpsDetectedLaps = [{ lapNumber: 1 }] as never;
+		appState.gpsSelectedLaps = [1];
+		appState.gpsLapDetectionResult = {} as never;
+		appState.outAndBackSections = [{ sectionNumber: 1 }] as never;
+		appState.outAndBackSelectedSections = [1, 2];
+		appState.outAndBackResult = {} as never;
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.gpsDetectedLaps).toEqual([]);
+		expect(appState.gpsSelectedLaps).toEqual([]);
+		expect(appState.gpsLapDetectionResult).toBeNull();
+		expect(appState.outAndBackSections).toEqual([]);
+		expect(appState.outAndBackSelectedSections).toEqual([]);
+		expect(appState.outAndBackResult).toBeNull();
+	});
+
+	it("clears the previous file's map markers", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		// The map the previous activity drew on. Taken back OUT of the shared
+		// registry the way `configure`'s `getMapVisualization` resolves it --
+		// first non-destroyed instance -- rather than assuming this one is it,
+		// because a `rerenderSection3` earlier in the test can have made its own.
+		new FakeMap("analysisSection");
+		const map = mapInstances.find((m) => !m.destroyed);
+		if (!map) throw new Error("no live FakeMap for the reset to clear");
+		map.cleared = { detectedLaps: 0, gpsMarker: 0, outAndBackMarkers: 0 };
+
+		resetAnalysisForNewActivity();
+
+		expect(map.cleared.detectedLaps).toBeGreaterThan(0);
+		expect(map.cleared.gpsMarker).toBeGreaterThan(0);
+		expect(map.cleared.outAndBackMarkers).toBeGreaterThan(0);
+	});
+
+	it("does not throw when no activity was ever analyzed", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		// The very first file load of a session.
+		expect(() => resetAnalysisForNewActivity()).not.toThrow();
+		expect(appState.selectedLaps).toEqual([]);
+	});
+});
+
+/**
+ * THE WHOLE OF `SelectionState`, not a hand-listed subset.
+ *
+ * `resetAnalysisForNewActivity` shipped clearing the three SELECTIONS and
+ * leaving the state DERIVED from them behind, and the gap was not theoretical:
+ * `filteredLapData` still held the previous file's samples, so the load-path
+ * auto-rho (`fileLoadOrchestration.ts:398`) sailed past its `!filteredLapData`
+ * guard and read trim sliders that had just been re-rendered for the NEW file.
+ * With start === end `calculateTrimRegionMetadata` throws, surfacing as
+ * "Auto-rho calculation failed. Using manual value." on every file switch --
+ * and never on a session's first load, where `filteredLapData` is still null
+ * and the guard returns early. Reported from the running app, 2026-08-31.
+ *
+ * Asserting against a FRESH `AppState`'s selection block rather than naming
+ * fields is the point: the reset's contract is "this activity's selection state
+ * goes back to as-loaded", and a field added to `SelectionState` later is
+ * exactly the thing that would otherwise be forgotten here.
+ */
+describe("the new-activity reset returns every selection-derived field", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		setupDom();
+		mapInstances.length = 0;
+		mapInitializeBehaviour = () => Promise.resolve();
+		Element.prototype.scrollIntoView = () => {};
+		(globalThis as unknown as { Plotly: unknown }).Plotly = {
+			newPlot: () => Promise.resolve(),
+			react: () => Promise.resolve(),
+			relayout: () => Promise.resolve(),
+			purge: () => {},
+			Plots: { resize: () => Promise.resolve() },
+		};
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	afterEach(() => {
+		resetRecomputeThrottle();
+		vi.useRealTimers();
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	it("leaves the selection block identical to a freshly constructed one", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		// Dirty every field a real session would have written by the time a
+		// second file is picked.
+		appState.selectedLaps = [2, 4, 6];
+		appState.gpsSelectedLaps = [1];
+		appState.outAndBackSelectedSections = [1, 2];
+		appState.currentAnalyzedLaps = [2, 4, 6];
+		appState.currentCoveredItems = [2, 4];
+		appState.filteredLapData = {
+			timestamps: [1, 2, 3],
+		} as never;
+		appState.filteredVEData = { timestamps: [1, 2, 3] } as never;
+		appState.currentFilteredData = { timestamps: [1, 2, 3] } as never;
+		appState.presetTrimStart = 40;
+		appState.presetTrimEnd = 90;
+		appState.currentGpsLapIndexRanges = [{ startIdx: 0, endIdx: 9 }] as never;
+		appState.currentOverlayLapNumbers = [2, 4, 6];
+		appState.currentOutAndBackSections = [{ sectionNumber: 1 }] as never;
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.selection).toEqual(new AppState().selection);
+	});
+
+	it("clears the filtered lap data the load-path auto-rho guards on", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		appState.selectedLaps = [10, 12];
+		appState.filteredLapData = { timestamps: [1, 2, 3] } as never;
+
+		resetAnalysisForNewActivity();
+
+		// The specific field whose survival produced the toast: with it null the
+		// guard returns early and quietly, exactly as on a first load.
+		expect(appState.filteredLapData).toBeNull();
+	});
+
+	it("clears the trim window, which indexes into the previous selection", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("None");
+		await settle();
+
+		appState.presetTrimStart = 40;
+		appState.presetTrimEnd = 90;
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.presetTrimStart).toBe(0);
+		expect(appState.presetTrimEnd).toBeNull();
 	});
 });

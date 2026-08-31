@@ -37,6 +37,7 @@ import {
 	resetRecomputeThrottle,
 } from "../analysis/recomputeRunner";
 import { purgePlotlyGraphsIn } from "../dom/plotlyPurge";
+import { sameItems } from "../ve/veSelectionGuard";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -212,6 +213,122 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	// already nulls; leaving it would keep a stale segment list alive.
 	appState.currentGpsLapIndexRanges = null;
 	appState.currentOverlayLapNumbers = null;
+}
+
+/**
+ * Invalidate the VE panel when a Section-3 SELECTION no longer matches the one
+ * that was analyzed.
+ *
+ * The same rule `tearDownVeAnalysisPanel` states for a mode change — the basis
+ * is gone, so the results computed from it go too — reached by the other route.
+ * A mode change is not the only way to replace the panel's input: the lap
+ * checkboxes, the out-and-back section checkboxes and a gate re-detection all
+ * do. None of them touched the panel, so the plot kept the old selection's
+ * curve while the Section-3 controls that read the selection directly moved to
+ * the new one.
+ *
+ * GUARDED, NOT UNCONDITIONAL, on both halves of the condition:
+ *
+ *  - `analyzedBasis` empty means nothing has been analyzed, so there is no
+ *    panel to invalidate. Selecting the laps for a FIRST analyze must not run
+ *    the teardown — it would fight the very selection the user is making.
+ *  - An UNCHANGED basis means this call is a reconciliation, not a user edit.
+ *    `updateSelectedLaps` is also Section 3's post-render hook: it re-derives
+ *    the selection from freshly rendered markup on every `rerenderSection3`,
+ *    and tearing down there would destroy a valid panel on an ordinary mode
+ *    re-render. That is the defect the first describe block of
+ *    `section3ModeSwitch.test.ts` exists for, and this is the shape that would
+ *    reintroduce it.
+ *
+ * Callers pass the analyzed list their own mode records: `currentAnalyzedLaps`
+ * for FIT laps, `currentCoveredItems` for the segment modes' section numbers
+ * (WR-01/WR-02).
+ */
+function invalidateVePanelIfBasisChanged(
+	analyzedBasis: number[] | null,
+	newBasis: number[],
+): void {
+	if (!analyzedBasis || analyzedBasis.length === 0) return;
+	if (sameItems(analyzedBasis, newBasis)) return;
+	tearDownVeAnalysisPanel(getDependencies().appState);
+}
+
+/**
+ * Return Section 3 and the VE panel to their pre-analysis state, because a
+ * DIFFERENT activity has just been loaded.
+ *
+ * `setLoadedActivity` (`AppState.ts:314`) swaps `currentFitData`,
+ * `currentFitResult` and `currentLaps` and stops there. Everything the user had
+ * SELECTED survived that swap, and `renderSection3Template` re-ticks from
+ * `selectedLaps`, so laps chosen for the previous ride came back checked
+ * against the new one and Analyze ran on them with no further gesture.
+ *
+ * `currentAnalyzedLaps` survived too, which is the half that does not show up
+ * as a wrong tick: `invalidateVePanelIfBasisChanged` compares the carried-over
+ * selection against the carried-over analyzed set, finds them equal, and leaves
+ * the previous file's VE panel on screen over the new file's data.
+ *
+ * NOT ROUTED THROUGH `setGpsAnalysisMode("None")`, which is the obvious way to
+ * write this and is wrong. Every branch of that function is gated on
+ * `previousMode !== mode`, so asking for a mode already selected does nothing —
+ * and "already None" is plain Standard mode, the most common case and the one
+ * that was reported. The mode variable is moved directly here, and the
+ * `<select>` is put back in step with it.
+ *
+ * CALL THIS BEFORE SECTION 3 IS RE-RENDERED for the new activity
+ * (`displayResults`), or the template re-ticks the old laps from the state this
+ * clears.
+ */
+export function resetAnalysisForNewActivity(): void {
+	const deps = getDependencies();
+	const { appState } = deps;
+
+	// The three selections, one per mode family.
+	appState.selectedLaps = [];
+	appState.gpsSelectedLaps = [];
+	appState.outAndBackSelectedSections = [];
+	appState.currentOutAndBackSections = [];
+
+	// AND THE STATE DERIVED FROM THEM, which is the half that was missed.
+	// Clearing a selection while leaving its derived data behind does not
+	// produce a clean slate — it produces an INCONSISTENT one, and the
+	// inconsistency is load-bearing: `calculateAutoRho`'s early return is
+	// `if (!appState.filteredLapData)`, so a surviving value from the previous
+	// file carried the load-path call (`fileLoadOrchestration.ts:398`) past its
+	// own guard and into trim sliders that had just been re-rendered for the new
+	// activity. With `start === end` the metadata call throws and the user gets
+	// "Auto-rho calculation failed. Using manual value." on every file switch,
+	// and never on the first load — where this field is still null.
+	appState.filteredLapData = null;
+	appState.filteredVEData = null;
+
+	// Sample INDICES into the selection that has just gone. Carried onto a new
+	// activity they point at nothing in particular.
+	appState.presetTrimStart = 0;
+	appState.presetTrimEnd = null;
+
+	// The detections those selections indexed into. All are derived from the
+	// activity that has just been replaced.
+	appState.gpsDetectedLaps = [];
+	appState.gpsLapDetectionResult = null;
+	appState.outAndBackSections = [];
+	appState.outAndBackResult = null;
+
+	const mapVisualization = deps.getMapVisualization();
+	mapVisualization?.clearDetectedLaps();
+	mapVisualization?.clearGpsMarker();
+	mapVisualization?.clearOutAndBackMarkers();
+
+	currentGpsAnalysisMode = "None";
+	const modeSelect = document.getElementById(
+		"gpsAnalysisMode",
+	) as HTMLSelectElement | null;
+	if (modeSelect) modeSelect.value = "None";
+
+	// Unconditionally, unlike the mode-change and selection-change callers: a new
+	// activity invalidates the panel whatever the old basis was, and there is no
+	// "unchanged" case to spare.
+	tearDownVeAnalysisPanel(appState);
 }
 
 /**
@@ -801,6 +918,15 @@ export async function runOutAndBackDetection(
 	// Auto-select all sections initially
 	deps.appState.outAndBackSelectedSections =
 		deps.appState.outAndBackSections.map((s) => s.sectionNumber);
+
+	// Moving a gate re-cuts the ride into different sections, so a panel
+	// analyzed from the previous cut describes segments that no longer exist —
+	// the same invalidation as ticking the section boxes, by a blunter route.
+	invalidateVePanelIfBasisChanged(
+		deps.appState.currentCoveredItems,
+		deps.appState.outAndBackSelectedSections,
+	);
+
 	deps.updateAnalyzeButton();
 }
 
@@ -882,6 +1008,14 @@ export function handleOutAndBackSectionSelectionChange(): void {
 		})
 		.filter((section) => section > 0);
 
+	// The segment modes record their analyzed set on `currentCoveredItems`, not
+	// `currentAnalyzedLaps` — that is the field `summarize` writes and the one
+	// Store Result and the CSV report coverage from.
+	invalidateVePanelIfBasisChanged(
+		deps.appState.currentCoveredItems,
+		deps.appState.outAndBackSelectedSections,
+	);
+
 	// Update visual selection state
 	document
 		.querySelectorAll(".lap-checkbox-item[data-oab-section]")
@@ -953,6 +1087,16 @@ export function updateSelectedLaps(): void {
 			return item ? parseInt(item.getAttribute("data-lap") || "0") : 0;
 		})
 		.filter((lap) => lap > 0);
+
+	// BEFORE the auto-rho schedule below, deliberately. Auto-rho writes
+	// parameters ~500 ms later and that write reaches
+	// `requestModeUpdate("parameters")`; with the panel already hidden the
+	// primitive bails at its visibility gate instead of recomputing against a
+	// selection the panel on screen does not belong to.
+	invalidateVePanelIfBasisChanged(
+		deps.appState.currentAnalyzedLaps,
+		deps.appState.selectedLaps,
+	);
 
 	// Update map visualization
 	const mapVisualization = deps.getMapVisualization();
