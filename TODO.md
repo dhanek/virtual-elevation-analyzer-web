@@ -31,14 +31,14 @@ dependency column below says what actually has to wait.
 | ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | ~~**B**~~ | ~~Make Store Result truthful~~ | — | **Done** 2026-08-31, awaiting in-app check |
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, awaiting in-app check |
-| **D** | Plot rendering and tab layout | M | — |
+| ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, awaiting in-app check |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
 | **G** | Test infrastructure | M | — |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, awaiting in-app check |
 | — | Standalone work | varies | — |
 
-Suggested order from here: **D** or **G**. A, B, C, E and H are done. The one piece of B
+Suggested order from here: **G**. A, B, C, D, E and H are done. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -61,49 +61,6 @@ These block work below. None of them is a coding question.
       a drag can resolve, and the number input stays the precise path. Shipped in bundle E.
 
 ---
-
-## Bundle D · Plot rendering and tab layout
-
-*Effort: M. Why together: all four touch the plotting and rendering path. Order matters — the layout
-fix is cheap and visible, and the axis switch rewrites draw calls, so doing it after the
-`Plotly.react` migration avoids writing the new axis code twice.*
-
-- [ ] **[S–M] Layout: the Wind, Power and VD tabs waste most of their width.** Observed in all three
-      (maintainer screenshots, 2026-08-30): the plot renders at roughly two-thirds width with dead
-      space either side, a full-width empty bordered strip sits above it, and in the Wind tab the
-      air-speed-offset control is stranded in its own box far to the right of the plot rather than
-      under it. The VE tab does not show this. Suspects, not yet a diagnosis: `.ve-plots` is a flex
-      column whose `.ve-plot-container` children carry `flex: 1`
-      (`frontend/src/styles/ve-results.css:150-165`) while `.ve-tab-content--active` is
-      `display: block` (`ve-results.css:360-366`), so that `flex: 1` does nothing; and the three
-      tab panes interleave the plot container with the offset-control block
-      (`renderStandardVe.ts:472-500`). Reproduce in the browser first — this one is a layout
-      inspection, not a code read. *origin: maintainer, 2026-08-30*
-
-- [ ] **[M] Out-and-back still uses `Plotly.newPlot` for plots redrawn on every update.** GPS-lap
-      moved to `Plotly.react` some time ago. The VE and residual plots are the significant ones —
-      redrawn on every slider update — and out-and-back computes 2N segments, so it is the mode
-      most likely to feel the teardown cost. Worth doing behind a draw-method test that stubs both
-      methods, as `gpsLapPlotDrawMethod.test.ts` does.
-      `frontend/src/shell/outAndBack/outAndBackPlots.ts:142,160,192,461-462`; five more in
-      `renderStandardVe.ts:157-181`
-
-- [ ] **[M] A time/distance switch on the x-axis for standard mode.** Cheaper than it looks: every
-      standard plot takes its x from one place — `input.context.timePoints{Before,Main,After}` —
-      and hardcodes `title: 'Time (seconds)'` at
-      `frontend/src/plots/StandardPlotBuilders.ts:293,540,646,780` (VE, wind, power, VD). So the
-      work is a second context builder plus an axis title, not four plot rewrites. Two things to
-      watch: distance must be cumulative across the whole series rather than per-slice, or the
-      before/main/after regions will not line up; and `findOptimalAnnotationPosition`
-      (`StandardPlotBuilders.ts:800`) takes the time array explicitly. The switch belongs at the
-      axis, per the request, not in the sidebar. *origin: maintainer, 2026-08-30*
-
-- [ ] **[S–M] A torn-down VE panel keeps its DOM, listeners and Plotly instances.** `Plotly.purge`
-      has zero callers anywhere in `frontend/src`, so each mode change leaves one fully-wired,
-      fully plotted panel alive behind `display: none` until the next analyze replaces it. Does not
-      accumulate across cycles; memory/GC only. One 250 ms status-flash timer can also fire
-      post-teardown and create a `#veRecomputeStatus` node inside the hidden panel — cosmetic.
-      *origin: audit NEW-2*
 
 ## Bundle F · Weather — the deferred WEATH-01 feature
 
@@ -216,6 +173,136 @@ are best judged against the same question — what does `npm run check` currentl
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle D · Plot rendering and tab layout — 2026-08-31
+
+Implemented in the working tree; **not committed**. 941 tests pass (up 48), `npm run check` and
+`npm run lint` clean. Every new assertion was checked against the pre-fix code and observed to fail,
+so none of them is vacuous.
+
+**A first attempt at the layout item shipped a worse bug and was corrected.** Adding the
+`Plots.resize` call without changing the sizing convention collapsed Standard's plots to 26 px
+(maintainer screenshots). The write-up below is of the corrected work; the correction is item 0.
+
+- [x] **[M] One sizing convention for every plot in every mode.** *Not in the original bundle —
+      found by the maintainer when the first attempt at the layout item broke the panel, and it is
+      the real root cause underneath it.*
+
+      **Two conventions coexisted.** GPS-lap and out-and-back size a plot from CSS: the graph div
+      is nested inside the bordered box, carries a height class, and the figure sets no
+      `layout.height`. Standard inverted it — the figure carried `height: 350`/`200` and the
+      container carried no height at all, so the BOX was sized by the plot. Standard's wind, power
+      and VD figures were on neither convention: no CSS height *and* no `layout.height`, so they had
+      no height source whatsoever and only ever looked right because being drawn into a hidden pane
+      handed them Plotly's 700×450 fallback. **That accident was load-bearing**, which is the real
+      answer to "why do plot dimensions change after an update or a tab switch": the four draw paths
+      re-measured by different amounts, and any path that measured honestly destroyed the default.
+
+      **Why the pinned height was actively harmful.** `Plots.resize` guards on
+      `layout.width && layout.height` (`plotly-basic.js:48331`) and then *deletes both* and
+      re-autosizes. A height-only layout sails past that guard. Measured in Chrome: 350 px → 26 px,
+      and 26 px again on every subsequent resize — a ratchet, not a one-off. Same 26 px for the
+      wind plot. That is exactly the maintainer's two screenshots.
+
+      **Unified on the CSS convention**, which is what two of the three modes already had and the
+      only one compatible with `config.responsive` and `Plots.resize`. All 13 plot divs across the
+      three templates are now `.ve-plot-container > .ve-plot-container__plot--{ve,residuals,tall}`;
+      the four `layout.height` entries are gone; `.ve-plot` / `.ve-plot--tall` are retired. Nesting
+      rather than sizing the box itself also removes a slow drift — the box carries padding and a
+      border, so as a graph div its `offsetHeight` included them and it grew on every re-measure.
+
+      Heights moved to `clamp()` (`40vh`/`20vh`/`58vh` with floors and ceilings), so the plots fill
+      the space on a laptop and a tall monitor alike; this replaced the `@media` override in
+      `responsive.css`, which only ever reached the now-retired `.ve-plot`. Verified in Chrome:
+      `svg === box` on every plot, and stable across five parameter updates, a tab switch and
+      repeated resizes.
+
+      `oneSizingConvention.test.ts` pins it — the failure is invisible at the unit level, since a
+      figure with a pinned height looks perfectly reasonable on its own.
+      *origin: maintainer, 2026-08-31*
+
+- [x] **[S–M] Layout: the Wind, Power and VD tabs waste most of their width.** Reproduced in Chrome
+      against the real markup and stylesheet before any code was changed, as the item asked.
+
+      **Neither suspect in the item was the cause.** `.ve-plot-container`'s `flex: 1` is inert — its
+      parent is always a `.ve-tab-content` pane, which is `display: block` or `display: none` and
+      never a flex container (measured: computed `flex-grow: 1`, parent display `block`/`none`, on
+      every instance). The interleaved offset-control block is a plain sibling. Both were red
+      herrings.
+
+      **The actual cause is that the plots are drawn while their pane is hidden.**
+      `initializeVEAnalysis` draws all five plots up front, when every pane but VE is
+      `display: none`. Plotly's autosize reads `gd.offsetWidth`, gets 0 and falls back to its
+      default `layout.width` of **700 px**. Nothing rescues it afterwards: `config.responsive`
+      hooks only the window `resize` event, which un-hiding does not fire, and `Plotly.react` does
+      not re-run autosize on a graph that already carries a width — so the tab render callbacks
+      re-plot at 700 px too. Measured: an 808 px container holding a 700 px svg after activation
+      **and** react; 808 px only after `Plots.resize`. That is the "roughly two-thirds width with
+      dead space either side", and it is exactly why the VE tab was exempt — its pane is the active
+      one when the first draw happens. The same measurement on the GPS-lap / out-and-back shape
+      (`.ve-plot--tall`) gave 700×300 in an 808×300 box, so height was wrong there too.
+
+      Fixed centrally in `resizePlotlyGraphsIn` (`shell/dom/plotlyResize.ts`), called from
+      `activateTab` after the render callback — one call point covering all three modes and every
+      tab. **That call is only safe on top of the sizing unification above**, and shipping it
+      without that is what broke the panel: `Plots.resize` deletes a height-only layout. The
+      original verification measured width for the height-less container and height only for the
+      fixed-height one, so it never asked the question that would have caught it. The dead `flex: 1` is removed with a note saying why it never applied, and the
+      `StandardPlotBuilders` comment that cited it as the reason for the explicit `layout.height`
+      is corrected: the height is load-bearing, but not for that reason.
+      *origin: maintainer, 2026-08-30*
+
+- [x] **[M] Out-and-back still uses `Plotly.newPlot` for plots redrawn on every update.** All seven
+      out-and-back calls and the five in `renderStandardVe` now use `Plotly.react`; `Plotly.newPlot`
+      has no callers left anywhere in `src`. Pinned by a new `outAndBackPlotDrawMethod.test.ts`
+      (modelled on `gpsLapPlotDrawMethod.test.ts`, both methods stubbed so `newPlot` stays available
+      and is simply not taken) and by two new cases in `standardModeRealChain.test.ts`, whose fake
+      now records WHICH method each draw went through — it used to `void name`, which is why the
+      five Standard `newPlot` calls were invisible to that chain.
+
+      **One interaction worth recording.** `renderOutAndBackPlots` unhides `#oabCompareView` before
+      plotting, with a comment explaining that Plotly measures the container at draw time. That is
+      true of `newPlot` and NOT of `react`, so the migration would have introduced the same stale
+      width the layout item above is about; the compare view is now re-measured after the draw.
+      Two existing tests (`outAndBackCompareFigures`, `outAndBackVdHeader`) stubbed only `newPlot`
+      and so were quietly a second pin on the draw method — their stubs now offer both.
+
+- [x] **[M] A time/distance switch on the x-axis for standard mode.** Two maintainer rulings taken
+      first (2026-08-31): **one shared setting**, with a copy of the control under each of the four
+      plots, over four independent per-plot settings; and **cumulative distance** accumulated across
+      lap boundaries, over the raw FIT odometer — Standard stitches several laps, so the recorded
+      channel jumps backwards at every boundary.
+
+      The item's estimate held. `PlotContext` gained the x-axis identity (`xPoints*` renamed from
+      `timePoints*`, plus `xAxisTitle` and `axis`), `createDistancePlotContext` sits beside
+      `createPlotContext` with identical index bookkeeping, and the four hardcoded `'Time (seconds)'`
+      titles read from the context. All four figures take their x from the context, so the switch is
+      a context swap and no figure builder knows which axis it draws.
+
+      **One thing the item did not name.** `buildTrimBoundaryShapes` used `context.trimStart` /
+      `trimEnd` — SAMPLE INDICES — directly as x coordinates. That is invisible under a time axis,
+      where the axis IS the index, and would have put the dashed trim lines at kilometre 30 000 of a
+      40 km ride. `xTrimStart` / `xTrimEnd` are the same boundaries in x units and are what the
+      shapes read now. `findOptimalAnnotationPosition` needed nothing: it normalises whatever array
+      it is handed.
+
+      The control follows the `lapViewToggle` pattern and the codebase's presence-not-visibility
+      rule — emitted unconditionally, hidden until a draw reports a usable distance channel, so it
+      is never absent at bind time. `ve` joined the tab render map, which it had never been in: the
+      recompute path was the only thing that redrew the VE pair, and the toggle changes no parameter
+      and runs no fit, so without an entry a flip on the VE tab would have moved the other three and
+      left the one on screen behind. *origin: maintainer, 2026-08-30*
+
+- [x] **[S–M] A torn-down VE panel keeps its DOM, listeners and Plotly instances.**
+      `purgePlotlyGraphsIn` (`shell/dom/plotlyPurge.ts`) is called from `tearDownVeAnalysisPanel`.
+      The markup still stays — the next render replaces it wholesale, as that function's own comment
+      says — but what Plotly hung off it does not.
+
+      The status-flash half is fixed at the root rather than only at the teardown: going idle now
+      never CREATES the pill. `ensureStatusNode` builds one wherever it fails to find one, so the
+      250 ms timer firing into a torn-down panel meant "hide the pill" MINTED a fresh
+      `#veRecomputeStatus` inside the panel it was hiding something in. The teardown also clears the
+      flash timer, which `resetRecomputeThrottle` never touched. *origin: audit NEW-2*
 
 ### Bundle H · On-screen results view — 2026-08-31
 

@@ -1,3 +1,32 @@
+/**
+ * ONE SIZING CONVENTION, AND THIS FILE USED TO BREAK IT.
+ *
+ * Across the app a plot is sized like this: the graph div carries a HEIGHT FROM
+ * CSS (`.ve-plot-container__plot--ve` / `--residuals` / `--tall`), the figure
+ * carries NO `layout.height`, and Plotly autosizes into the box. That is the
+ * only convention compatible with the two things that re-measure a plot after
+ * it is drawn — `config.responsive`, which re-autosizes on window resize, and
+ * `Plots.resize`, which the tab layer calls when a hidden pane becomes visible.
+ *
+ * The Standard figures below used to carry `height: 350` / `height: 200` while
+ * their container carried no CSS height at all, which inverted the
+ * relationship: the BOX was sized by the plot. Measured in Chrome 2026-08-31,
+ * that fails in two ways, and both were on screen:
+ *
+ *   - `Plots.resize` guards on `gd.layout.width && gd.layout.height`
+ *     (plotly-basic.js:48331). These layouts set height but never width, so the
+ *     guard let it through and the next two lines DELETE both and re-autosize —
+ *     into a box whose height came from the plot. Measured: 350 px -> 26 px,
+ *     and 26 px again on every later resize.
+ *   - Standard's wind, power and VD figures set no height and their containers
+ *     set none either, so they had NO height source. They only ever looked
+ *     right because they were drawn while their pane was `display: none`, where
+ *     Plotly falls back to a 700x450 default. That accident was load-bearing:
+ *     any path that honestly re-measured them collapsed them to 26 px.
+ *
+ * So: no `height` in any layout in this file. If a plot is the wrong size, the
+ * stylesheet is where to fix it.
+ */
 import { anchorSeriesTo, residualsAgainst } from './comparisonTraces';
 import { buildTrimBoundaryShapes, createContextSlices, type PlotContext } from './PlotContext';
 import {
@@ -112,7 +141,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
     if (input.context.contextBefore > 0) {
         elevationData.push(
             {
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: offsetBefore,
                 type: 'scatter',
                 mode: 'lines',
@@ -122,7 +151,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
                 showlegend: false,
             },
             {
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: actualSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -136,7 +165,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
 
     elevationData.push(
         {
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: offsetMain,
             type: 'scatter',
             mode: 'lines',
@@ -144,7 +173,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
             line: { color: '#4363d8', width: 2 },
         },
         {
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: actualSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -156,7 +185,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
     if (input.context.contextAfter > 0) {
         elevationData.push(
             {
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: offsetAfter,
                 type: 'scatter',
                 mode: 'lines',
@@ -166,7 +195,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
                 showlegend: false,
             },
             {
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: actualSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -180,7 +209,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
 
     const annotationPosition = findOptimalAnnotationPosition(
         [...offsetMain, ...actualSlices.main],
-        [...input.context.timePointsMain, ...input.context.timePointsMain],
+        [...input.context.xPointsMain, ...input.context.xPointsMain],
     );
 
     const residualsMain = offsetMain.map((value, index) => value - actualSlices.main[index]);
@@ -190,7 +219,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
     const residualsData: PlotTrace[] = [];
     if (input.context.contextBefore > 0) {
         residualsData.push({
-            x: input.context.timePointsBefore,
+            x: input.context.xPointsBefore,
             y: residualsBefore,
             type: 'scatter',
             mode: 'lines',
@@ -202,7 +231,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
     }
 
     residualsData.push({
-        x: input.context.timePointsMain,
+        x: input.context.xPointsMain,
         y: residualsMain,
         type: 'scatter',
         mode: 'lines',
@@ -212,7 +241,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
 
     if (input.context.contextAfter > 0) {
         residualsData.push({
-            x: input.context.timePointsAfter,
+            x: input.context.xPointsAfter,
             y: residualsAfter,
             type: 'scatter',
             mode: 'lines',
@@ -224,9 +253,9 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
     }
 
     const allTimePoints = [
-        ...input.context.timePointsBefore,
-        ...input.context.timePointsMain,
-        ...input.context.timePointsAfter,
+        ...input.context.xPointsBefore,
+        ...input.context.xPointsMain,
+        ...input.context.xPointsAfter,
     ];
     if (allTimePoints.length > 0) {
         residualsData.push({
@@ -279,7 +308,6 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
                     },
                 }],
                 margin: { l: 60, r: 20, t: 40, b: 5 },
-                height: 350,
                 plot_bgcolor: '#fafafa',
                 paper_bgcolor: 'white',
             },
@@ -290,7 +318,7 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
             layout: {
                 title: { text: 'Residuals (Virtual - Actual Elevation)', font: { size: 12 } },
                 xaxis: {
-                    title: 'Time (seconds)',
+                    title: input.context.xAxisTitle,
                     showgrid: true,
                     gridcolor: '#e0e0e0',
                     range: [input.context.xMin, input.context.xMax],
@@ -306,7 +334,6 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
                 legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
                 shapes: buildTrimBoundaryShapes(input.context),
                 margin: { l: 60, r: 20, t: 30, b: 60 },
-                height: 200,
                 plot_bgcolor: '#fafafa',
                 paper_bgcolor: 'white',
             },
@@ -334,7 +361,7 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
         elevation: {
             data: [
                 {
-                    x: input.context.timePointsMain,
+                    x: input.context.xPointsMain,
                     y: offsetFit,
                     type: 'scatter',
                     mode: 'lines',
@@ -342,7 +369,7 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                     line: { color: '#4363d8', width: 2 },
                 },
                 {
-                    x: input.context.timePointsMain,
+                    x: input.context.xPointsMain,
                     y: actualSlices.main,
                     type: 'scatter',
                     mode: 'lines',
@@ -350,7 +377,7 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                     line: { color: '#000000', width: 2 },
                 },
                 {
-                    x: input.context.timePointsMain,
+                    x: input.context.xPointsMain,
                     y: offsetConstant,
                     type: 'scatter',
                     mode: 'lines',
@@ -364,18 +391,17 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
                 hovermode: 'closest',
-                // Must match buildVirtualElevationFigures. `.ve-plot-container`
-                // is flex:1 inside a display:block tab pane with no height, so a
-                // responsive figure with no layout.height collapses to unreadable.
+                // NO `height` HERE, and none in any other figure: the CSS
+                // sizes the graph div and Plotly autosizes into it. See the
+                // "one sizing convention" note at the top of this file.
                 margin: { l: 60, r: 20, t: 40, b: 5 },
-                height: 350,
             },
             config: getDefaultPlotConfig(),
         },
         residuals: {
             data: [
                 {
-                    x: input.context.timePointsMain,
+                    x: input.context.xPointsMain,
                     y: fitResiduals,
                     type: 'scatter',
                     mode: 'lines',
@@ -383,7 +409,7 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                     line: { color: '#4363d8', width: 2 },
                 },
                 {
-                    x: input.context.timePointsMain,
+                    x: input.context.xPointsMain,
                     y: constantResiduals,
                     type: 'scatter',
                     mode: 'lines',
@@ -391,8 +417,8 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                     line: { color: '#a9a9a9', width: 2 },
                 },
                 {
-                    x: input.context.timePointsMain,
-                    y: new Array(input.context.timePointsMain.length).fill(0),
+                    x: input.context.xPointsMain,
+                    y: new Array(input.context.xPointsMain.length).fill(0),
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Zero',
@@ -407,7 +433,6 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 hovermode: 'closest',
                 // Must match buildVirtualElevationFigures' residuals sizing.
                 margin: { l: 60, r: 20, t: 30, b: 60 },
-                height: 200,
             },
             config: getDefaultPlotConfig(),
         },
@@ -425,7 +450,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
     const traces: PlotTrace[] = [];
     if (input.context.contextBefore > 0) {
         traces.push({
-            x: input.context.timePointsBefore,
+            x: input.context.xPointsBefore,
             y: groundSlices.before,
             type: 'scatter',
             mode: 'lines',
@@ -437,7 +462,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
         if (fitWindSlices.main.some(value => value !== null)) {
             traces.push({
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: fitWindSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -450,7 +475,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
         if (constantWindSlices) {
             traces.push({
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: constantWindSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -463,7 +488,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
     }
 
     traces.push({
-        x: input.context.timePointsMain,
+        x: input.context.xPointsMain,
         y: groundSlices.main,
         type: 'scatter',
         mode: 'lines',
@@ -473,7 +498,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
     if (fitWindSlices.main.some(value => value !== null)) {
         traces.push({
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: fitWindSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -484,7 +509,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
     if (constantWindSlices) {
         traces.push({
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: constantWindSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -495,7 +520,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
     if (input.context.contextAfter > 0) {
         traces.push({
-            x: input.context.timePointsAfter,
+            x: input.context.xPointsAfter,
             y: groundSlices.after,
             type: 'scatter',
             mode: 'lines',
@@ -507,7 +532,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
         if (fitWindSlices.main.some(value => value !== null)) {
             traces.push({
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: fitWindSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -520,7 +545,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
 
         if (constantWindSlices) {
             traces.push({
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: constantWindSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -537,7 +562,7 @@ export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition 
         layout: {
             title: { text: 'Wind Speed Analysis', font: { size: 14 } },
             xaxis: {
-                title: 'Time (seconds)',
+                title: input.context.xAxisTitle,
                 showgrid: true,
                 gridcolor: '#e0e0e0',
                 range: [input.context.xMin, input.context.xMax],
@@ -566,7 +591,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
     if (input.context.contextBefore > 0) {
         traces.push(
             {
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: speedSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -577,7 +602,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
                 yaxis: 'y',
             },
             {
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: powerSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -592,7 +617,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
 
     traces.push(
         {
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: speedSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -601,7 +626,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
             yaxis: 'y',
         },
         {
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: powerSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -614,7 +639,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
     if (input.context.contextAfter > 0) {
         traces.push(
             {
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: speedSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -625,7 +650,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
                 yaxis: 'y',
             },
             {
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: powerSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -643,7 +668,7 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
         layout: {
             title: { text: 'Speed & Power', font: { size: 14 } },
             xaxis: {
-                title: 'Time (seconds)',
+                title: input.context.xAxisTitle,
                 showgrid: true,
                 gridcolor: '#e0e0e0',
                 range: [input.context.xMin, input.context.xMax],
@@ -706,7 +731,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
     if (input.context.contextBefore > 0) {
         traces.push(
             {
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: airSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -716,7 +741,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
                 showlegend: false,
             },
             {
-                x: input.context.timePointsBefore,
+                x: input.context.xPointsBefore,
                 y: groundSlices.before,
                 type: 'scatter',
                 mode: 'lines',
@@ -730,7 +755,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
 
     traces.push(
         {
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: airSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -738,7 +763,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
             line: { color: '#4363d8', width: 2 },
         },
         {
-            x: input.context.timePointsMain,
+            x: input.context.xPointsMain,
             y: groundSlices.main,
             type: 'scatter',
             mode: 'lines',
@@ -750,7 +775,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
     if (input.context.contextAfter > 0) {
         traces.push(
             {
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: airSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -760,7 +785,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
                 showlegend: false,
             },
             {
-                x: input.context.timePointsAfter,
+                x: input.context.xPointsAfter,
                 y: groundSlices.after,
                 type: 'scatter',
                 mode: 'lines',
@@ -777,7 +802,7 @@ export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): Plo
         layout: {
             title: { text: 'Virtual Distance: Air Speed vs Ground Speed', font: { size: 14 } },
             xaxis: {
-                title: 'Time (seconds)',
+                title: input.context.xAxisTitle,
                 showgrid: true,
                 gridcolor: '#e0e0e0',
                 range: [input.context.xMin, input.context.xMax],

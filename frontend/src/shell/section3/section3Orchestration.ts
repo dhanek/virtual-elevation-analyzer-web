@@ -32,7 +32,11 @@ import {
 } from "../dem/demHandlers";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
 import { clearModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
-import { resetRecomputeThrottle } from "../analysis/recomputeRunner";
+import {
+	resetRecomputeStatus,
+	resetRecomputeThrottle,
+} from "../analysis/recomputeRunner";
+import { purgePlotlyGraphsIn } from "../dom/plotlyPurge";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -164,6 +168,17 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	// unreachable behind the visibility gate.
 	document.getElementById("veAnalysisSection")?.classList.add("hidden");
 
+	// The MARKUP can stay; what Plotly hung off it should not (audit NEW-2).
+	// Hiding a graph div releases none of the figure data, layout, drag handlers
+	// or `responsive` window listener behind it, and this is the point at which
+	// they stop describing anything on screen. Bounded at one panel — the next
+	// analyze overwrites the container — so this is memory and a stray listener,
+	// not correctness.
+	const veContent = document.getElementById("veAnalysisContent");
+	if (veContent) {
+		purgePlotlyGraphsIn(veContent);
+	}
+
 	// First production caller. Stops a previous mode's renderer factory staying
 	// reachable for the life of the session.
 	clearModeUpdateCallbacks();
@@ -175,6 +190,13 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	// fields reset below. `requestModeUpdate`'s scheduled run re-checks
 	// visibility as well; this disarms it earlier so the pass never starts.
 	resetRecomputeThrottle();
+
+	// The 250 ms "Updated" flash is a SEPARATE timer that `resetRecomputeThrottle`
+	// does not clear. Left armed it fires into a torn-down panel, and going idle
+	// used to MINT a `#veRecomputeStatus` node wherever it failed to find one —
+	// so the teardown ended with a fresh pill inside the panel it had just
+	// hidden. Cosmetic, and now impossible from either end.
+	resetRecomputeStatus();
 
 	// Everything Store Result and Export read, so neither can persist a record
 	// describing an analysis whose basis no longer exists.

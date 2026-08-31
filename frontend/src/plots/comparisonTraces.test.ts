@@ -96,10 +96,10 @@ describe('buildVirtualElevationComparisonFigures — frozen trace data (before p
 
     it('keeps every trace on the main time axis, and the zero line flat', () => {
         for (const trace of [...figures.elevation.data, ...figures.residuals.data]) {
-            expect(trace.x).toEqual(context.timePointsMain);
+            expect(trace.x).toEqual(context.xPointsMain);
         }
         expect(traceNamed(figures.residuals.data, 'Zero').y).toEqual(
-            new Array(context.timePointsMain.length).fill(0),
+            new Array(context.xPointsMain.length).fill(0),
         );
     });
 

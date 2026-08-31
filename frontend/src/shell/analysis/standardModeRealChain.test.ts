@@ -122,13 +122,21 @@ const drawTargets: string[] = [];
 /** Draws aimed at an id this panel does not contain — always a defect. */
 const missingTargets: string[] = [];
 /** Every draw's trace list, in order, so a redraw's CONTENT can be read. */
-const draws: Array<{ id: string; data: any[] }> = [];
+const draws: Array<{ id: string; data: any[]; layout: any }> = [];
+/**
+ * Which Plotly call each draw went through (bundle D). Recorded because the
+ * choice is a property worth pinning end to end: `newPlot` tears the graph down
+ * and rebuilds it, and every id below is redrawn on every slider update. The
+ * fake used to `void name`, so both methods were indistinguishable here and the
+ * five `newPlot` calls in `initializeVEAnalysis` were invisible to this chain.
+ */
+const drawMethods: Array<{ id: string; method: "newPlot" | "react" }> = [];
 
 function fakePlotly(name: "newPlot" | "react") {
 	return (id: string, ...rest: unknown[]) => {
-		void name;
+		drawMethods.push({ id, method: name });
 		drawTargets.push(id);
-		draws.push({ id, data: (rest[0] as any[]) ?? [] });
+		draws.push({ id, data: (rest[0] as any[]) ?? [], layout: rest[1] });
 		if (!document.getElementById(id)) {
 			missingTargets.push(id);
 			// Exactly what Plotly does, so a draw into thin air cannot pass for one
@@ -370,6 +378,7 @@ beforeEach(() => {
 	drawTargets.length = 0;
 	missingTargets.length = 0;
 	draws.length = 0;
+	drawMethods.length = 0;
 	overlay.ve.mockClear();
 	overlay.vd.mockClear();
 	clearModeUpdateCallbacks();
@@ -679,5 +688,185 @@ describe("standard: the header spans at first paint (WR-4)", () => {
 		expect(document.getElementById("actualGainValue")?.textContent).toBe(
 			"3.00m",
 		);
+	});
+});
+
+/**
+ * EVERY STANDARD PLOT REDRAWS WITH `Plotly.react` (bundle D).
+ *
+ * GPS-lap made this move already, pinned by `gpsLapPlotDrawMethod.test.ts`;
+ * out-and-back followed, pinned by `outAndBackPlotDrawMethod.test.ts`. Standard
+ * was the last holdout, and only on its FIRST draw: `bindStandardSliders`
+ * already reached four of these five ids through `react`, while
+ * `initializeVEAnalysis` opened every one of them with `newPlot`.
+ *
+ * Pinned here rather than in a unit test because this chain drives the real
+ * render, so it sees the ids the panel actually opens with -- including the
+ * ones whose panes are hidden at that moment, which a hand-built DOM would have
+ * to guess at.
+ *
+ * A stub that provided only `react` would make this vacuous: any renderer would
+ * be forced onto it. `fakePlotly` supplies both and records which was used, so
+ * choosing `newPlot` is available and simply not taken.
+ */
+describe("standard: plots redraw by diffing, not by teardown", () => {
+	it("opens all five plots with react and none with newPlot", async () => {
+		await renderStitched();
+
+		expect(drawMethods.filter(draw => draw.method === "newPlot")).toEqual([]);
+		expect(drawMethods.map(draw => draw.id)).toEqual(
+			expect.arrayContaining([
+				"vePlot",
+				"veResidualsPlot",
+				"windSpeedPlot",
+				"speedPowerPlot",
+				"vdPlot",
+			]),
+		);
+	});
+
+	it("stays on react when a slider drag redraws them", async () => {
+		await renderStitched();
+		await settle();
+		drawMethods.length = 0;
+
+		await dragCda(0.3);
+
+		expect(drawMethods.length).toBeGreaterThan(0);
+		expect(drawMethods.filter(draw => draw.method === "newPlot")).toEqual([]);
+	});
+});
+
+/**
+ * THE TIME/DISTANCE X-AXIS SWITCH, end to end (bundle D).
+ *
+ * The unit cases cover the two halves separately: `distancePlotContext.test.ts`
+ * holds the context builder, `plotXAxisToggle.test.ts` holds the one-setting
+ * control, `standardSegments.test.ts` holds the cumulative distance. What none
+ * of them can see is whether a click on the rendered control actually reaches
+ * the figures — which is the whole feature, and which spans the toggle, the
+ * tab render map, the adapter's `contextFor` and four figure builders.
+ *
+ * Asserted on the DRAWN x data rather than on a call count: the point of the
+ * design is that no figure builder knows which axis it is drawing, so the only
+ * honest observation is what came out.
+ */
+describe("standard: the time/distance x-axis switch", () => {
+	function toggleButton(axis: "time" | "distance"): HTMLButtonElement {
+		const button = document.querySelector<HTMLButtonElement>(
+			`#ve-tab .plot-x-axis-toggle__btn[data-axis="${axis}"]`,
+		);
+		if (!button) throw new Error(`no ${axis} button in the VE pane`);
+		return button;
+	}
+
+	function lastDraw(id: string) {
+		const matching = draws.filter(draw => draw.id === id);
+		return matching[matching.length - 1];
+	}
+
+	it("draws against time until the switch is used", async () => {
+		await renderStitched();
+		await settle();
+
+		const ve = lastDraw("vePlot");
+		// The time axis IS the sample index, so the last x is one less than the
+		// series length rather than a distance.
+		expect(Math.max(...ve.data[0].x)).toBeGreaterThan(50);
+		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Time (seconds)");
+	});
+
+	it("shows the control once a draw has seen a usable distance channel", async () => {
+		await renderStitched();
+		await settle();
+
+		const group = document.querySelector<HTMLElement>("#ve-tab .plot-x-axis-toggle");
+		expect(group).not.toBeNull();
+		expect(group!.hidden).toBe(false);
+	});
+
+	it("redraws the VE pair in kilometres when Distance is clicked", async () => {
+		await renderStitched();
+		await settle();
+		draws.length = 0;
+
+		toggleButton("distance").click();
+		await settle();
+
+		const ve = lastDraw("vePlot");
+		const residuals = lastDraw("veResidualsPlot");
+		expect(ve).toBeDefined();
+
+		// 10 m per sample in the fixture, so the whole selection is well under
+		// 10 km -- a decisive separation from the index axis above.
+		expect(Math.max(...ve.data[0].x)).toBeLessThan(10);
+		expect(residuals.layout.xaxis.title).toBe("Distance (km)");
+	});
+
+	it("puts the trim boundary lines in kilometres too, not at sample indices", async () => {
+		// The `xTrimStart`/`xTrimEnd` split. Under time the two are numerically
+		// equal, so a builder that kept reading `trimStart` would pass every
+		// time-axis test and put the dashed lines past the right edge here.
+		await renderStitched();
+		await settle();
+		draws.length = 0;
+
+		toggleButton("distance").click();
+		await settle();
+
+		const shapes = lastDraw("veResidualsPlot").layout.shapes;
+		expect(shapes).toHaveLength(2);
+		for (const shape of shapes) {
+			expect(shape.x0).toBeLessThan(10);
+		}
+	});
+
+	it("carries the axis over to a tab the user opens afterwards", async () => {
+		// The "one setting, four controls" half: Wind was not redrawn by the
+		// click, and must come up in distance when it is activated.
+		await renderStitched();
+		await settle();
+
+		toggleButton("distance").click();
+		await settle();
+		draws.length = 0;
+
+		clickTab("wind");
+		await settle();
+
+		const wind = lastDraw("windSpeedPlot");
+		expect(wind).toBeDefined();
+		expect(wind.layout.xaxis.title).toBe("Distance (km)");
+		expect(Math.max(...wind.data[0].x)).toBeLessThan(10);
+	});
+
+	it("goes back to time, and takes the plots with it", async () => {
+		await renderStitched();
+		await settle();
+
+		toggleButton("distance").click();
+		await settle();
+		draws.length = 0;
+
+		toggleButton("time").click();
+		await settle();
+
+		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Time (seconds)");
+		expect(Math.max(...lastDraw("vePlot").data[0].x)).toBeGreaterThan(50);
+	});
+
+	it("keeps the axis across a slider drag", async () => {
+		// The recompute path builds its own context. If it read the setting only
+		// at first paint, a drag would silently snap the axis back to time.
+		await renderStitched();
+		await settle();
+
+		toggleButton("distance").click();
+		await settle();
+		draws.length = 0;
+
+		await dragCda(0.3);
+
+		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Distance (km)");
 	});
 });

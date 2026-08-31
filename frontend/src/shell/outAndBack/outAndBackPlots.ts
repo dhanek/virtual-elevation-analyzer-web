@@ -14,6 +14,7 @@ import {
 import { renderVirtualDistanceHeader, sectionVirtualDistanceRows } from '../ve/vdHeader';
 import { anchorSeriesTo } from '../../plots/comparisonTraces';
 import { log } from '../../utils/log';
+import { resizePlotlyGraphsIn } from '../dom/plotlyResize';
 
 /**
  * Calculate mean actual elevation profile for Out and Back (with inbound mirrored)
@@ -141,7 +142,7 @@ export function renderOutAndBackWindPlot(profiles: OutAndBackVEProfile[]) {
         series: buildOutAndBackMultiSegmentSeries(profiles),
     });
 
-    Plotly.newPlot('oabWindPlot', figure.data, figure.layout, figure.config);
+    Plotly.react('oabWindPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -159,7 +160,7 @@ export function renderOutAndBackPowerPlot(profiles: OutAndBackVEProfile[]) {
         series: buildOutAndBackMultiSegmentSeries(profiles),
     });
 
-    Plotly.newPlot('oabPowerPlot', figure.data, figure.layout, figure.config);
+    Plotly.react('oabPowerPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -191,7 +192,7 @@ export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
         series: buildOutAndBackMultiSegmentSeries(profiles),
     });
 
-    Plotly.newPlot('oabVdPlot', figure.data, figure.layout, figure.config);
+    Plotly.react('oabVdPlot', figure.data, figure.layout, figure.config);
     renderVirtualDistanceHeader(
         sectionVirtualDistanceRows(
             profiles.map(profile => ({
@@ -678,16 +679,27 @@ export function renderOutAndBackPlots(
         compareView.classList.toggle('hidden', !isCompare);
     }
 
-    Plotly.newPlot('oabVePlot', figures.ve.data, figures.ve.layout, { responsive: true });
-    Plotly.newPlot('oabVeResidualsPlot', figures.residuals.data, figures.residuals.layout, { responsive: true });
+    Plotly.react('oabVePlot', figures.ve.data, figures.ve.layout, { responsive: true });
+    Plotly.react('oabVeResidualsPlot', figures.residuals.data, figures.residuals.layout, { responsive: true });
 
     if (figures.compareVe && figures.compareResiduals) {
-        Plotly.newPlot('oabVeComparePlot', figures.compareVe.data, figures.compareVe.layout, { responsive: true });
-        Plotly.newPlot(
+        Plotly.react('oabVeComparePlot', figures.compareVe.data, figures.compareVe.layout, { responsive: true });
+        Plotly.react(
             'oabVeCompareResidualsPlot',
             figures.compareResiduals.data,
             figures.compareResiduals.layout,
             { responsive: true },
         );
+
+        // The unhide above is no longer enough on its own. `newPlot` measured
+        // the container on every call, so unhiding first was the whole fix;
+        // `react` reuses the width the graph already carries, and the compare
+        // view spends time hidden whenever the selection drops out of compare.
+        // A window resize during that stretch resizes a zero-width div, and
+        // without this the stale width would survive the next unhide.
+        // Scoped to the compare view deliberately: resizing every graph on the
+        // page would hand `Plots.resize` the hidden tab panes too, and a
+        // zero-width measurement is exactly the state this is here to undo.
+        if (compareView) resizePlotlyGraphsIn(compareView);
     }
 }

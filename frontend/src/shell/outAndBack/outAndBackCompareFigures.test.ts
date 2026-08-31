@@ -293,20 +293,33 @@ describe('renderOutAndBackPlots — the second subplot has somewhere to go', () 
      * has actually caught things in this phase: a fake that throws on a missing
      * target turns "the builder produced a figure" into "the figure reached a
      * container that exists in the shipped template".
+     *
+     * BOTH draw methods, sharing one record (bundle D). This fake used to supply
+     * `newPlot` alone, which quietly made these cases a second pin on the draw
+     * METHOD -- they broke on the switch to `react` while having nothing to say
+     * about it. What they are about is WHERE a figure lands, so they now record
+     * either call and leave the method to `outAndBackPlotDrawMethod.test.ts`.
      */
     function fakePlotly() {
         const drawn = new Map<string, any[]>();
-        return {
-            drawn,
-            newPlot: vi.fn((target: string, data: any[]) => {
+        const draw = (method: string) =>
+            vi.fn((target: string, data: any[]) => {
                 if (typeof target !== 'string') {
                     throw new Error(`Plotly target must be an element id, got ${typeof target}`);
                 }
                 if (document.getElementById(target) === null) {
-                    throw new Error(`Plotly.newPlot('${target}'): no such element in the document`);
+                    throw new Error(`Plotly.${method}('${target}'): no such element in the document`);
                 }
                 drawn.set(target, data);
-            }),
+            });
+        return {
+            drawn,
+            newPlot: draw('newPlot'),
+            react: draw('react'),
+            // `renderOutAndBackPlots` re-measures the compare view after
+            // unhiding it, because `react` -- unlike `newPlot` -- reuses the
+            // width the graph already carries.
+            Plots: { resize: vi.fn(() => Promise.resolve()) },
         };
     }
 
@@ -342,7 +355,7 @@ describe('renderOutAndBackPlots — the second subplot has somewhere to go', () 
         renderOutAndBackPlots(Plotly, sections, meanElevation);
         renderOutAndBackPlots(Plotly, makeSections(false), meanElevation);
 
-        expect(Plotly.newPlot.mock.calls.slice(4).map((call) => call[0])).toEqual([
+        expect(Plotly.react.mock.calls.slice(4).map((call) => call[0])).toEqual([
             'oabVePlot',
             'oabVeResidualsPlot',
         ]);

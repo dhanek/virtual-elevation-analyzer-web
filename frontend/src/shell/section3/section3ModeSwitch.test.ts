@@ -599,6 +599,9 @@ async function attemptStoreResult(appState: AppState) {
 	return saveResult;
 }
 
+/** Ids `Plotly.purge` was called on, in order. */
+const purged: string[] = [];
+
 describe("GPS-02: the VE panel after a Section 3 mode change", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -609,11 +612,17 @@ describe("GPS-02: the VE panel after a Section 3 mode change", () => {
 		Element.prototype.scrollIntoView = () => {};
 		// `waitForPlotly` resolves immediately once `window.Plotly` is set
 		// (`plotlyLoader.ts:39-42`), so no loader mock is needed.
+		purged.length = 0;
 		(globalThis as unknown as { Plotly: unknown }).Plotly = {
 			newPlot: () => Promise.resolve(),
 			react: () => Promise.resolve(),
 			relayout: () => Promise.resolve(),
-			purge: () => {},
+			// Records rather than ignores (NEW-2): the teardown is supposed to
+			// reach this, and a no-op stub cannot tell whether it did.
+			purge: (gd: Element) => {
+				purged.push((gd as HTMLElement).id);
+			},
+			Plots: { resize: () => Promise.resolve() },
 		};
 		window.alert = vi.fn();
 		calculatorCalls.length = 0;
@@ -773,6 +782,99 @@ describe("GPS-02: the VE panel after a Section 3 mode change", () => {
 		expect(appState.currentWindSource).toBe("none");
 		expect(appState.currentCoveredItems).toBeNull();
 		expect(gpsLapDraw.ve).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * NEW-2, from the round-2 milestone audit.
+	 *
+	 * The teardown hides the panel and deliberately keeps its markup — the next
+	 * render replaces it wholesale. What it did NOT do was tell Plotly, so the
+	 * figure data, layout, drag handlers and `responsive` window listener behind
+	 * every graph in that panel stayed reachable until the next analyze.
+	 * `Plotly.purge` had zero callers anywhere in `src`.
+	 *
+	 * Bounded at one panel's worth — one panel is live at a time — so this is
+	 * memory and a stray listener rather than correctness. It is closed because
+	 * the release point is knowable and `purge` is the call that knows how.
+	 */
+	it("releases the panel's Plotly graphs on the way out (NEW-2)", async () => {
+		const appState = makeAppState();
+		await startInMode(appState, "GPS based lap splitting");
+		await analyzeGpsLap(appState);
+		await settle();
+
+		// The graphs the render left behind. Every plot in every mode is a
+		// `.ve-plot-container__plot` nested inside its bordered box, so that is
+		// the set of graph divs. `js-plotly-plot` is the class Plotly stamps on a
+		// div it has plotted into, and the fake does not, so they are marked here
+		// — this case is about the teardown reaching them, not about what the
+		// fake stamps.
+		const content = document.getElementById("veAnalysisContent")!;
+		content.querySelectorAll(".ve-plot-container__plot").forEach(node => {
+			node.classList.add("js-plotly-plot");
+		});
+		const plotted = content.querySelectorAll(".js-plotly-plot").length;
+		expect(plotted).toBeGreaterThan(0);
+		purged.length = 0;
+
+		setGpsAnalysisMode("None");
+		await settle();
+
+		expect(veSectionHidden()).toBe(true);
+		expect(purged).toHaveLength(plotted);
+	});
+
+	it("purges nothing when the panel holds no graphs, and does not throw", async () => {
+		// A mode change before any analyze. `Plots.purge` throws on a div it never
+		// plotted, so the marker class is the guard and this is the case that
+		// shows it holds.
+		const appState = makeAppState();
+		await startInMode(appState, "GPS based lap splitting");
+		await settle();
+		purged.length = 0;
+
+		expect(() => setGpsAnalysisMode("None")).not.toThrow();
+		await settle();
+
+		expect(purged).toEqual([]);
+	});
+
+	/**
+	 * The other half of NEW-2: a 250 ms status flash that outlives the panel.
+	 *
+	 * `resetRecomputeThrottle` clears the THROTTLE timer; the "Updated" flash is
+	 * a separate one it never touched. It fired after the teardown and asked for
+	 * status "idle" — and going idle used to run through `ensureStatusNode`,
+	 * which BUILDS a pill wherever it fails to find one. So hiding the pill
+	 * created one, inside the panel the teardown had just hidden.
+	 */
+	it("does not mint a status pill into the panel it just tore down (NEW-2)", async () => {
+		const appState = makeAppState();
+		await startInMode(appState, "GPS based lap splitting");
+		await analyzeGpsLap(appState);
+		await settle();
+
+		// Arm the flash and STOP SHORT of it firing. `settle()` advances 500 ms,
+		// which would run the 250 ms timer before the teardown and make this
+		// case vacuous -- so the drag is hand-rolled and the clock is advanced
+		// by less than the flash interval.
+		const slider = document.getElementById("cdaSlider") as HTMLInputElement;
+		slider.value = "0.42";
+		slider.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(100);
+
+		// Precondition: the recompute finished and armed the flash, so there is
+		// a live timer for the teardown to have to deal with.
+		expect(document.getElementById("veRecomputeStatus")).not.toBeNull();
+		document.getElementById("veRecomputeStatus")!.remove();
+
+		setGpsAnalysisMode("None");
+
+		// Past the 250 ms flash interval: if the timer survived the teardown it
+		// fires here, and going idle would rebuild the pill it meant to hide.
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(document.getElementById("veRecomputeStatus")).toBeNull();
 	});
 
 	it("direction 1: Store Result cannot persist a record after the mode change", async () => {

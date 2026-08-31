@@ -189,6 +189,34 @@ export interface StitchedStandardSeries {
 	velocity: number[];
 	power: number[];
 	apparentWindSpeedMps: number[];
+	/**
+	 * Ground distance in km, accumulated across the WHOLE selection.
+	 *
+	 * The x-axis of every Standard plot under the distance setting. Each
+	 * segment's `distancesKm` is relative to its own first sample
+	 * (`buildRelativeDistanceSeries`), so a bare concatenation would restart at
+	 * zero on every lap boundary; the running total carried between segments is
+	 * what makes this monotonic and what makes the before/main/after regions
+	 * line up. Maintainer ruling 2026-08-31, over the alternative of plotting
+	 * the raw FIT odometer — which jumps backwards whenever the selected laps
+	 * are not contiguous.
+	 */
+	cumulativeDistanceKm: number[];
+}
+
+/**
+ * Is a distance axis meaningful for this selection?
+ *
+ * False when the FIT file carries no usable distance channel: the series is
+ * then flat at zero, and an axis whose every tick reads 0.00 km is worse than
+ * no switch at all. Checked on the total rather than per sample, because a
+ * stationary stretch inside a ride is legitimate and repeats a value honestly.
+ */
+export function hasUsableDistance(series: Pick<StitchedStandardSeries, 'cumulativeDistanceKm'>): boolean {
+	const km = series.cumulativeDistanceKm;
+	if (km.length < 2) return false;
+	const last = km[km.length - 1];
+	return Number.isFinite(last) && last > 0;
 }
 
 /**
@@ -217,7 +245,11 @@ export function stitchStandardProfiles(
 	const velocity: number[] = [];
 	const power: number[] = [];
 	const apparentWindSpeedMps: number[] = [];
+	const cumulativeDistanceKm: number[] = [];
 
+	// Carried ACROSS segments: each segment's `distancesKm` restarts at zero, so
+	// without this the axis would reset on every lap boundary.
+	let distanceOffsetKm = 0;
 	let offset = 0;
 	let trimStart = 0;
 	let trimEnd = 0;
@@ -246,6 +278,22 @@ export function stitchStandardProfiles(
 		}
 		actualElevation.push(...profile.actualElevation);
 		power.push(...profile.supplementarySeries.powerWatts);
+
+		// Same NaN-padding rule as the compare leg above: a segment that carries
+		// no distance contributes its own extent rather than shortening the
+		// series, which would slide every later sample onto the wrong x
+		// position. It contributes ZERO length, so the running total is
+		// unchanged and the segments after it stay where they belong.
+		const segmentKm = profile.supplementarySeries.distancesKm;
+		for (let i = 0; i < length; i += 1) {
+			const local = segmentKm[i];
+			cumulativeDistanceKm.push(
+				distanceOffsetKm + (Number.isFinite(local) ? local : 0),
+			);
+		}
+		const lastLocal = segmentKm.length > 0 ? segmentKm[segmentKm.length - 1] : 0;
+		distanceOffsetKm += Number.isFinite(lastLocal) ? lastLocal : 0;
+
 		apparentWindSpeedMps.push(
 			...profile.supplementarySeries.apparentWindSpeedMps,
 		);
@@ -268,6 +316,7 @@ export function stitchStandardProfiles(
 		velocity,
 		power,
 		apparentWindSpeedMps,
+		cumulativeDistanceKm,
 	};
 }
 
