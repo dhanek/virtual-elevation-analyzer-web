@@ -96,6 +96,19 @@ function keyOf(result: StoredVEResult): StoredResultKey {
  */
 let closeOpenView: (() => void) | null = null;
 
+/**
+ * An open that has passed `closeResultsModal()` but has not yet appended its
+ * modal, i.e. is still awaiting `getAllResults()`.
+ *
+ * Without it a second open arriving inside that await — a double-click on the
+ * footer button, or the footer button then the sidebar's — was not serialised:
+ * both passed the close, both awaits resolved, and both appended, leaving two
+ * elements with the same id, a `closeOpenView` holding only the second
+ * teardown, and the FIRST view's `document` keydown listener armed forever on a
+ * detached node.
+ */
+let openInFlight = false;
+
 /** Close whatever results view is open, if any. */
 export function closeResultsModal(): void {
 	const close = closeOpenView;
@@ -115,6 +128,12 @@ export function closeResultsModal(): void {
  * result an injection vector against the next person to open this table.
  */
 export async function openResultsModal(deps: ResultsModalDeps): Promise<void> {
+	// A second open while the first is still loading is a no-op, not a second
+	// modal. Claimed BEFORE the close so that the close cannot be read as the
+	// in-flight open having finished.
+	if (openInFlight) return;
+	openInFlight = true;
+
 	closeResultsModal();
 
 	let results: StoredVEResult[];
@@ -123,6 +142,8 @@ export async function openResultsModal(deps: ResultsModalDeps): Promise<void> {
 	} catch (error) {
 		log.error("Could not load stored results:", error);
 		return;
+	} finally {
+		openInFlight = false;
 	}
 
 	const hidden = readHiddenColumns();

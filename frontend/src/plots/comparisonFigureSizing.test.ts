@@ -26,7 +26,11 @@ import {
 	buildVirtualElevationComparisonFigures,
 	getDefaultPlotConfig,
 } from "./StandardPlotBuilders";
-import { createPlotContext } from "./PlotContext";
+import {
+	createDistancePlotContext,
+	createPlotContext,
+	X_AXIS_TITLES,
+} from "./PlotContext";
 
 const LENGTH = 20;
 const context = createPlotContext(LENGTH, 2, 17);
@@ -42,6 +46,17 @@ const comparison = buildVirtualElevationComparisonFigures({
 	actualElevation: series(1),
 });
 
+const distanceComparison = buildVirtualElevationComparisonFigures({
+	context: createDistancePlotContext(
+		Array.from({ length: LENGTH }, (_, i) => i * 2),
+		2,
+		17,
+	),
+	virtualElevationFit: series(1.1),
+	virtualElevationConstant: series(0.9),
+	actualElevation: series(1),
+});
+
 const standard = buildVirtualElevationFigures({
 	context,
 	virtualElevation: series(1.1),
@@ -49,6 +64,15 @@ const standard = buildVirtualElevationFigures({
 	cdaLabel: "0.250",
 	crrLabel: "0.0040",
 });
+
+/**
+ * The x-axis title out of a layout. `PlotLayout` is `Record<string, unknown>`
+ * (`StandardPlotBuilders.ts:56`), so the nested read has to be narrowed here
+ * rather than at every call.
+ */
+function xAxisTitle(figure: { layout: Record<string, unknown> }): unknown {
+	return (figure.layout.xaxis as { title?: unknown } | undefined)?.title;
+}
 
 describe("virtual elevation comparison figure sizing", () => {
 	it.each(["elevation", "residuals"] as const)(
@@ -82,6 +106,45 @@ describe("virtual elevation comparison figure sizing", () => {
 			);
 		},
 	);
+
+	/**
+	 * The compare builder was the one builder left hardcoding `'Time Point'`
+	 * after every other layout in `StandardPlotBuilders` moved to
+	 * `context.xAxisTitle`, and `drawVe` routes here whenever the wind source is
+	 * *compare*. So flipping the x-axis toggle to Distance put kilometres under
+	 * an axis that said time — and even in time mode the label disagreed with
+	 * the `'Time (seconds)'` every other plot on the page was showing.
+	 */
+	it.each(["elevation", "residuals"] as const)(
+		"%s labels its x axis exactly as the non-compare builder does",
+		(figure) => {
+			// Both builders draw into the SAME stacked pair, `#vePlot` above
+			// `#veResidualsPlot` (`bindStandardSliders.ts:184`), so they must
+			// agree here or flipping the wind source to *compare* relabels the
+			// axis under the user.
+			expect(xAxisTitle(comparison[figure])).toBe(
+				xAxisTitle(standard[figure]),
+			);
+		},
+	);
+
+	it("puts the shared axis title on the residuals plot, not the elevation plot", () => {
+		// The stacked convention (`renderStandardVe.ts:532`): the upper plot has
+		// `b: 5` and no room for a label, the lower one carries it for both.
+		expect(xAxisTitle(comparison.elevation)).toBe("");
+		expect(xAxisTitle(comparison.residuals)).toBe(X_AXIS_TITLES.time);
+	});
+
+	it("follows the x-axis toggle into distance mode", () => {
+		// The defect: this builder was the last one hardcoding `'Time Point'`,
+		// so *compare* + Distance drew kilometres under an axis claiming time —
+		// and in time mode it disagreed with every other plot on the page, which
+		// say `'Time (seconds)'`.
+		expect(xAxisTitle(distanceComparison.residuals)).toBe(
+			X_AXIS_TITLES.distance,
+		);
+		expect(xAxisTitle(distanceComparison.elevation)).toBe("");
+	});
 
 	it.each(["elevation", "residuals"] as const)(
 		"%s uses the shared plot config, not a bare responsive flag",

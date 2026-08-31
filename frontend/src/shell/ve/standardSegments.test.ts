@@ -221,6 +221,43 @@ describe("stitchStandardProfiles: the cumulative distance axis", () => {
 		expect(stitched.cumulativeDistanceKm[10]).toBeCloseTo(0);
 	});
 
+	/**
+	 * A distance channel SHORTER than the VE series it accompanies.
+	 *
+	 * The padding rule above ("contributes its own extent, and zero length")
+	 * was applied to the samples but not to the running total: the offset
+	 * advanced by `segmentKm[segmentKm.length - 1]`, the end of the ARRAY, while
+	 * the loop that placed the samples walked `virtualElevation.length`. For a
+	 * short channel those are different distances, and the disagreement is
+	 * exactly the non-monotonic axis the padding exists to prevent: the padded
+	 * tail sits back at the segment's own origin while every later segment is
+	 * pushed past it, right where the trim lines are drawn.
+	 */
+	it("does not advance the total past the samples it actually placed", () => {
+		const short = profileWithDistance("lap1", 0, 9);
+		// Six of ten samples carry a distance; the VE series keeps all ten.
+		short.supplementarySeries.distancesKm =
+			short.supplementarySeries.distancesKm.slice(0, 6);
+
+		const stitched = stitchStandardProfiles(
+			[short, profileWithDistance("lap2", 9, 18)],
+			normalized,
+		);
+
+		const km = stitched.cumulativeDistanceKm;
+		expect(km).toHaveLength(stitched.length);
+		expect(km.every(Number.isFinite)).toBe(true);
+		for (let i = 1; i < km.length; i += 1) {
+			expect(km[i]).toBeGreaterThanOrEqual(km[i - 1]);
+		}
+		// The tail holds the last distance the channel actually reported (0.5 km
+		// at sample 5) instead of dropping back to the segment's origin, and the
+		// next segment continues from there.
+		expect(km[5]).toBeCloseTo(0.5);
+		expect(km[9]).toBeCloseTo(0.5);
+		expect(km[10]).toBeCloseTo(0.5);
+	});
+
 	it("reports a usable distance axis only when the selection actually moved", () => {
 		expect(
 			hasUsableDistance(
