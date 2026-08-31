@@ -42,6 +42,32 @@ import { sameItems } from "../ve/veSelectionGuard";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
+/**
+ * "Re-run the active GPS detection with the gates where they are now",
+ * published by whichever binder is currently bound.
+ *
+ * BOTH DETECTORS ARE SCOPED TO THE FIT LAP SELECTION — each derives its
+ * `trimStart`/`trimEnd` from `appState.selectedLaps` — and nothing re-ran them
+ * when that selection changed. Ticking a second FIT lap left the detected lap
+ * count, the checkbox list and the VE panel all describing the previous window;
+ * the only way to provoke a re-detect was to nudge a gate by a second. Reported
+ * from the running app, 2026-09-01.
+ *
+ * A slot rather than a direct call because the gate offsets live in the
+ * binders' closures, and `rerenderSection3` rebinds them. Cleared alongside
+ * `restoreSection3Controls` so a mode that is no longer bound cannot leave a
+ * closure behind that re-detects into a mode the user has left.
+ */
+let redetectForFitSelection: (() => void) | null = null;
+
+function setGpsRedetect(redetect: () => void): void {
+	redetectForFitSelection = redetect;
+}
+
+function clearGpsRedetect(): void {
+	redetectForFitSelection = null;
+}
+
 // GPS Analysis Mode state - lives in Section 3 shell as single source of truth (per D-04)
 type GpsAnalysisMode =
 	| "None"
@@ -315,6 +341,20 @@ function lapRangeCut(range: { startIdx: number; endIdx: number }): string {
 }
 
 /**
+ * The cut currently on screen, whichever GPS mode drew it.
+ *
+ * Both fields are written at render and cleared by `tearDownVeAnalysisPanel`,
+ * and only one of them is ever populated, so the concatenation is the analysed
+ * cut without needing to ask which mode is live.
+ */
+function analyzedGpsCuts(appState: AppState): string[] {
+	return [
+		...appState.currentOutAndBackSections.map(outAndBackCut),
+		...(appState.currentGpsLapIndexRanges ?? []).map(lapRangeCut),
+	];
+}
+
+/**
  * Return Section 3 and the VE panel to their pre-analysis state, because a
  * DIFFERENT activity has just been loaded.
  *
@@ -441,6 +481,9 @@ function rerenderSection3(): void {
 	// the map.
 	setTimeout(async () => {
 		restoreSection3Controls(hasGpsData);
+		// The binders below re-publish this; until they do, the previous
+		// render's closure belongs to markup that no longer exists.
+		clearGpsRedetect();
 
 		try {
 			// Setup map visualization if GPS data available
@@ -465,6 +508,7 @@ function rerenderSection3(): void {
 								getSelectedDataTimeRange,
 								findDataIndexAtTimeOffset,
 								runGpsLapDetection,
+								registerRedetect: setGpsRedetect,
 							},
 						);
 					}
@@ -479,6 +523,7 @@ function rerenderSection3(): void {
 								getSelectedDataTimeRange,
 								findDataIndexAtTimeOffset,
 								runOutAndBackDetection,
+								registerRedetect: setGpsRedetect,
 							},
 						);
 					}
@@ -499,6 +544,7 @@ function rerenderSection3(): void {
 								getSelectedDataTimeRange,
 								findDataIndexAtTimeOffset,
 								runGpsLapDetection,
+								registerRedetect: setGpsRedetect,
 							},
 						);
 					}
@@ -512,6 +558,7 @@ function rerenderSection3(): void {
 								getSelectedDataTimeRange,
 								findDataIndexAtTimeOffset,
 								runOutAndBackDetection,
+								registerRedetect: setGpsRedetect,
 							},
 						);
 					}
@@ -1209,6 +1256,29 @@ export function updateSelectedLaps(): void {
 		mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 	}
 
+	// AND IN THE GPS MODES, RE-DETECT. The FIT selection is the detection
+	// WINDOW there, not the analysis unit: `runGpsLapDetection` and
+	// `runOutAndBackDetection` both derive `trimStart`/`trimEnd` from
+	// `selectedLaps`. Nothing re-ran them when it changed, so ticking a second
+	// FIT lap left the detected-lap count and the panel on the old window until
+	// the user nudged a gate.
+	//
+	// The teardown falls out of the re-detection rather than being ordered
+	// separately, which is why this is not an unconditional
+	// `tearDownVeAnalysisPanel`: both detectors end in
+	// `invalidateVePanelIfCutChanged`, so a wider window that re-cuts the ride
+	// drops the panel and a selection change that happens to leave every
+	// analysed range intact leaves it up. The empty selection is the one case
+	// the detectors cannot speak for — they bail before detecting — so it is
+	// answered here, with the same "no basis, no panel" rule.
+	if (!isFitLapSelectionMode) {
+		if (deps.appState.selectedLaps.length === 0) {
+			invalidateVePanelIfCutChanged(analyzedGpsCuts(deps.appState), []);
+		} else {
+			redetectForFitSelection?.();
+		}
+	}
+
 	const shouldShowSelectionTrimControls =
 		deps.appState.selectedLaps.length > 0 && isFitLapSelectionMode;
 
@@ -1613,6 +1683,9 @@ export function initializeSection3(): void {
 	// rerenderSection3: a map failure must not leave Section 3 inert.
 	setTimeout(async () => {
 		restoreSection3Controls(hasGpsData);
+		// The binders below re-publish this; until they do, the previous
+		// render's closure belongs to markup that no longer exists.
+		clearGpsRedetect();
 
 		try {
 			if (hasGpsData) {
@@ -1632,6 +1705,7 @@ export function initializeSection3(): void {
 							getSelectedDataTimeRange,
 							findDataIndexAtTimeOffset,
 							runGpsLapDetection,
+							registerRedetect: setGpsRedetect,
 						},
 					);
 				}
@@ -1646,6 +1720,7 @@ export function initializeSection3(): void {
 							getSelectedDataTimeRange,
 							findDataIndexAtTimeOffset,
 							runOutAndBackDetection,
+							registerRedetect: setGpsRedetect,
 						},
 					);
 				}

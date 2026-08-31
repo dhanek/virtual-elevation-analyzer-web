@@ -7,6 +7,20 @@ export interface OutAndBackDetectionCallbacks {
     getSelectedDataTimeRange: () => { startTime: number; endTime: number; duration: number };
     findDataIndexAtTimeOffset: (timeOffset: number, startTime: number) => number | null;
     runOutAndBackDetection: (markerALat: number, markerALon: number, markerBLat: number, markerBLon: number) => void;
+    /**
+     * Hand the caller a "re-run detection with the gates where they are now"
+     * closure.
+     *
+     * The detection window is scoped to the SELECTED FIT LAPS — both detectors
+     * derive `trimStart`/`trimEnd` from `appState.selectedLaps` — but nothing
+     * re-ran them when that selection changed, so ticking another lap left the
+     * detected list, and the VE panel built from it, describing the old window.
+     * The only way to provoke a re-detect was to nudge a gate, which is what
+     * this closure does minus the nudge: the offset is re-read from the slider
+     * and re-resolved against the CURRENT selection's time range, exactly as
+     * `getGatePosition` does for a real drag.
+     */
+    registerRedetect?: (redetect: () => void) => void;
 }
 
 /**
@@ -173,6 +187,10 @@ export async function bindOutAndBackDetection(
         gateBSlider.value = String(val);
         void updateGates();
     };
+
+    callbacks.registerRedetect?.(() => {
+        void updateGates();
+    });
 
     // Initial detection with loaded/defaults
     void updateGates();

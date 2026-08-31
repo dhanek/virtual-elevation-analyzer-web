@@ -435,13 +435,19 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
             ],
             layout: {
                 title: 'Virtual Elevation Comparison',
-                // EMPTY, like `buildVirtualElevationFigures`' elevation layout
-                // above, and for the same reason: this figure and the residuals
-                // one below it are drawn into the stacked `#vePlot` /
-                // `#veResidualsPlot` pair, where the lower plot carries the
-                // shared x-axis title (`renderStandardVe.ts:532`). This one has
-                // `b: 5` to put it in, so a title here is clipped, not read.
-                xaxis: { title: '' },
+                // THE UPPER HALF OF A STACKED PAIR, so no title AND NO TICK
+                // LABELS — `buildVirtualElevationFigures`' elevation layout
+                // above says the same thing, and this builder draws into the
+                // same two containers (`bindStandardSliders.ts:184`): `#vePlot`
+                // over `#veResidualsPlot`, where the lower plot carries the
+                // shared x axis for both (`renderStandardVe.ts:532`).
+                //
+                // `showticklabels` is not cosmetic here. The `b: 5` margin below
+                // leaves five pixels of gutter, so Plotly drew the tick numbers
+                // straight through it and they came out sliced in half. Dropping
+                // the title alone left that, because the labels were never the
+                // title's doing.
+                xaxis: { title: '', showticklabels: false },
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
                 hovermode: 'closest',

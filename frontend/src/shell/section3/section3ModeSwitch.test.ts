@@ -1181,6 +1181,85 @@ describe("the VE panel after a Section 3 selection change", () => {
 		expect(appState.currentAnalyzedLaps).toEqual([1, 2, 3]);
 	});
 
+	/**
+	 * THE FIT SELECTION IS THE DETECTION WINDOW IN THE GPS MODES, so changing it
+	 * has to re-detect — and nothing did.
+	 *
+	 * `runGpsLapDetection` and `runOutAndBackDetection` both derive their
+	 * `trimStart`/`trimEnd` from `appState.selectedLaps`, but no path re-ran them
+	 * when that selection moved. Reported from the running app (2026-09-01): with
+	 * FIT lap 8 selected the gate found 5 laps; ticking lap 10 as well left the
+	 * counter at 5 and the plot untouched, and only nudging a gate by one second
+	 * revealed the 14 laps the wider window actually contains.
+	 *
+	 * END TO END ON PURPOSE, through the real `rerenderSection3` and the real
+	 * `bindGpsDetection` it runs — the gate offsets live in that binder's
+	 * closure, and the wiring under test is that the binder PUBLISHES a re-detect
+	 * closure and `updateSelectedLaps` calls it. A test that registered its own
+	 * closure would pass against a binder that never publishes one, which is
+	 * exactly the defect.
+	 *
+	 * The observation is `gpsDetectedLaps` being REPLACED. The real detector runs
+	 * against this fixture's constant coordinates and finds nothing, so a
+	 * hand-seeded list becoming empty is proof the whole chain ran; what the
+	 * detector concluded is not the point and is covered on controlled ranges in
+	 * `gateRedetectInvalidation.test.ts`.
+	 */
+	it("re-runs GPS detection when the FIT lap selection changes", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("GPS based lap splitting");
+		await settle();
+
+		// Stands in for a detection the user has already seen. Anything at all,
+		// as long as a re-detection would have to replace it.
+		appState.gpsDetectedLaps = [{ lapNumber: 1, startIdx: 0, endIdx: 99 }] as never;
+		// `runGpsLapDetection` bails without a FIT lap list to scope itself to
+		// (`section3Orchestration.ts:701`); `currentFitResult.laps` is a
+		// different field and does not populate it.
+		appState.currentLaps = [
+			{ start_time: 0, end_time: HALF - 1 },
+			{ start_time: HALF, end_time: SAMPLE_COUNT - 1 },
+		] as never;
+
+		// The REAL template is on the page after the mode switch, so this ticks a
+		// real checkbox rather than markup the test invented. The SECOND one, to
+		// widen the selection: unticking the only checked lap would empty it and
+		// take the separate no-selection branch instead.
+		const boxes = document.querySelectorAll<HTMLInputElement>(".lap-checkbox");
+		if (boxes.length < 2) throw new Error("the rendered template has too few lap checkboxes");
+		boxes[1].checked = true;
+		updateSelectedLaps();
+		await settle();
+
+		expect(appState.gpsDetectedLaps).toEqual([]);
+	});
+
+	/**
+	 * The one case the detectors cannot answer: both bail before detecting when
+	 * no FIT lap is selected (`section3Orchestration.ts:701`), so the re-detection
+	 * route cannot reach the panel and `updateSelectedLaps` applies the rule
+	 * itself. No basis, no panel.
+	 */
+	it("tears a GPS panel down when the FIT selection is emptied", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("GPS based lap splitting");
+		await settle();
+		await analyzeStandard(appState);
+		await settle();
+
+		appState.currentGpsLapIndexRanges = [{ startIdx: 0, endIdx: 99 }];
+		expect(veSectionHidden()).toBe(false);
+
+		renderLapCheckboxes([1, 2], []);
+		updateSelectedLaps();
+		await settle();
+
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
+	});
+
 	it("leaves an auto-rho recompute scheduled before the teardown unable to write", async () => {
 		const appState = await analyzedStandardPanel();
 

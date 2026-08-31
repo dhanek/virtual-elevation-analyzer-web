@@ -7,6 +7,20 @@ export interface GpsDetectionCallbacks {
     getSelectedDataTimeRange: () => { startTime: number; endTime: number; duration: number };
     findDataIndexAtTimeOffset: (timeOffset: number, startTime: number) => number | null;
     runGpsLapDetection: (markerLat: number, markerLon: number, markerIndex: number) => void;
+    /**
+     * Hand the caller a "re-run detection with the gates where they are now"
+     * closure.
+     *
+     * The detection window is scoped to the SELECTED FIT LAPS — both detectors
+     * derive `trimStart`/`trimEnd` from `appState.selectedLaps` — but nothing
+     * re-ran them when that selection changed, so ticking another lap left the
+     * detected list, and the VE panel built from it, describing the old window.
+     * The only way to provoke a re-detect was to nudge a gate, which is what
+     * this closure does minus the nudge: the offset is re-read from the slider
+     * and re-resolved against the CURRENT selection's time range, exactly as
+     * `getGatePosition` does for a real drag.
+     */
+    registerRedetect?: (redetect: () => void) => void;
 }
 
 /**
@@ -120,6 +134,10 @@ export async function bindGpsDetection(
         gateSlider.value = String(val);
         void updateGatePosition(val);
     };
+
+    callbacks.registerRedetect?.(() => {
+        void updateGatePosition(parseInt(gateSlider.value));
+    });
 
     // Initial detection with loaded/default offset — only when FIT laps are
     // selected. Detection must not start before the user has chosen which laps
