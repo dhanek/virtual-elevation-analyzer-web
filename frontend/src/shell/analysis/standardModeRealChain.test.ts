@@ -237,7 +237,6 @@ async function renderStitched(): Promise<void> {
 			onExportAll: () => {},
 			saveCurrentLapSettings: () => {},
 		},
-		{ r2: 0.5, rmse: 1, ve_elevation_diff: 2, actual_elevation_diff: 3 },
 		[1, 2],
 		fit.timestamps.map((_, i) => i),
 		fit.timestamps,
@@ -641,6 +640,43 @@ describe("standard: currentFilteredData after the analyze render (CR-01)", () =>
 		expect(filtered.timestamps[0]).toBe(SAMPLE_COUNT - 1 - 30);
 		expect(filtered.timestamps[filtered.timestamps.length - 1]).toBe(
 			SAMPLE_COUNT - 1,
+		);
+	});
+});
+
+/**
+ * WR-4, Standard's half.
+ *
+ * The header spans used to be interpolated into the template from
+ * `prepareAnalysisPayload`'s `initialResult` -- a fit over the CONCATENATED
+ * selection with NO trim window and the wind source forced to `"fit"` with the
+ * offset off -- while the plot immediately below them was drawn from the fit
+ * this render computes itself, WITH the trim and WITH the selected source
+ * (`renderStandardVe.ts:100-123`). Two fits of one ride, stacked, until the
+ * post-bind kick replaced both a macrotask later.
+ *
+ * That parameter is gone: the template now ships the spans EMPTY and
+ * `initializeVEAnalysis` fills them from the integration that just drew the
+ * curve, on the same rule the virtual-distance header already followed. So the
+ * disagreement is unwritable rather than merely corrected, and what is left to
+ * guard is the half that can still regress -- that something fills them at all.
+ * An empty template plus a forgotten fill would leave the user staring at
+ * "R²: | RMSE: |" until the first nudge landed.
+ *
+ * Asserted BEFORE `settle()`, deliberately: after the kick, pass 3 has written
+ * the spans and this would pass even if the first paint left them blank.
+ */
+describe("standard: the header spans at first paint (WR-4)", () => {
+	it("carries the fit the plot below them was drawn from", async () => {
+		await renderStitched();
+
+		// The mocked calculator's own numbers -- so reaching them means the
+		// render's own integration, not a value handed in from outside.
+		expect(document.getElementById("r2Value")?.textContent).toBe("0.5000");
+		expect(document.getElementById("rmseValue")?.textContent).toBe("1.00m");
+		expect(document.getElementById("veGainValue")?.textContent).toBe("2.00m");
+		expect(document.getElementById("actualGainValue")?.textContent).toBe(
+			"3.00m",
 		);
 	});
 });

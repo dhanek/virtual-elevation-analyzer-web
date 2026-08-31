@@ -18,7 +18,10 @@ import {
 	buildSpeedPowerFigure,
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
-import { setupVESliders } from "./bindStandardSliders";
+import {
+	setupVESliders,
+	updateMetricsDisplay,
+} from "./bindStandardSliders";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "./crrTempControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
@@ -212,6 +215,28 @@ export async function initializeVEAnalysis(
 		selectedLapCount(appState),
 	);
 
+	// The R2/RMSE/VE/Actual spans, on the same rule as the VD header above and
+	// for the same reason: fill them from the integration that just drew the
+	// curve, never from a fit computed somewhere else.
+	//
+	// The template used to interpolate `prepareAnalysisPayload`'s
+	// `initialResult`, which integrates the CONCATENATED selection with NO trim
+	// and the wind source forced to `"fit"` with the offset off. The plot
+	// directly below the header came from `result` above -- trimmed, and on the
+	// selected source. Two fits of one ride, side by side, until the kick
+	// overwrote both a macrotask later.
+	//
+	// `null` for the lap count: the template already wrote it from
+	// `analyzedLaps.length`, and this pass has no per-segment decomposition to
+	// improve on it with.
+	updateMetricsDisplay(
+		result.r2,
+		result.rmse,
+		result.ve_elevation_diff,
+		result.actual_elevation_diff,
+		null,
+	);
+
 	appState.filteredVEData = {
 		positionLat: analysisInput.positionLat,
 		positionLong: analysisInput.positionLong,
@@ -228,7 +253,6 @@ export async function showVirtualElevationAnalysisInline(
 	services: ShellServices,
 	mapVisualization: MapVisualization | null,
 	callbacks: StandardVeCallbacks,
-	initialResult: any,
 	analyzedLaps: number[],
 	selectedIndices: number[],
 	timestamps: number[],
@@ -458,10 +482,10 @@ export async function showVirtualElevationAnalysisInline(
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
                             <div class="ve-metrics-compact">
-                                R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
-                                RMSE:<span id="rmseValue">${initialResult.rmse.toFixed(2)}m</span> |
-                                VE:<span id="veGainValue">${initialResult.ve_elevation_diff.toFixed(2)}m</span> |
-                                Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span> |
+                                R²:<span id="r2Value"></span> |
+                                RMSE:<span id="rmseValue"></span> |
+                                VE:<span id="veGainValue"></span> |
+                                Actual:<span id="actualGainValue"></span> |
                                 Laps:<span id="lapsCoveredValue">${analyzedLaps.length}</span>
                             </div>
                             <div id="vePlot" class="ve-plot-container"></div>

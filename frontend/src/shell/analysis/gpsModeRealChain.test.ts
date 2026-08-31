@@ -122,6 +122,7 @@ import {
 	showOutAndBackVEPlot,
 } from "../outAndBack/renderOutAndBack";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
+import { resetRecomputeThrottle } from "./recomputeRunner";
 import { resetModeUpdateRequests } from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
@@ -196,6 +197,15 @@ function makeAppState(): AppState {
 		selectedLaps: [1],
 		currentAnalyzedLaps: [1, 2],
 		airSpeedCalibrationPercent: 0,
+		// A FRESH SESSION, at the real AppState defaults (AppState.ts:272,284-285).
+		// Without these the fixture leaves them `undefined`, and the WR-3/WR-4
+		// assertions pass vacuously against `undefined !== "none"` and
+		// `undefined !== null` — the exact vacuous-guard shape this file exists
+		// to answer. Both bugs were first "caught" by tests that did that.
+		currentWindSource: "none",
+		currentVirtualDistances: [],
+		currentCoveredItems: null,
+		currentVEResult: null,
 		activeDisplayProfile: "fit-raw",
 		isCalculatingAutoRho: false,
 		demProfilesAvailable: true,
@@ -237,12 +247,30 @@ const lapProfile = (lapNumber: number) => ({
 	distances: [0, 1, 2],
 	virtualElevation: [0, 1, 2],
 	actualElevation: [0, 1, 2],
-	supplementarySeries: null,
+	// The analyze leg builds one of these for every lap it keeps
+	// (`buildSegmentSupplementarySeries`), so a null here modelled a state
+	// production never reaches — and WR-3's seed reads it.
+	supplementarySeries: {
+		distancesKm: [0, 1, 2],
+		powerWatts: [200, 200, 200],
+		apparentWindSpeedMps: [3, 3, 3],
+		virtualDistanceAirKm: [0, 1, 2],
+		virtualDistanceGroundKm: [0, 1, 2.2],
+	},
 	duration: HALF,
 	totalDistance: 2,
 });
 
 const meanElevation = { distances: [0, 1, 2], elevation: [0, 1, 2] };
+
+/** A minimal but well-formed supplementary series for one leg. */
+const legSeries = (scale: number) => ({
+	distancesKm: [0, 1, 2].map((d) => d * scale),
+	powerWatts: [200, 200, 200],
+	apparentWindSpeedMps: [3, 3, 3],
+	virtualDistanceAirKm: [0, 1, 2].map((d) => d * scale),
+	virtualDistanceGroundKm: [0, 1, 2.2].map((d) => d * scale),
+});
 
 const sectionProfile = {
 	sectionNumber: 1,
@@ -251,11 +279,13 @@ const sectionProfile = {
 	outboundDistances: [0, 1, 2],
 	outboundVE: [0, 1, 2],
 	outboundActualElevation: [0, 1, 2],
-	outboundSeries: null,
+	// As with lapProfile above: the analyze leg builds a series per surviving
+	// leg, and WR-3's seed reads them to total the section.
+	outboundSeries: legSeries(1.0),
 	inboundDistances: [0, 1, 2],
 	inboundVE: [0, 1, 2],
 	inboundActualElevation: [0, 1, 2],
-	inboundSeries: null,
+	inboundSeries: legSeries(0.9),
 	outboundDuration: HALF,
 	inboundDuration: HALF,
 	totalDistance: 4,
@@ -430,6 +460,21 @@ describe.each(MODES)(
 		});
 
 		afterEach(() => {
+			// FIRST, and before `useRealTimers` -- this is CROSS-TEST state.
+			//
+			// `scheduleRecompute` guards on a MODULE-LEVEL `throttleTimer`
+			// handle that is only nulled inside its own callback
+			// (`recomputeRunner.ts:239`). `useRealTimers` DISCARDS a pending
+			// fake timer without running it, so a test that ends with a
+			// recompute still armed leaves that handle set forever -- and every
+			// later test then hits `if (throttleTimer !== null) return`, arms
+			// nothing, and observes no recompute at all. Its assertion fails for
+			// a reason with nothing to do with what it tests.
+			//
+			// `standardModeRealChain.test.ts:387-398` carries the same hook for
+			// the same reason; it is why Standard's post-bind kick was testable
+			// and this file's was not.
+			resetRecomputeThrottle();
 			vi.useRealTimers();
 			clearModeUpdateCallbacks();
 			resetModeUpdateRequests();
@@ -449,6 +494,54 @@ describe.each(MODES)(
 		 * The `beforeEach` above renders and then clears the spies, so reaching
 		 * this assertion means the panel is up and NOTHING has been dragged.
 		 */
+		/**
+		 * WR-3, the rest of the same seam.
+		 *
+		 * `currentWindSource` and `currentVirtualDistances` had exactly ONE
+		 * writer between them -- `summarize`, i.e. the UPDATE path. So Analyze ->
+		 * Store Result with nothing in between persisted `windSource: "none"` on
+		 * a fresh session, or the PREVIOUS analysis's virtual distances on a
+		 * second analyze. The `beforeEach` renders and clears, so reaching these
+		 * assertions means the panel is up and nothing has been dragged.
+		 */
+		it("records the wind source before any control is touched", () => {
+			expect(appState.currentWindSource).not.toBe("none");
+		});
+
+		it("records this analysis's virtual distances, not a previous one's", () => {
+			expect(appState.currentVirtualDistances.length).toBeGreaterThan(0);
+		});
+
+		/**
+		 * WR-4, and the trap the re-scoping note called out: a seed that does
+		 * not reproduce the first update is the SAME defect in a new place.
+		 *
+		 * `analyzeOrchestrator.ts` used to assign `payload.initialResult` -- ONE
+		 * stitched fit over the concatenated selection -- while these panels
+		 * display N per-lap fits (2N legs for out-and-back). Store Result
+		 * straight after Analyze therefore persisted an r2/RMSE no screen ever
+		 * showed, and the first control nudge silently replaced it.
+		 *
+		 * Asserted as an EQUALITY against a nudge that changes nothing, not as
+		 * a non-null check: "a result exists" would pass against the stitched
+		 * fit too. What has to hold is that the analyze-time value and the
+		 * update-time value are the same number.
+		 */
+		it("seeds the result the first recompute goes on to write", async () => {
+			await settle();
+
+			const seeded = appState.currentVEResult;
+			expect(seeded).not.toBeNull();
+			const beforeNudge = JSON.stringify(seeded);
+
+			// A gesture that changes NOTHING: re-fire `input` at the value the
+			// slider already holds. Same inputs, so the same result -- unless
+			// the seed came from somewhere else.
+			await drag("cdaSlider", parseFloat(el("cdaSlider").value));
+
+			expect(JSON.stringify(appState.currentVEResult)).toBe(beforeNudge);
+		});
+
 		it("has the analysed samples in AppState before any control is touched", () => {
 			expect(appState.currentFilteredData).not.toBeNull();
 			expect(appState.currentFilteredData!.power.length).toBeGreaterThan(0);

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ActivityDataLike } from '../../state/AppState';
 import type { AnalysisParameters } from '../../components/AnalysisParameters';
@@ -19,7 +20,21 @@ import type { AnalysisParameters } from '../../components/AnalysisParameters';
  * runs outside the `describe.skipIf` for exactly that reason (D-10).
  */
 
-export const GOLDEN_RIDE_PATH = fileURLToPath(new URL('./golden-ride.json', import.meta.url));
+/**
+ * `import.meta.url` is a `file:` URL under vitest's `node` environment but an
+ * `http:` one under `jsdom`, where `fileURLToPath` throws "The URL must be of
+ * scheme file" AT IMPORT TIME -- so a jsdom test could not even import this
+ * module. The fallback keeps one loader for both environments; vitest runs with
+ * the frontend package root as its cwd.
+ */
+function resolveGoldenRidePath(): string {
+    const url = new URL('./golden-ride.json', import.meta.url);
+    return url.protocol === 'file:'
+        ? fileURLToPath(url)
+        : resolve(process.cwd(), 'src/analysis/__fixtures__/golden-ride.json');
+}
+
+export const GOLDEN_RIDE_PATH = resolveGoldenRidePath();
 
 export interface GoldenRideAnonymisation {
     note: string;

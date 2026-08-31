@@ -29,7 +29,7 @@ dependency column below says what actually has to wait.
 | Bundle | What it is | Effort | Waits on |
 |---|---|---|---|
 | ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, awaiting in-app check |
-| **B** | Make Store Result truthful | M | — |
+| ~~**B**~~ | ~~Make Store Result truthful~~ | — | **Done** 2026-08-31, awaiting in-app check |
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **D** | Plot rendering and tab layout | M | — |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, awaiting in-app check |
@@ -38,8 +38,9 @@ dependency column below says what actually has to wait.
 | **H** | On-screen results view | M–L | **B** (A's k column is done) |
 | — | Standalone work | varies | — |
 
-Suggested order from here: **B**, the last thing standing between bundle **H** and a correct results
-view. A, C and E are done.
+Suggested order from here: **H** — bundle **B** no longer blocks it. A, B, C and E are done.
+The one piece of B deliberately NOT done is the analyze-leg retirement, now carried as a standalone
+item below; it is a performance and structure cleanup, not a correctness gap.
 
 ---
 
@@ -60,27 +61,6 @@ These block work below. None of them is a coding question.
       a drag can resolve, and the number input stays the precise path. Shipped in bundle E.
 
 ---
-
-## Bundle B · Make Store Result truthful
-
-*Effort: M. Why together: these are one bug, not two — the analyze path never writes the state that
-`summarize` writes (`segmentSummary.ts:249-258`), so everything seeded at analyze time is either
-absent or left over from the previous run. **Bundle H depends on this**: without it the new results
-view displays the same wrong numbers in a new place.*
-
-- [ ] **[M] Store Result straight after Analyze records a wind source and virtual distances that no
-      analyze ever wrote.** The only writers of `currentWindSource` and `currentVirtualDistances`
-      live inside `summarize`, i.e. the update path. Press Store Result before touching a control
-      and you persist `windSource: "none"` on a fresh session, or the *previous* analysis's values
-      on a second analyze.
-      `analyzeOrchestrator.ts:428-432`, `segmentSummary.ts:250,255`, `standardMode.ts:284,292`
-      · *origin: audit WR-3*
-
-- [ ] **[M] Store Result straight after Analyze persists an r²/RMSE the screen never showed (GPS
-      modes).** `analyzeOrchestrator` assigns `payload.initialResult` — one stitched calculator run
-      over the concatenated selection — while the GPS-lap panel displays N per-lap fits and
-      out-and-back 2N leg fits. The first control nudge replaces it.
-      `analyzeOrchestrator.ts:428` · *origin: audit WR-4*
 
 ## Bundle D · Plot rendering and tab layout
 
@@ -221,6 +201,25 @@ in a new surface.*
       own investigation before it can be sized.
       `gateMarkers.ts`, `bindGpsDetection.ts`, `bindOutAndBackDetection.ts`
 
+- [ ] **[L] Retire the GPS analyze legs' own calculator pass.** With WR-4 done, one Analyze click
+      still runs the physics twice in the GPS modes: the analyze leg computes N per-lap fits
+      (`renderGpsLap.ts:219`) or 2N leg fits (`renderOutAndBack.ts:193,259`) for the first paint,
+      and the post-bind kick then recomputes the same segments through `updateModeVEPlots`. So
+      GPS-lap costs `1 + 2N` runs where `2N` would do, and out-and-back `1 + 4N`.
+      Standard has the same shape (`renderStandardVe.ts:103`).
+
+      The target: the analyze leg selects segments and renders nothing, the panel ships with empty
+      stats the way Standard's header spans now do, and the kick's pass is the first and only paint.
+      That would also make `seedSegmentModeAnalyzeState` unnecessary — the seed exists precisely
+      because the analyze path had no writer, and it now has one.
+
+      NOT bundled with WR-4 on purpose. It is a first-paint SEQUENCING change (the panel would
+      render empty and fill on the next macrotask), which no test in this repo can settle — the
+      risk is flicker, not numbers. It also wants the WR-4 in-app check done first: if the kick
+      misbehaves visually, this builds on top of that.
+      `renderGpsLap.ts`, `renderOutAndBack.ts`, `renderStandardVe.ts` · *origin: WR-4 follow-up,
+      2026-08-31*
+
 - [ ] **[M] Out-and-back's aggregation helpers have never been profiled.** GPS-lap's two
       equivalents each hid an O(targets × samples) rescan worth ~10 ms of a ~22 ms update.
       Out-and-back's `calculateOutAndBackStats` has the same shape and twice the segments. Not
@@ -234,6 +233,100 @@ in a new surface.*
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle B · Store Result is truthful — the analyze path stopped computing its own answer — 2026-08-31
+
+Implemented in the working tree; **not committed**. 854 tests pass, `npm run check` and `npm run
+lint` clean. Four obsolete guards went out with the code they pinned (two golden analyze-leg cases,
+two `rhoArray` payload tests) and seven came in.
+
+The load-bearing one is `analyzeStoredResult.wasm.test.ts`: the real GPS-lap analyze entry point
+over the anonymised golden ride (1436 samples, 7 laps) with the REAL Rust calculator, asserting that
+what Store Result would persist is the number the panel was painted with. It exists because
+`gpsModeRealChain.test.ts`'s calculator is a stub returning a constant `r2: 0.5`, against which
+"the seed equals the first update" cannot distinguish a shared code path from any two code paths.
+On real physics the gap is stark and is recorded in the test: the old stitched fit reports
+**RMSE 55.33 m** where the panel shows **7.81 m**.
+
+- [x] **[M–L] Store Result straight after Analyze no longer persists an r²/RMSE the screen never
+      showed (WR-4).** Both GPS renderers now call `requestModeUpdate("parameters")` after
+      `bindModeControls`, which is the kick Standard has had since before the phase
+      (`renderStandardVe.ts:562`). The seeded value is produced by the SAME code path a control
+      gesture uses, so "the seed disagrees with the first update" is unwritable rather than merely
+      tested — which is what the re-scoping note asked for and what hand-rolling the aggregation
+      would have broken (CR-02).
+      `renderGpsLap.ts`, `renderOutAndBack.ts` · *origin: audit WR-4*
+
+      **The previous attempt's diagnosis was wrong, and it is worth recording why.** It concluded
+      the runner's running/handoff state suppressed the following pass — "an app-level risk, not a
+      test one". It is the opposite: a **fake-timer leak in the harness**. `scheduleRecompute`
+      guards on a module-level `throttleTimer` that is nulled only inside its own callback
+      (`recomputeRunner.ts:239`), and `vi.useRealTimers()` DISCARDS a pending fake timer without
+      running it. Any test ending with a recompute armed leaves that handle set forever, and every
+      later test then returns at the guard, arms nothing, and observes no recompute at all. The
+      kick is what first armed a timer in `beforeEach`. `standardModeRealChain.test.ts:387-398`
+      already carried the fix and the explanation — which is the real reason Standard's kick was
+      testable and this one was not. Adding `resetRecomputeThrottle()` to the three `afterEach`
+      hooks that lacked it took the failures from 20 to 0 with no production change.
+
+- [x] **[S] The GPS analyze legs pass the rho array.** Found by asking a question the eye cannot
+      answer -- does the kick's repaint change anything? -- and measuring it instead. All three
+      analyze-leg calculators (`renderGpsLap.ts`, `renderOutAndBack.ts` outbound and inbound) were
+      built with NO `rhoArray`, while `updateModeVEPlots.ts:251` passes a per-segment slice. On any
+      ride carrying usable air density the first paint therefore integrated constant `params.rho`
+      and the kick's repaint the real per-point series: **mean RMSE 7.809 m at the analyze paint
+      against 7.555 m a macrotask later**, with the analyze number the wrong one. Both now call the
+      shared `resolveRhoArray` (D-06).
+
+      Pre-existing and older than WR-4 — the kick did not cause it, it made it observable. Before
+      this the GPS modes simply never ran the primitive at analyze time, so nothing was there to
+      disagree with the wrong number. `analyzeStoredResult.wasm.test.ts` now holds the first
+      paint and the repaint to agree, with rho installed on the axis that separates them.
+
+- [x] **[S] `currentVEResult` has one writer.** `analyzeOrchestrator.ts` no longer assigns
+      `payload.initialResult` — one stitched fit over the concatenated selection, which
+      `gpsLapMode.render` and `outAndBackMode.render` never forwarded to anything. `handler.summarize`
+      is the sole writer now, for all three modes. The field is also **cleared at the start of every
+      analyze**, so a failed one cannot leave the previous ride's result for Store Result to persist
+      under this ride's name. New `analyzeResultLifecycle.test.ts` holds that.
+
+- [x] **[S] Standard's header spans agree with the plot beneath them.** They were interpolated from
+      `initialResult` (no trim, wind forced to `"fit"`, offset off) while the curve directly below
+      came from `initializeVEAnalysis`'s own fit (trimmed, selected source) — two fits of one ride,
+      stacked, until the kick replaced both. The template now ships them empty and
+      `updateMetricsDisplay` fills them from the integration that drew the curve, on the same rule
+      the virtual-distance header already followed (`renderStandardVe.ts:205`).
+
+- [x] **[S] `prepareAnalysisPayload` runs no physics.** With its last consumer gone, the calculator,
+      `initialResult`, `rhoArray` and the `calculateRhoArray` injection are deleted; it filters the
+      selection and returns arrays. Production calculator sites drop from 6 to 5, and the two golden
+      analyze-leg cases go with the calculator they existed to pin — the D-10 mutation they closed
+      has no target left, which the golden file records in their place.
+
+### Bundle B (part) · The analyze-time wind source and virtual distances — 2026-08-30
+
+Implemented in the working tree; **not committed**. 850 tests pass (up 4), `npm run check` and
+`npm run lint` clean. WR-4 is closed in the entry above.
+
+- [x] **[M] Store Result straight after Analyze no longer records a wind source and virtual
+      distances that no analyze ever wrote.** New `seedSegmentModeAnalyzeState`
+      (`segmentSummary.ts`) extends the CR-01 samples seed to the other two fields Store Result
+      reads. It delegates to `seedSegmentModeFilteredData` and routes the source through
+      `resolveRecordedWindSource`, so "compare" survives exactly as on the update path rather than
+      through a second copy of the rule. Both GPS panels now compute `selectedWindSource` *before*
+      the seed and pass that one value to both, so the recorded source and the rendered panel
+      cannot disagree. GPS-lap stacks one VD entry per lap; out-and-back reuses
+      `sectionVirtualDistances` for one entry per SECTION, per the standing ruling — reusing the
+      same builders is what keeps an analyze-time export identical to a post-update one.
+      `renderGpsLap.ts`, `renderOutAndBack.ts`, `segmentSummary.ts` · *origin: audit WR-3*
+
+      **The harness was lying, and that came first.** `gpsModeRealChain.test.ts`'s `makeAppState` is
+      a plain object cast to `AppState`, so `currentWindSource` was `undefined` and the first
+      version of this guard passed vacuously against `undefined !== "none"` — the exact shape that
+      file exists to answer. The fixture now carries the real defaults
+      (`currentWindSource: "none"`, `currentVirtualDistances: []`). Its two profile fixtures also
+      set `supplementarySeries`/leg series to `null`, a state the analyze leg never produces and
+      the `LapVEProfile` type does not even permit; they now carry well-formed series.
 
 ### Bundle A · Wind height factor k, end to end — 2026-08-30
 

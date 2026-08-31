@@ -481,9 +481,17 @@ async function settle(): Promise<void> {
 }
 
 /**
- * A STANDARD analyze, in `analyzeOrchestrator`'s own order
- * (`analyzeOrchestrator.ts:428-434` then its `renderStitched` closure) and
- * through the real `standardMode.syncState` rather than hand-set flags.
+ * A STANDARD analyze, in `analyzeOrchestrator`'s own order (`syncState`, then
+ * its `renderStitched` closure) and through the real `standardMode.syncState`
+ * rather than hand-set flags.
+ *
+ * The `currentVEResult` assignment below STANDS IN for the write production
+ * makes at the end of an analyze, and it is no longer a copy of an orchestrator
+ * line: WR-4 deleted `analyzeOrchestrator`'s own assignment of the stitched
+ * `initialResult`, leaving `handler.summarize` -- reached through the update
+ * primitive by every mode's post-bind kick -- as the one writer. What these
+ * tests need from it is unchanged: a non-null result standing for "an analyze
+ * happened", so the teardown assertions have something to observe being cleared.
  */
 async function analyzeStandard(appState: AppState): Promise<void> {
 	appState.currentVEResult = INITIAL_RESULT as never;
@@ -502,7 +510,6 @@ async function analyzeStandard(appState: AppState): Promise<void> {
 			onExportAll: () => {},
 			saveCurrentLapSettings: () => {},
 		},
-		INITIAL_RESULT,
 		[1],
 		fit.timestamps.map((_, i) => i),
 		fit.timestamps,
@@ -523,9 +530,9 @@ async function analyzeStandard(appState: AppState): Promise<void> {
  * A GPS-LAP analyze, same order, through the real `gpsLapMode.syncState` --
  * which is what sets `isGpsLapModeActive` and `currentGpsLapIndexRanges`.
  *
- * `showGpsLapVEPlot` does NOT call `syncState` itself; only
- * `analyzeOrchestrator.ts:434` does, for every mode. Driving it here is what
- * makes direction 2's starting state the one production actually produces.
+ * `showGpsLapVEPlot` does NOT call `syncState` itself; only the orchestrator
+ * does, for every mode. Driving it here is what makes direction 2's starting
+ * state the one production actually produces.
  */
 async function analyzeGpsLap(appState: AppState): Promise<void> {
 	appState.currentVEResult = INITIAL_RESULT as never;

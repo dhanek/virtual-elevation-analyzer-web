@@ -22,6 +22,7 @@ import {
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
+import { resolveRhoArray } from "../analysis/rhoArrayResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -65,7 +66,9 @@ import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
-import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
+import { seedSegmentModeAnalyzeState } from "../../modes/analysis/segmentSummary";
+import { requestModeUpdate } from "../analysis/requestModeUpdate";
+import { sectionVirtualDistances } from "../../modes/analysis/segmentVirtualDistance";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -115,6 +118,35 @@ export async function showOutAndBackVEAnalysis(
 		normalizedArrays.altitude,
 	).altitude;
 	const allDistance = normalizedArrays.distance;
+
+	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT (WR-4 follow-up).
+	//
+	// This calculator used to be built with NO `rhoArray` at all, while
+	// `updateModeVEPlots` passes a per-segment slice (`:251`). On any ride
+	// carrying usable air density the two passes therefore integrated different
+	// physics -- constant `params.rho` here, the real per-point series there --
+	// and the panel visibly changed by itself when the post-bind kick landed.
+	// Measured on the golden ride: mean RMSE 7.809 m at the analyze paint
+	// against 7.555 m one macrotask later, and the analyze number was the wrong
+	// one.
+	//
+	// `resolveRhoArray` is the one resolver both paths share (D-06), so this is
+	// the same call the primitive makes, not a second opinion.
+	const allRho = resolveRhoArray(fitData, normalizedArrays);
+
+	/**
+	 * The rho slice for one leg, on `extractSegmentData`'s own bounds
+	 * (`SegmentExtractor.ts:26`) so the series cannot end up a different length
+	 * from the ones beside it.
+	 */
+	const legRho = (startIdx: number, endIdx: number): number[] | null => {
+		if (!allRho) return null;
+		const slice: number[] = [];
+		for (let i = startIdx; i <= endIdx && i < allTimestamps.length; i++) {
+			slice.push(allRho[i]);
+		}
+		return slice;
+	};
 
 	// Handle wind/air speed via typed locals.
 	const outAndBackWindResolution = resolveWindSeries({
@@ -197,6 +229,7 @@ export async function showOutAndBackVEAnalysis(
 					altitude: outboundData.altitude,
 					distance: outboundData.distance,
 					windSpeed: outboundData.windSpeed,
+					rhoArray: legRho(section.outboundStartIdx, section.outboundEndIdx),
 					params: resolvedParams,
 					cda,
 					crr: appliedCrr,
@@ -263,6 +296,7 @@ export async function showOutAndBackVEAnalysis(
 					altitude: inboundData.altitude,
 					distance: inboundData.distance,
 					windSpeed: inboundData.windSpeed,
+					rhoArray: legRho(section.inboundStartIdx, section.inboundEndIdx),
 					params: resolvedParams,
 					cda,
 					crr: appliedCrr,
@@ -628,18 +662,35 @@ export async function showOutAndBackVEPlot(
 	// as long as ONE leg survived. Ranging over the sections would therefore seed
 	// samples no plotted leg describes, which is why the filter below is on the
 	// per-leg ranges rather than on `resolveActiveOutAndBackSections`.
-	seedSegmentModeFilteredData(
-		appState,
-		profiles.flatMap((profile) =>
+	// Computed BEFORE the seed: WR-3 records it, and the panel below renders from
+	// the same value, so the two cannot describe different sources.
+	const selectedWindSource =
+		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
+
+	seedSegmentModeAnalyzeState(appState, {
+		ranges: profiles.flatMap((profile) =>
 			[profile.outboundRange, profile.inboundRange].filter(
 				(range): range is { startIdx: number; endIdx: number } =>
 					range !== null,
 			),
 		),
-	);
-
-	const selectedWindSource =
-		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
+		// Both arguments, as in renderGpsLap: `selectedWindSource` is already the
+		// resolved panel source, and `resolveRecordedWindSource` preserves
+		// "compare" while passing the other two straight through.
+		requestedWindSource: selectedWindSource as never,
+		resolvedWindSource: selectedWindSource as never,
+		// ONE entry per SECTION, not per leg — the maintainer's ruling that
+		// `outAndBackMode.summarize` already follows. Reusing the same builder is
+		// what keeps an analyze-time export identical to a post-update one, 2N
+		// lines being exactly what it exists to prevent.
+		virtualDistances: sectionVirtualDistances(
+			profiles.map((profile) => ({
+				label: `Section ${profile.sectionNumber}`,
+				outbound: profile.outboundSeries ?? null,
+				inbound: profile.inboundSeries ?? null,
+			})),
+		),
+	});
 	const showWindTab = hasWindSpeed || hasConstantWind;
 	// PRESENCE, not visibility — see the identical note in renderGpsLap.ts.
 	const showVirtualDistanceTab = hasWindSpeed;
@@ -727,6 +778,29 @@ export async function showOutAndBackVEPlot(
 
 	// Initial plot render
 	renderOutAndBackPlots(Plotly, profiles, meanElevation);
+
+	// THE POST-BIND KICK (WR-4). Standard has had this since before the phase
+	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never
+	// carried this bug.
+	//
+	// Everything the analyze leg above computed is a FIRST PAINT, not a
+	// RESULT: it keeps `virtual_elevation` from each per-lap fit and discards
+	// r2, RMSE and the elevation gains. So without this line the only writer
+	// of `appState.currentVEResult` on an analyze was the stitched fit
+	// `prepareAnalysisPayload` runs over the concatenated selection, which
+	// this panel never displays -- and the first control nudge replaced it.
+	//
+	// Scheduled, not called: `requestModeUpdate` funnels into
+	// `scheduleRecompute`, so the pass lands on the next macrotask and the
+	// value it writes is produced by the SAME code path a control gesture
+	// uses. That identity is the point. Hand-rolling the aggregation here
+	// would give the field a second writer with its own idea of trim, wind
+	// source and segmentation, which is the CR-02 shape.
+	//
+	// AFTER the binder, never before: `bindModeControls` is what calls
+	// `configureModeUpdateRequests` (`bindModeControls.ts:154`), and
+	// `requestModeUpdate` no-ops while that is unset.
+	requestModeUpdate("parameters");
 
 	// Scroll to the VE analysis section
 	veSection?.scrollIntoView({ behavior: "smooth", block: "start" });

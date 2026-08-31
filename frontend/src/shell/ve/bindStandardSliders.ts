@@ -60,7 +60,16 @@ export function formatCoveredLapCount(
 		: `${covered} of ${selected}`;
 }
 
-function updateMetricsDisplay(
+/**
+ * THE one writer of Standard's four metric spans.
+ *
+ * Exported for `initializeVEAnalysis`, which fills them at first paint from the
+ * SAME integration that drew the curve beneath them. Before that the template
+ * painted them from `prepareAnalysisPayload`'s stitched fit -- a different trim
+ * window and a different wind source from the plot underneath -- so the header
+ * and the curve disagreed until the post-bind kick replaced both.
+ */
+export function updateMetricsDisplay(
 	r2: number,
 	rmse: number,
 	veGain: number,
