@@ -286,45 +286,64 @@ function invalidateVePanelIfBasisChanged(
 }
 
 /**
- * The RE-DETECTION twin of the above, comparing THE CUT rather than the item
- * numbers. Used by both GPS modes.
+ * The RE-DETECTION twin of the above: the panel goes when THE DETECTION
+ * CHANGES, in either GPS mode.
  *
- * Item numbers are useless here and comparing them was the original defect.
- * Both detectors number their output sequentially from 1, so nudging a gate
- * over a ride that still yields three sections produces `[1, 2, 3]` both
- * before and after: `sameItems` said "unchanged" and the panel kept showing the
- * PREVIOUS cut of the ride while Section 3 showed the new one. What actually
- * changed is where each piece of the ride starts and ends, so that is what is
- * compared — as an opaque key per item, built by the caller because the two
- * modes cut the ride differently (a section has an outbound and an inbound leg,
- * a GPS lap has one range).
+ * Two earlier versions of this were both too weak. The first compared item
+ * numbers, which the detectors renumber sequentially from 1, so a gate nudge
+ * that still yielded three sections compared `[1, 2, 3]` with `[1, 2, 3]` and
+ * the guard could not fire at all. The second compared the ANALYSED ranges
+ * against the new detection and spared a detection that merely ADDED items,
+ * on the reasoning that what was on screen was still accurate. It is not:
+ * widening the FIT window from one lap to two took the GPS lap count from 6 to
+ * 14 while the plot stayed, and the plot's own lap NUMBERS — the key Store
+ * Result and the saved CdA/Crr live under — now point at different laps. A
+ * detection that changed is a basis that changed, whichever direction it moved.
+ * Reported from the running app, 2026-09-01.
  *
- * THE ANALYSED BASIS IS THE FIELD THE RENDER WROTE — `currentOutAndBackSections`
- * (`activeOutAndBackSections.ts:5` — "written once, by
- * `showOutAndBackVEAnalysis`, and holds exactly the sections that were analysed
- * and drawn") and `currentGpsLapIndexRanges` (`gpsLapMode.ts:70`). Both carry
- * ranges, and both are written AT RENDER, whereas `currentCoveredItems` is
- * nulled by `resolveMultiSegmentAnalysisParams` and only refilled by
- * `summarize` — so a re-detection landing between Analyze and the first
- * recompute saw no analysed basis at all and returned early. Both are cleared
- * by `tearDownVeAnalysisPanel`, so a torn-down panel reports no cut.
+ * So the comparison is the detected list BEFORE against the detected list
+ * AFTER, in order, and the analysed state only answers "is there a panel to
+ * invalidate at all".
  *
  * STILL GUARDED, for the reason the doc above gives: `bindOutAndBackDetection`
  * and `bindGpsDetection` both end with an initial detection call, so an ordinary
  * `rerenderSection3` re-runs detection with the gates unmoved. That pass
- * re-derives the identical ranges, matches, and must leave a valid panel alone.
+ * re-derives an identical list, matches, and must leave a valid panel alone.
  */
-function invalidateVePanelIfCutChanged(
-	analyzedCuts: string[],
-	detectedCuts: string[],
+function invalidateVePanelIfDetectionChanged(
+	before: string[],
+	after: string[],
 ): void {
-	if (analyzedCuts.length === 0) return;
-	const available = new Set(detectedCuts);
-	// Every analysed piece must survive the new detection unchanged. A detection
-	// that merely ADDS one leaves what is on screen accurate, so it is not a
-	// reason to throw the panel away.
-	if (analyzedCuts.every((cut) => available.has(cut))) return;
-	tearDownVeAnalysisPanel(getDependencies().appState);
+	const { appState } = getDependencies();
+	if (!gpsPanelIsAnalyzed(appState)) return;
+	if (
+		before.length === after.length &&
+		before.every((cut, index) => cut === after[index])
+	) {
+		return;
+	}
+	tearDownVeAnalysisPanel(appState);
+}
+
+/**
+ * Is a GPS-mode VE panel on screen, i.e. is there anything to invalidate?
+ *
+ * Both fields are written at render — `currentOutAndBackSections` by
+ * `showOutAndBackVEAnalysis` (`renderOutAndBack.ts:101`),
+ * `currentGpsLapIndexRanges` by `gpsLapMode.syncState` (`gpsLapMode.ts:70`) —
+ * and both are cleared by `tearDownVeAnalysisPanel`, so this is false exactly
+ * when there is no panel. Only one is ever populated; asking about both saves
+ * the caller having to know which mode is live.
+ *
+ * NOT `currentCoveredItems`, which `resolveMultiSegmentAnalysisParams` nulls and
+ * only `summarize` refills: a re-detection landing between Analyze and the first
+ * recompute would find no analysed basis at all and return early.
+ */
+function gpsPanelIsAnalyzed(appState: AppState): boolean {
+	return (
+		appState.currentOutAndBackSections.length > 0 ||
+		(appState.currentGpsLapIndexRanges?.length ?? 0) > 0
+	);
 }
 
 /** One out-and-back section, keyed on both of its legs. */
@@ -338,20 +357,6 @@ function outAndBackCut(section: OutAndBackSection): string {
 /** One GPS lap, or one already-analysed lap range. */
 function lapRangeCut(range: { startIdx: number; endIdx: number }): string {
 	return `${range.startIdx}:${range.endIdx}`;
-}
-
-/**
- * The cut currently on screen, whichever GPS mode drew it.
- *
- * Both fields are written at render and cleared by `tearDownVeAnalysisPanel`,
- * and only one of them is ever populated, so the concatenation is the analysed
- * cut without needing to ask which mode is live.
- */
-function analyzedGpsCuts(appState: AppState): string[] {
-	return [
-		...appState.currentOutAndBackSections.map(outAndBackCut),
-		...(appState.currentGpsLapIndexRanges ?? []).map(lapRangeCut),
-	];
 }
 
 /**
@@ -814,6 +819,11 @@ export async function runGpsLapDetection(
 		config,
 	);
 
+	// Captured BEFORE the overwrite: the guard at the foot of this function
+	// compares the detection the panel was built against with the one just
+	// produced, so the previous list has to be read while it is still there.
+	const detectionBefore = deps.appState.gpsDetectedLaps.map(lapRangeCut);
+
 	deps.appState.gpsLapDetectionResult = detector.detectLaps();
 	deps.appState.gpsDetectedLaps =
 		deps.appState.gpsLapDetectionResult.detectedLaps;
@@ -840,13 +850,13 @@ export async function runGpsLapDetection(
 		(lap) => lap.lapNumber,
 	);
 
-	// The out-and-back twin, and for the identical reason: moving the gate
-	// re-cuts the ride, so a panel analyzed from the previous cut describes laps
-	// that no longer exist. Compared on the RANGES — the auto-select above has
-	// just written the detector's own 1..N into `gpsSelectedLaps`, so lap numbers
-	// would compare equal to themselves exactly as the section numbers did.
-	invalidateVePanelIfCutChanged(
-		(deps.appState.currentGpsLapIndexRanges ?? []).map(lapRangeCut),
+	// The out-and-back twin, and for the identical reason: moving the gate — or
+	// widening the FIT window this detection is scoped to — re-cuts the ride, and
+	// a panel built on the previous cut is describing laps that are no longer the
+	// laps under those numbers. Compared on the RANGES, because the auto-select
+	// above has just written the detector's own 1..N into `gpsSelectedLaps`.
+	invalidateVePanelIfDetectionChanged(
+		detectionBefore,
 		deps.appState.gpsDetectedLaps.map(lapRangeCut),
 	);
 
@@ -1023,6 +1033,9 @@ export async function runOutAndBackDetection(
 		config,
 	);
 
+	// Captured BEFORE the overwrite, as in `runGpsLapDetection`.
+	const detectionBefore = deps.appState.outAndBackSections.map(outAndBackCut);
+
 	deps.appState.outAndBackResult = detector.detectSections();
 	deps.appState.outAndBackSections =
 		deps.appState.outAndBackResult.detectedSections;
@@ -1053,8 +1066,8 @@ export async function runOutAndBackDetection(
 	// analyzed from the previous cut describes segments that no longer exist —
 	// the same invalidation as ticking the section boxes, by a blunter route.
 	// Compared on the RANGES, not the section numbers: see the helper.
-	invalidateVePanelIfCutChanged(
-		deps.appState.currentOutAndBackSections.map(outAndBackCut),
+	invalidateVePanelIfDetectionChanged(
+		detectionBefore,
 		deps.appState.outAndBackSections.map(outAndBackCut),
 	);
 
@@ -1264,16 +1277,17 @@ export function updateSelectedLaps(): void {
 	// the user nudged a gate.
 	//
 	// The teardown falls out of the re-detection rather than being ordered
-	// separately, which is why this is not an unconditional
-	// `tearDownVeAnalysisPanel`: both detectors end in
-	// `invalidateVePanelIfCutChanged`, so a wider window that re-cuts the ride
-	// drops the panel and a selection change that happens to leave every
-	// analysed range intact leaves it up. The empty selection is the one case
-	// the detectors cannot speak for — they bail before detecting — so it is
-	// answered here, with the same "no basis, no panel" rule.
+	// separately: both detectors end in `invalidateVePanelIfDetectionChanged`, so
+	// a window that finds a different set of laps or sections drops the panel
+	// while a re-detection that reproduces the same list leaves it up. The empty
+	// selection is the one case the detectors cannot speak for — they bail before
+	// detecting — so it is answered here, with the same "no basis, no panel"
+	// rule.
 	if (!isFitLapSelectionMode) {
 		if (deps.appState.selectedLaps.length === 0) {
-			invalidateVePanelIfCutChanged(analyzedGpsCuts(deps.appState), []);
+			if (gpsPanelIsAnalyzed(deps.appState)) {
+				tearDownVeAnalysisPanel(deps.appState);
+			}
 		} else {
 			redetectForFitSelection?.();
 		}

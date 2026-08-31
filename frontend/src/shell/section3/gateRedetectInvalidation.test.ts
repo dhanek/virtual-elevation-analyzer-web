@@ -171,6 +171,13 @@ function analyzed(appState: AppState, sections: OutAndBackSection[]): void {
 	appState.currentVEResult = { r2: 0.9 } as never;
 	appState.currentOutAndBackSections = sections;
 	appState.currentCoveredItems = sections.map((s) => s.sectionNumber);
+	// AND THE DETECTION THAT PRODUCED IT. The guard compares the detected list
+	// before against the detected list after, so a fixture that leaves
+	// `outAndBackSections` empty is not "a panel over an unchanged detection" —
+	// it is a panel over no detection at all, and every re-detection reads as a
+	// change. Production always has both.
+	appState.outAndBackSections = sections;
+	appState.outAndBackSelectedSections = sections.map((s) => s.sectionNumber);
 }
 
 describe("the VE panel after an out-and-back gate re-detection", () => {
@@ -241,21 +248,30 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 		expect(appState.currentVEResult).not.toBeNull();
 	});
 
-	it("leaves the panel alone when the re-cut only adds a section", async () => {
+	/**
+	 * SPARING THIS CASE WAS THE SECOND WRONG ANSWER, and it shipped.
+	 *
+	 * The reasoning was that everything on screen still describes the ride
+	 * accurately, so an added section is no reason to throw the panel away. It
+	 * is: the panel's own section NUMBERS are the key Store Result and the saved
+	 * CdA/Crr live under, and a detection that gained a section has renumbered
+	 * them. Observed as the GPS-lap count going 6 -> 14 under a plot that stayed
+	 * put (2026-09-01). A detection that changed is a basis that changed,
+	 * whichever direction it moved.
+	 */
+	it("tears the panel down when the re-cut only adds a section", async () => {
 		const appState = makeAppState();
 		configure(appState);
 		analyzed(appState, [section(1, 0, 40, 41, 80)]);
 
-		// Everything on screen still describes the ride accurately; there is
-		// simply more of the ride available to analyse next time.
 		detected.sections = [
 			section(1, 0, 40, 41, 80),
 			section(2, 81, 120, 121, 160),
 		];
 		await runOutAndBackDetection(52.52, 13.405, 52.53, 13.406);
 
-		expect(veSectionHidden()).toBe(false);
-		expect(appState.currentVEResult).not.toBeNull();
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
 	});
 
 	it("does not tear down when nothing has been analysed yet", async () => {
@@ -364,6 +380,9 @@ describe("the VE panel in GPS-lap mode", () => {
 			endIdx: l.endIdx,
 		}));
 		appState.currentCoveredItems = laps.map((l) => l.lapNumber);
+		// And the detection it came from — see the out-and-back twin above.
+		appState.gpsDetectedLaps = laps;
+		appState.gpsSelectedLaps = laps.map((l) => l.lapNumber);
 	}
 
 	describe("after a gate re-detection", () => {
@@ -380,6 +399,27 @@ describe("the VE panel in GPS-lap mode", () => {
 			expect(veSectionHidden()).toBe(true);
 			expect(appState.currentVEResult).toBeNull();
 			expect(appState.currentGpsLapIndexRanges).toBeNull();
+		});
+
+		/**
+		 * THE REPORTED SEQUENCE, in the mode it was reported in. With FIT lap 8
+		 * selected the gate found 6 laps and the user analysed one of them;
+		 * ticking lap 10 as well widened the detection window and the count went
+		 * to 14 — while the plot stayed, still labelled with lap numbers that now
+		 * belong to different laps (2026-09-01).
+		 */
+		it("tears the panel down when a wider window finds more laps", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+
+			// Every analysed range survives untouched; there are simply more of
+			// them now. That is still a changed basis.
+			detected.laps = [lap(1, 0, 80), lap(2, 81, 160), lap(3, 161, 240)];
+			await runGpsLapDetection(52.52, 13.405, 0);
+
+			expect(veSectionHidden()).toBe(true);
+			expect(appState.currentVEResult).toBeNull();
 		});
 
 		it("leaves the panel alone when the gate has not moved", async () => {

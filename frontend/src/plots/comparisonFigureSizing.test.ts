@@ -128,6 +128,48 @@ describe("virtual elevation comparison figure sizing", () => {
 		},
 	);
 
+	/**
+	 * THE TWO PLOTS MUST OCCUPY THE SAME HORIZONTAL BAND, because they are read
+	 * as one stacked chart: a reader traces a feature in the elevation plot down
+	 * to its residual at the same x.
+	 *
+	 * Three things decide that band, and the compare builder originally got two
+	 * of them wrong. Its legends were left at Plotly's default, which places them
+	 * OUTSIDE on the right and shrinks the plot area by however wide the longest
+	 * entry is — and these two legends have different longest entries, so the
+	 * elevation plot came out narrower than the residuals plot beneath it. And
+	 * neither axis pinned a range, so even at equal widths the two were free to
+	 * autorange apart. Observed in the running app, 2026-09-01.
+	 */
+	it.each(["elevation", "residuals"] as const)(
+		"%s keeps its legend inside the plot area, where it costs no width",
+		(figure) => {
+			expect(comparison[figure].layout.legend).toEqual(
+				standard[figure].layout.legend,
+			);
+		},
+	);
+
+	it("gives both plots the same horizontal band", () => {
+		const band = (figure: { layout: Record<string, unknown> }) => ({
+			margin: figure.layout.margin as { l: number; r: number },
+			range: (figure.layout.xaxis as { range?: unknown }).range,
+			legend: figure.layout.legend,
+		});
+		const top = band(comparison.elevation);
+		const bottom = band(comparison.residuals);
+
+		// Left and right margins, the legend that eats into them, and the data
+		// range they map — the three inputs to where the plot area starts and
+		// ends. Top and bottom margins are deliberately NOT compared: those
+		// differ by design (`t`/`b` carry the titles).
+		expect(top.margin.l).toBe(bottom.margin.l);
+		expect(top.margin.r).toBe(bottom.margin.r);
+		expect(top.legend).toEqual(bottom.legend);
+		expect(top.range).toEqual(bottom.range);
+		expect(top.range).toEqual([context.xMin, context.xMax]);
+	});
+
 	it("puts the shared axis title on the residuals plot, not the elevation plot", () => {
 		// The stacked convention (`renderStandardVe.ts:532`): the upper plot has
 		// `b: 5` and no room for a label, the lower one carries it for both.
