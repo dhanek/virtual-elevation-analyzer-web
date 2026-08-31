@@ -20,7 +20,10 @@ import {
 } from "../../activity/ActivityLoader";
 import { calculateAutoRho } from "../ve";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
-import { initializeSection3 } from "../section3/section3Orchestration";
+import {
+	initializeSection3,
+	resetAnalysisForNewActivity,
+} from "../section3/section3Orchestration";
 import {
 	calculateAvgCda,
 	displayResults,
@@ -174,6 +177,12 @@ export async function processFitFile(file: File): Promise<void> {
 				result,
 			}),
 		);
+
+		// A DIFFERENT ride: everything selected for the previous one is now
+		// meaningless, and `setLoadedActivity` does not touch any of it. BEFORE
+		// `displayResults` below re-renders Section 3, which re-ticks the lap
+		// boxes from `selectedLaps`.
+		resetAnalysisForNewActivity();
 
 		if (result.fit_data) {
 			deps.appState.fitRawElevation = Array.from(result.fit_data.altitude);
@@ -518,6 +527,9 @@ export async function processCsvFile(file: File): Promise<void> {
 		}
 
 		deps.appState.setLoadedActivity(loadedActivity);
+
+		// Same reset as the FIT path, for the same reason.
+		resetAnalysisForNewActivity();
 
 		deps.hideLoading();
 		await displayCsvResults(csvData, result);
