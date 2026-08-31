@@ -84,8 +84,25 @@ function keyOf(result: StoredVEResult): StoredResultKey {
 	};
 }
 
+/**
+ * Teardown for the view that is currently open, installed by
+ * `openResultsModal`.
+ *
+ * The listener the view registers is on `document`, not on the modal element,
+ * so removing the element does not remove it. Without this ref the exported
+ * close — which also runs at the top of every open — left a live handler
+ * holding a detached modal: Escape then "closed" that dead view and threw focus
+ * back to whatever had it when the view was opened.
+ */
+let closeOpenView: (() => void) | null = null;
+
 /** Close whatever results view is open, if any. */
 export function closeResultsModal(): void {
+	const close = closeOpenView;
+	closeOpenView = null;
+	close?.();
+	// Belt and braces: an element left behind by an earlier build that
+	// registered no teardown.
 	document.getElementById(MODAL_ID)?.remove();
 }
 
@@ -325,7 +342,13 @@ export async function openResultsModal(deps: ResultsModalDeps): Promise<void> {
 		}
 	}
 
+	// Routed through the module-level ref so that EVERY close runs the same
+	// teardown, including `closeResultsModal()` called from outside.
 	function close(): void {
+		closeResultsModal();
+	}
+
+	function teardown(): void {
 		document.removeEventListener("keydown", onKeydown);
 		modal.remove();
 		previouslyFocused?.focus?.();
@@ -334,6 +357,7 @@ export async function openResultsModal(deps: ResultsModalDeps): Promise<void> {
 	const previouslyFocused = document.activeElement as HTMLElement | null;
 
 	renderTable();
+	closeOpenView = teardown;
 	document.addEventListener("keydown", onKeydown);
 	document.body.appendChild(modal);
 	closeBtn.focus();

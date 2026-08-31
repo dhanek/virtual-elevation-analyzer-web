@@ -8,6 +8,17 @@ import { log } from '../../utils/log'
 const PLOTLY_GRAPH_SELECTOR = '.js-plotly-plot'
 
 /**
+ * Every way this app takes a container off screen: the shared `.hidden` utility
+ * and the `[hidden]` attribute (D-06's single visibility mechanism — nothing
+ * writes `style.display` outside MapVisualization's internals), plus the tab
+ * pane, whose own rule is `display: none` until it carries the active modifier.
+ *
+ * An ancestor matching any of these means the graph measures zero.
+ */
+const HIDDEN_SELECTOR =
+    '.hidden, [hidden], .ve-tab-content:not(.ve-tab-content--active)'
+
+/**
  * Re-measure every Plotly graph inside a container that has just become
  * visible.
  *
@@ -61,6 +72,20 @@ export function resizePlotlyGraphsIn(root: HTMLElement): void {
     if (!resize) return
 
     root.querySelectorAll(PLOTLY_GRAPH_SELECTOR).forEach(graph => {
+        // A HIDDEN GRAPH IS EXACTLY THE CASE THIS FUNCTION EXISTS TO UNDO, so
+        // it must not be handed one: `Plots.resize` deletes `layout.width` and
+        // re-autosizes against `gd.offsetWidth`, which is 0 inside a
+        // `display: none` subtree, pinning the graph at that measurement until
+        // something redraws it.
+        //
+        // The guard belongs here rather than at the call sites, which
+        // disagreed about it: `renderOutAndBackPlots` scopes its call to the
+        // compare view for precisely this reason, while `activateTab` passes a
+        // whole pane — and the out-and-back VE pane CONTAINS the compare view,
+        // which is `.hidden` whenever the selection is not in compare mode. A
+        // Power/VE tab round trip therefore zero-width-pinned the two compare
+        // graphs until the next full render repaired them.
+        if (graph.closest(HIDDEN_SELECTOR)) return
         try {
             void Promise.resolve(resize.call(Plots, graph)).catch((error: unknown) => {
                 log.debug('Plotly resize failed for a graph', error)

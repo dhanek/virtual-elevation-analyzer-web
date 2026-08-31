@@ -36,6 +36,7 @@ import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { resolveSelectionRhoArray } from "../analysis/rhoArrayResolver";
 import {
 	resolvePlaceholderWindSpeed,
 	resolveSelectionWindSeries,
@@ -106,6 +107,25 @@ export async function initializeVEAnalysis(
 		initialWindSource === "fit" ? "fit" : "constant",
 	);
 
+	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT — the third and last
+	// analyze leg. `renderGpsLap` and `renderOutAndBack` were corrected first;
+	// this one was left building its calculator with no `rhoArray` while
+	// `updateModeVEPlots:251` passes a per-segment slice, so on any ride with
+	// usable air density the two passes integrated different physics. That was
+	// filed as unobservable while this paint only drew plots. It is observable
+	// now: `updateMetricsDisplay` below writes R²/RMSE/VE/Actual from THIS fit,
+	// so the header showed the constant-rho numbers until the post-bind kick
+	// landed — and kept showing them on any path where the scheduled pass never
+	// reaches `renderVe` (every segment under the trim floor, a calculator
+	// throwing, a saved trim already at its clamp).
+	const selectionRho = appState.currentFitData
+		? resolveSelectionRhoArray(
+				appState.currentFitData,
+				selectedIndices,
+				analysisInput.timestamps.length,
+			)
+		: null;
+
 	const calculator = createVeCalculator({
 		timestamps: analysisInput.timestamps,
 		power: analysisInput.power,
@@ -119,6 +139,7 @@ export async function initializeVEAnalysis(
 			analysisInput.windSpeed,
 			resolvedWindSpeed,
 		),
+		rhoArray: selectionRho,
 		params: appState.currentParameters!,
 		cda: initialCdA,
 		crr: appliedInitialCrr,

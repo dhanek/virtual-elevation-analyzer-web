@@ -160,6 +160,34 @@ are best judged against the same question — what does `npm run check` currentl
       `renderGpsLap.ts`, `renderOutAndBack.ts`, `renderStandardVe.ts` · *origin: WR-4 follow-up,
       2026-08-31*
 
+- [ ] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
+      The analyze leg paints `updateMetricsDisplay` from ONE fit over the concatenated selection
+      (`renderStandardVe.ts:265`); the kick a macrotask later writes the MEAN of the per-lap fits
+      (D-09 entry g). For a multi-lap selection those are different quantities, so the header
+      visibly changes by itself even though both numbers are correct for what they measure.
+      Measured in the app 2026-08-31 on `13.07.fit` laps 10+12: RMSE 26.22 m → 8.10 m, R²
+      0.0002 → 0.0031. A single lap is exact after the rho fix, so this is the only remaining
+      first-paint jump on a fresh load.
+
+      Three ways out, and it needs a ruling: decompose the analyze leg per lap (correct, and the
+      most work), paint the spans empty and let the kick fill them (cheapest, adds a flicker), or
+      keep the combined figure and label it as such the way the VD header labels its combined line.
+      **Retiring the analyze legs' own calculator pass (the item above) subsumes this** — if that is
+      done first, this disappears with it.
+      `frontend/src/shell/ve/renderStandardVe.ts:251-273` · *origin: in-app check of the PR #7
+      review fixes, 2026-08-31*
+
+- [ ] **[S] Re-analyzing a NARROWER lap selection paints a stale trim.** Analyze laps 10+12, untick
+      12, analyze lap 10 alone: the header paints RMSE 11.51 m and settles at 7.62 m. A fresh page
+      load of lap 10 alone paints 7.62 m once and never moves, so the jump is state carried over
+      from the previous selection — the trim reset in `showVirtualElevationAnalysisInline` only runs
+      inside the `if (appState.currentFileHash && parameterStorage)` branch and only when
+      `loadLapSettings` returns nothing, so a saved trim from the WIDER selection can reach
+      `initializeVEAnalysis` through `appState.presetTrimStart/End`. Not investigated beyond the
+      observation; reproduce it before believing that explanation.
+      `frontend/src/shell/ve/renderStandardVe.ts:318-345` · *origin: in-app check of the PR #7
+      review fixes, 2026-08-31*
+
 - [ ] **[M] Out-and-back's aggregation helpers have never been profiled.** GPS-lap's two
       equivalents each hid an O(targets × samples) rescan worth ~10 ms of a ~22 ms update.
       Out-and-back's `calculateOutAndBackStats` has the same shape and twice the segments. Not
@@ -173,6 +201,70 @@ are best judged against the same question — what does `npm run check` currentl
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Review follow-ups on PR #7 — 2026-08-31
+
+A code review of the whole `refactoring` diff found five defects across the bundles above. All five
+are fixed here; 955 tests pass (up 14), `npm run check` clean. Every new assertion was checked
+against the pre-fix code and observed to fail. **Checked in the running app** (dev server + Chrome,
+`13.07.fit`, which carries per-point air density), not only under vitest.
+
+- [x] **[S] Standard's analyze leg had no `rhoArray` — and the header now reads that fit.** Bundle
+      D's WR-4 pass gave `renderGpsLap` and `renderOutAndBack` the shared resolver and left the
+      third leg on the constant `params.rho`, because Standard slices a CONCATENATED selection and
+      so could not copy the per-segment `indices.map(...)` line. Filed as unobservable while the
+      paint only drew plots; bundle B's `updateMetricsDisplay` made it visible.
+
+      New `resolveSelectionRhoArray` beside `resolveRhoArray`, slicing with the same
+      `selectedIndices.map` that built the payload arrays, and returning `null` (constant rho, as
+      before) when the ride has no usable density, when an index falls outside the series, or when
+      the slice is not the length of the calculator's other series.
+
+      **A/B in the app, lap 10 of `13.07.fit`, MutationObserver on the header spans:** without the
+      fix R² 0.0052 / RMSE 7.94 m / VE 16.17 m at the analyze paint, flipping to 0.0060 / 7.62 m /
+      15.57 m a macrotask later; with it, 0.0060 / 7.62 m / 15.57 m written once and never changed.
+      `rhoArrayResolver.ts`, `renderStandardVe.ts:110` · test: `selectionRhoArray.test.ts`, whose
+      last case is source-level on purpose — the defect is an OMISSION, which no test of the leg's
+      own module can observe
+
+- [x] **[XS] `closeResultsModal()` leaked the view's keydown handler.** The listener is on
+      `document`, so removing the element did not remove it — and the exported close runs at the top
+      of every open. Escape afterwards ran the dead view's `close()` and threw focus back to
+      whatever had it when that view was opened. Now a module-level teardown ref that every close
+      path routes through. `resultsModal.ts:87` · test: two cases in `resultsModal.test.ts`
+
+- [x] **[XS] `deleteResult` reported success when the database was never opened.** `if (!this.db)
+      return;` resolved, and `resultsModal` acts on that: row removed, "Stored results (N)"
+      decremented, nothing deleted. Now throws, as `saveResult` already did.
+      `ResultsStorage.ts:684`
+
+- [x] **[XS] `deleteResult` resolved on `request.onsuccess`, not on the transaction.** An IndexedDB
+      write can succeed at request level and still be rolled back (quota, an explicit abort, the
+      connection closing); the row would reappear on the next open with nothing having reported a
+      failure. Now `oncomplete`/`onabort`/`onerror`. `ResultsStorage.ts:684` · test: two cases in
+      `resultsStorageDelete.test.ts`, the second aborting from the delete request's own success
+      handler
+
+- [x] **[XS] The tab resize took in graphs its own call sites disagreed about.**
+      `resizePlotlyGraphsIn(pane)` reached every `.js-plotly-plot` in the activated pane, including
+      the out-and-back compare graphs, which live inside the VE pane behind `.hidden` — the exact
+      thing the scoped call at `outAndBackPlots.ts:703` documents avoiding. The guard now lives in
+      the helper, so both sites agree.
+
+      **Stated plainly: the harm the review predicted does not reproduce.** Replaying the pre-fix
+      helper verbatim in the app against the hidden compare graphs left them at 1032 px, because the
+      graph div is `display: block` inside a `display: none` parent — Plotly's own hidden-guard does
+      not reject, and its autosize falls back to the current `fullLayout.width` rather than
+      measuring 0. So this is a consistency guard, not a bug fix, kept because the sizing convention
+      note is explicit that a re-introduced `layout.height` makes that call destructive again.
+      Confirmed not to break the real path: Power and Wind still measure 1032 px against their
+      1032 px containers after activation. `plotlyResize.ts:6` · test: two cases in
+      `tabPlotResize.test.ts`
+
+Also confirmed in the app, none of it changed by this work: Store Result persists the number the
+header shows (RMSE 7.624 stored against 7.62 m on screen), the results view deletes exactly the
+addressed row and the delete survives a reopen, and no console errors anywhere in the session. Two
+first-paint jumps that are NOT this work are filed under *Standalone work* above.
 
 ### Bundle D · Plot rendering and tab layout — 2026-08-31
 
