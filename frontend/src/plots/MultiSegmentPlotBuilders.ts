@@ -1,5 +1,11 @@
 import type { SegmentSupplementarySeries } from '../analysis/SegmentSupplementarySeries';
-import { getDefaultPlotConfig, type PlotDefinition, type PlotTrace } from './StandardPlotBuilders';
+import {
+    BELOW_AXIS_LEGEND_MARGIN_B,
+    belowAxisLegend,
+    getDefaultPlotConfig,
+    type PlotDefinition,
+    type PlotTrace,
+} from './StandardPlotBuilders';
 
 export interface MultiSegmentSeries {
     label: string;
@@ -102,11 +108,8 @@ function createFigure(input: {
                 showgrid: true,
                 gridcolor: '#e0e0e0',
             },
-            legend: {
-                orientation: 'h',
-                y: -0.2,
-            },
-            margin: { l: 60, r: 20, t: 40, b: 90 },
+            legend: belowAxisLegend(),
+            margin: { l: 60, r: 20, t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B },
             hovermode: 'closest',
             plot_bgcolor: '#fafafa',
             paper_bgcolor: 'white',
