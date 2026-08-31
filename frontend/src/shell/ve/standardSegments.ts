@@ -279,20 +279,37 @@ export function stitchStandardProfiles(
 		actualElevation.push(...profile.actualElevation);
 		power.push(...profile.supplementarySeries.powerWatts);
 
-		// Same NaN-padding rule as the compare leg above: a segment that carries
-		// no distance contributes its own extent rather than shortening the
-		// series, which would slide every later sample onto the wrong x
-		// position. It contributes ZERO length, so the running total is
-		// unchanged and the segments after it stay where they belong.
+		// Same padding rule as the compare leg above — a segment contributes its
+		// own EXTENT rather than shortening the series, which would slide every
+		// later sample onto the wrong x position — but padded with THE LAST
+		// KNOWN DISTANCE rather than with zero, and the running total advances
+		// by that same value.
+		//
+		// The loop walks `length` (the VE series) while `segmentKm` is whatever
+		// the distance channel supplied, and the two are only assumed equal.
+		// Zero is the wrong pad the moment they are not: it puts the tail back at
+		// the SEGMENT'S OWN ORIGIN, a jump backwards mid-segment, and the offset
+		// read off the end of the ARRAY (`segmentKm[segmentKm.length - 1]`) then
+		// advanced by a distance no sample had been placed at, pushing every
+		// later segment past a tail that had already fallen behind. Both halves
+		// of a non-monotonic axis, right where the trim lines are drawn. Holding
+		// the last finite value keeps the axis flat across the gap instead, and
+		// covers a hole in the middle of the channel as well as a short one at
+		// the end.
+		//
+		// Unchanged in the two cases that already worked: a full channel ends at
+		// `segmentKm[length - 1]` exactly as before, and a channel that is absent
+		// entirely still contributes a flat run at the current offset and leaves
+		// the running total where it was, so the segments after it stay where
+		// they belong.
 		const segmentKm = profile.supplementarySeries.distancesKm;
+		let lastLocal = 0;
 		for (let i = 0; i < length; i += 1) {
 			const local = segmentKm[i];
-			cumulativeDistanceKm.push(
-				distanceOffsetKm + (Number.isFinite(local) ? local : 0),
-			);
+			if (Number.isFinite(local)) lastLocal = local;
+			cumulativeDistanceKm.push(distanceOffsetKm + lastLocal);
 		}
-		const lastLocal = segmentKm.length > 0 ? segmentKm[segmentKm.length - 1] : 0;
-		distanceOffsetKm += Number.isFinite(lastLocal) ? lastLocal : 0;
+		distanceOffsetKm += lastLocal;
 
 		apparentWindSpeedMps.push(
 			...profile.supplementarySeries.apparentWindSpeedMps,

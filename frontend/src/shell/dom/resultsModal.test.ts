@@ -325,4 +325,88 @@ describe("the stored-results view", () => {
 			expect(document.getElementById("resultsModal")).toBeNull();
 		});
 	});
+
+	/**
+	 * TWO OPENS INSIDE ONE LOAD.
+	 *
+	 * `openResultsModal` closes whatever is up and then AWAITS `getAllResults`,
+	 * and the close is not a claim on the seat. A double-click on the footer
+	 * button — or the footer button and then the sidebar's, now that both reach
+	 * the same view — put two opens inside that await: both passed the close,
+	 * both resolved, and both appended. That leaves two elements sharing
+	 * `id="resultsModal"`, a `closeOpenView` holding only the second one's
+	 * teardown, and the FIRST view's `document` keydown listener armed forever on
+	 * a node no longer in the page — the exact leak the "closed from outside"
+	 * cases above exist to prevent, arriving by a different door.
+	 */
+	describe("two opens racing the same load", () => {
+		/** An open whose results arrive only when the test says so. */
+		function deferredOpen() {
+			let release: (results: StoredVEResult[]) => void = () => {};
+			const loaded = new Promise<StoredVEResult[]>((resolve) => {
+				release = resolve;
+			});
+			const getAllResults = vi.fn(() => loaded);
+			const pending = openResultsModal({
+				getAllResults,
+				deleteResult: vi.fn(async () => {}),
+			});
+			return { getAllResults, pending, release };
+		}
+
+		it("appends one view, not two", async () => {
+			const first = deferredOpen();
+			const second = deferredOpen();
+
+			// BOTH released, so a build without the latch fails on the assertion
+			// rather than by hanging on a promise it never awaited.
+			first.release([record()]);
+			second.release([record()]);
+			await Promise.all([first.pending, second.pending]);
+
+			expect(document.querySelectorAll("#resultsModal")).toHaveLength(1);
+			// The second call did not even ask the store: it saw a load already
+			// in flight and stood down.
+			expect(second.getAllResults).not.toHaveBeenCalled();
+		});
+
+		it("leaves no Escape handler behind after the surviving view closes", async () => {
+			const opener = document.createElement("button");
+			document.body.appendChild(opener);
+			opener.focus();
+
+			const first = deferredOpen();
+			const second = deferredOpen();
+			first.release([record()]);
+			second.release([record()]);
+			await Promise.all([first.pending, second.pending]);
+
+			closeResultsModal();
+
+			const elsewhere = document.createElement("input");
+			document.body.appendChild(elsewhere);
+			elsewhere.focus();
+
+			// A surviving handler from an orphaned view would run its own
+			// teardown here and pull focus back to `opener`.
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+			);
+
+			expect(document.activeElement).toBe(elsewhere);
+		});
+
+		it("still opens normally once the first load has finished", async () => {
+			const first = deferredOpen();
+			first.release([record()]);
+			await first.pending;
+
+			// The latch is released with the load, not held for the life of the
+			// view: reopening must still work.
+			closeResultsModal();
+			await open([record(), record({ lapKey: "2" })]);
+
+			expect(rows()).toHaveLength(2);
+		});
+	});
 });

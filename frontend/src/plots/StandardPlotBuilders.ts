@@ -435,7 +435,13 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
             ],
             layout: {
                 title: 'Virtual Elevation Comparison',
-                xaxis: { title: 'Time Point' },
+                // EMPTY, like `buildVirtualElevationFigures`' elevation layout
+                // above, and for the same reason: this figure and the residuals
+                // one below it are drawn into the stacked `#vePlot` /
+                // `#veResidualsPlot` pair, where the lower plot carries the
+                // shared x-axis title (`renderStandardVe.ts:532`). This one has
+                // `b: 5` to put it in, so a title here is clipped, not read.
+                xaxis: { title: '' },
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
                 hovermode: 'closest',
@@ -475,7 +481,7 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
             ],
             layout: {
                 title: 'Residuals Comparison (Virtual - Actual)',
-                xaxis: { title: 'Time Point' },
+                xaxis: { title: input.context.xAxisTitle },
                 yaxis: { title: 'Residual (m)' },
                 showlegend: true,
                 hovermode: 'closest',

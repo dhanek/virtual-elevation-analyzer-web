@@ -222,6 +222,11 @@ export class ResultsStorage {
     private dbName = 'VirtualElevationResults'; // Separate database for results
     private storeName = 'veResults';
     private db: IDBDatabase | null = null;
+    /**
+     * The in-flight (or settled) `initialize()`, so that the open happens once
+     * however many callers ask for it. See `initialize` below.
+     */
+    private initPromise: Promise<void> | null = null;
 
     /**
      * Delete the database completely (for testing/debugging)
@@ -231,6 +236,11 @@ export class ResultsStorage {
             const request = indexedDB.deleteDatabase(this.dbName);
 
             request.onsuccess = () => {
+                // Forget the memoised open too: without this a later
+                // `initialize()` resolves instantly against a database that is
+                // no longer there.
+                this.db = null;
+                this.initPromise = null;
                 resolve();
             };
 
@@ -245,7 +255,34 @@ export class ResultsStorage {
         });
     }
 
+    /**
+     * Open the database if it is not open yet, and never twice.
+     *
+     * The store is GLOBAL — every ride ever analysed — but `initialize()` had
+     * exactly one production caller, on the file-load path
+     * (`fileLoadOrchestration.ts:91`). The footer's "Show All Results" is
+     * reachable with no file loaded, which is precisely when that call has not
+     * run, and `getAllResults` answers `[]` rather than throwing when `db` is
+     * null: the user got "Stored results (0)" over a populated database.
+     *
+     * Memoised rather than re-entrant-guarded with a boolean, so that the
+     * startup call and a reader arriving during the open both await the SAME
+     * open instead of racing two `indexedDB.open` sequences — the migration in
+     * `openDatabase` is not safe to run twice concurrently. A failed open is
+     * forgotten so the next caller can retry.
+     */
     async initialize(): Promise<void> {
+        if (this.db) return;
+        if (!this.initPromise) {
+            this.initPromise = this.openDatabase().catch((error) => {
+                this.initPromise = null;
+                throw error;
+            });
+        }
+        await this.initPromise;
+    }
+
+    private async openDatabase(): Promise<void> {
         return new Promise((resolve, reject) => {
             // First check current version
             const checkRequest = indexedDB.open(this.dbName);
@@ -628,6 +665,15 @@ export class ResultsStorage {
      * Get all stored results
      */
     async getAllResults(): Promise<StoredVEResult[]> {
+        // Opens the store on demand: this is reachable from the footer button
+        // before any file has been loaded. Kept as a `[]` fallback rather than
+        // a throw if the open itself fails — an unreadable store is an empty
+        // table, not a broken page.
+        try {
+            await this.initialize();
+        } catch (error) {
+            log.error('Could not open the results database:', error);
+        }
         if (!this.db) {
             return [];
         }
@@ -724,6 +770,14 @@ export class ResultsStorage {
      * Clear all stored results
      */
     async clearAllResults(): Promise<void> {
+        // On demand, like `getAllResults`: the footer's "Clear Results" sits
+        // next to "Show All Results" and is just as reachable with no file
+        // loaded, where this used to return having cleared nothing.
+        try {
+            await this.initialize();
+        } catch (error) {
+            log.error('Could not open the results database:', error);
+        }
         if (!this.db) return;
 
         return new Promise((resolve, reject) => {

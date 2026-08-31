@@ -40,7 +40,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** Every `createVeCalculator` call the chain made, in order. */
 const calculatorCalls = vi.hoisted(
-	() => [] as Array<{ cda: number; crr: number; altitude: number[] }>,
+	() => [] as Array<{
+		cda: number;
+		crr: number;
+		altitude: number[];
+		rhoArray: number[] | null;
+		timestamps: number;
+	}>,
 );
 
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
@@ -51,6 +57,11 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 			// WR-1's probe: WHICH elevation series reached the physics, which is
 			// the only place the analyze leg's choice of profile is observable.
 			altitude: Array.from(input.altitude ?? []),
+			// And WHAT AIR DENSITY it was given. Kept unconverted -- an
+			// `Array.from` would turn the `undefined` holes this probe exists to
+			// catch into something that still looks like a number array.
+			rhoArray: input.rhoArray ?? null,
+			timestamps: input.timestamps.length,
 		});
 		const n = input.timestamps.length;
 		return {
@@ -866,6 +877,78 @@ describe.each(MODES)(
 
 			expect(calculatorCalls.length).toBeGreaterThan(0);
 			expect(calculatorCalls[0].altitude).toEqual(firstSegment(FIT_RAW));
+		});
+	},
+);
+
+
+/**
+ * THE AIR-DENSITY SERIES AND THE SEGMENT IT IS SLICED FOR.
+ *
+ * Both analyze legs walked their segment on `allTimestamps.length` and indexed
+ * `allRho` with the same counter — `renderGpsLap.ts:210`'s
+ * `if (allRho) lapRho.push(allRho[i])` and `renderOutAndBack.ts`' `legRho`.
+ * Nothing checks that the density channel is as long as the ride.
+ * `resolveRhoArray` accepts it on `.some(rho => rho > 0)`, and
+ * `getNormalizedActivityArrays` converts it without padding, so a device that
+ * stopped emitting air density mid-ride yields a SHORT array: the tail indices
+ * pushed `undefined` into a `number[]` and NaN rho crossed the WASM boundary
+ * for the rest of that segment.
+ *
+ * The Standard leg had already been given this guard, with the rule written
+ * down at `rhoArrayResolver.ts:86` — "a short or hole-punched array under the
+ * calculator is a worse bug than a constant one". These two legs are that rule
+ * applied where it was missed, so the assertion is not "rho is right" but
+ * "rho is either complete or absent, never partial".
+ */
+describe.each(MODES)(
+	"$name: the analyze leg's air-density slice",
+	({ gpsAnalysisMode, analyze }) => {
+		beforeEach(() => {
+			modeState.gps = gpsAnalysisMode;
+			calculatorCalls.length = 0;
+			Element.prototype.scrollIntoView = () => {};
+			renderHostPage();
+		});
+
+		/** An activity whose recorded air density stops after `covered` samples. */
+		function appStateWithRho(covered: number): AppState {
+			const appState = makeAppState();
+			appState.currentFitData = {
+				...makeFitData(),
+				air_density_data: new Array<number>(covered).fill(1.22),
+			} as unknown as AppState["currentFitData"];
+			return appState;
+		}
+
+		it("hands the calculator a complete series when the channel spans the ride", async () => {
+			await analyze(appStateWithRho(SAMPLE_COUNT));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			for (const call of calculatorCalls) {
+				expect(call.rhoArray).not.toBeNull();
+				expect(call.rhoArray).toHaveLength(call.timestamps);
+				expect(call.rhoArray!.every(Number.isFinite)).toBe(true);
+			}
+		});
+
+		it("falls back to a constant rather than a hole-punched series", async () => {
+			// Density for the first quarter of the ride only, so the first
+			// segment of BOTH modes (0..HALF-1) runs off the end of it.
+			await analyze(appStateWithRho(SAMPLE_COUNT / 4));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			for (const call of calculatorCalls) {
+				// Null is the fallback; what must never reach the physics is an
+				// array with holes in it or one shorter than the other series.
+				if (call.rhoArray !== null) {
+					expect(call.rhoArray).toHaveLength(call.timestamps);
+					expect(call.rhoArray.every(Number.isFinite)).toBe(true);
+				}
+			}
+			// And at least one segment actually hit the short tail, or this test
+			// proves nothing.
+			expect(calculatorCalls.some((call) => call.rhoArray === null)).toBe(true);
 		});
 	},
 );

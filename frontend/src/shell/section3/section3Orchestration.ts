@@ -14,6 +14,7 @@ import {
 	DEFAULT_OUT_AND_BACK_CONFIG,
 	formatLapDuration,
 	formatLapDistance,
+	type OutAndBackSection,
 } from "../../utils/GpsLapDetection";
 import { saveMapTrimSettings } from "../../analysis/MultiSegmentSettings";
 import { calculateAutoRho } from "../ve";
@@ -213,6 +214,11 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	// already nulls; leaving it would keep a stale segment list alive.
 	appState.currentGpsLapIndexRanges = null;
 	appState.currentOverlayLapNumbers = null;
+	// The out-and-back twin of the two above, and the basis
+	// `invalidateVePanelIfSectionCutChanged` reads: left behind, a torn-down
+	// panel would still report an analysed cut, and `resolveActiveOutAndBackSections`
+	// would still prefer it over the live selection.
+	appState.currentOutAndBackSections = [];
 }
 
 /**
@@ -250,6 +256,46 @@ function invalidateVePanelIfBasisChanged(
 ): void {
 	if (!analyzedBasis || analyzedBasis.length === 0) return;
 	if (sameItems(analyzedBasis, newBasis)) return;
+	tearDownVeAnalysisPanel(getDependencies().appState);
+}
+
+/**
+ * The gate-re-detection twin of the above, comparing THE CUT rather than the
+ * section numbers.
+ *
+ * Section numbers are useless here and comparing them was the original defect.
+ * `detectSections` numbers its output sequentially from 1, so nudging a gate
+ * over a ride that still yields three sections produces `[1, 2, 3]` both
+ * before and after: `sameItems` said "unchanged" and the panel kept showing the
+ * PREVIOUS cut of the ride while Section 3 showed the new one. What actually
+ * changed is where each section starts and ends, so that is what is compared.
+ *
+ * `currentOutAndBackSections` is the right analyzed basis for two reasons.
+ * It carries the index ranges (`activeOutAndBackSections.ts:5` — "written once,
+ * by `showOutAndBackVEAnalysis`, and holds exactly the sections that were
+ * analysed and drawn"), and it is written AT RENDER, whereas
+ * `currentCoveredItems` is nulled by `resolveMultiSegmentAnalysisParams` and
+ * only refilled by `summarize` — so a re-detection landing between Analyze and
+ * the first recompute saw no analyzed basis at all and returned early.
+ *
+ * STILL GUARDED, for the reason the doc above gives: `bindOutAndBackDetection`
+ * ends with an initial `void updateGates()`, so an ordinary `rerenderSection3`
+ * re-runs detection with the gates unmoved. That pass re-derives the identical
+ * ranges, matches, and must leave a valid panel alone.
+ */
+function invalidateVePanelIfSectionCutChanged(
+	analyzed: OutAndBackSection[],
+	detected: OutAndBackSection[],
+): void {
+	if (analyzed.length === 0) return;
+	const cut = (section: OutAndBackSection) =>
+		`${section.outboundStartIdx}:${section.outboundEndIdx}:` +
+		`${section.inboundStartIdx}:${section.inboundEndIdx}`;
+	const detectedCuts = new Set(detected.map(cut));
+	// Every analysed section must survive the new detection unchanged. A
+	// detection that merely ADDS a section leaves what is on screen accurate,
+	// so it is not a reason to throw the panel away.
+	if (analyzed.every((section) => detectedCuts.has(cut(section)))) return;
 	tearDownVeAnalysisPanel(getDependencies().appState);
 }
 
@@ -922,9 +968,10 @@ export async function runOutAndBackDetection(
 	// Moving a gate re-cuts the ride into different sections, so a panel
 	// analyzed from the previous cut describes segments that no longer exist —
 	// the same invalidation as ticking the section boxes, by a blunter route.
-	invalidateVePanelIfBasisChanged(
-		deps.appState.currentCoveredItems,
-		deps.appState.outAndBackSelectedSections,
+	// Compared on the RANGES, not the section numbers: see the helper.
+	invalidateVePanelIfSectionCutChanged(
+		deps.appState.currentOutAndBackSections,
+		deps.appState.outAndBackSections,
 	);
 
 	deps.updateAnalyzeButton();
@@ -1088,15 +1135,36 @@ export function updateSelectedLaps(): void {
 		})
 		.filter((lap) => lap > 0);
 
+	const lapDetectionMode = getGpsAnalysisMode();
+
+	// ONLY IN THE FIT-LAP MODES, because only there do the two lists being
+	// compared mean the same thing. `currentAnalyzedLaps` holds FIT lap numbers
+	// under Standard, but GPS VIRTUAL LAP numbers under GPS-lap splitting
+	// (`renderGpsLap.ts:103`) and SECTION numbers under out-and-back
+	// (`renderOutAndBack.ts:94`) — all three written by
+	// `resolveMultiSegmentAnalysisParams` (`MultiSegmentSettings.ts:84`), and
+	// all three counting 1..N, so they collide numerically with the FIT lap
+	// list in `selectedLaps`. Ticking FIT lap 3 with three GPS laps analyzed
+	// made `[1,2,3]` match `[1,2,3]` and skipped an invalidation that was due;
+	// the mirror case tore down a perfectly valid GPS panel. The GPS modes
+	// invalidate on their own basis instead — out-and-back through
+	// `invalidateVePanelIfSectionCutChanged`, which the FIT-lap selection
+	// reaches anyway because it re-trims the detector's input.
+	const isFitLapSelectionMode =
+		!isGpsLapSelectionMode(lapDetectionMode) &&
+		lapDetectionMode !== "GPS based out and back";
+
 	// BEFORE the auto-rho schedule below, deliberately. Auto-rho writes
 	// parameters ~500 ms later and that write reaches
 	// `requestModeUpdate("parameters")`; with the panel already hidden the
 	// primitive bails at its visibility gate instead of recomputing against a
 	// selection the panel on screen does not belong to.
-	invalidateVePanelIfBasisChanged(
-		deps.appState.currentAnalyzedLaps,
-		deps.appState.selectedLaps,
-	);
+	if (isFitLapSelectionMode) {
+		invalidateVePanelIfBasisChanged(
+			deps.appState.currentAnalyzedLaps,
+			deps.appState.selectedLaps,
+		);
+	}
 
 	// Update map visualization
 	const mapVisualization = deps.getMapVisualization();
@@ -1104,11 +1172,8 @@ export function updateSelectedLaps(): void {
 		mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 	}
 
-	const lapDetectionMode = getGpsAnalysisMode();
 	const shouldShowSelectionTrimControls =
-		deps.appState.selectedLaps.length > 0 &&
-		!isGpsLapSelectionMode(lapDetectionMode) &&
-		lapDetectionMode !== "GPS based out and back";
+		deps.appState.selectedLaps.length > 0 && isFitLapSelectionMode;
 
 	// Show/hide trim controls based on lap selection.
 	// GPS-based splitting modes have their own selection model, so these

@@ -64,6 +64,96 @@ function record(overrides: Partial<SaveResultData> = {}): SaveResultData {
 const identify = (r: { fileName: string; lapKey: string; notes: string }) =>
 	`${r.fileName}|${r.lapKey}|${r.notes}`;
 
+/**
+ * THE STORE OPENS ITSELF, because the results view is reachable with no file
+ * loaded.
+ *
+ * `initialize()` had exactly one production caller, on the startup path
+ * (`fileLoadOrchestration.ts:91`), and it runs after the WASM module and the FIT
+ * processor. The footer's "Show All Results" is bound before any of that
+ * (`initializeApplication.ts:324`) and is the entry point whose whole point is
+ * that it works with nothing open — which is precisely the window in which the
+ * database is not. `getAllResults` answers `[]` rather than throwing when it has
+ * no connection, so the user was shown "Stored results (0)" over a populated
+ * store, and "Clear Results" beside it cleared nothing.
+ */
+describe("reading the store before anything has opened it", () => {
+	beforeEach(() => {
+		globalThis.indexedDB = new IDBFactory();
+	});
+
+	/** Put rows in the database and drop the connection that wrote them. */
+	async function seedTwoRows(): Promise<void> {
+		const writer = new ResultsStorage();
+		await writer.initialize();
+		await writer.saveResult(record({ fileName: "a.fit", laps: [1] }));
+		await writer.saveResult(record({ fileName: "b.fit", laps: [2] }));
+	}
+
+	it("opens on demand rather than reporting an empty store", async () => {
+		await seedTwoRows();
+
+		// Never initialized: the footer button's state on a cold page.
+		const reader = new ResultsStorage();
+
+		expect(await reader.getAllResults()).toHaveLength(2);
+	});
+
+	it("clears on demand rather than clearing nothing", async () => {
+		await seedTwoRows();
+
+		const cold = new ResultsStorage();
+		await cold.clearAllResults();
+
+		expect(await cold.getAllResults()).toHaveLength(0);
+	});
+
+	it("opens once however many readers arrive together", async () => {
+		await seedTwoRows();
+
+		const storage = new ResultsStorage();
+		const opens = vi.spyOn(globalThis.indexedDB, "open");
+
+		// Two readers inside the same open. Memoised on the promise rather than
+		// on a `db !== null` check, because that check is still false while the
+		// first open is in flight — two concurrent `openDatabase` runs would
+		// mean two version-upgrade/migration sequences against one database.
+		const [first, second] = await Promise.all([
+			storage.getAllResults(),
+			storage.getAllResults(),
+		]);
+		const afterConcurrent = opens.mock.calls.length;
+
+		expect(first).toHaveLength(2);
+		expect(second).toHaveLength(2);
+
+		// And an already-open store opens nothing further.
+		await storage.getAllResults();
+		expect(opens.mock.calls.length).toBe(afterConcurrent);
+
+		opens.mockRestore();
+	});
+
+	it("retries after a failed open instead of latching the failure", async () => {
+		await seedTwoRows();
+
+		const storage = new ResultsStorage();
+		const opens = vi
+			.spyOn(globalThis.indexedDB, "open")
+			.mockImplementationOnce(() => {
+				throw new Error("storage refused");
+			});
+
+		// A refused open is reported as an empty table, not as a broken page.
+		expect(await storage.getAllResults()).toEqual([]);
+
+		// And the memoised promise is dropped on failure, so the next reader
+		// tries again rather than inheriting the first one's bad luck forever.
+		opens.mockRestore();
+		expect(await storage.getAllResults()).toHaveLength(2);
+	});
+});
+
 describe("deleting one stored result", () => {
 	let storage: ResultsStorage;
 

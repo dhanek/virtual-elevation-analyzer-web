@@ -207,7 +207,16 @@ export async function showGpsLapVEAnalysis(
 			lapAltitude.push(allAltitude[i]);
 			lapDistance.push(allDistance[i]);
 			lapWindSpeed.push(allWindSpeed[i]);
-			if (allRho) lapRho.push(allRho[i]);
+			// BOUNDED BY THE DENSITY SERIES, not by `allTimestamps`.
+			// `hasAirDensityData` is a `.some(...)`, so a channel the device
+			// stopped emitting mid-ride is still accepted, and the tail indices
+			// here pushed `undefined` into a `number[]` — NaN rho across the
+			// WASM boundary for the whole lap. Same rule as
+			// `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a short or
+			// hole-punched array under the calculator is a worse bug than a
+			// constant one, so a lap the series does not span falls back to the
+			// constant `params.rho` instead.
+			if (allRho && i < allRho.length) lapRho.push(allRho[i]);
 		}
 
 		if (lapTimestamps.length < 10) {
@@ -215,6 +224,15 @@ export async function showGpsLapVEAnalysis(
 				`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`,
 			);
 			continue;
+		}
+
+		// After the skip above, so a lap that contributes nothing does not also
+		// warn about its rho.
+		const lapRhoUsable = !!allRho && lapRho.length === lapTimestamps.length;
+		if (allRho && !lapRhoUsable) {
+			log.warn(
+				`Air density series (${allRho.length}) does not span lap ${lapNumber}; using constant rho`,
+			);
 		}
 
 		const supplementarySeries = buildSegmentSupplementarySeries({
@@ -244,7 +262,7 @@ export async function showGpsLapVEAnalysis(
 				altitude: lapAltitude,
 				distance: lapDistance,
 				windSpeed: lapWindSpeed,
-				rhoArray: allRho ? lapRho : null,
+				rhoArray: lapRhoUsable ? lapRho : null,
 				params: resolvedParams,
 				cda,
 				crr: appliedCrr,

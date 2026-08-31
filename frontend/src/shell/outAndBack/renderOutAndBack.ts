@@ -139,11 +139,25 @@ export async function showOutAndBackVEAnalysis(
 	 * The rho slice for one leg, on `extractSegmentData`'s own bounds
 	 * (`SegmentExtractor.ts:26`) so the series cannot end up a different length
 	 * from the ones beside it.
+	 *
+	 * BOUNDED BY THE DENSITY SERIES AS WELL. `hasAirDensityData` is a
+	 * `.some(...)`, so a channel the device stopped emitting mid-ride is still
+	 * accepted, and indexing on `allTimestamps` alone put `undefined` into a
+	 * `number[]` — NaN rho across the WASM boundary for that leg. Same rule as
+	 * `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a leg the series
+	 * does not span falls back to the constant `params.rho` rather than to a
+	 * hole-punched array.
 	 */
 	const legRho = (startIdx: number, endIdx: number): number[] | null => {
 		if (!allRho) return null;
 		const slice: number[] = [];
 		for (let i = startIdx; i <= endIdx && i < allTimestamps.length; i++) {
+			if (i >= allRho.length) {
+				log.warn(
+					`Air density series (${allRho.length}) does not span leg ${startIdx}-${endIdx}; using constant rho`,
+				);
+				return null;
+			}
 			slice.push(allRho[i]);
 		}
 		return slice;

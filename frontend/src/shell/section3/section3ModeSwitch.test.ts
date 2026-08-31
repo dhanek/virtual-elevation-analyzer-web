@@ -1142,6 +1142,45 @@ describe("the VE panel after a Section 3 selection change", () => {
 		expect(appState.currentVEResult).not.toBeNull();
 	});
 
+	/**
+	 * THE FIT-LAP LIST AND THE GPS-LAP LIST ARE DIFFERENT NAMESPACES THAT LOOK
+	 * ALIKE.
+	 *
+	 * `resolveMultiSegmentAnalysisParams` (`MultiSegmentSettings.ts:84`) writes
+	 * `currentAnalyzedLaps` in all three modes, but the numbers mean different
+	 * things: FIT lap numbers under Standard, GPS VIRTUAL lap numbers under GPS
+	 * lap splitting (`renderGpsLap.ts:103`), section numbers under out-and-back
+	 * (`renderOutAndBack.ts:94`). All three count 1..N, so they collide
+	 * numerically with the FIT lap list in `selectedLaps` and the guard compared
+	 * them as if they were the same list — in BOTH directions. Ticking FIT lap 3
+	 * with three GPS laps analysed made `[1,2,3]` match `[1,2,3]` and skipped an
+	 * invalidation that was due; the case below is the mirror, where a FIT
+	 * selection that merely happens to differ threw away a perfectly good GPS
+	 * panel. Only the mirror is observable from here — the missed teardown looks
+	 * exactly like a correct no-op — so that is what is pinned.
+	 */
+	it("does not tear a GPS-lap panel down over the FIT lap checkboxes", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("GPS based lap splitting");
+		await settle();
+		await analyzeStandard(appState);
+		await settle();
+
+		// What a GPS-lap analyze records: three VIRTUAL laps, nothing to do with
+		// the FIT lap list the checkboxes below drive.
+		appState.currentAnalyzedLaps = [1, 2, 3];
+		expect(veSectionHidden()).toBe(false);
+
+		renderLapCheckboxes([1, 2, 3], [1]);
+		updateSelectedLaps();
+		await settle();
+
+		expect(veSectionHidden()).toBe(false);
+		expect(appState.currentVEResult).not.toBeNull();
+		expect(appState.currentAnalyzedLaps).toEqual([1, 2, 3]);
+	});
+
 	it("leaves an auto-rho recompute scheduled before the teardown unable to write", async () => {
 		const appState = await analyzedStandardPanel();
 
