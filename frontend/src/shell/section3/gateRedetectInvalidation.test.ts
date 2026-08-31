@@ -32,8 +32,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-/** What `detectSections()` will return on the next call. */
-const detected = vi.hoisted(() => ({ sections: [] as unknown[] }));
+/** What the two detectors will return on the next call. */
+const detected = vi.hoisted(() => ({
+	sections: [] as unknown[],
+	laps: [] as unknown[],
+}));
 
 vi.mock("../../utils/GpsLapDetection", async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
@@ -46,14 +49,29 @@ vi.mock("../../utils/GpsLapDetection", async (importOriginal) => ({
 			};
 		}
 	},
+	GpsLapDetector: class {
+		detectLaps() {
+			return {
+				detectedLaps: detected.laps,
+				passings: [],
+				markerLat: 0,
+				markerLon: 0,
+			};
+		}
+	},
 }));
 
 import {
 	configureSection3Orchestration,
+	handleGpsLapSelectionChange,
+	runGpsLapDetection,
 	runOutAndBackDetection,
 } from "./section3Orchestration";
 import { AppState } from "../../state/AppState";
-import type { OutAndBackSection } from "../../utils/GpsLapDetection";
+import type {
+	DetectedLap,
+	OutAndBackSection,
+} from "../../utils/GpsLapDetection";
 import { resetRecomputeThrottle } from "../analysis/recomputeRunner";
 import { clearModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
 import { resetModeUpdateRequests } from "../analysis/requestModeUpdate";
@@ -159,6 +177,7 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 	beforeEach(() => {
 		setupDom();
 		detected.sections = [];
+		detected.laps = [];
 		clearModeUpdateCallbacks();
 		resetModeUpdateRequests();
 	});
@@ -271,5 +290,173 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 
 		expect(veSectionHidden()).toBe(true);
 		expect(appState.currentVEResult).toBeNull();
+	});
+});
+
+
+/**
+ * THE SAME TWO GUARDS, IN THE MODE THAT NEVER HAD EITHER.
+ *
+ * `runGpsLapDetection` had no invalidation at all, and neither did
+ * `handleGpsLapSelectionChange` — while their out-and-back twins had one each.
+ * The gap was masked rather than caught: before the FIT-lap fix,
+ * `updateSelectedLaps` compared `currentAnalyzedLaps` (GPS virtual laps here)
+ * against `selectedLaps` (FIT laps) and tore the panel down whenever those two
+ * unrelated lists happened to differ. Coincidental teardowns are not a guard,
+ * and removing the wrong comparison left GPS-lap mode with nothing.
+ */
+describe("the VE panel in GPS-lap mode", () => {
+	beforeEach(() => {
+		setupDom();
+		detected.sections = [];
+		detected.laps = [];
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	afterEach(() => {
+		resetRecomputeThrottle();
+		clearModeUpdateCallbacks();
+		resetModeUpdateRequests();
+	});
+
+	/**
+	 * GPS-lap detection is SCOPED TO THE FIT SELECTION and bails outright
+	 * without one (`section3Orchestration.ts:701`), so this mode's fixture
+	 * carries a FIT lap over the whole activity. The trim that implies is not
+	 * what these tests are about — the faked detector ignores it — but without
+	 * it the function under test never runs.
+	 */
+	function configureWithFitLap(appState: AppState): void {
+		configure(appState);
+		appState.currentLaps = [{ start_time: 0, end_time: SAMPLE_COUNT - 1 }] as never;
+		appState.selectedLaps = [1];
+	}
+
+	function lap(lapNumber: number, startIdx: number, endIdx: number): DetectedLap {
+		return {
+			lapNumber,
+			startIdx,
+			endIdx,
+			startTime: startIdx,
+			endTime: endIdx,
+			duration: endIdx - startIdx,
+			distance: 1,
+			startDirection: 0,
+			endDirection: 0,
+			directionName: "N",
+			startLat: 52.52,
+			startLon: 13.405,
+		} as DetectedLap;
+	}
+
+	/**
+	 * The state a completed GPS-lap analyze leaves behind. The basis is
+	 * `currentGpsLapIndexRanges`, written by `gpsLapMode.syncState`
+	 * (`gpsLapMode.ts:70`) and cleared by the teardown, exactly as
+	 * `currentOutAndBackSections` is.
+	 */
+	function analyzedLaps(appState: AppState, laps: DetectedLap[]): void {
+		document.getElementById("veAnalysisSection")?.classList.remove("hidden");
+		appState.currentVEResult = { r2: 0.9 } as never;
+		appState.currentGpsLapIndexRanges = laps.map((l) => ({
+			startIdx: l.startIdx,
+			endIdx: l.endIdx,
+		}));
+		appState.currentCoveredItems = laps.map((l) => l.lapNumber);
+	}
+
+	describe("after a gate re-detection", () => {
+		it("tears the panel down when the gate move re-cuts the laps", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+
+			// Three laps before, three laps after, numbered 1..3 both times —
+			// the shape that made the section-number comparison useless.
+			detected.laps = [lap(1, 5, 85), lap(2, 86, 165)];
+			await runGpsLapDetection(52.52, 13.405, 0);
+
+			expect(veSectionHidden()).toBe(true);
+			expect(appState.currentVEResult).toBeNull();
+			expect(appState.currentGpsLapIndexRanges).toBeNull();
+		});
+
+		it("leaves the panel alone when the gate has not moved", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			const laps = [lap(1, 0, 80), lap(2, 81, 160)];
+			analyzedLaps(appState, laps);
+
+			// `bindGpsDetection` runs an initial detection on every Section 3
+			// re-render, so this pass must not disturb a valid panel.
+			detected.laps = laps.map((l) => ({ ...l }));
+			await runGpsLapDetection(52.52, 13.405, 0);
+
+			expect(veSectionHidden()).toBe(false);
+			expect(appState.currentVEResult).not.toBeNull();
+		});
+
+		it("does not tear down when nothing has been analysed yet", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+
+			detected.laps = [lap(1, 0, 80)];
+			await runGpsLapDetection(52.52, 13.405, 0);
+
+			expect(veSectionHidden()).toBe(false);
+			expect(appState.gpsSelectedLaps).toEqual([1]);
+		});
+	});
+
+	describe("after a lap checkbox change", () => {
+		/** The GPS lap list, reduced to what the handler actually reads. */
+		function renderGpsLapCheckboxes(laps: number[], checked: number[]): void {
+			const results = document.getElementById("results");
+			if (!results) throw new Error("#results is not on the page");
+			results.innerHTML = laps
+				.map(
+					(l) => `
+        <div class="lap-checkbox-item" data-gps-lap="${l}">
+            <input type="checkbox" class="gps-lap-checkbox"${checked.includes(l) ? " checked" : ""}>
+        </div>`,
+				)
+				.join("");
+		}
+
+		it("tears the panel down when an analysed lap is unticked", () => {
+			const appState = makeAppState();
+			configure(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+
+			renderGpsLapCheckboxes([1, 2, 3], [1]);
+			handleGpsLapSelectionChange();
+
+			expect(veSectionHidden()).toBe(true);
+			expect(appState.currentVEResult).toBeNull();
+		});
+
+		it("leaves the panel alone when the selection still matches", () => {
+			const appState = makeAppState();
+			configure(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+
+			// Order-insensitive, like the FIT-lap and section guards: the list is
+			// derived by walking rendered checkboxes and has no meaningful order.
+			renderGpsLapCheckboxes([1, 2, 3], [2, 1]);
+			handleGpsLapSelectionChange();
+
+			expect(veSectionHidden()).toBe(false);
+			expect(appState.currentVEResult).not.toBeNull();
+		});
+
+		it("does not tear down when nothing has been analysed yet", () => {
+			const appState = makeAppState();
+			configure(appState);
+
+			renderGpsLapCheckboxes([1, 2, 3], [1, 2]);
+			expect(() => handleGpsLapSelectionChange()).not.toThrow();
+			expect(appState.gpsSelectedLaps).toEqual([1, 2]);
+		});
 	});
 });
