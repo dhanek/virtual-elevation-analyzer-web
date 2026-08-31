@@ -663,26 +663,59 @@ export class ResultsStorage {
      * Deleting a key that is not present RESOLVES rather than throwing, which is
      * IndexedDB's own behaviour and the right one here — a second click on a
      * table another tab has already pruned should not raise.
+     *
+     * RESOLVING IS A CLAIM, and the only caller acts on it: the results view
+     * removes the row and decrements its count as soon as this settles. So the
+     * two ways of resolving without having deleted anything are both errors:
+     *
+     *   - NO DATABASE. `saveResult` already throws here rather than returning
+     *     quietly; a delete that reported success while storage was never
+     *     opened would take the row off the table and leave it on disk.
+     *   - REQUEST SUCCESS. An IndexedDB write can succeed at request level and
+     *     still be rolled back when its transaction aborts (quota, an explicit
+     *     abort, the connection closing). The row would then reappear the next
+     *     time the view is opened, with nothing having reported a failure.
+     *     `oncomplete`/`onabort` is the honest pair for a mutating request.
      */
     async deleteResult(key: {
         fileName: string;
         lapKey: string;
         notes: string;
     }): Promise<void> {
-        if (!this.db) return;
+        if (!this.db) {
+            log.warn('IndexedDB not initialized, cannot delete result');
+            throw new Error('Database not initialized');
+        }
 
         return new Promise((resolve, reject) => {
             const transaction = this.db!.transaction([this.storeName], 'readwrite');
             const objectStore = transaction.objectStore(this.storeName);
             const request = objectStore.delete([key.fileName, key.lapKey, key.notes]);
 
-            request.onsuccess = () => {
-                resolve();
-            };
+            // An explicit `abort()` leaves both `error` fields null, so the
+            // reason has to be synthesised rather than passed through — a
+            // rejection with `null` in it tells the caller nothing.
+            const failure = (what: string) =>
+                transaction.error ?? request.error ?? new Error(what);
 
             request.onerror = () => {
                 log.error('Failed to delete result:', request.error);
-                reject(request.error);
+            };
+
+            transaction.oncomplete = () => {
+                resolve();
+            };
+
+            transaction.onabort = () => {
+                const error = failure('Delete transaction aborted');
+                log.error('Delete transaction aborted:', error);
+                reject(error);
+            };
+
+            transaction.onerror = () => {
+                const error = failure('Delete transaction failed');
+                log.error('Delete transaction failed:', error);
+                reject(error);
             };
         });
     }

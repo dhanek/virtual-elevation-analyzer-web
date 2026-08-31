@@ -15,7 +15,7 @@
  * failure mode this branch has spent its time removing.
  */
 import { IDBFactory } from "fake-indexeddb";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ResultsStorage,
 	type SaveResultData,
@@ -144,5 +144,64 @@ describe("deleting one stored result", () => {
 		});
 
 		expect(await storage.getAllResults()).toHaveLength(1);
+	});
+
+	/**
+	 * RESOLVING IS A CLAIM. `resultsModal` removes the row from the table and
+	 * decrements its "Stored results (N)" heading the moment this settles, so
+	 * every way of resolving without having deleted anything shows the user a
+	 * deletion that did not happen. The two below are the ones that were
+	 * reachable.
+	 */
+	describe("does not report a delete it did not perform", () => {
+		it("rejects when the database was never opened", async () => {
+			// A private window, storage the browser refuses, an `initialize`
+			// that threw. `saveResult` already throws on this; the delete used
+			// to return quietly, which reads as success.
+			const unopened = new ResultsStorage();
+
+			await expect(
+				unopened.deleteResult({ fileName: "a.fit", lapKey: "1", notes: "" }),
+			).rejects.toThrow(/not initialized/i);
+		});
+
+		it("rejects when the transaction is rolled back after the request succeeded", async () => {
+			await storage.saveResult(record({ fileName: "a.fit", notes: "keep" }));
+
+			const db = (storage as unknown as { db: IDBDatabase }).db;
+			const openTransaction = db.transaction.bind(db);
+
+			// Abort from the delete request's OWN success handler: the exact
+			// shape of a write that IndexedDB reports as successful and then
+			// throws away when the transaction cannot commit (quota, an
+			// explicit abort, the connection closing). Resolving on
+			// `request.onsuccess` cannot tell this apart from a real delete.
+			vi.spyOn(db, "transaction").mockImplementation((...args: unknown[]) => {
+				const transaction = (
+					openTransaction as unknown as (...a: unknown[]) => IDBTransaction
+				)(...args);
+				const openStore = transaction.objectStore.bind(transaction);
+				transaction.objectStore = (name: string) => {
+					const store = openStore(name);
+					const remove = store.delete.bind(store);
+					store.delete = (key: IDBValidKey | IDBKeyRange) => {
+						const request = remove(key);
+						request.addEventListener("success", () => transaction.abort());
+						return request;
+					};
+					return store;
+				};
+				return transaction;
+			});
+
+			await expect(
+				storage.deleteResult({ fileName: "a.fit", lapKey: "1", notes: "keep" }),
+			).rejects.toBeTruthy();
+
+			vi.restoreAllMocks();
+			// The row is still there, which is what makes the rejection the
+			// truthful answer.
+			expect(await storage.getAllResults()).toHaveLength(1);
+		});
 	});
 });

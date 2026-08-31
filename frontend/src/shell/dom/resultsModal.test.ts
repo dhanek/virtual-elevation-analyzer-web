@@ -21,6 +21,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RESULT_COLUMNS } from "../../utils/resultColumns";
 import type { StoredVEResult } from "../../utils/ResultsStorage";
 import {
+	closeResultsModal,
 	HIDDEN_COLUMNS_STORAGE_KEY,
 	openResultsModal,
 } from "./resultsModal";
@@ -78,6 +79,10 @@ function rowButton(i: number, action: string): HTMLButtonElement {
 
 describe("the stored-results view", () => {
 	beforeEach(() => {
+		// Through the exported close, not by wiping the body: the view's own
+		// listener is on `document`, so an innerHTML reset would leave the
+		// previous test's handler live and let it answer this test's keystrokes.
+		closeResultsModal();
 		document.body.innerHTML = "";
 		localStorage.clear();
 	});
@@ -275,6 +280,48 @@ describe("the stored-results view", () => {
 			expect(document.getElementById("resultsModal")).not.toBeNull();
 
 			document.getElementById("resultsModalBackdrop")!.click();
+			expect(document.getElementById("resultsModal")).toBeNull();
+		});
+
+		/**
+		 * The exported close is the one the rest of the app calls, and it used
+		 * to remove the element WITHOUT removing the keydown handler, which is
+		 * registered on `document` and therefore outlives the element. The
+		 * evidence that the handler is still live is not the modal — that is
+		 * already gone — it is the focus restore inside it: Escape anywhere
+		 * afterwards dragged the caret back to whatever had focus when the dead
+		 * view was opened.
+		 */
+		it("takes its Escape handler with it when closed from outside", async () => {
+			const opener = document.createElement("button");
+			document.body.appendChild(opener);
+			opener.focus();
+
+			await open([record()]);
+			closeResultsModal();
+
+			const elsewhere = document.createElement("input");
+			document.body.appendChild(elsewhere);
+			elsewhere.focus();
+
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+			);
+
+			expect(document.activeElement).toBe(elsewhere);
+		});
+
+		it("still closes on Escape after an earlier view was closed from outside", async () => {
+			// The other half of the same seam: a teardown ref that is cleared
+			// too eagerly leaves the NEXT view without a working Escape.
+			await open([record()]);
+			closeResultsModal();
+			await open([record()]);
+
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+			);
+
 			expect(document.getElementById("resultsModal")).toBeNull();
 		});
 	});

@@ -55,6 +55,14 @@ describe('activating a tab re-measures the plots that pane just revealed', () =>
             <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                 <div class="ve-plot-container"><div id="vePlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
                 <div class="ve-plot-container"><div id="veResidualsPlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
+                <!--
+                    The out-and-back shape: the compare graphs live INSIDE the
+                    VE pane, in a wrapper that carries .hidden whenever the
+                    selection is not a comparison.
+                -->
+                <div id="oabCompareView" class="hidden">
+                    <div class="ve-plot-container"><div id="oabVeComparePlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
+                </div>
             </div>
             <div class="ve-tab-content" id="wind-tab">
                 <div class="ve-plot-container"><div id="windSpeedPlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
@@ -89,6 +97,24 @@ describe('activating a tab re-measures the plots that pane just revealed', () =>
         activateTab('wind')
         activateTab('ve')
         expect(resized).toEqual(['windSpeedPlot', 'vePlot', 'veResidualsPlot'])
+    })
+
+    it('skips graphs inside a hidden container within the pane', () => {
+        // `Plots.resize` deletes layout.width and re-autosizes against
+        // `offsetWidth`, which is 0 in a `display: none` subtree -- so handing
+        // it a hidden graph PINS the zero width this function exists to undo,
+        // and it survives until something redraws that graph. The out-and-back
+        // compare view is the case: it sits inside the VE pane, so a
+        // Power -> VE tab switch in non-compare mode reached it.
+        activateTab('ve')
+        expect(resized).toEqual(['vePlot', 'veResidualsPlot'])
+    })
+
+    it('resizes a container in the pane once it is unhidden', () => {
+        document.getElementById('oabCompareView')!.classList.remove('hidden')
+
+        activateTab('ve')
+        expect(resized).toEqual(['vePlot', 'veResidualsPlot', 'oabVeComparePlot'])
     })
 
     it('does nothing when Plotly is absent or too old to expose Plots.resize', () => {
