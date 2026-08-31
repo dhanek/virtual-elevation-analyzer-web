@@ -260,43 +260,58 @@ function invalidateVePanelIfBasisChanged(
 }
 
 /**
- * The gate-re-detection twin of the above, comparing THE CUT rather than the
- * section numbers.
+ * The RE-DETECTION twin of the above, comparing THE CUT rather than the item
+ * numbers. Used by both GPS modes.
  *
- * Section numbers are useless here and comparing them was the original defect.
- * `detectSections` numbers its output sequentially from 1, so nudging a gate
+ * Item numbers are useless here and comparing them was the original defect.
+ * Both detectors number their output sequentially from 1, so nudging a gate
  * over a ride that still yields three sections produces `[1, 2, 3]` both
  * before and after: `sameItems` said "unchanged" and the panel kept showing the
  * PREVIOUS cut of the ride while Section 3 showed the new one. What actually
- * changed is where each section starts and ends, so that is what is compared.
+ * changed is where each piece of the ride starts and ends, so that is what is
+ * compared — as an opaque key per item, built by the caller because the two
+ * modes cut the ride differently (a section has an outbound and an inbound leg,
+ * a GPS lap has one range).
  *
- * `currentOutAndBackSections` is the right analyzed basis for two reasons.
- * It carries the index ranges (`activeOutAndBackSections.ts:5` — "written once,
- * by `showOutAndBackVEAnalysis`, and holds exactly the sections that were
- * analysed and drawn"), and it is written AT RENDER, whereas
- * `currentCoveredItems` is nulled by `resolveMultiSegmentAnalysisParams` and
- * only refilled by `summarize` — so a re-detection landing between Analyze and
- * the first recompute saw no analyzed basis at all and returned early.
+ * THE ANALYSED BASIS IS THE FIELD THE RENDER WROTE — `currentOutAndBackSections`
+ * (`activeOutAndBackSections.ts:5` — "written once, by
+ * `showOutAndBackVEAnalysis`, and holds exactly the sections that were analysed
+ * and drawn") and `currentGpsLapIndexRanges` (`gpsLapMode.ts:70`). Both carry
+ * ranges, and both are written AT RENDER, whereas `currentCoveredItems` is
+ * nulled by `resolveMultiSegmentAnalysisParams` and only refilled by
+ * `summarize` — so a re-detection landing between Analyze and the first
+ * recompute saw no analysed basis at all and returned early. Both are cleared
+ * by `tearDownVeAnalysisPanel`, so a torn-down panel reports no cut.
  *
  * STILL GUARDED, for the reason the doc above gives: `bindOutAndBackDetection`
- * ends with an initial `void updateGates()`, so an ordinary `rerenderSection3`
- * re-runs detection with the gates unmoved. That pass re-derives the identical
- * ranges, matches, and must leave a valid panel alone.
+ * and `bindGpsDetection` both end with an initial detection call, so an ordinary
+ * `rerenderSection3` re-runs detection with the gates unmoved. That pass
+ * re-derives the identical ranges, matches, and must leave a valid panel alone.
  */
-function invalidateVePanelIfSectionCutChanged(
-	analyzed: OutAndBackSection[],
-	detected: OutAndBackSection[],
+function invalidateVePanelIfCutChanged(
+	analyzedCuts: string[],
+	detectedCuts: string[],
 ): void {
-	if (analyzed.length === 0) return;
-	const cut = (section: OutAndBackSection) =>
-		`${section.outboundStartIdx}:${section.outboundEndIdx}:` +
-		`${section.inboundStartIdx}:${section.inboundEndIdx}`;
-	const detectedCuts = new Set(detected.map(cut));
-	// Every analysed section must survive the new detection unchanged. A
-	// detection that merely ADDS a section leaves what is on screen accurate,
-	// so it is not a reason to throw the panel away.
-	if (analyzed.every((section) => detectedCuts.has(cut(section)))) return;
+	if (analyzedCuts.length === 0) return;
+	const available = new Set(detectedCuts);
+	// Every analysed piece must survive the new detection unchanged. A detection
+	// that merely ADDS one leaves what is on screen accurate, so it is not a
+	// reason to throw the panel away.
+	if (analyzedCuts.every((cut) => available.has(cut))) return;
 	tearDownVeAnalysisPanel(getDependencies().appState);
+}
+
+/** One out-and-back section, keyed on both of its legs. */
+function outAndBackCut(section: OutAndBackSection): string {
+	return (
+		`${section.outboundStartIdx}:${section.outboundEndIdx}:` +
+		`${section.inboundStartIdx}:${section.inboundEndIdx}`
+	);
+}
+
+/** One GPS lap, or one already-analysed lap range. */
+function lapRangeCut(range: { startIdx: number; endIdx: number }): string {
+	return `${range.startIdx}:${range.endIdx}`;
 }
 
 /**
@@ -777,6 +792,17 @@ export async function runGpsLapDetection(
 	deps.appState.gpsSelectedLaps = deps.appState.gpsDetectedLaps.map(
 		(lap) => lap.lapNumber,
 	);
+
+	// The out-and-back twin, and for the identical reason: moving the gate
+	// re-cuts the ride, so a panel analyzed from the previous cut describes laps
+	// that no longer exist. Compared on the RANGES — the auto-select above has
+	// just written the detector's own 1..N into `gpsSelectedLaps`, so lap numbers
+	// would compare equal to themselves exactly as the section numbers did.
+	invalidateVePanelIfCutChanged(
+		(deps.appState.currentGpsLapIndexRanges ?? []).map(lapRangeCut),
+		deps.appState.gpsDetectedLaps.map(lapRangeCut),
+	);
+
 	deps.updateAnalyzeButton();
 }
 
@@ -856,6 +882,17 @@ export function handleGpsLapSelectionChange(): void {
 			return item ? parseInt(item.getAttribute("data-gps-lap") || "0") : 0;
 		})
 		.filter((lap) => lap > 0);
+
+	// The twin of `handleOutAndBackSectionSelectionChange`'s guard, which the
+	// GPS-lap list never had: unticking an analysed lap leaves the panel showing
+	// a curve that includes it. `currentCoveredItems` is the right basis in BOTH
+	// segment modes — `writeSegmentModeResultState` (`segmentSummary.ts:316`) is
+	// shared, and `gpsLapMode.summarize` passes the REAL lap numbers of the
+	// surviving profiles, the same namespace `gpsSelectedLaps` counts in.
+	invalidateVePanelIfBasisChanged(
+		deps.appState.currentCoveredItems,
+		deps.appState.gpsSelectedLaps,
+	);
 
 	// Update visual selection state
 	document
@@ -969,9 +1006,9 @@ export async function runOutAndBackDetection(
 	// analyzed from the previous cut describes segments that no longer exist —
 	// the same invalidation as ticking the section boxes, by a blunter route.
 	// Compared on the RANGES, not the section numbers: see the helper.
-	invalidateVePanelIfSectionCutChanged(
-		deps.appState.currentOutAndBackSections,
-		deps.appState.outAndBackSections,
+	invalidateVePanelIfCutChanged(
+		deps.appState.currentOutAndBackSections.map(outAndBackCut),
+		deps.appState.outAndBackSections.map(outAndBackCut),
 	);
 
 	deps.updateAnalyzeButton();
