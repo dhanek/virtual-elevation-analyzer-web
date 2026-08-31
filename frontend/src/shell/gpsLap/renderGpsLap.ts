@@ -804,7 +804,7 @@ export function buildGpsLapVeAnalysisTemplate(
 													showWindTab
 														? `
                         <div class="ve-tab-content" id="wind-tab">
-                            <div id="gpsLapWindPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="gpsLapWindPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                             ${
 															// PRESENCE on hasWindSpeed, VISIBILITY on the source.
 															// Gated on showFitWindControls this block was absent
@@ -830,7 +830,7 @@ export function buildGpsLapVeAnalysisTemplate(
 												}
 
                         <div class="ve-tab-content" id="power-tab">
-                            <div id="gpsLapPowerPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="gpsLapPowerPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                         </div>
 
                         ${
@@ -847,7 +847,7 @@ export function buildGpsLapVeAnalysisTemplate(
                                 below draws.
                             -->
                             ${virtualDistanceHeaderMarkup()}
-                            <div id="gpsLapVdPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="gpsLapVdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                         </div>
                         `
 														: ""

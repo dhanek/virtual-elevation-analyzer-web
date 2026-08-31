@@ -1,15 +1,24 @@
 /**
  * Regression coverage for the tiny compare-plot defect.
  *
- * `.ve-plot-container` is `flex: 1` inside a `display: block` tab pane with no
- * height, so a responsive Plotly figure with no `layout.height` sizes itself
- * from a content-driven container and collapses to near-zero. The non-compare
- * builder never hit this because it pins `height` (350 / 200) and `margin`; the
- * comparison builder set neither and used a bare `{ responsive: true }` config.
- * See deferred-items.md "maintainer defect 3, second half".
+ * THE SYMPTOM WAS REAL; THE DIAGNOSIS WAS WRONG, and this file recorded the
+ * wrong one. It said `.ve-plot-container` is `flex: 1` inside a `display: block`
+ * pane, so a figure with no `layout.height` collapses. The `flex: 1` was inert
+ * -- the pane is never a flex container -- and the actual cause was that the
+ * container had NO CSS HEIGHT AT ALL, so a figure without `layout.height` was
+ * sized from a box that was itself sized by the plot. The compare builder set
+ * no height and collapsed; the non-compare builder pinned 350/200 and did not.
  *
- * This asserts the two builders agree on sizing, so the compare figures cannot
- * drift back to unsized without a test failing.
+ * Pinning a height was therefore a fix by accident, and it became a defect of
+ * its own: `Plots.resize` guards on `layout.width && layout.height`, so a
+ * height-only layout gets BOTH deleted and re-autosized into that same
+ * height-less box. Measured 350 px -> 26 px.
+ *
+ * The container now carries the height (`.ve-plot-container__plot--*`) and NO
+ * figure carries one, which is the convention the other two modes always had.
+ * So what these cases hold is inverted: the two builders must still agree about
+ * sizing, and the thing they must agree on is that neither of them sets a
+ * height.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -43,17 +52,22 @@ const standard = buildVirtualElevationFigures({
 
 describe("virtual elevation comparison figure sizing", () => {
 	it.each(["elevation", "residuals"] as const)(
-		"%s pins an explicit height so a flex container cannot collapse it",
+		"%s sets NO height, leaving the size to the container's CSS",
 		(figure) => {
-			const height = comparison[figure].layout.height;
-			expect(typeof height).toBe("number");
-			expect(height as number).toBeGreaterThan(0);
+			// A height here is not merely redundant, it is destructive:
+			// `Plots.resize` deletes a height-only layout and re-autosizes, and
+			// the tab layer calls it whenever a hidden pane becomes visible.
+			expect(comparison[figure].layout.height).toBeUndefined();
+			expect(standard[figure].layout.height).toBeUndefined();
 		},
 	);
 
 	it.each(["elevation", "residuals"] as const)(
-		"%s matches the non-compare builder's height",
+		"%s agrees with the non-compare builder about height",
 		(figure) => {
+			// The property the original defect was about, and it survives the
+			// correction: the two builders must not diverge on sizing. They now
+			// agree by both saying nothing.
 			expect(comparison[figure].layout.height).toBe(
 				standard[figure].layout.height,
 			);

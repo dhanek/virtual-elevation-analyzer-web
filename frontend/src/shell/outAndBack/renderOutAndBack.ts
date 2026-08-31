@@ -401,7 +401,7 @@ export function outAndBackVdTabMarkup(
 	return `
                         <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(windSource)}>
                             ${virtualDistanceHeaderMarkup()}
-                            <div id="oabVdPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="oabVdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                         </div>
                         `;
 }
@@ -590,7 +590,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 													showWindTab
 														? `
                         <div class="ve-tab-content" id="wind-tab">
-                            <div id="oabWindPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="oabWindPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                             ${
 															// PRESENCE on hasWindSpeed, VISIBILITY on the source.
 															// Gated on showFitWindControls this block was absent
@@ -616,7 +616,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 												}
 
                         <div class="ve-tab-content" id="power-tab">
-                            <div id="oabPowerPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="oabPowerPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                         </div>
 
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}

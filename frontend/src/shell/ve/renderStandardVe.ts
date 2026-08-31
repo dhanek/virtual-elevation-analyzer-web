@@ -13,6 +13,11 @@ import { bindActionFooter } from "../dom/actionFooter";
 import { getSelectedWindSource } from "../dom/windSource";
 import { createPlotContext } from "../../plots/PlotContext";
 import {
+	bindPlotXAxisToggle,
+	plotXAxisToggleMarkup,
+	resetPlotXAxisForNewPanel,
+} from "./plotXAxisToggle";
+import {
 	buildVirtualElevationFigures,
 	buildWindSpeedFigure,
 	buildSpeedPowerFigure,
@@ -172,31 +177,37 @@ export async function initializeVEAnalysis(
 		virtualDistanceInput,
 	);
 
-	Plotly.newPlot(
+	// `react`, not `newPlot`, for all five (bundle D). Every one of these ids is
+	// redrawn on every slider update -- `bindStandardSliders` already reaches
+	// four of them through `react` -- so `newPlot` here only bought a teardown
+	// and rebuild on the FIRST draw, and left the pattern for the next plot to
+	// be copied from. `react` on a div Plotly has never touched initialises it
+	// exactly as `newPlot` would, so there is no first-draw special case.
+	Plotly.react(
 		"vePlot",
 		figures.elevation.data,
 		figures.elevation.layout,
 		figures.elevation.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"veResidualsPlot",
 		figures.residuals.data,
 		figures.residuals.layout,
 		figures.residuals.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"windSpeedPlot",
 		windSpeedFigure.data,
 		windSpeedFigure.layout,
 		windSpeedFigure.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"speedPowerPlot",
 		speedPowerFigure.data,
 		speedPowerFigure.layout,
 		speedPowerFigure.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"vdPlot",
 		virtualDistanceFigure.data,
 		virtualDistanceFigure.layout,
@@ -373,6 +384,11 @@ export async function showVirtualElevationAnalysisInline(
 	// Without this, any first pass that does not reach `renderVe` leaves
 	// Wind/Power/VD rendering the PREVIOUS selection into this panel.
 	resetTabRenderMapForNewPanel();
+	// Same lifecycle boundary, same reason: the first paint below builds a TIME
+	// context (the cumulative distance series is a property of the stitched
+	// profiles, which do not exist yet), so a distance setting carried over from
+	// the previous analysis would light the wrong button over a time axis.
+	resetPlotXAxisForNewPanel();
 	veAnalysisContent.innerHTML = `
         <div class="ve-inline-container">
             <div class="ve-layout">
@@ -490,21 +506,29 @@ export async function showVirtualElevationAnalysisInline(
                                 Actual:<span id="actualGainValue"></span> |
                                 Laps:<span id="lapsCoveredValue">${analyzedLaps.length}</span>
                             </div>
-                            <div id="vePlot" class="ve-plot-container"></div>
-                            <div id="veResidualsPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="vePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div></div>
+                            <div class="ve-plot-container"><div id="veResidualsPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div></div>
+                            <!--
+                                Under the RESIDUALS plot, not the VE plot: the VE
+                                plot hides its own tick labels and the residuals
+                                plot below it carries the shared x-axis title, so
+                                this is the control's own axis.
+                            -->
+                            ${plotXAxisToggleMarkup()}
                         </div>
                         ${
 													cdaReference
 														? `
                         <div class="ve-tab-content" id="cda-validation-tab">
-                            <div id="cdaValidationPlot" class="ve-plot-container"></div>
-                            <div id="cdaValidationResidualsPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="cdaValidationPlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div></div>
+                            <div class="ve-plot-container"><div id="cdaValidationResidualsPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div></div>
                         </div>
                         `
 														: ""
 												}
                         <div class="ve-tab-content" id="wind-tab">
-                            <div id="windSpeedPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="windSpeedPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
+                            ${plotXAxisToggleMarkup()}
                             ${
 															/*
 															 * N-3 (maintainer ruling, plan 07-03): Standard gains
@@ -526,7 +550,8 @@ export async function showVirtualElevationAnalysisInline(
 														}
                         </div>
                         <div class="ve-tab-content" id="power-tab">
-                            <div id="speedPowerPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="speedPowerPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
+                            ${plotXAxisToggleMarkup()}
                         </div>
                         <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(initialWindSource)}>
                              <!--
@@ -540,7 +565,8 @@ export async function showVirtualElevationAnalysisInline(
                                 multi-lap selection, one line per lap.
                              -->
                             ${virtualDistanceHeaderMarkup()}
-                            <div id="vdPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="vdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
+                            ${plotXAxisToggleMarkup()}
                         </div>
                     </div>
                 </div>
@@ -607,6 +633,13 @@ export async function showVirtualElevationAnalysisInline(
 	bindTabButtons();
 
 	bindLapViewToggle();
+
+	// Bound here, next to the other panel controls, for exactly the reason the
+	// comment above `bindTabButtons` gives: this is the half that is always safe
+	// to run, so the control responds even on the paths where the first
+	// scheduled pass never reaches `renderVe`. It stays hidden until a draw
+	// reports a usable distance channel.
+	bindPlotXAxisToggle();
 
 	bindActionFooter({
 		onSaveScreenshot: callbacks.onSaveScreenshot,
