@@ -13,6 +13,7 @@ import {
 } from '../../plots/MultiSegmentPlotBuilders';
 import { renderVirtualDistanceHeader, sectionVirtualDistanceRows } from '../ve/vdHeader';
 import { anchorSeriesTo } from '../../plots/comparisonTraces';
+import { BELOW_AXIS_LEGEND_MARGIN_B, belowAxisLegend } from '../../plots/StandardPlotBuilders';
 import { log } from '../../utils/log';
 import { resizePlotlyGraphsIn } from '../dom/plotlyResize';
 
@@ -438,8 +439,8 @@ function outAndBackLayouts(maxDist: number, titleSuffix: string) {
             title: `Out & Back Virtual Elevation${titleSuffix}`,
             xaxis: { title: 'Distance (km)', range: [0, maxDist * 1.02] },
             yaxis: { title: 'Elevation (m)' },
-            legend: { orientation: 'h', y: -0.15 },
-            margin: { t: 40, b: 80, l: 60, r: 20 },
+            legend: belowAxisLegend(),
+            margin: { t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B, l: 60, r: 20 },
             hovermode: 'closest'
         },
         residualLayout: {

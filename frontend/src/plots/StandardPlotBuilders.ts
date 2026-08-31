@@ -128,6 +128,54 @@ export function getDefaultPlotConfig(): PlotConfig {
     };
 }
 
+/**
+ * The legend for an OVERLAY figure, and the second thing the sizing convention
+ * above broke.
+ *
+ * The figures in this file put their legend INSIDE the plot area
+ * (`x: 0.02, y: 0.98`), where it cannot touch an axis title. The three overlay
+ * figures cannot: they stack several laps or sections on one axis, so they
+ * carry more entries than fit over the data, and the legend goes below the
+ * x-axis instead. That is the placement that collides.
+ *
+ * `legend.y` is a FRACTION OF THE PLOT AREA under the default
+ * `yref: 'paper'`. The x-axis title beneath it is placed at a fixed PIXEL
+ * offset from the axis line. While every canvas carried a fixed
+ * `layout.height` the two agreed by coincidence and the hardcoded `-0.15` /
+ * `-0.2` looked correct. Moving the heights into CSS `clamp()`s made the plot
+ * area shrink with the viewport, so the same fraction buys fewer and fewer
+ * pixels until the legend sits on top of `Distance (km)` -- seen in the
+ * out-and-back VE plot in a short window, 2026-08-31.
+ *
+ * No single paper fraction fixes it, which is why this is a helper and not a
+ * bigger number: one large enough to clear the title at the clamp MINIMUM
+ * pushes the legend past the bottom margin and off the figure at the clamp
+ * MAXIMUM. `yref: 'container'` measures from the figure's own bottom edge, so
+ * the legend is pinned there and the only thing that must be big enough is
+ * `margin.b` -- also pixels, so it holds at every height in the clamp range.
+ *
+ * Use `BELOW_AXIS_LEGEND_MARGIN_B` as the bottom margin wherever this is used;
+ * the two are one setting in two fields, and pinned together by
+ * `belowAxisLegend.test.ts`.
+ */
+export function belowAxisLegend(): PlotLayout {
+    return {
+        orientation: 'h',
+        yref: 'container',
+        yanchor: 'bottom',
+        y: 0,
+        // Centred EXPLICITLY. Plotly's default `x` for a horizontal legend is 0,
+        // which the old layouts were quietly relying on not being applied --
+        // they read as centred because the entries filled the width. Measured in
+        // Chrome once `yref` was set: the legend went hard left.
+        x: 0.5,
+        xanchor: 'center',
+    };
+}
+
+/** Bottom margin that fits an x-axis title AND `belowAxisLegend` under it. */
+export const BELOW_AXIS_LEGEND_MARGIN_B = 100;
+
 export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): VirtualElevationFigures {
     const virtualSlices = createContextSlices(input.virtualElevation, input.context);
     const actualSlices = createContextSlices(input.actualElevation, input.context);
