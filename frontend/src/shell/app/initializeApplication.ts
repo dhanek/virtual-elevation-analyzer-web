@@ -11,6 +11,7 @@ import { MultiDEMManager } from "../../utils/MultiDEMManager";
 import { WeatherCache } from "../../utils/WeatherCache";
 import { log } from "../../utils/log";
 import { AppState } from "../../state/AppState";
+import { bindShowAllResultsButton } from "../analysis/storageHandlers";
 import {
 	configureFileLoadOrchestration,
 	handleFileSelection,
@@ -46,6 +47,7 @@ interface ShellDomElements {
 	results: HTMLDivElement;
 	statisticsContent: HTMLDivElement;
 	clearStorageButton: HTMLButtonElement;
+	showAllResultsFooter: HTMLButtonElement;
 	demFileInput: HTMLInputElement;
 	demFileDropZone: HTMLDivElement;
 	demFileInfo: HTMLDivElement;
@@ -308,6 +310,18 @@ export async function initializeApplicationShell(
 		}
 	}
 	updateDEMSourceSelection(dom.remoteDEMSelector.value);
+
+	// THE RESULTS VIEW, REACHABLE WITH NO FILE LOADED.
+	//
+	// The stored results are one global store spanning every ride ever analysed;
+	// nothing about them depends on what is currently open. The sidebar's own
+	// button stays as the convenient path right after Store Result, and both go
+	// through `handleShowAllResults`, so the two entry points cannot drift.
+	//
+	// Placed before the clear button below, in the markup and here: being able to
+	// see what is stored — and now to delete single rows — is what makes "Clear
+	// Results" an informed decision rather than a leap.
+	bindShowAllResultsButton(dom.showAllResultsFooter, resultsStorage);
 
 	// Clear saved parameters and results button
 	dom.clearStorageButton.addEventListener("click", async () => {

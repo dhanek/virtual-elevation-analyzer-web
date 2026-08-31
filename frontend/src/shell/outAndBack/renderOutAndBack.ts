@@ -46,6 +46,7 @@ import { bindActionFooter } from "../dom/actionFooter";
 import {
 	handleStoreResult,
 	handleExportAllResults,
+	handleShowAllResults,
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
@@ -526,6 +527,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                     <div class="ve-sidebar-footer">
                         <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
                     </div>
                 </div>
@@ -770,6 +772,9 @@ export async function showOutAndBackVEPlot(
 		},
 		onStoreResult: () => {
 			void handleStoreResult(appState, resultsStorage);
+		},
+		onShowAllResults: () => {
+			void handleShowAllResults(resultsStorage);
 		},
 		onExportAll: () => {
 			void handleExportAllResults(resultsStorage);

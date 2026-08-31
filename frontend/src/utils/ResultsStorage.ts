@@ -2,6 +2,7 @@ import { fileSave } from 'browser-fs-access';
 import { AnalysisParameters } from '../components/AnalysisParameters';
 import type { SegmentVirtualDistance } from '../analysis/VirtualDistance';
 import { log } from './log';
+import { RESULT_COLUMNS, toCsvCell } from './resultColumns';
 
 // Shape of a VE analysis result kept in IndexedDB.
 //
@@ -135,20 +136,18 @@ export interface StoredVEResult {
     timestamp: string; // ISO timestamp when entry was added to DB
 }
 
-export const CSV_HEADERS = [
-    // `Laps` is what was SELECTED; `LapsCovered` is which of them the numbers in
-    // this row actually describe (WR-02). Empty when no segment was dropped is
-    // NOT the convention — empty means "unknown", i.e. a pre-WR-02 record or one
-    // stored before any recompute ran.
-    'RecordingDate', 'FileName', 'Laps', 'LapsCovered', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
-    'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
-    'WindSource', 'WindSpeed', 'WindDir', 'WindHeightPct', 'SystemMass', 'Rho', 'Eta',
-    'R2', 'RMSE', 'VEGain', 'ActualGain',
-    // Entry (h). One value per independently-integrated segment, ';'-separated
-    // in analysis order, aligned position-for-position with VDSegments.
-    'VDSegments', 'VDAirKm', 'VDGroundKm', 'VDDiffPercent',
-    'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
-];
+/**
+ * The header line, derived from the one column table rather than restated.
+ *
+ * This used to be a hand-maintained array of 32 strings sitting beside a
+ * hand-maintained array of 32 value expressions in `generateCSVFromResults`,
+ * related only by position. See `resultColumns.ts` for why that is now one
+ * table; `resultColumns.test.ts` pins the output byte for byte across the
+ * change.
+ */
+export const CSV_HEADERS: readonly string[] = RESULT_COLUMNS.map(
+    column => column.header
+);
 
 /**
  * How N virtual distances fit a format shaped for one value per analysis.
@@ -206,42 +205,14 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
         return a.lapKey.localeCompare(b.lapKey);
     });
 
-    // Rows
     for (const result of results) {
-        const values = [
-            result.recordingDate,
-            result.fileName,
-            result.lapKey,
-            result.lapsCoveredKey ?? '',
-            result.trimStart,
-            result.trimEnd,
-            result.cda.toFixed(3),
-            result.crr.toFixed(4),
-            result.crrApplied !== undefined ? result.crrApplied.toFixed(4) : '',
-            result.ambientTemp !== undefined ? result.ambientTemp.toFixed(1) : '',
-            result.tireSensitivity ?? '',
-            result.airSpeedCalibration !== undefined ? result.airSpeedCalibration.toFixed(1) : '',
-            result.windSource,
-            result.windSpeed,
-            result.windDirection,
-            result.windHeightFactor !== undefined
-                ? Math.round(result.windHeightFactor * 100)
-                : '',
-            result.systemMass,
-            result.rho.toFixed(3),
-            result.eta.toFixed(3),
-            result.r2.toFixed(4),
-            result.rmse.toFixed(2),
-            result.veGain.toFixed(2),
-            result.actualGain.toFixed(2),
-            ...virtualDistanceCsvCells(result.virtualDistances),
-            result.avgPower.toFixed(1),
-            result.avgSpeed.toFixed(2),
-            result.avgTemperature !== undefined ? result.avgTemperature.toFixed(1) : '',
-            `"${result.notes.replace(/"/g, '""')}"`, // Escape quotes in notes
-            result.timestamp
-        ];
-        csv += values.join(',') + '\n';
+        // ONCE per row: the four VD cells come from one helper call and are
+        // handed to the four columns that read them, rather than each column
+        // recomputing the group.
+        const vd = virtualDistanceCsvCells(result.virtualDistances);
+        csv += RESULT_COLUMNS
+            .map(column => toCsvCell(column, column.cell(result, vd)))
+            .join(',') + '\n';
     }
 
     return csv;
@@ -673,6 +644,44 @@ export class ResultsStorage {
 
             request.onerror = () => {
                 log.error('Failed to get results:', request.error);
+                reject(request.error);
+            };
+        });
+    }
+
+    /**
+     * Delete ONE stored result.
+     *
+     * The store's `keyPath` is the composite `['fileName', 'lapKey', 'notes']`
+     * (`createDatabase`), so a row is already uniquely addressable and this
+     * needs no new index, no schema version and no migration. The key is passed
+     * as an object rather than three positional strings precisely because the
+     * components are all strings: a transposed pair would delete a different
+     * row, silently, and positional arguments make that a typo rather than a
+     * type error.
+     *
+     * Deleting a key that is not present RESOLVES rather than throwing, which is
+     * IndexedDB's own behaviour and the right one here — a second click on a
+     * table another tab has already pruned should not raise.
+     */
+    async deleteResult(key: {
+        fileName: string;
+        lapKey: string;
+        notes: string;
+    }): Promise<void> {
+        if (!this.db) return;
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+            const request = objectStore.delete([key.fileName, key.lapKey, key.notes]);
+
+            request.onsuccess = () => {
+                resolve();
+            };
+
+            request.onerror = () => {
+                log.error('Failed to delete result:', request.error);
                 reject(request.error);
             };
         });

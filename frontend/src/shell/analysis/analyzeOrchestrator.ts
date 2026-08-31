@@ -19,6 +19,7 @@ import {
 	handleSaveScreenshot,
 	handleStoreResult,
 	handleExportAllResults,
+	handleShowAllResults,
 	saveCurrentLapSettings,
 } from "./storageHandlers";
 import {
@@ -472,6 +473,9 @@ export async function handleAnalyze(): Promise<void> {
 							},
 							onStoreResult: () => {
 								void handleStoreResult(deps.appState, deps.resultsStorage);
+							},
+							onShowAllResults: () => {
+								void handleShowAllResults(deps.resultsStorage);
 							},
 							onExportAll: () => {
 								void handleExportAllResults(deps.resultsStorage);

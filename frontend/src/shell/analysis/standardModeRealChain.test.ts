@@ -235,6 +235,7 @@ async function renderStitched(): Promise<void> {
 			onSaveScreenshot: () => {},
 			onStoreResult: () => {},
 			onExportAll: () => {},
+			onShowAllResults: () => {},
 			saveCurrentLapSettings: () => {},
 		},
 		[1, 2],

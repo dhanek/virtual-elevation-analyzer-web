@@ -35,12 +35,12 @@ dependency column below says what actually has to wait.
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, awaiting in-app check |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
 | **G** | Test infrastructure | M | — |
-| **H** | On-screen results view | M–L | **B** (A's k column is done) |
+| ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, awaiting in-app check |
 | — | Standalone work | varies | — |
 
-Suggested order from here: **H** — bundle **B** no longer blocks it. A, B, C and E are done.
-The one piece of B deliberately NOT done is the analyze-leg retirement, now carried as a standalone
-item below; it is a performance and structure cleanup, not a correctness gap.
+Suggested order from here: **D** or **G**. A, B, C, E and H are done. The one piece of B
+deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
+performance and structure cleanup, not a correctness gap.
 
 ---
 
@@ -155,23 +155,6 @@ are best judged against the same question — what does `npm run check` currentl
       reaching `setGpsAnalysisMode`) still has none.
       *origin: `2026-08-15-gps-state-sync-coverage-gap` todo, partially closed*
 
-## Bundle H · On-screen results view
-
-*Effort: M–L. **Gated on bundle A's k column and on bundle B** — build it after those and it shows
-the right columns with the right values from day one; build it before and it inherits both defects
-in a new surface.*
-
-- [ ] **[M–L] An on-screen "show all results" view, with per-entry delete.** The only way to see
-      stored results today is to download the CSV — `exportAllResultsToCSV`
-      (`frontend/src/utils/ResultsStorage.ts:581`), wired to the one button each sidebar carries
-      (`renderStandardVe.ts:417`, `renderGpsLap.ts:673`, `renderOutAndBack.ts:484`, handler
-      `storageHandlers.ts:351`). `getAllResults()` (`ResultsStorage.ts:641`) already returns
-      everything a table would need, so the reading half is free. Deleting is not: the store has
-      `clearAllResults()` (`ResultsStorage.ts:666`) and `deleteDatabase()` only — all-or-nothing —
-      so a single-entry delete needs a new keyed-delete method plus a decision about what the key
-      is (`lapKey` is `fileName`-scoped, not unique on its own).
-      *origin: maintainer, 2026-08-30*
-
 ## Standalone work
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
@@ -233,6 +216,63 @@ in a new surface.*
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle H · On-screen results view — 2026-08-31
+
+Implemented in the working tree; **not committed**. 878 tests pass (up 24), `npm run check`,
+`npm run lint` and `npm run build` clean.
+
+- [x] **[M] "Show All Results", with per-entry delete.** New modal
+      (`shell/dom/resultsModal.ts`), reached from a fourth button in all three sidebar footers
+      through `bindActionFooter`'s new optional `onShowAllResults`. Reads the existing
+      `getAllResults()`; deletes through the new `ResultsStorage.deleteResult`.
+      *origin: maintainer, 2026-08-30*
+
+      **The open question in this item was already answered by the schema.** It asked for "a
+      decision about what the key is (`lapKey` is `fileName`-scoped, not unique on its own)". The
+      object store's `keyPath` has been the composite `['fileName', 'lapKey', 'notes']` all along,
+      so a row was already uniquely addressable: `objectStore.delete([fileName, lapKey, notes])`,
+      no new index, no schema version, no migration. That dropped the item from M–L to M.
+
+- [x] **[S] The results view is reachable with no file loaded.** A second entry point in the app
+      footer (`showAllResultsFooter`), bound in `initializeApplication` where `resultsStorage` is
+      already in scope, placed BEFORE "Clear Results" so the reading order is look-then-destroy.
+      The sidebar button stays as the convenient path right after Store Result; both go through
+      `handleShowAllResults`, so the two cannot drift.
+
+      The asymmetry that motivated it: the footer has always carried "Clear Results & Saved
+      Parameters" against the same global store with no file loaded, so every stored result could be
+      DESTROYED from a cold start but not READ. `handleShowAllResults` now takes a narrow
+      `ResultsViewStorage` (the two functions the view uses) rather than the whole class — which is
+      also what lets `showAllResultsEntry.test.ts` drive the entry point with no IndexedDB.
+      *origin: maintainer, 2026-08-31*
+
+- [x] **[S] One column table for the CSV and the view.** `CSV_HEADERS` and the value list inside
+      `generateCSVFromResults` were two parallel arrays of 32 entries related only by position —
+      add a field to one and every cell after it shifts, silently, for every consumer. They are now
+      one `RESULT_COLUMNS` array (`utils/resultColumns.ts`) that both the export and the table
+      render from, so the on-screen view could not become the THIRD such list. `resultColumns.test.ts`
+      pins the CSV byte for byte across the extraction, and its own value was confirmed by mutating
+      a column and watching it fail.
+
+      Also closes a latent hole: only `Notes` was ever quoted, so a FIT file whose NAME contained a
+      comma shifted every column after `FileName` in that row. Escaping is now the CSV writer's job
+      rather than a per-column concern.
+
+      **The columns were then reordered** (maintainer, 2026-08-31) to read most-important-first:
+      date, file, notes, CdA, Crr, avg power, avg speed, RMSE, R², temp, timestamp, laps, then the
+      rest by how much they change the reading of those. One array edit moved BOTH surfaces, which
+      is the payoff of merging the two lists. **The exported CSV's column order therefore changed** —
+      breaking for anything reading it positionally rather than by header name. The characterization
+      pin failed on the reorder, as intended, and was re-baselined deliberately with the cell formats
+      still pinned.
+
+- [x] **[S] The IndexedDB half of `ResultsStorage` has tests at all.** jsdom ships no IndexedDB, so
+      `saveResult`, `getAllResults` and `clearAllResults` had never been exercised by anything but
+      hand. Tolerable for an append and an all-or-nothing clear; not for a keyed DELETE, where the
+      assertion that matters is "only that row went". `fake-indexeddb` (new devDependency, maintainer
+      approved) is the store's own engine rather than a stub, so the key-comparison semantics under
+      test are the browser's.
 
 ### Bundle B · Store Result is truthful — the analyze path stopped computing its own answer — 2026-08-31
 

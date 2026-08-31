@@ -58,6 +58,7 @@ export interface StandardVeCallbacks {
 	onSaveScreenshot: () => void;
 	onStoreResult: () => void;
 	onExportAll: () => void;
+	onShowAllResults: () => void;
 	saveCurrentLapSettings: () => void;
 }
 
@@ -447,6 +448,7 @@ export async function showVirtualElevationAnalysisInline(
                     <div class="ve-sidebar-footer">
                         <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
                     </div>
                 </div>
@@ -610,6 +612,7 @@ export async function showVirtualElevationAnalysisInline(
 		onSaveScreenshot: callbacks.onSaveScreenshot,
 		onStoreResult: callbacks.onStoreResult,
 		onExportAll: callbacks.onExportAll,
+		onShowAllResults: callbacks.onShowAllResults,
 	});
 
 	setTimeout(() => {
