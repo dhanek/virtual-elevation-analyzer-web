@@ -20,7 +20,10 @@ import {
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
+import {
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "../analysis/elevationProfileResolver";
 import { resolveRhoArray } from "../analysis/rhoArrayResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
@@ -52,6 +55,7 @@ import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycl
 import {
 	calculateGpsLapStats,
 	calculateMeanElevationProfile,
+	calculateMeanReferenceProfile,
 	renderGpsLapVEPlots,
 	renderGpsLapWindPlot,
 	renderGpsLapPowerPlot,
@@ -70,9 +74,12 @@ import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
+import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
+import { requestConvergenceRedraw } from "../analysis/convergenceView";
 
 /**
  * Calculate VE for each GPS-detected lap and show stacked plot.
@@ -121,11 +128,19 @@ export async function showGpsLapVEAnalysis(
 	// applied, the smoothing toggle rendered ON while this first paint was
 	// computed from the raw FIT channel -- and the numbers then moved on the
 	// first control nudge, when the primitive took over.
-	const allAltitude = resolveElevationProfile(
+	const resolvedProfile = resolveElevationProfile(
 		appState,
 		fitData,
 		normalizedArrays.altitude,
-	).altitude;
+	);
+	const allAltitude = resolvedProfile.altitude;
+	// The NON-master channel, resolved once like the primitive does — sliced
+	// per lap below so the first paint already shows both channels.
+	const allReferenceElevation = resolveReferenceElevation(
+		appState,
+		resolvedProfile.profile,
+		normalizedArrays.altitude.length,
+	);
 	const allDistance = normalizedArrays.distance;
 
 	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT (WR-4 follow-up).
@@ -289,6 +304,15 @@ export async function showGpsLapVEAnalysis(
 				range,
 				distances: relativeDistances,
 				virtualElevation: veArray,
+				referenceElevation: allReferenceElevation
+					? {
+							label: allReferenceElevation.label,
+							series: allReferenceElevation.series.slice(
+								range.startIdx,
+								Math.min(range.endIdx + 1, allTimestamps.length),
+							),
+						}
+					: null,
 				// The ANALYZE leg computes one wind source, so the initial paint
 				// is always single-source. The first `requestModeUpdate` after
 				// this panel binds repaints it through the primitive, which is
@@ -491,6 +515,7 @@ export async function showGpsLapVEPlot(
 		wind: () => renderGpsLapWindPlot(lapProfiles),
 		power: () => renderGpsLapPowerPlot(lapProfiles),
 		vd: () => renderGpsLapVdPlot(lapProfiles),
+		convergence: requestConvergenceRedraw,
 	});
 
 	// Setup action footer buttons
@@ -512,7 +537,14 @@ export async function showGpsLapVEPlot(
 	// Render the plots using the shared function. `initialStats` is the SAME
 	// object the template above painted the header spans from, so the first
 	// paint and the plot cannot disagree either (D1).
-	renderGpsLapVEPlots(lapProfiles, meanElevation, initialStats);
+	// The non-master channel's mean rides on the lap profiles themselves, so
+	// it is derived here rather than threaded through the long signature above.
+	renderGpsLapVEPlots(
+		lapProfiles,
+		meanElevation,
+		initialStats,
+		calculateMeanReferenceProfile(lapProfiles),
+	);
 
 	// THE POST-BIND KICK (WR-4). Standard has had this since before the phase
 	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never
@@ -719,6 +751,8 @@ export function buildGpsLapVeAnalysisTemplate(
                                     <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(params)}
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>
@@ -792,6 +826,7 @@ export function buildGpsLapVeAnalysisTemplate(
                             `
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -870,6 +905,9 @@ export function buildGpsLapVeAnalysisTemplate(
                         `
 														: ""
 												}
+                        <div class="ve-tab-content" id="convergence-tab">
+                            <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -64,6 +64,7 @@ function makeProfile(indices: number[]): SegmentVeProfile {
         virtualElevationCompare: null,
         resultCompare: null,
         actualElevation: indices.map(() => 100),
+        referenceElevation: null,
         supplementarySeries: {
             distancesKm: [],
             powerWatts: [],

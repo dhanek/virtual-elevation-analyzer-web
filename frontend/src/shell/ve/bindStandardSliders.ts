@@ -36,6 +36,11 @@ import {
 	segmentVirtualDistanceRows,
 	selectedLapCount,
 } from "./vdHeader";
+import {
+	renderConvergenceView,
+	requestConvergenceRedraw,
+} from "../analysis/convergenceView";
+import { computeStandardAggregate } from "./standardAggregate";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
@@ -187,11 +192,13 @@ function createStandardUpdateCallbacks(
 					virtualElevationFit: series.virtualElevation,
 					virtualElevationConstant: series.virtualElevationCompare,
 					actualElevation: series.actualElevation,
+					referenceElevation: series.referenceElevation,
 				})
 			: buildVirtualElevationFigures({
 					context,
 					virtualElevation: series.virtualElevation,
 					actualElevation: series.actualElevation,
+					referenceElevation: series.referenceElevation,
 					cdaLabel: cda.toFixed(3),
 					crrLabel: appliedCrr.toFixed(4),
 				});
@@ -226,6 +233,7 @@ function createStandardUpdateCallbacks(
 			wind: () => drawWind(profiles),
 			power: () => drawPower(profiles),
 			vd: () => drawVd(profiles),
+			convergence: requestConvergenceRedraw,
 		});
 	}
 
@@ -241,61 +249,17 @@ function createStandardUpdateCallbacks(
 	}
 
 	return {
-		/**
-		 * D-09 entry (g): under D-19 Option B the headline r²/RMSE are the MEAN
-		 * of the per-lap fits, not one fit over the concatenated selection. The
-		 * maintainer accepted this deliberately, so that Standard reports the
-		 * same way the two segment modes already do.
-		 */
-		aggregate(profiles) {
-			const count = profiles.length;
-			const compareResults = profiles
-				.map((p) => p.resultCompare)
-				.filter((result): result is NonNullable<typeof result> => result !== null);
-
-			return {
-				r2: profiles.reduce((sum, p) => sum + p.result.r2, 0) / count,
-				rmse: profiles.reduce((sum, p) => sum + p.result.rmse, 0) / count,
-				veGain:
-					profiles.reduce((sum, p) => sum + p.result.ve_elevation_diff, 0) /
-					count,
-				actualGain:
-					profiles.reduce((sum, p) => sum + p.result.actual_elevation_diff, 0) /
-					count,
-				segmentCount: count,
-				// The constant-wind leg's own per-lap means, kept SEPARATE here
-				// (07-04 ruling 2). `renderMetrics` is what folds the two together
-				// for Standard's spans, because Standard's averaging is pre-phase
-				// behaviour that is deliberately not being changed.
-				compare:
-					compareResults.length > 0
-						? {
-								r2:
-									compareResults.reduce((sum, r) => sum + r.r2, 0) /
-									compareResults.length,
-								rmse:
-									compareResults.reduce((sum, r) => sum + r.rmse, 0) /
-									compareResults.length,
-								veGain:
-									compareResults.reduce(
-										(sum, r) => sum + r.ve_elevation_diff,
-										0,
-									) / compareResults.length,
-								actualGain:
-									compareResults.reduce(
-										(sum, r) => sum + r.actual_elevation_diff,
-										0,
-									) / compareResults.length,
-							}
-						: undefined,
-			};
-		},
+		// D-09 entry (g): the headline mean-of-fits aggregate — extracted to
+		// `standardAggregate.ts` (C4) so the headless API reaches the same
+		// numbers through the same function.
+		aggregate: computeStandardAggregate,
 
 		renderVe: drawVe,
 
 		renderWind: drawWind,
 		renderPower: drawPower,
 		renderVd: drawVd,
+		renderConvergence: renderConvergenceView,
 
 		renderMetrics(aggregate) {
 			// STANDARD'S AVERAGING IS UNCHANGED (07-04 ruling 2). Pre-refactor the

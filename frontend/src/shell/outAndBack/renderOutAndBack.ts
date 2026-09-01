@@ -21,7 +21,10 @@ import {
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
+import {
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "../analysis/elevationProfileResolver";
 import { resolveRhoArray } from "../analysis/rhoArrayResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
@@ -52,6 +55,7 @@ import { log } from "../../utils/log";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import {
 	calculateOutAndBackMeanElevation,
+	calculateOutAndBackMeanReference,
 	calculateOutAndBackStats,
 	renderOutAndBackPlots,
 	renderOutAndBackWindPlot,
@@ -61,7 +65,9 @@ import {
 import { createOutAndBackUpdateCallbacks } from "./updateOutAndBack";
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
+import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
@@ -70,6 +76,7 @@ import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { seedSegmentModeAnalyzeState } from "../../modes/analysis/segmentSummary";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
 import { sectionVirtualDistances } from "../../modes/analysis/segmentVirtualDistance";
+import { requestConvergenceRedraw } from "../analysis/convergenceView";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -113,11 +120,19 @@ export async function showOutAndBackVEAnalysis(
 	// applied, the smoothing toggle rendered ON while this first paint was
 	// computed from the raw FIT channel -- and the numbers then moved on the
 	// first control nudge, when the primitive took over.
-	const allAltitude = resolveElevationProfile(
+	const resolvedProfile = resolveElevationProfile(
 		appState,
 		fitData,
 		normalizedArrays.altitude,
-	).altitude;
+	);
+	const allAltitude = resolvedProfile.altitude;
+	// The NON-master channel, resolved once like the primitive does — sliced
+	// per leg below so the first paint already shows both channels.
+	const allReferenceElevation = resolveReferenceElevation(
+		appState,
+		resolvedProfile.profile,
+		normalizedArrays.altitude.length,
+	);
 	const allDistance = normalizedArrays.distance;
 
 	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT (WR-4 follow-up).
@@ -206,12 +221,14 @@ export async function showOutAndBackVEAnalysis(
 			outboundVE: [],
 			outboundVECompare: null,
 			outboundActualElevation: [],
+			outboundReferenceElevation: null,
 			outboundSeries: null,
 			outboundRange: null,
 			inboundDistances: [],
 			inboundVE: [],
 			inboundVECompare: null,
 			inboundActualElevation: [],
+			inboundReferenceElevation: null,
 			inboundSeries: null,
 			inboundRange: null,
 			outboundDuration: section.outboundDuration,
@@ -278,6 +295,15 @@ export async function showOutAndBackVEAnalysis(
 				profile.outboundActualElevation = resolvedParams.velodrome
 					? new Array(outboundData.altitude.length).fill(0)
 					: [...outboundData.altitude];
+				profile.outboundReferenceElevation = allReferenceElevation
+					? {
+							label: allReferenceElevation.label,
+							series: allReferenceElevation.series.slice(
+								section.outboundStartIdx,
+								section.outboundEndIdx + 1,
+							),
+						}
+					: null;
 			}
 		} catch (err) {
 			log.error(
@@ -345,6 +371,15 @@ export async function showOutAndBackVEAnalysis(
 				profile.inboundActualElevation = resolvedParams.velodrome
 					? new Array(inboundData.altitude.length).fill(0)
 					: [...inboundData.altitude];
+				profile.inboundReferenceElevation = allReferenceElevation
+					? {
+							label: allReferenceElevation.label,
+							series: allReferenceElevation.series.slice(
+								section.inboundStartIdx,
+								section.inboundEndIdx + 1,
+							),
+						}
+					: null;
 			}
 		} catch (err) {
 			log.error(
@@ -493,6 +528,8 @@ export function buildOutAndBackVeAnalysisTemplate(
                                     <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(params)}
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>
@@ -566,6 +603,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                             `
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -634,6 +672,9 @@ export function buildOutAndBackVeAnalysisTemplate(
                         </div>
 
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
+                        <div class="ve-tab-content" id="convergence-tab">
+                            <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -777,6 +818,7 @@ export async function showOutAndBackVEPlot(
 		wind: () => renderOutAndBackWindPlot(profiles),
 		power: () => renderOutAndBackPowerPlot(profiles),
 		vd: () => renderOutAndBackVdPlot(profiles),
+		convergence: requestConvergenceRedraw,
 	});
 
 	// Setup action footer buttons
@@ -795,8 +837,15 @@ export async function showOutAndBackVEPlot(
 		},
 	});
 
-	// Initial plot render
-	renderOutAndBackPlots(Plotly, profiles, meanElevation);
+	// Initial plot render. The non-master channel's mean rides on the section
+	// profiles themselves, so it is derived here rather than threaded through
+	// the long signature above.
+	renderOutAndBackPlots(
+		Plotly,
+		profiles,
+		meanElevation,
+		calculateOutAndBackMeanReference(profiles),
+	);
 
 	// THE POST-BIND KICK (WR-4). Standard has had this since before the phase
 	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never

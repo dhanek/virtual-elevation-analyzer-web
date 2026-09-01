@@ -217,6 +217,86 @@
 	height: clamp(320px, 58vh, 640px);
 }
 
+/* The Convergence tab's contour: CdA x Crr, not a time series, so it wants a
+   squarer box than --tall. Same convention as every plot box above — the CSS
+   owns the height, the figure sets none (oneSizingConvention.test.ts). */
+.ve-plot-container__plot--square {
+	height: clamp(360px, 62vh, 700px);
+}
+
+/* Auto-converge lock pair, rendered under the Crr slider in every sidebar.
+   Present-and-hidden until the Section-3 checkbox enables it (the [hidden]
+   attribute; binding happens once, from the render). */
+.auto-converge-locks {
+	border-top: 1px dashed var(--color-border-strong);
+	padding-top: var(--space-sm);
+}
+
+.auto-converge-locks__label {
+	font-weight: 500;
+}
+
+.auto-converge-locks__toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
+	margin-right: var(--space-md);
+	font-size: 0.85rem;
+	cursor: pointer;
+	user-select: none;
+}
+
+.auto-converge-locks__status {
+	margin-top: var(--space-xs);
+	font-size: 0.8rem;
+	color: var(--color-danger);
+}
+
+/* Closure-target source (phase 2): where the Convergence tab's reference
+   elevation difference comes from. Compact horizontal radios — the sidebar's
+   full-width .ve-radio-label treatment is deliberately overridden here so the
+   three short options share one row. */
+.elevation-diff-controls {
+	border-top: 1px dashed var(--color-border-strong);
+	padding-top: var(--space-sm);
+}
+
+.elevation-diff-controls__radios {
+	flex-direction: row;
+	gap: var(--space-sm);
+	flex-wrap: wrap;
+}
+
+.elevation-diff-controls__radios .ve-radio-label {
+	padding: var(--space-xs) var(--space-sm);
+}
+
+.elevation-diff-controls__manual {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	margin-top: var(--space-xs);
+	font-size: 0.85rem;
+}
+
+.elevation-diff-controls__manual--hidden {
+	display: none;
+}
+
+.elevation-diff-controls__manual input[type="number"] {
+	width: 5.5rem;
+}
+
+.elevation-diff-controls__status {
+	margin-top: var(--space-xs);
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
+}
+
+.elevation-diff-controls__status:empty {
+	display: none;
+}
+
 .ve-wind-source {
 	background: white;
 	padding: var(--space-lg);

@@ -291,7 +291,7 @@ so none of them is vacuous.
       re-measured by different amounts, and any path that measured honestly destroyed the default.
 
       **Why the pinned height was actively harmful.** `Plots.resize` guards on
-      `layout.width && layout.height` (`plotly-basic.js:48331`) and then *deletes both* and
+      `layout.width && layout.height` (`plotly-cartesian.js:48489`) and then *deletes both* and
       re-autosizes. A height-only layout sails past that guard. Measured in Chrome: 350 px → 26 px,
       and 26 px again on every subsequent resize — a ratchet, not a one-off. Same 26 px for the
       wind plot. That is exactly the maintainer's two screenshots.

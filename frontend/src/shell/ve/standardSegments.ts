@@ -32,6 +32,7 @@
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { ModeSegment, SegmentVeProfile } from "../../modes/analysis/types";
+import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
 import type { AppState, WindSource } from "../../state/AppState";
 
 /**
@@ -185,6 +186,11 @@ export interface StitchedStandardSeries {
 	 */
 	virtualElevationCompare: number[] | null;
 	actualElevation: number[];
+	/**
+	 * The stitched NON-master elevation channel (see `SegmentVeProfile`),
+	 * non-null iff the profiles carry one. Same length as `actualElevation`.
+	 */
+	referenceElevation: ReferenceElevationSeries | null;
 	timestamps: number[];
 	velocity: number[];
 	power: number[];
@@ -241,6 +247,13 @@ export function stitchStandardProfiles(
 	);
 	const virtualElevationCompare: number[] | null = isCompare ? [] : null;
 	const actualElevation: number[] = [];
+	// Same all-or-nothing shape as the compare leg: built only when at least
+	// one profile carries a reference, padded with NaN over any that does not,
+	// so the series never shortens and slides later samples off their x.
+	const referenceLabel =
+		profiles.find((profile) => profile.referenceElevation)?.referenceElevation
+			?.label ?? null;
+	const referenceSeries: number[] | null = referenceLabel ? [] : null;
 	const timestamps: number[] = [];
 	const velocity: number[] = [];
 	const power: number[] = [];
@@ -277,6 +290,12 @@ export function stitchStandardProfiles(
 			);
 		}
 		actualElevation.push(...profile.actualElevation);
+		if (referenceSeries) {
+			referenceSeries.push(
+				...(profile.referenceElevation?.series ??
+					new Array<number>(length).fill(Number.NaN)),
+			);
+		}
 		power.push(...profile.supplementarySeries.powerWatts);
 
 		// Same padding rule as the compare leg above — a segment contributes its
@@ -329,6 +348,10 @@ export function stitchStandardProfiles(
 		virtualElevation,
 		virtualElevationCompare,
 		actualElevation,
+		referenceElevation:
+			referenceLabel && referenceSeries
+				? { label: referenceLabel, series: referenceSeries }
+				: null,
 		timestamps,
 		velocity,
 		power,

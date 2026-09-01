@@ -14,7 +14,7 @@
  * that fails in two ways, and both were on screen:
  *
  *   - `Plots.resize` guards on `gd.layout.width && gd.layout.height`
- *     (plotly-basic.js:48331). These layouts set height but never width, so the
+ *     (plotly-cartesian.js:48489). These layouts set height but never width, so the
  *     guard let it through and the next two lines DELETE both and re-autosize —
  *     into a box whose height came from the plot. Measured: 350 px -> 26 px,
  *     and 26 px again on every later resize.
@@ -29,6 +29,7 @@
  */
 import { anchorSeriesTo, residualsAgainst } from './comparisonTraces';
 import { buildTrimBoundaryShapes, createContextSlices, type PlotContext } from './PlotContext';
+import type { ReferenceElevationSeries } from '../analysis/elevationProfiles';
 import {
     computeVirtualDistanceWindowTotals,
     integrateVirtualDistance,
@@ -72,12 +73,16 @@ export interface VirtualElevationComparisonPlotInput {
     virtualElevationConstant: number[];
     virtualElevationFit: number[];
     actualElevation: number[];
+    /** The non-master elevation channel, drawn dashed beside the actual trace. */
+    referenceElevation?: ReferenceElevationSeries | null;
 }
 
 export interface VirtualElevationPlotInput {
     context: PlotContext;
     virtualElevation: number[];
     actualElevation: number[];
+    /** The non-master elevation channel, drawn dashed beside the actual trace. */
+    referenceElevation?: ReferenceElevationSeries | null;
     cdaLabel: string;
     crrLabel: string;
 }
@@ -176,9 +181,37 @@ export function belowAxisLegend(): PlotLayout {
 /** Bottom margin that fits an x-axis title AND `belowAxisLegend` under it. */
 export const BELOW_AXIS_LEGEND_MARGIN_B = 100;
 
+/** One dashed-grey style for the reference channel, shared by both builders. */
+const REFERENCE_ELEVATION_LINE = { color: '#8a8a8a', width: 1.5, dash: 'dash' };
+
+/**
+ * Offset aligning the reference channel to the master at the first trimmed
+ * sample where BOTH are finite. The barometer's absolute datum is
+ * calibration-dependent and routinely sits tens of metres from the DEM's;
+ * drawn raw, that gap doubles the y-range and flattens exactly the shape
+ * detail this overlay exists to compare — so the reference is aligned the
+ * same way the VE trace is anchored to the actual. Zero when no finite pair
+ * exists; the trace then draws at its own datum, which is at least honest.
+ */
+function referenceAlignmentOffset(actualMain: number[], referenceMain: number[]): number {
+    const n = Math.min(actualMain.length, referenceMain.length);
+    for (let i = 0; i < n; i++) {
+        if (Number.isFinite(actualMain[i]) && Number.isFinite(referenceMain[i])) {
+            return actualMain[i] - referenceMain[i];
+        }
+    }
+    return 0;
+}
+
 export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): VirtualElevationFigures {
     const virtualSlices = createContextSlices(input.virtualElevation, input.context);
     const actualSlices = createContextSlices(input.actualElevation, input.context);
+    const referenceSlices = input.referenceElevation
+        ? createContextSlices(input.referenceElevation.series, input.context)
+        : null;
+    const referenceOffset = referenceSlices
+        ? referenceAlignmentOffset(actualSlices.main, referenceSlices.main)
+        : 0;
 
     const veOffset = actualSlices.main[0] - virtualSlices.main[0];
     const offsetMain = virtualSlices.main.map(value => value + veOffset);
@@ -209,6 +242,18 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
                 showlegend: false,
             },
         );
+        if (referenceSlices && input.referenceElevation) {
+            elevationData.push({
+                x: input.context.xPointsBefore,
+                y: referenceSlices.before.map(value => value + referenceOffset),
+                type: 'scatter',
+                mode: 'lines',
+                name: `${input.referenceElevation.label} (trimmed)`,
+                line: REFERENCE_ELEVATION_LINE,
+                opacity: 0.2,
+                showlegend: false,
+            });
+        }
     }
 
     elevationData.push(
@@ -229,6 +274,17 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
             line: { color: '#000000', width: 2 },
         },
     );
+
+    if (referenceSlices && input.referenceElevation) {
+        elevationData.push({
+            x: input.context.xPointsMain,
+            y: referenceSlices.main.map(value => value + referenceOffset),
+            type: 'scatter',
+            mode: 'lines',
+            name: `${input.referenceElevation.label} (aligned)`,
+            line: REFERENCE_ELEVATION_LINE,
+        });
+    }
 
     if (input.context.contextAfter > 0) {
         elevationData.push(
@@ -253,6 +309,18 @@ export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): 
                 showlegend: false,
             },
         );
+        if (referenceSlices && input.referenceElevation) {
+            elevationData.push({
+                x: input.context.xPointsAfter,
+                y: referenceSlices.after.map(value => value + referenceOffset),
+                type: 'scatter',
+                mode: 'lines',
+                name: `${input.referenceElevation.label} (trimmed)`,
+                line: REFERENCE_ELEVATION_LINE,
+                opacity: 0.2,
+                showlegend: false,
+            });
+        }
     }
 
     const annotationPosition = findOptimalAnnotationPosition(
@@ -394,6 +462,9 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
     const fitSlices = createContextSlices(input.virtualElevationFit, input.context);
     const constantSlices = createContextSlices(input.virtualElevationConstant, input.context);
     const actualSlices = createContextSlices(input.actualElevation, input.context);
+    const referenceSlices = input.referenceElevation
+        ? createContextSlices(input.referenceElevation.series, input.context)
+        : null;
 
     // Each series is anchored INDEPENDENTLY on the first main-window actual
     // sample, through the one shared helper the GPS comparison figures also use
@@ -432,6 +503,21 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                     name: 'VE (Constant Wind)',
                     line: { color: '#a9a9a9', width: 2 },
                 },
+                // The non-master channel, aligned exactly as in
+                // `buildVirtualElevationFigures`. Spread of a conditional
+                // array keeps the six pinned traces at their indices
+                // (`comparisonTraces.test.ts`) when no reference exists.
+                ...(referenceSlices && input.referenceElevation
+                    ? [{
+                        x: input.context.xPointsMain,
+                        y: referenceSlices.main.map(value =>
+                            value + referenceAlignmentOffset(actualSlices.main, referenceSlices.main)),
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: `${input.referenceElevation.label} (aligned)`,
+                        line: REFERENCE_ELEVATION_LINE,
+                    }]
+                    : []),
             ],
             layout: {
                 title: 'Virtual Elevation Comparison',

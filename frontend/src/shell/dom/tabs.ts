@@ -10,6 +10,7 @@ export interface TabRenderMap {
     power?: () => void
     vd?: () => void
     ve?: () => void
+    convergence?: () => void
 }
 
 // Latest render callbacks. Kept in a module ref so repeated setupTabSwitching
@@ -47,6 +48,7 @@ export function activateTab(tabName: string): void {
 
     const showWindTab = !!document.getElementById('wind-tab')
     const showVdTab = !!document.getElementById('vd-tab')
+    const showConvergenceTab = !!document.getElementById('convergence-tab')
 
     // Invoke tab-specific render callback from the latest renderMap if available
     if (tabName === 'wind' && showWindTab && currentRenderMap.wind) {
@@ -61,6 +63,9 @@ export function activateTab(tabName: string): void {
     } else if (tabName === 've' && currentRenderMap.ve) {
         log.debug('Tab switching: rendering VE tab')
         currentRenderMap.ve()
+    } else if (tabName === 'convergence' && showConvergenceTab && currentRenderMap.convergence) {
+        log.debug('Tab switching: rendering convergence tab')
+        currentRenderMap.convergence()
     }
 
     // The pane is visible now and its plots have been redrawn, so this is the

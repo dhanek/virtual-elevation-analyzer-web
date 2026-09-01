@@ -211,6 +211,15 @@ export function renderSection3Template(input: Section3TemplateInput): string {
         </div>
         <div class="analysis-actions">
             <button id="analyzeBtn" class="primary-btn" disabled>Select Laps to Analyze</button>
+            <!--
+                The box renders bare on purpose: auto-converge is runtime state
+                on AppState, synced onto it at bind time
+                (analyzeOrchestrator.setupAnalyzeButton). The template test
+                forbids any pre-selected control in this markup.
+            -->
+            <label class="analysis-actions__toggle" title="Solve CdA/Crr from the closure-error surface. Lock a slider in the VE sidebar and the solver drives it along the ridge; lock both to sit on the optimum.">
+                <input type="checkbox" id="autoConvergeToggle"> Auto-converge
+            </label>
         </div>
     `;
 }

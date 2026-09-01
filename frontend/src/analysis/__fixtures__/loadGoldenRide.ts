@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ActivityDataLike } from '../../state/AppState';
 import type { AnalysisParameters } from '../../components/AnalysisParameters';
+import { activityFromChannels } from '../../api/activityFromChannels';
 
 /**
  * Typed loader for the D-12 anonymised golden fixture.
@@ -137,27 +138,22 @@ export function loadGoldenRide(): GoldenRide {
 
     const json = JSON.parse(readFileSync(GOLDEN_RIDE_PATH, 'utf8')) as GoldenRideJson;
 
-    const zeros = (): number[] => new Array<number>(json.record_count).fill(0);
-
-    const fitData = {
+    // ONE zero-fill, shared with the headless API (C2): the arrays the fixture
+    // does not carry are filled by `activityFromChannels`, so the fixture
+    // loader and the API cannot drift on which channels default to zero.
+    const fitData: ActivityDataLike = activityFromChannels({
+        record_count: json.record_count,
         timestamps: json.timestamps,
+        power: json.power,
+        velocity: json.velocity,
         position_lat: json.position_lat,
         position_long: json.position_long,
         altitude: json.altitude,
-        velocity: json.velocity,
-        power: json.power,
-        air_speed: json.air_speed,
         distance: json.distance,
-        wind_speed: zeros(),
+        air_speed: json.air_speed,
         wind_yaw: json.wind_yaw,
-        air_density_data: zeros(),
-        road_speed: zeros(),
         temperature: json.temperature,
-        battery_soc: zeros(),
-        heart_rate: zeros(),
-        cadence: zeros(),
-        record_count: json.record_count,
-    } as ActivityDataLike;
+    });
 
     return {
         fitData,

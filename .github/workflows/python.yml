@@ -1,0 +1,49 @@
+# The ve_batch layer's own gate. Deliberately SEPARATE from deploy.yml —
+# that workflow is a deploy path and stays one; this one exists so the batch
+# layer's tests (including the end-to-end run over the golden fixture) fail a
+# PR rather than a user.
+name: python
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ve-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust + wasm-pack
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # The integration test drives the REAL runner, which needs the wasm and
+      # the node toolchain the frontend uses.
+      - name: Build wasm
+        run: |
+          source "$HOME/.cargo/env"
+          cd backend
+          wasm-pack build --target web --out-dir ../frontend/pkg
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Install python tooling
+        run: pip install ruff pytest
+
+      - name: Lint
+        run: ruff check python
+
+      - name: Test
+        run: cd python && python -m pytest tests -v

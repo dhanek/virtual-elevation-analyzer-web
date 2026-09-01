@@ -6,7 +6,7 @@ import {
     type StoredVEResult,
 } from '../../utils/ResultsStorage';
 import { ParameterStorage, LapSettings } from '../../utils/ParameterStorage';
-import { resolveAppliedCrr } from '../../analysis/CrrTemperatureCorrection';
+import { buildSaveResultData } from './buildSaveResultData';
 
 /**
  * Save current lap settings to IndexedDB.
@@ -200,135 +200,26 @@ export async function handleStoreResult(
             crr = parseFloat(crrSlider.value);
         }
 
-        const filteredPower = appState.currentFilteredData.power;
-        const filteredVelocity = appState.currentFilteredData.velocity;
-        const filteredTemperature = appState.currentFilteredData.temperature;
-        const filteredTimestamps = appState.currentFilteredData.timestamps;
-
-        // CR-02. THE WINDOW IS THE WHOLE OF `currentFilteredData`, in every mode.
-        //
-        // It used to be `slice(trimStart, trimEnd + 1)` with the SLIDER values,
-        // which are analyze-selection indices — a different space from what
-        // `standardMode.summarize` writes here on every update. `summarize`
-        // stores the concatenation of the SURVIVING segments, and
-        // `mapTrimToSegments` drops any segment the trim window leaves under
-        // MIN_TRIMMED_SEGMENT_SAMPLES, so narrowing a 3-lap selection onto lap 3
-        // shrank this array to ~300 samples while `trimStart` stayed ~700. The
-        // slice returned `[]`, every average came out 0, and
-        // `filteredTimestamps[700]` was `undefined` — `new Date(NaN)` threw and
-        // surfaced as the generic "Failed to store result".
-        //
-        // Deriving the window from the space actually being read removes the
-        // mismatch instead of detecting it: Standard's profiles are ALREADY
-        // trim-mapped by the time they land here, so what is on screen IS this
-        // concatenation. That is exactly how both segment modes have always
-        // treated it (`:126-127`, `:169-170`) — Standard was the odd one out.
-        //
-        // The slider values are still RECORDED as `trimStart` / `trimEnd`: they
-        // are the trim the user chose, the stored rows and the CSV export carry
-        // them, and reducing them to 0 / length-1 would empty that column.
-        const trimmedPower = filteredPower;
-        const trimmedVelocity = filteredVelocity;
-        const trimmedTemperature = filteredTemperature;
-
-        const avgPower = calculateAverage(trimmedPower, false);
-        const avgSpeed = calculateAverage(trimmedVelocity, false) * 3.6;
-        // STILL zero-skipping, deliberately. `buildFilteredDataFromProfiles`
-        // now marks a missing reading as NaN (which `calculateAverage` drops
-        // anyway), so for the two segment modes this flag could be dropped —
-        // but `prepareAnalysisPayload.ts:88` and `ActivityLoader.ts:242` still
-        // fabricate a 0 for a missing sample, and Standard's analyze path and
-        // every CSV ride go through those. Turning the zero-skip off before
-        // they are fixed too would drag Standard's stored avgTemperature toward
-        // 0 rather than away from it. Cost of leaving it on: a genuine 0 °C
-        // sample is excluded from the mean.
-        // ABSENT, not 0, when the ride carries no usable reading. `calculateAverage`
-        // returns 0 for an all-NaN array, and a stored 0 is indistinguishable from
-        // a genuine 0 °C ride — the same confusion the NaN marker exists to avoid.
-        const hasAnyTemperature = trimmedTemperature.some(Number.isFinite);
-        const avgTemperature = hasAnyTemperature
-            ? calculateAverage(trimmedTemperature, true)
-            : undefined;
-
-        // The FIRST ANALYSED SAMPLE, not `filteredTimestamps[trimStart]`.
-        //
-        // Same reasoning as the window above: indexing this array with a slider
-        // value read it in the wrong space, and when the two diverged far enough
-        // the lookup was `undefined` and `new Date(NaN).toISOString()` threw.
-        // Index 0 is the first sample actually on screen, which is what the
-        // segment modes have always recorded.
-        //
-        // The emptiness guard at the top of this function has already
-        // established `length > 0`, so this only has to reject a non-finite
-        // reading rather than an out-of-range index.
-        const firstTimestamp = filteredTimestamps[0];
-        if (!Number.isFinite(firstTimestamp)) {
-            log.error(
-                `Cannot store: first analysed timestamp is ${firstTimestamp}.`,
-            );
-            alert(
-                'Cannot store result: the analysed samples have no usable ' +
-                'timestamp. Please re-run the analysis.',
-            );
+        // The pure middle — averages, dates, invariants — lives in
+        // `buildSaveResultData.ts` (C5) so the headless API builds the same
+        // record through the same function. This handler keeps the DOM and
+        // the alerts.
+        const outcome = buildSaveResultData({
+            appState,
+            fileName: appState.selectedFile.name,
+            notes,
+            cda,
+            crr,
+            trimStart,
+            trimEnd,
+            now: new Date(),
+        });
+        if (!outcome.ok) {
+            log.error(`Cannot store: ${outcome.logMessage}`);
+            alert(`Cannot store result: ${outcome.alertMessage}`);
             return;
         }
-        const recordingDate = new Date(firstTimestamp * 1000).toISOString().split('T')[0];
-
-        // Crr from the slider is 22 °C-referenced; record the temperature-
-        // corrected value actually used in the physics alongside it.
-        const tempCorrectionActive =
-            appState.currentParameters.crr_temp_correction === true &&
-            appState.currentParameters.ambient_temp_c !== null &&
-            appState.currentParameters.ambient_temp_c !== undefined;
-
-        const saveData = {
-            fileName: appState.selectedFile.name,
-            // WHAT THE USER SELECTED, in all three modes (WR-02). Standard used
-            // to write the selection while the two segment modes wrote whatever
-            // survived, so the same drop produced `laps: [1,2,3]` here and
-            // `laps: [3]` there — one column, two meanings, and nothing saying
-            // which. It is the selection everywhere now.
-            laps: appState.currentAnalyzedLaps,
-            // WHICH OF THEM THE NUMBERS IN THIS ROW DESCRIBE. `avgPower`,
-            // `avgSpeed`, `avgTemperature`, `result` and `virtualDistances` all
-            // come from the SURVIVING profiles, so a dropped lap silently
-            // narrowed them with no column to say so.
-            //
-            // `?? undefined`, never `?? appState.currentAnalyzedLaps`: before the
-            // first recompute the coverage is genuinely unknown, and claiming
-            // full coverage there would be exactly the fabrication this column
-            // exists to prevent.
-            lapsCovered: appState.currentCoveredItems ?? undefined,
-            trimStart: trimStart,
-            trimEnd: trimEnd,
-            cda: cda,
-            crr: crr,
-            crrApplied: tempCorrectionActive
-                ? resolveAppliedCrr(appState.currentParameters, crr)
-                : undefined,
-            ambientTemp: tempCorrectionActive
-                ? (appState.currentParameters.ambient_temp_c ?? undefined)
-                : undefined,
-            tireSensitivity: tempCorrectionActive
-                ? (appState.currentParameters.tire_sensitivity ?? 'typical')
-                : undefined,
-            airSpeedCalibration: appState.airSpeedCalibrationPercent !== 0 ? appState.airSpeedCalibrationPercent : undefined,
-            windSource: appState.currentWindSource,
-            parameters: appState.currentParameters,
-            result: appState.currentVEResult,
-            // Entry (h): the per-segment virtual distances the VD header is
-            // showing, written by the same `summarize` seam that wrote
-            // `currentVEResult`. Multi-lap Standard used to persist nothing but
-            // the combined result's zeros here.
-            virtualDistances: appState.currentVirtualDistances,
-            timestamp: new Date(),
-            recordingDate: recordingDate,
-            avgPower: avgPower,
-            avgSpeed: avgSpeed,
-            avgTemperature: avgTemperature,
-            notes: notes,
-            isGpsLapMode: appState.isGpsLapModeActive
-        };
+        const saveData = outcome.data;
 
         storeBtn.disabled = true;
         storeBtn.textContent = 'Storing...';
@@ -436,12 +327,6 @@ export async function handleExportAllResults(
     }
 }
 
-function calculateAverage(values: number[], excludeZero: boolean = false): number {
-    const validValues = values.filter(v => !isNaN(v) && (excludeZero ? v !== 0 : true));
-    if (validValues.length === 0) return 0;
-    const sum = validValues.reduce((acc, val) => acc + val, 0);
-    return sum / validValues.length;
-}
 
 /**
  * Ask for the note to file the result under.

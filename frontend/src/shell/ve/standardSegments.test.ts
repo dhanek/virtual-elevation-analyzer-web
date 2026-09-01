@@ -124,6 +124,7 @@ function profile(
 		virtualElevationCompare: null,
 		resultCompare: null,
 		actualElevation: indices.map(() => 100),
+		referenceElevation: null,
 		supplementarySeries: {
 			distancesKm: [],
 			powerWatts: indices.map(() => 200),
@@ -352,5 +353,56 @@ describe("resolvePlaceholderWindSpeed", () => {
 		// a length bug, which is worse than an un-offset one.
 		expect(resolvePlaceholderWindSpeed("fit", RAW, [])).toEqual(RAW);
 		expect(resolvePlaceholderWindSpeed("fit", RAW, [20, 21])).toEqual(RAW);
+	});
+});
+
+describe("stitchStandardProfiles: the reference elevation channel", () => {
+	const normalized = {
+		timestamps: Array.from({ length: 40 }, (_, i) => i),
+		velocity: Array.from({ length: 40 }, () => 10),
+	};
+
+	function withReference(
+		base: SegmentVeProfile,
+		series: number[],
+	): SegmentVeProfile {
+		return {
+			...base,
+			referenceElevation: { label: "Barometer", series },
+		};
+	}
+
+	it("stitches the reference across segments, keeping the label", () => {
+		const first = withReference(profile("s1", 0, 2), [50, 51, 52]);
+		const second = withReference(profile("s2", 10, 12), [60, 61, 62]);
+
+		const stitched = stitchStandardProfiles([first, second], normalized);
+
+		expect(stitched.referenceElevation).not.toBeNull();
+		expect(stitched.referenceElevation!.label).toBe("Barometer");
+		expect(stitched.referenceElevation!.series).toEqual([
+			50, 51, 52, 60, 61, 62,
+		]);
+	});
+
+	it("NaN-pads a segment without a reference rather than shortening the axis", () => {
+		const first = withReference(profile("s1", 0, 2), [50, 51, 52]);
+		const second = profile("s2", 10, 12);
+
+		const stitched = stitchStandardProfiles([first, second], normalized);
+
+		const series = stitched.referenceElevation!.series;
+		expect(series).toHaveLength(6);
+		expect(series.slice(0, 3)).toEqual([50, 51, 52]);
+		expect(series.slice(3).every((value) => Number.isNaN(value))).toBe(true);
+	});
+
+	it("stays null when no profile carries one — the phase-1 series exactly", () => {
+		const stitched = stitchStandardProfiles(
+			[profile("s1", 0, 2), profile("s2", 10, 12)],
+			normalized,
+		);
+
+		expect(stitched.referenceElevation).toBeNull();
 	});
 });

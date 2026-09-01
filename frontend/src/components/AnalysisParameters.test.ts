@@ -176,6 +176,37 @@ describe("carry-over through the wholesale form rebuild", () => {
 		expect(component.getParameters().wind_height_factor).toBe(0.65);
 	});
 
+	test("a system_mass edit preserves the closure-target fields (phase 2)", () => {
+		// Found live: the rebuild lists its carry-overs one by one, so a field
+		// added to AnalysisParameters without a line here is silently reset by
+		// the next keystroke in ANY form input — the radio in the sidebar
+		// snapped back to DEM while the user watched.
+		component.setParameters({
+			elevation_diff_source: "manual",
+			manual_elevation_diff_m: -4.5,
+		});
+		onChange.mockClear();
+
+		typeInto("system_mass", "82");
+
+		const params = component.getParameters();
+		expect(params.elevation_diff_source).toBe("manual");
+		expect(params.manual_elevation_diff_m).toBe(-4.5);
+	});
+
+	test("a system_mass edit preserves a slider-set air_speed_offset", () => {
+		// Found while adding baro_lag_seconds: the rebuild read a form input
+		// named air_speed_offset that has never existed in this form (the
+		// sidebar slider owns the field), so NaN || default reset a tuned
+		// offset to 2 on the next keystroke in ANY form input.
+		component.setParameters({ air_speed_offset: 3.5 });
+		onChange.mockClear();
+
+		typeInto("system_mass", "82");
+
+		expect(component.getParameters().air_speed_offset).toBe(3.5);
+	});
+
 	test("a system_mass edit preserves the legacy 'unknown' provenance", () => {
 		component.setParameters({
 			wind_entry: "unknown",
@@ -202,5 +233,35 @@ describe("carry-over through the wholesale form rebuild", () => {
 		const params = component.getParameters();
 		expect(params.wind_entry).toBe("manual");
 		expect(params.wind_height_factor).toBe(1.0);
+	});
+});
+
+describe("baro_lag_seconds (barometric altitude latency)", () => {
+	test("ships disabled: the default is 0, never a silent correction", () => {
+		expect(DEFAULT_PARAMETERS.baro_lag_seconds).toBe(0);
+	});
+
+	test("typing a lag sets the parameter", () => {
+		typeInto("baro_lag_seconds", "2");
+		expect(component.getParameters().baro_lag_seconds).toBe(2);
+		expect(onChange).toHaveBeenCalled();
+	});
+
+	test("a cleared field falls back to 0, and negative lags are accepted", () => {
+		typeInto("baro_lag_seconds", "-1.5");
+		expect(component.getParameters().baro_lag_seconds).toBe(-1.5);
+		typeInto("baro_lag_seconds", "");
+		expect(component.getParameters().baro_lag_seconds).toBe(0);
+	});
+
+	test("a typed lag survives a system_mass edit (it is a real form field)", () => {
+		typeInto("baro_lag_seconds", "2");
+		typeInto("system_mass", "82");
+		expect(component.getParameters().baro_lag_seconds).toBe(2);
+	});
+
+	test("setParameters writes the input, so a persisted lag renders on load", () => {
+		component.setParameters({ baro_lag_seconds: 2 });
+		expect(input("baro_lag_seconds").value).toBe("2");
 	});
 });

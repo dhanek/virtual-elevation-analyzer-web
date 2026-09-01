@@ -27,6 +27,7 @@ import {
     buildWindSpeedFigure,
 } from './StandardPlotBuilders'
 import { createPlotContext } from './PlotContext'
+import { buildClosureContourFigure } from './ConvergencePlotBuilders'
 
 const LENGTH = 20
 const context = createPlotContext(LENGTH, 2, 17)
@@ -75,6 +76,22 @@ const figures: Array<[string, { layout: Record<string, unknown> }]> = [
         timestamps: series(1),
         velocity: series(10),
         windSpeed: series(0.5),
+    })],
+    ['convergencePlot', buildClosureContourFigure({
+        surface: {
+            z: [[1, 2], [2, 1]],
+            ridgeCda: [0.2, 0.3],
+            ridgeCrr: [0.004, 0.005],
+            best: { cda: 0.3, crr: 0.005, error: 0.1 },
+            clipped: false,
+            underdetermined: null,
+        },
+        cdaValues: [0.2, 0.3],
+        crrValues: [0.004, 0.005],
+        marker: { cda: 0.25, crr: 0.0045 },
+        segmentCount: 1,
+        targetLabel: 'DEM',
+        gridSteps: 41,
     })],
 ]
 

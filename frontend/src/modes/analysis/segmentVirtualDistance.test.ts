@@ -83,6 +83,7 @@ function makeProfile(
 		virtualElevationCompare: null,
 		resultCompare: null,
 		actualElevation: indices.map(() => 100),
+		referenceElevation: null,
 		supplementarySeries: {
 			distancesKm: indices.map((_, i) => i / 100),
 			powerWatts: indices.map(() => 200),

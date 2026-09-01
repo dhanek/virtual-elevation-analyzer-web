@@ -28,7 +28,9 @@ import {
 	updateMetricsDisplay,
 } from "./bindStandardSliders";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { autoConvergeLockControlsMarkup } from "./autoConvergeLocks";
 import { crrTempControlsMarkup } from "./crrTempControls";
+import { elevationDiffControlsMarkup } from "./elevationDiffControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
@@ -37,6 +39,11 @@ import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveSelectionRhoArray } from "../analysis/rhoArrayResolver";
+import {
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "../analysis/elevationProfileResolver";
+import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import {
 	resolvePlaceholderWindSpeed,
 	resolveSelectionWindSeries,
@@ -152,11 +159,33 @@ export async function initializeVEAnalysis(
 		trimEnd,
 	);
 
+	// The NON-master channel, resolved and sliced EXACTLY as the update path
+	// does (WR-1): the resolver call is idempotent against the cached arrays,
+	// so this is the same object identity the primitive's pass will use, and
+	// the initial paint cannot disagree with the first slider move.
+	const referenceElevation = appState.currentFitData
+		? resolveReferenceElevation(
+				appState,
+				resolveElevationProfile(
+					appState,
+					appState.currentFitData,
+					getNormalizedActivityArrays(appState.currentFitData).altitude,
+				).profile,
+				getNormalizedActivityArrays(appState.currentFitData).altitude.length,
+			)
+		: null;
+
 	// Create plots
 	const figures = buildVirtualElevationFigures({
 		context,
 		virtualElevation: Array.from(result.virtual_elevation),
 		actualElevation: analysisInput.altitude,
+		referenceElevation: referenceElevation
+			? {
+					label: referenceElevation.label,
+					series: selectedIndices.map((i) => referenceElevation.series[i]),
+				}
+			: null,
 		cdaLabel: initialCdA.toFixed(3),
 		crrLabel: appliedInitialCrr.toFixed(4),
 	});
@@ -439,6 +468,8 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="range" id="crrSlider" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" value="${appState.currentParameters!.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(appState.currentParameters!)}
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
                                 ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}
                             </div>
@@ -517,6 +548,7 @@ export async function showVirtualElevationAnalysisInline(
 																? `<button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(initialWindSource)}>VD</button>`
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
@@ -588,6 +620,9 @@ export async function showVirtualElevationAnalysisInline(
                             ${virtualDistanceHeaderMarkup()}
                             <div class="ve-plot-container"><div id="vdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                             ${plotXAxisToggleMarkup()}
+                        </div>
+                        <div class="ve-tab-content" id="convergence-tab">
+                            <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
                         </div>
                     </div>
                 </div>

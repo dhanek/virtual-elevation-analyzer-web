@@ -1,4 +1,5 @@
 import type { SegmentSupplementarySeries } from '../../analysis/SegmentSupplementarySeries';
+import type { ReferenceElevationSeries } from '../../analysis/elevationProfiles';
 
 export interface LapVEProfile {
     lapNumber: number;
@@ -32,6 +33,13 @@ export interface LapVEProfile {
      */
     virtualElevationCompare: number[] | null;
     actualElevation: number[];
+    /**
+     * The NON-master elevation channel over the same samples as
+     * `actualElevation` (see `SegmentVeProfile.referenceElevation`). Carried on
+     * the profile for the same reason the compare leg is: the update path drops
+     * the index range (`range: null`), so a renderer cannot slice it later.
+     */
+    referenceElevation: ReferenceElevationSeries | null;
     supplementarySeries: SegmentSupplementarySeries;
     duration: number;         // seconds
     totalDistance: number;    // km

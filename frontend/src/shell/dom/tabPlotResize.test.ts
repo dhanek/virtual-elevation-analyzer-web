@@ -52,6 +52,7 @@ describe('activating a tab re-measures the plots that pane just revealed', () =>
             <button class="ve-tab-button ve-tab-button--active" data-tab="ve"></button>
             <button class="ve-tab-button" data-tab="wind"></button>
             <button class="ve-tab-button" data-tab="vd"></button>
+            <button class="ve-tab-button" data-tab="convergence"></button>
             <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                 <div class="ve-plot-container"><div id="vePlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
                 <div class="ve-plot-container"><div id="veResidualsPlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
@@ -71,6 +72,9 @@ describe('activating a tab re-measures the plots that pane just revealed', () =>
             <div class="ve-tab-content" id="vd-tab">
                 <div class="ve-plot-container"><div id="vdPlot" class="ve-plot-container__plot"></div></div>
             </div>
+            <div class="ve-tab-content" id="convergence-tab">
+                <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot js-plotly-plot"></div></div>
+            </div>
         `
         setPlotly(true)
     })
@@ -78,6 +82,14 @@ describe('activating a tab re-measures the plots that pane just revealed', () =>
     it('resizes the graphs in the activated pane only', () => {
         activateTab('wind')
         expect(resized).toEqual(['windSpeedPlot'])
+    })
+
+    it('resizes the convergence contour and nothing else when its tab activates', () => {
+        // The fifth tab this file's header warned about. `activateTab` calls
+        // `Plots.resize` on every activation, which is why the contour figure
+        // must never pin a height (`oneSizingConvention.test.ts`).
+        activateTab('convergence')
+        expect(resized).toEqual(['convergencePlot'])
     })
 
     it('resizes after the render callback, so the async relayout is not raced', () => {

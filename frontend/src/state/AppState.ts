@@ -1,4 +1,5 @@
 import type { AnalysisParameters } from "../components/AnalysisParameters";
+import type { AutoConvergeState } from "../analysis/AutoConverge";
 import type {
 	DetectedLap,
 	GpsLapDetectionResult,
@@ -212,6 +213,13 @@ export interface AnalysisState {
 	currentVirtualDistances: SegmentVirtualDistance[];
 	currentWindSource: WindSource;
 	airSpeedCalibrationPercent: number;
+	/**
+	 * Auto-converge UI state (Convergence plan, phase 1). Runtime, like the
+	 * calibration above — deliberately NOT on AnalysisParameters, so the
+	 * Section-3 template never emits `checked` and no merge route is needed;
+	 * persistence is a recorded follow-up.
+	 */
+	autoConverge: AutoConvergeState;
 	isCalculatingAutoRho: boolean;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
@@ -284,6 +292,7 @@ export class AppState {
 		currentVirtualDistances: [],
 		currentWindSource: "none",
 		airSpeedCalibrationPercent: 0,
+		autoConverge: { enabled: false, cdaLocked: false, crrLocked: false },
 		isCalculatingAutoRho: false,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
@@ -515,6 +524,10 @@ export class AppState {
 
 	set airSpeedCalibrationPercent(calibrationPercent: number) {
 		this.analysis.airSpeedCalibrationPercent = calibrationPercent;
+	}
+
+	get autoConverge(): AutoConvergeState {
+		return this.analysis.autoConverge;
 	}
 
 	get gpsLapDetectionResult(): GpsLapDetectionResult | null {

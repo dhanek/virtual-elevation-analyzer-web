@@ -182,6 +182,43 @@ struct VirtualSlopeResult {
     apparent_velocity: Vec<f64>,
 }
 
+/// The parts of a virtual-elevation evaluation that do not depend on CdA or
+/// Crr, precomputed once over a trim window so a grid of (CdA, Crr) pairs can
+/// be evaluated without re-deriving acceleration, wind and apparent velocity
+/// per cell. `calculate_virtual_slope_impl` recomputes all three on every
+/// call, which is what made a naive grid loop unaffordable.
+///
+/// Covers samples `start + 1 ..= end` of the window only. That range is
+/// exact, not approximate: `build_virtual_elevation` accumulates
+/// `ve[i] = ve[i-1] + v_i·dt·sin(atan(slope_i))`, so `ve[end] - ve[start]`
+/// is the sum over `start + 1 ..= end` and sample `start` itself contributes
+/// nothing. Include it and every cell is off by one term.
+struct GainKernel {
+    /// `v_i · dt` — the distance each sample's slope is multiplied by.
+    step: Vec<f64>,
+    /// `w/(v·m·g) − a/g` — the CdA- and Crr-free part of the Chung slope.
+    base: Vec<f64>,
+    /// `ρ_i · va_i² / (2·m·g)` — the coefficient CdA multiplies.
+    aero: Vec<f64>,
+}
+
+impl GainKernel {
+    /// `ve[end] - ve[start]` at one (CdA, Crr).
+    ///
+    /// Keeps `slope.atan().sin()` verbatim from `build_virtual_elevation`
+    /// rather than the algebraically identical `x / sqrt(1 + x²)`: the whole
+    /// value of the grid is that its minimum agrees with the number the VE
+    /// tab shows, and the two forms are not bit-identical.
+    fn gain(&self, cda: f64, crr: f64) -> f64 {
+        let mut sum = 0.0;
+        for i in 0..self.step.len() {
+            let slope = self.base[i] - cda * self.aero[i] - crr;
+            sum += self.step[i] * slope.atan().sin();
+        }
+        sum
+    }
+}
+
 #[wasm_bindgen]
 impl VirtualElevationCalculator {
     #[wasm_bindgen(constructor)]
@@ -542,6 +579,235 @@ impl VirtualElevationCalculator {
         self.calculate_virtual_elevation_impl(0.3, Some(cda_array), crr, trim_start, trim_end)
     }
 
+    /// Whether `calculate_metrics` has a reference altitude to compare
+    /// against: the channel is unusable when empty, all-NaN or all-zero.
+    fn has_usable_altitude(&self) -> bool {
+        let altitude = &self.data.altitude;
+        if altitude.is_empty() {
+            return false;
+        }
+        let all_nan = altitude.iter().all(|&x| x.is_nan());
+        let all_zero = altitude.iter().all(|&x| x == 0.0);
+        !(all_nan || all_zero)
+    }
+
+    /// The clamped `(start, end)` sample window `calculate_metrics` reports
+    /// over, or `None` where it reports zeros instead.
+    ///
+    /// ONE definition, used by both `calculate_metrics` and the gain kernel.
+    /// The two branches clamp differently — without a usable altitude the
+    /// window is clamped to the profile and never rejected; with one it is
+    /// clamped to the shorter of profile and altitude and rejected below
+    /// three samples or a span of two — and a grid that clamped even one
+    /// sample differently from the readout would put the contour's minimum
+    /// beside the number the VE tab shows rather than on it.
+    fn metrics_window(
+        &self,
+        ve_len: usize,
+        trim_start: usize,
+        trim_end: usize,
+    ) -> Option<(usize, usize)> {
+        if !self.has_usable_altitude() {
+            if ve_len == 0 {
+                return None;
+            }
+            let end = trim_end.min(ve_len - 1);
+            let start = trim_start.min(end);
+            return Some((start, end));
+        }
+
+        let min_len = ve_len.min(self.data.altitude.len());
+        if min_len < 3 {
+            return None;
+        }
+        let end = trim_end.min(min_len - 1);
+        let start = trim_start.min(end);
+        if end <= start || end - start < 2 {
+            return None;
+        }
+        Some((start, end))
+    }
+
+    /// Precompute the CdA/Crr-independent inputs over `start + 1 ..= end`.
+    /// Both bounds must already have been clamped by `metrics_window`.
+    fn build_gain_kernel(&self, start: usize, end: usize) -> GainKernel {
+        let acceleration = self.calculate_acceleration();
+        let effective_wind = self.calculate_effective_wind();
+        let apparent_velocity = self.get_apparent_velocity(&effective_wind);
+        let mg = self.params.system_mass * 9.807;
+
+        let count = end.saturating_sub(start);
+        let mut step = Vec::with_capacity(count);
+        let mut base = Vec::with_capacity(count);
+        let mut aero = Vec::with_capacity(count);
+
+        for i in (start + 1)..=end {
+            let v = self.data.velocity[i].max(0.001); // Avoid division by zero
+            let w = self.data.power[i] * self.params.eta;
+            let a = acceleration[i];
+            let va = apparent_velocity[i];
+            let rho = self
+                .data
+                .rho_array
+                .as_ref()
+                .and_then(|arr| arr.get(i).copied())
+                .unwrap_or(self.params.rho);
+
+            let power_term = w / (v * mg);
+            let accel_term = a / 9.807;
+            let aero_term = rho * va.powi(2) / (2.0 * mg);
+            let distance = self.data.velocity[i] * self.dt;
+
+            // `calculate_virtual_slope_impl` zeroes a non-finite slope. Whether
+            // the slope is finite does not depend on CdA or Crr (both finite,
+            // CdA positive), so decide it once here: such a sample contributes
+            // `v·dt·sin(atan(0))` — zero, or NaN when the velocity itself is
+            // NaN — exactly as the profile does.
+            if (power_term - aero_term - accel_term).is_finite() {
+                step.push(distance);
+                base.push(power_term - accel_term);
+                aero.push(aero_term);
+            } else {
+                step.push(distance * 0.0);
+                base.push(0.0);
+                aero.push(0.0);
+            }
+        }
+
+        GainKernel { step, base, aero }
+    }
+
+    /// Virtual-elevation gain `ve[trim_end] - ve[trim_start]` in metres at
+    /// one (CdA, Crr), clamped exactly as `calculate_metrics` clamps, so it
+    /// equals `calculate_virtual_elevation(..).ve_elevation_diff` in every
+    /// branch that function has: with a reference altitude, without one,
+    /// and under velodrome.
+    ///
+    /// This is the closure-error primitive, and it is deliberately
+    /// target-free: the caller subtracts its own reference elevation
+    /// difference. Pooling across segments and choosing where the reference
+    /// comes from both stay in TypeScript, with no change on this side.
+    #[wasm_bindgen]
+    pub fn ve_gain(&self, cda: f64, crr: f64, trim_start: usize, trim_end: usize) -> f64 {
+        match self.metrics_window(self.data.velocity.len(), trim_start, trim_end) {
+            Some((start, end)) => self.build_gain_kernel(start, end).gain(cda, crr),
+            None => 0.0,
+        }
+    }
+
+    /// `ve_gain` over a CdA × Crr grid, row-major over CdA:
+    /// `index = cda_index * crr_steps + crr_index`, with
+    /// `cda_i = cda_min + i·(cda_max − cda_min)/(cda_steps − 1)` and Crr the
+    /// same way. Empty when either step count is below two or the window is
+    /// degenerate — rejected by `metrics_window`, or spanning no samples.
+    ///
+    /// The kernel is built once; each CdA column folds CdA into the
+    /// per-sample slope once and sweeps Crr as a scalar subtraction, so the
+    /// only cost that scales is `cda_steps × crr_steps × window` evaluations
+    /// of `atan` and `sin`. Cells are bit-identical to `ve_gain` at the same
+    /// coordinates: same operand order, same summation order.
+    #[wasm_bindgen]
+    #[allow(clippy::too_many_arguments)]
+    pub fn ve_gain_grid(
+        &self,
+        cda_min: f64,
+        cda_max: f64,
+        cda_steps: usize,
+        crr_min: f64,
+        crr_max: f64,
+        crr_steps: usize,
+        trim_start: usize,
+        trim_end: usize,
+    ) -> Vec<f64> {
+        if cda_steps < 2 || crr_steps < 2 {
+            return Vec::new();
+        }
+        let Some((start, end)) =
+            self.metrics_window(self.data.velocity.len(), trim_start, trim_end)
+        else {
+            return Vec::new();
+        };
+        let kernel = self.build_gain_kernel(start, end);
+        if kernel.step.is_empty() {
+            return Vec::new();
+        }
+
+        let cda_step = (cda_max - cda_min) / ((cda_steps - 1) as f64);
+        let crr_step = (crr_max - crr_min) / ((crr_steps - 1) as f64);
+        let mut grid = Vec::with_capacity(cda_steps * crr_steps);
+        let mut column = vec![0.0; kernel.step.len()];
+
+        for i in 0..cda_steps {
+            let cda = cda_min + (i as f64) * cda_step;
+            for (slope, (&base, &aero)) in column
+                .iter_mut()
+                .zip(kernel.base.iter().zip(kernel.aero.iter()))
+            {
+                *slope = base - cda * aero;
+            }
+            for j in 0..crr_steps {
+                let crr = crr_min + (j as f64) * crr_step;
+                let mut sum = 0.0;
+                for (&step, &slope) in kernel.step.iter().zip(column.iter()) {
+                    sum += step * (slope - crr).atan().sin();
+                }
+                grid.push(sum);
+            }
+        }
+        grid
+    }
+
+    /// The Crr at which `ve_gain(cda, ·)` equals `target_gain`, by bisection
+    /// over `[crr_lo, crr_hi]`. Raising Crr lowers every sample's slope, so
+    /// gain is strictly decreasing in Crr and the root is unique whenever it
+    /// is bracketed; NaN when it is not, so a caller can tell "outside the
+    /// bounds" from a bound. Single segment only — the pooled multi-segment
+    /// solve needs every segment's calculator at once and lives in
+    /// TypeScript.
+    #[wasm_bindgen]
+    pub fn crr_for_gain(
+        &self,
+        cda: f64,
+        target_gain: f64,
+        crr_lo: f64,
+        crr_hi: f64,
+        trim_start: usize,
+        trim_end: usize,
+    ) -> f64 {
+        let Some((start, end)) =
+            self.metrics_window(self.data.velocity.len(), trim_start, trim_end)
+        else {
+            return f64::NAN;
+        };
+        let kernel = self.build_gain_kernel(start, end);
+        if kernel.step.is_empty() || !(crr_lo < crr_hi) {
+            return f64::NAN;
+        }
+        let gain_lo = kernel.gain(cda, crr_lo);
+        let gain_hi = kernel.gain(cda, crr_hi);
+        // Decreasing in Crr: bracketed when gain(lo) >= target >= gain(hi).
+        if !(gain_hi <= target_gain && target_gain <= gain_lo) {
+            return f64::NAN;
+        }
+
+        let (mut lo, mut hi) = (crr_lo, crr_hi);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if mid <= lo || mid >= hi {
+                break;
+            }
+            if kernel.gain(cda, mid) > target_gain {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            if hi - lo <= 1e-12 {
+                break;
+            }
+        }
+        0.5 * (lo + hi)
+    }
+
     /// Calculate R², RMSE and elevation differences within trim region
     fn calculate_metrics(
         &self,
@@ -549,25 +815,17 @@ impl VirtualElevationCalculator {
         trim_start: usize,
         trim_end: usize,
     ) -> (f64, f64, f64, f64) {
-        // Check if we have actual elevation data
-        // Only skip if array is empty OR if ALL values are NaN OR if ALL values are zero
-        let all_nan =
-            !self.data.altitude.is_empty() && self.data.altitude.iter().all(|&x| x.is_nan());
-        let all_zero =
-            !self.data.altitude.is_empty() && self.data.altitude.iter().all(|&x| x == 0.0);
+        // The window is shared with the gain kernel (`metrics_window`) so the
+        // Convergence map and this readout can never clamp differently.
+        let Some((safe_trim_start, safe_trim_end)) =
+            self.metrics_window(virtual_elevation.len(), trim_start, trim_end)
+        else {
+            return (0.0, 0.0, 0.0, 0.0);
+        };
 
-        if self.data.altitude.is_empty() || all_nan || all_zero {
-            // No actual elevation available - calculate VE diff using trim indices
-            let safe_trim_end = trim_end.min(virtual_elevation.len().saturating_sub(1));
-            let safe_trim_start = trim_start.min(safe_trim_end);
-
-            let ve_diff = if virtual_elevation.len() > safe_trim_start
-                && virtual_elevation.len() > safe_trim_end
-            {
-                virtual_elevation[safe_trim_end] - virtual_elevation[safe_trim_start]
-            } else {
-                0.0
-            };
+        if !self.has_usable_altitude() {
+            // No actual elevation available - VE diff over the clamped window only
+            let ve_diff = virtual_elevation[safe_trim_end] - virtual_elevation[safe_trim_start];
             return (0.0, 0.0, ve_diff, 0.0);
         }
 
@@ -578,19 +836,8 @@ impl VirtualElevationCalculator {
             actual_elevation = vec![0.0; actual_elevation.len()];
         }
 
-        // Ensure same length
+        // Ensure same length (`metrics_window` already guaranteed >= 3)
         let min_len = virtual_elevation.len().min(actual_elevation.len());
-        if min_len < 3 {
-            return (0.0, 0.0, 0.0, 0.0);
-        }
-
-        // Validate trim indices
-        let safe_trim_end = trim_end.min(min_len.saturating_sub(1));
-        let safe_trim_start = trim_start.min(safe_trim_end);
-
-        if safe_trim_end <= safe_trim_start || (safe_trim_end - safe_trim_start) < 2 {
-            return (0.0, 0.0, 0.0, 0.0);
-        }
 
         let ve_full = &virtual_elevation[..min_len];
         let actual_full = &actual_elevation[..min_len];
@@ -1277,5 +1524,235 @@ mod tests {
                 rho_array_value
             );
         }
+    }
+
+    // ---- Gain kernel (Convergence tab / auto-converge) ----
+
+    /// A ride exercising every CdA/Crr-independent input the gain kernel
+    /// hoists out of the grid loop: varying speed and power (so acceleration
+    /// is non-zero), a GPS track whose heading sweeps a circle (so wind
+    /// direction matters), a per-sample rho array, and a climbing altitude.
+    fn varied_ride() -> VEData {
+        let timestamps: Vec<f64> = (0..N).map(|i| i as f64).collect();
+        let velocity: Vec<f64> = (0..N)
+            .map(|i| 9.0 + 2.0 * ((i as f64) * 0.15).sin())
+            .collect();
+        let power: Vec<f64> = (0..N)
+            .map(|i| 220.0 + 60.0 * ((i as f64) * 0.09).cos())
+            .collect();
+        let position_lat: Vec<f64> = (0..N)
+            .map(|i| 51.0 + 0.001 * ((i as f64) * 0.06).cos())
+            .collect();
+        let position_long: Vec<f64> = (0..N)
+            .map(|i| -1.0 + 0.001 * ((i as f64) * 0.06).sin())
+            .collect();
+        let altitude: Vec<f64> = (0..N).map(|i| 100.0 + 0.2 * (i as f64)).collect();
+        let mut distance = Vec::with_capacity(N);
+        let mut travelled = 0.0;
+        for &v in &velocity {
+            travelled += v;
+            distance.push(travelled);
+        }
+        let mut data = VEData::new(
+            timestamps,
+            power,
+            velocity,
+            position_lat,
+            position_long,
+            altitude,
+            distance,
+            vec![0.0; N],
+        );
+        data.set_rho_array(
+            (0..N)
+                .map(|i| 1.20 + 0.01 * ((i as f64) * 0.05).sin())
+                .collect(),
+        );
+        data
+    }
+
+    /// Reference parameters plus a 3 m/s wind from the west, which only
+    /// matters on a ride with GPS (`calculate_effective_wind`).
+    fn windy_params() -> VEParameters {
+        let mut p = reference_params();
+        p.wind_speed = Some(3.0);
+        p.wind_direction = Some(270.0);
+        p
+    }
+
+    /// The kernel sums the window directly where the profile accumulates
+    /// from sample 0 and subtracts, so the two differ by summation rounding
+    /// (~1e-14 here). 1e-9 is still five orders below anything displayed,
+    /// while the two defects this guards against are far larger: an
+    /// off-by-one term is ~v·dt·slope ≈ 0.1 m, and a clamping mismatch
+    /// between the kernel and `calculate_metrics` is metres.
+    const GAIN_TOLERANCE: f64 = 1e-9;
+
+    /// `ve_gain` must equal `ve_elevation_diff` at every (CdA, Crr) and every
+    /// window shape — interior, clamped past the end, a span of exactly two
+    /// (the smallest `calculate_metrics` accepts), a span of one (which it
+    /// rejects), and an empty one.
+    fn assert_gain_matches_profile(calc: &VirtualElevationCalculator, label: &str) {
+        let windows = [(0, N - 1), (10, 60), (5, 7), (5, 6), (0, 10 * N), (N - 1, N - 1)];
+        for &cda in &[0.20, 0.30, 0.45] {
+            for &crr in &[0.002, 0.005, 0.012] {
+                for &(start, end) in &windows {
+                    let expected = calc
+                        .calculate_virtual_elevation(cda, crr, start, end)
+                        .ve_elevation_diff();
+                    let actual = calc.ve_gain(cda, crr, start, end);
+                    assert!(
+                        (expected - actual).abs() < GAIN_TOLERANCE,
+                        "{}: ve_gain({}, {}, {}, {}) = {} but the profile says {}",
+                        label,
+                        cda,
+                        crr,
+                        start,
+                        end,
+                        actual,
+                        expected
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ve_gain_matches_profile_with_altitude() {
+        let data = constant_ride(steady_state_power(), 100.0, vec![0.0; N]);
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        assert_gain_matches_profile(&calc, "altitude");
+    }
+
+    /// The all-zero altitude branch of `calculate_metrics` clamps differently
+    /// (to the profile, never rejecting) — the kernel must follow it there.
+    #[test]
+    fn ve_gain_matches_profile_without_altitude() {
+        let data = constant_ride(steady_state_power(), 0.0, vec![0.0; N]);
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        assert_gain_matches_profile(&calc, "no altitude");
+    }
+
+    #[test]
+    fn ve_gain_matches_profile_under_velodrome() {
+        let mut params = windy_params();
+        params.velodrome = true;
+        let calc = VirtualElevationCalculator::new(varied_ride(), params);
+        assert_gain_matches_profile(&calc, "velodrome");
+    }
+
+    /// The hoist itself: acceleration, wind direction against a turning GPS
+    /// heading, and a per-sample rho all come out of the grid loop. This is
+    /// the test that the hoisted arrays are the ones the profile uses.
+    #[test]
+    fn ve_gain_matches_profile_with_wind_gps_and_rho_array() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        assert_gain_matches_profile(&calc, "wind + GPS + rho array");
+    }
+
+    /// The other apparent-velocity path: measured air speed in the data with
+    /// a calibration multiplier applied, which `get_apparent_velocity` takes
+    /// in preference to the wind parameters.
+    #[test]
+    fn ve_gain_matches_profile_with_measured_air_speed_and_calibration() {
+        let mut data = varied_ride();
+        data.wind_speed = data.velocity.iter().map(|v| v + 1.5).collect();
+        let mut calc = VirtualElevationCalculator::new(data, windy_params());
+        calc.set_air_speed_calibration(1.05);
+        assert_gain_matches_profile(&calc, "measured air speed");
+    }
+
+    /// Pins the layout TypeScript decodes: `index = cda_index * crr_steps +
+    /// crr_index`, CdA and Crr both linearly spaced from min to max inclusive.
+    #[test]
+    fn ve_gain_grid_is_row_major_over_cda() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        let (cda_steps, crr_steps) = (3, 4);
+        let grid = calc.ve_gain_grid(0.2, 0.4, cda_steps, 0.002, 0.008, crr_steps, 0, N - 1);
+        assert_eq!(grid.len(), cda_steps * crr_steps);
+
+        for i in 0..cda_steps {
+            let cda = 0.2 + (i as f64) * 0.1;
+            for j in 0..crr_steps {
+                let crr = 0.002 + (j as f64) * 0.002;
+                let cell = grid[i * crr_steps + j];
+                let direct = calc.ve_gain(cda, crr, 0, N - 1);
+                assert!(
+                    (cell - direct).abs() < 1e-12,
+                    "grid[{}][{}] = {} but ve_gain({}, {}) = {}",
+                    i,
+                    j,
+                    cell,
+                    cda,
+                    crr,
+                    direct
+                );
+            }
+        }
+    }
+
+    /// The monotonicity that licenses bisection along either axis. CdA needs
+    /// a non-zero apparent velocity, which `varied_ride` has (v ≈ 9 m/s);
+    /// a zero-airspeed ride is genuinely flat in CdA.
+    #[test]
+    fn ve_gain_is_strictly_decreasing_in_crr_and_in_cda() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+
+        let mut previous = f64::INFINITY;
+        for k in 0..20 {
+            let crr = 0.001 + (k as f64) * 0.001;
+            let gain = calc.ve_gain(0.3, crr, 0, N - 1);
+            assert!(gain < previous, "gain must fall as Crr rises: crr={} gain={} previous={}", crr, gain, previous);
+            previous = gain;
+        }
+
+        let mut previous = f64::INFINITY;
+        for k in 0..20 {
+            let cda = 0.15 + (k as f64) * 0.02;
+            let gain = calc.ve_gain(cda, 0.005, 0, N - 1);
+            assert!(gain < previous, "gain must fall as CdA rises: cda={} gain={} previous={}", cda, gain, previous);
+            previous = gain;
+        }
+    }
+
+    #[test]
+    fn crr_for_gain_recovers_a_planted_crr_and_is_nan_outside_the_bracket() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        let planted = 0.005;
+        let target = calc.ve_gain(0.3, planted, 0, N - 1);
+
+        let recovered = calc.crr_for_gain(0.3, target, 0.001, 0.03, 0, N - 1);
+        assert!(
+            (recovered - planted).abs() < 1e-9,
+            "bisection should recover crr={} but gave {}",
+            planted,
+            recovered
+        );
+
+        // A gain only reachable below crr_lo is outside the bracket.
+        let unreachable = calc.ve_gain(0.3, 0.0005, 0, N - 1);
+        assert!(calc
+            .crr_for_gain(0.3, unreachable, 0.001, 0.03, 0, N - 1)
+            .is_nan());
+        // So is an inverted bracket.
+        assert!(calc.crr_for_gain(0.3, target, 0.03, 0.001, 0, N - 1).is_nan());
+    }
+
+    #[test]
+    fn ve_gain_grid_is_empty_on_degenerate_input() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        assert!(calc.ve_gain_grid(0.2, 0.4, 1, 0.002, 0.008, 4, 0, N - 1).is_empty());
+        assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 1, 0, N - 1).is_empty());
+        assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, 50, 50).is_empty());
+        assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, 60, 50).is_empty());
+        assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, 50, 51).is_empty());
+
+        // The no-altitude branch never rejects a window, but a zero-span one
+        // still has no samples to sum: an empty grid, and a gain of exactly 0
+        // — which is also what the profile reports for it.
+        let data = constant_ride(steady_state_power(), 0.0, vec![0.0; N]);
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, 50, 50).is_empty());
+        assert_eq!(calc.ve_gain(0.3, 0.005, 50, 50), 0.0);
     }
 }
