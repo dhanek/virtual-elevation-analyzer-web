@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
+	PROFILE_NO_DISTANCE_REASON,
+	PROFILE_NO_PAIR_REASON,
 	pooledResidual,
 	resolveAutoConvergedControls,
 	solveBoth,
+	solveBothProfile,
 	solveCdaForCrr,
 	solveCrrForCda,
 	usableSegments,
@@ -249,5 +252,157 @@ describe("degenerate segments", () => {
 		expect(resolved.status).toBe("idle");
 		expect(resolved.cda).toBe(0.271);
 		expect(resolved.crr).toBe(0.0071);
+	});
+});
+
+/**
+ * A per-sample linear VE model planted at (CDA_STAR, CRR_STAR): each step of
+ * `ds` metres adds `(-ΔCdA·aero[i] - ΔCrr)·ds` of VE, so at the planted
+ * point every profile is identically zero and every gain closes exactly.
+ * `aero` plays the ρ·va²/(2mg) coefficient — vary it along the lap to give
+ * runs different pacing.
+ */
+function profileSegment(
+	aero: readonly number[],
+	ds: number,
+	group?: string,
+): AutoConvergeSegment {
+	const n = aero.length;
+	const distance = new Float64Array(n);
+	for (let i = 0; i < n; i++) {
+		distance[i] = i * ds;
+	}
+	const increment = (cda: number, crr: number, i: number) =>
+		(-(cda - CDA_STAR) * aero[i] - (crr - CRR_STAR)) * ds;
+	return {
+		veGain: (cda, crr) => {
+			let sum = 0;
+			for (let i = 1; i < n; i++) {
+				sum += increment(cda, crr, i);
+			}
+			return sum;
+		},
+		target: 0,
+		weight: (n - 1) * ds,
+		veProfile: (cda, crr) => {
+			const profile = new Float64Array(n);
+			for (let i = 1; i < n; i++) {
+				profile[i] = profile[i - 1] + increment(cda, crr, i);
+			}
+			return profile;
+		},
+		profileDistance: distance,
+		profileGroup: group,
+	};
+}
+
+/** 1 km at 10 m steps: fast-then-slow, and its mirror. Same MEAN aero, so
+ * the endpoint objective cannot tell them apart — only the profiles can. */
+function mirroredRuns(): AutoConvergeSegment[] {
+	const n = 101;
+	const fastSlow: number[] = [];
+	const slowFast: number[] = [];
+	for (let i = 0; i < n; i++) {
+		fastSlow.push(i <= 50 ? 0.11 : 0.04);
+		slowFast.push(i <= 50 ? 0.04 : 0.11);
+	}
+	return [profileSegment(fastSlow, 10), profileSegment(slowFast, 10)];
+}
+
+describe("solveBothProfile", () => {
+	test("recovers the planted point from mirrored pacing the endpoint solve refuses", () => {
+		const runs = mirroredRuns();
+		// Equal mean aero ⇒ equal gains everywhere ⇒ the endpoint ridge is
+		// perfectly flat and solveBoth refuses…
+		expect(solveBoth(runs, BOUNDS).status).toBe("underdetermined");
+		// …while the profiles diverge mid-lap away from the planted point.
+		const solved = solveBothProfile(runs, BOUNDS);
+		expect(solved.status).toBe("ok");
+		expect(solved.cda).toBeCloseTo(CDA_STAR, 2);
+		expect(solved.crr).toBeCloseTo(CRR_STAR, 4);
+	});
+
+	test("identically paced runs are flat and refused", () => {
+		const aero = Array.from({ length: 101 }, () => 0.075);
+		const solved = solveBothProfile(
+			[profileSegment(aero, 10), profileSegment(aero, 10)],
+			BOUNDS,
+		);
+		expect(solved.status).toBe("underdetermined");
+		expect(solved.cda).toBeNaN();
+	});
+
+	test("refuses without a comparable pair", () => {
+		const [a, b] = mirroredRuns();
+		// One profiled run plus one endpoint-only run: no pair.
+		const noProfile: AutoConvergeSegment = {
+			veGain: b.veGain,
+			target: 0,
+			weight: b.weight,
+		};
+		expect(solveBothProfile([a, noProfile], BOUNDS).reason).toBe(
+			PROFILE_NO_PAIR_REASON,
+		);
+		// Two runs in different groups (out-and-back legs) never pool.
+		const [c, d] = mirroredRuns();
+		c.profileGroup = "outbound";
+		d.profileGroup = "inbound";
+		expect(solveBothProfile([c, d], BOUNDS).reason).toBe(
+			PROFILE_NO_PAIR_REASON,
+		);
+	});
+
+	test("refuses when a profiled run lacks a distance axis", () => {
+		const [a, b] = mirroredRuns();
+		delete b.profileDistance;
+		expect(solveBothProfile([a, b], BOUNDS).reason).toBe(
+			PROFILE_NO_DISTANCE_REASON,
+		);
+	});
+});
+
+describe("resolveAutoConvergedControls profile routing", () => {
+	const bothLocked = { enabled: true, cdaLocked: true, crrLocked: true };
+
+	test("profileSolve routes the both-locked solve through the profiles", () => {
+		const runs = mirroredRuns();
+		const endpoint = resolveAutoConvergedControls({
+			state: { ...bothLocked, profileSolve: false },
+			cda: 0.2,
+			crr: 0.01,
+			segments: runs,
+			bounds: BOUNDS,
+		});
+		expect(endpoint.status).toBe("underdetermined");
+
+		const profiled = resolveAutoConvergedControls({
+			state: { ...bothLocked, profileSolve: true },
+			cda: 0.2,
+			crr: 0.01,
+			segments: runs,
+			bounds: BOUNDS,
+		});
+		expect(profiled.status).toBe("ok");
+		expect(profiled.drivenCda).toBe(true);
+		expect(profiled.drivenCrr).toBe(true);
+		expect(profiled.cda).toBeCloseTo(CDA_STAR, 2);
+		expect(profiled.crr).toBeCloseTo(CRR_STAR, 4);
+	});
+
+	test("profileSolve leaves the single-lock ridge follows unchanged", () => {
+		const resolved = resolveAutoConvergedControls({
+			state: {
+				enabled: true,
+				cdaLocked: false,
+				crrLocked: true,
+				profileSolve: true,
+			},
+			cda: CDA_STAR,
+			crr: 0.01,
+			segments: CROSSING,
+			bounds: BOUNDS,
+		});
+		expect(resolved.status).toBe("ok");
+		expect(resolved.crr).toBeCloseTo(CRR_STAR, 9);
 	});
 });

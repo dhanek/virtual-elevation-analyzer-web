@@ -292,7 +292,7 @@ export class AppState {
 		currentVirtualDistances: [],
 		currentWindSource: "none",
 		airSpeedCalibrationPercent: 0,
-		autoConverge: { enabled: false, cdaLocked: false, crrLocked: false },
+		autoConverge: { enabled: false, cdaLocked: false, crrLocked: false, profileSolve: false },
 		isCalculatingAutoRho: false,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,

@@ -394,6 +394,63 @@ export function buildAutoConvergeSegments(
 				Number.isFinite(travelled) && travelled > 0
 					? travelled
 					: Math.max(1, p.trimEnd - p.trimStart),
+			veProfile: (cda, crr) => {
+				// `calculate_virtual_elevation` returns the FULL segment's
+				// cumulative profile; the window slice is rebased to 0 at the
+				// window start so runs compare from a common origin. The
+				// VEResult is freed eagerly — the profile solve evaluates
+				// dozens per solve, too many to leave to GC finalizers.
+				const result = p.calculator.calculate_virtual_elevation(
+					cda,
+					resolveAppliedCrr(params, crr),
+					p.trimStart,
+					p.trimEnd,
+				);
+				const full = result.virtual_elevation;
+				result.free();
+				const end = Math.min(p.trimEnd, full.length - 1);
+				const start = Math.min(p.trimStart, Math.max(0, end));
+				const out = new Float64Array(Math.max(0, end - start + 1));
+				for (let i = 0; i < out.length; i++) {
+					out[i] = full[start + i] - full[start];
+				}
+				return out;
+			},
+			profileDistance: profileDistanceWindow(distance, p.trimStart, p.trimEnd),
+			// Out-and-back legs are only comparable within a direction
+			// (`ProfileSpread` header); every other mode shares one group.
+			profileGroup: p.segment.legDirection,
 		};
 	});
+}
+
+/**
+ * The window's travelled distance rebased to 0 at the window start, or
+ * undefined when the distance channel cannot support a profile comparison
+ * (missing, non-finite endpoints, no positive span, or a degenerate window)
+ * — `solveBothProfile` turns that absence into its distance refusal.
+ */
+function profileDistanceWindow(
+	distance: ArrayLike<number> | null | undefined,
+	trimStart: number,
+	trimEnd: number,
+): Float64Array | undefined {
+	if (!distance) {
+		return undefined;
+	}
+	const end = Math.min(trimEnd, distance.length - 1);
+	const start = Math.min(trimStart, Math.max(0, end));
+	if (end - start < 1) {
+		return undefined;
+	}
+	const base = distance[start];
+	const span = distance[end] - base;
+	if (!Number.isFinite(base) || !Number.isFinite(span) || span <= 0) {
+		return undefined;
+	}
+	const out = new Float64Array(end - start + 1);
+	for (let i = 0; i < out.length; i++) {
+		out[i] = distance[start + i] - base;
+	}
+	return out;
 }

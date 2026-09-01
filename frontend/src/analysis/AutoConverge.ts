@@ -35,6 +35,11 @@ import {
 	RIDGE_FLATNESS_FLOOR_M,
 	type RidgeColumn,
 } from "./ClosureRidge";
+import {
+	commonDistanceGrid,
+	resampleProfile,
+	spreadRmse,
+} from "./ProfileSpread";
 
 /** Re-exported so the solver's own floor stays one constant with the surface's. */
 export { RIDGE_FLATNESS_FLOOR_M };
@@ -46,6 +51,24 @@ export interface AutoConvergeSegment {
 	target: number;
 	/** Distance weight (m); the stationarity weight above. */
 	weight: number;
+	/**
+	 * The window's VE profile at one (CdA, Crr), rebased to 0 at the window
+	 * start, in SLIDER-value space like `veGain`. Optional: only the
+	 * profile-consistency solve reads it, and a segment without one simply
+	 * cannot be compared (`solveBothProfile`).
+	 */
+	veProfile?(cda: number, crr: number): Float64Array;
+	/**
+	 * The window's travelled distance per sample (m), rebased to 0 at the
+	 * window start; same length as a `veProfile` result. Absent when the
+	 * activity has no usable distance channel.
+	 */
+	profileDistance?: Float64Array;
+	/**
+	 * Profiles are compared only within a group (`ProfileSpread` header) —
+	 * out-and-back legs group by direction. Absent means one shared group.
+	 */
+	profileGroup?: string;
 }
 
 export interface AutoConvergeBounds {
@@ -229,23 +252,32 @@ export function solveBoth(
 			reason: verdict.reason,
 		};
 	}
-	const minIndex = verdict.bestIndex;
-	const ridgeError = ridge.map((column) => column.error);
-	const ridgeOnRidge = ridge.map((column) => column.onRidge);
+	const cda = refineRidgeArgmin(cdaValues, ridge, verdict.bestIndex);
+	const crr = solveCrrForCda(segments, cda, bounds.crrMin, bounds.crrMax);
 
-	// Parabolic vertex through the argmin and its neighbours, clamped to half
-	// a lattice cell; the lattice value where a neighbour is missing or
-	// clamped, or under degenerate curvature.
+	return { cda, crr: crr.value, status: "ok", reason: null };
+}
+
+/**
+ * Parabolic vertex through the argmin column and its neighbours, clamped to
+ * half a lattice cell; the lattice value where a neighbour is missing or
+ * off-ridge, or under degenerate curvature.
+ */
+function refineRidgeArgmin(
+	cdaValues: readonly number[],
+	ridge: readonly RidgeColumn[],
+	minIndex: number,
+): number {
 	let cda = cdaValues[minIndex];
 	if (
 		minIndex > 0 &&
-		minIndex < RIDGE_SAMPLES - 1 &&
-		ridgeOnRidge[minIndex - 1] &&
-		ridgeOnRidge[minIndex + 1]
+		minIndex < ridge.length - 1 &&
+		ridge[minIndex - 1].onRidge &&
+		ridge[minIndex + 1].onRidge
 	) {
-		const left = ridgeError[minIndex - 1];
-		const centre = ridgeError[minIndex];
-		const right = ridgeError[minIndex + 1];
+		const left = ridge[minIndex - 1].error;
+		const centre = ridge[minIndex].error;
+		const right = ridge[minIndex + 1].error;
 		const curvature = left - 2 * centre + right;
 		if (curvature > 0) {
 			const offset = Math.max(
@@ -255,6 +287,128 @@ export function solveBoth(
 			cda += offset * (cdaValues[1] - cdaValues[0]);
 		}
 	}
+	return cda;
+}
+
+/**
+ * Below this change in profile-spread RMSE (metres) between the best and
+ * worst on-ridge column, the spread is treated as flat and no optimum is
+ * reported. The spread's noise floor — barometric drift and wind differences
+ * between runs — moves slowly along the ridge; a minimum separated from the
+ * rest by less than a decimetre of RMSE is that noise, not a CdA signal.
+ */
+export const PROFILE_FLATNESS_FLOOR_M = 0.1;
+
+/** Distance-grid resolution the profiles are compared on. */
+const PROFILE_GRID_POINTS = 200;
+
+export const PROFILE_NO_PAIR_REASON =
+	"Profile consistency needs two or more runs over the same course in the " +
+	"same direction — the selection has no comparable pair.";
+export const PROFILE_NO_DISTANCE_REASON =
+	"Profile consistency needs a usable distance channel on every compared " +
+	"run — this selection has none to compare.";
+
+/**
+ * The profile-consistency variant of `solveBoth` (the sidebar checkbox).
+ *
+ * Same two ingredients as the endpoint solve, different along-ridge
+ * objective: the CLOSURE CONSTRAINT is kept exactly — each column's Crr is
+ * the zero of the pooled residual over ALL segments, so the mean closure
+ * matches the applied elevation everywhere the solver looks — but the point
+ * along the ridge is chosen by run-to-run VE profile spread (`ProfileSpread`)
+ * instead of pooled endpoint error. Profiles react to CdA wherever the runs'
+ * speed profiles differ mid-lap, so this can determine selections the
+ * endpoint objective refuses as flat; identically paced runs are still flat
+ * and still refused, through the same `judgeRidge` verdict with the spread's
+ * own flatness floor.
+ */
+export function solveBothProfile(
+	segments: readonly AutoConvergeSegment[],
+	bounds: AutoConvergeBounds,
+	options?: { profileFlatnessFloorM?: number },
+): SolveBothResult {
+	const refused = (reason: string): SolveBothResult => ({
+		cda: NaN,
+		crr: NaN,
+		status: "underdetermined",
+		reason,
+	});
+
+	// Comparable = carries both a profile and a distance axis; compared only
+	// within its group (out-and-back legs must not be pooled across
+	// directions — `ProfileSpread` header).
+	let missingDistance = false;
+	const groups = new Map<string, AutoConvergeSegment[]>();
+	for (const segment of segments) {
+		if (!segment.veProfile) {
+			continue;
+		}
+		if (!segment.profileDistance) {
+			missingDistance = true;
+			continue;
+		}
+		const key = segment.profileGroup ?? "";
+		const group = groups.get(key);
+		if (group) {
+			group.push(segment);
+		} else {
+			groups.set(key, [segment]);
+		}
+	}
+	const compared = [...groups.values()].filter((group) => group.length >= 2);
+	if (compared.length === 0) {
+		return refused(
+			missingDistance ? PROFILE_NO_DISTANCE_REASON : PROFILE_NO_PAIR_REASON,
+		);
+	}
+
+	const grid = commonDistanceGrid(
+		compared.flat().map((segment) => segment.profileDistance as Float64Array),
+		PROFILE_GRID_POINTS,
+	);
+	if (!grid) {
+		return refused(PROFILE_NO_DISTANCE_REASON);
+	}
+
+	const cdaValues: number[] = [];
+	const ridge: RidgeColumn[] = [];
+	for (let i = 0; i < RIDGE_SAMPLES; i++) {
+		const cda =
+			bounds.cdaMin +
+			(i * (bounds.cdaMax - bounds.cdaMin)) / (RIDGE_SAMPLES - 1);
+		// The closure constraint runs over ALL segments — a run with no
+		// profile still anchors the mean closure.
+		const crr = solveCrrForCda(segments, cda, bounds.crrMin, bounds.crrMax);
+		const error = spreadRmse(
+			compared.map((group) =>
+				group.map((segment) =>
+					resampleProfile(
+						segment.profileDistance as Float64Array,
+						(segment.veProfile as (c: number, r: number) => Float64Array)(
+							cda,
+							crr.value,
+						),
+						grid,
+					),
+				),
+			),
+		);
+		cdaValues.push(cda);
+		ridge.push({
+			error,
+			onRidge: crr.status === "ok" && Number.isFinite(error),
+		});
+	}
+
+	const verdict = judgeRidge(ridge, {
+		ridgeFlatnessFloorM:
+			options?.profileFlatnessFloorM ?? PROFILE_FLATNESS_FLOOR_M,
+	});
+	if (verdict.status === "underdetermined") {
+		return refused(verdict.reason);
+	}
+	const cda = refineRidgeArgmin(cdaValues, ridge, verdict.bestIndex);
 	const crr = solveCrrForCda(segments, cda, bounds.crrMin, bounds.crrMax);
 
 	return { cda, crr: crr.value, status: "ok", reason: null };
@@ -268,12 +422,20 @@ export interface AutoConvergeState {
 	enabled: boolean;
 	cdaLocked: boolean;
 	crrLocked: boolean;
+	/**
+	 * Both-locked solves use `solveBothProfile` (run-to-run VE profile
+	 * overlap along the closure ridge) instead of `solveBoth` (pooled
+	 * endpoint closure error). Optional so pre-existing state objects mean
+	 * "off"; irrelevant unless both locks are on.
+	 */
+	profileSolve?: boolean;
 }
 
 export const AUTO_CONVERGE_DEFAULT: AutoConvergeState = {
 	enabled: false,
 	cdaLocked: false,
 	crrLocked: false,
+	profileSolve: false,
 };
 
 export interface AutoConvergeResolution {
@@ -311,6 +473,7 @@ export function resolveAutoConvergedControls(args: {
 	segments: readonly AutoConvergeSegment[];
 	bounds: AutoConvergeBounds;
 	ridgeFlatnessFloorM?: number;
+	profileFlatnessFloorM?: number;
 }): AutoConvergeResolution {
 	const { state, cda, crr, bounds } = args;
 	const idle: AutoConvergeResolution = {
@@ -334,9 +497,13 @@ export function resolveAutoConvergedControls(args: {
 	}
 
 	if (state.cdaLocked && state.crrLocked) {
-		const solved = solveBoth(segments, bounds, {
-			ridgeFlatnessFloorM: args.ridgeFlatnessFloorM,
-		});
+		const solved = state.profileSolve
+			? solveBothProfile(segments, bounds, {
+					profileFlatnessFloorM: args.profileFlatnessFloorM,
+				})
+			: solveBoth(segments, bounds, {
+					ridgeFlatnessFloorM: args.ridgeFlatnessFloorM,
+				});
 		if (solved.status === "underdetermined") {
 			return {
 				...idle,

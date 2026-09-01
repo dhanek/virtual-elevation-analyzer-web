@@ -49,6 +49,9 @@ export function autoConvergeLockControlsMarkup(): string {
             <label class="auto-converge-locks__toggle" title="Automatic Crr: the solver drives Crr along the closure ridge while you tune CdA.">
                 <input type="checkbox" id="crrLockToggle"> Automatic Crr
             </label>
+            <label class="auto-converge-locks__toggle" title="Both automatic: pick the CdA/Crr that makes the runs' virtual-elevation profiles overlap along the whole lap, instead of the endpoint-closure optimum. Needs two or more runs over the same course; the closure target is still enforced.">
+                <input type="checkbox" id="profileSolveToggle"> Profile-consistency solve
+            </label>
             <div id="autoConvergeStatus" class="auto-converge-locks__status" hidden></div>
         </div>`;
 }
@@ -76,6 +79,13 @@ export function syncAutoConvergeControlState(appState: AppState): void {
 	if (cdaLock) cdaLock.checked = state.cdaLocked;
 	const crrLock = checkbox("crrLockToggle");
 	if (crrLock) crrLock.checked = state.crrLocked;
+	// The profile solve only replaces the BOTH-locked solve, so the toggle is
+	// disabled (but keeps its checked state) until both locks are on.
+	const profileSolve = checkbox("profileSolveToggle");
+	if (profileSolve) {
+		profileSolve.checked = state.profileSolve ?? false;
+		profileSolve.disabled = !(state.cdaLocked && state.crrLocked);
+	}
 
 	const setDisabled = (ids: string[], disabled: boolean) => {
 		for (const id of ids) {
@@ -123,6 +133,15 @@ export function bindAutoConvergeLocks(
 	});
 	crrLock.addEventListener("change", () => {
 		state.crrLocked = crrLock.checked;
+		syncAutoConvergeControlState(appState);
+		onChange();
+	});
+
+	// Optional in test fixtures that predate it; the two lock toggles alone
+	// still count as bound.
+	const profileSolve = checkbox("profileSolveToggle");
+	profileSolve?.addEventListener("change", () => {
+		state.profileSolve = profileSolve.checked;
 		syncAutoConvergeControlState(appState);
 		onChange();
 	});

@@ -106,6 +106,7 @@ function renderPanel(): void {
 			<div id="autoConvergeLocks" hidden>
 				<input type="checkbox" id="cdaLockToggle">
 				<input type="checkbox" id="crrLockToggle">
+				<input type="checkbox" id="profileSolveToggle">
 				<div id="autoConvergeStatus" hidden></div>
 			</div>
 			<label><input type="radio" name="windSource" value="fit" checked></label>
@@ -261,10 +262,36 @@ describe("the lock controls", () => {
 		expect(el("cdaSlider").disabled).toBe(true);
 	});
 
+	it("the profile-solve toggle is gated on both locks and writes the state", () => {
+		const appState = makeAppState();
+		appState.autoConverge.cdaLocked = false;
+		syncAutoConvergeControlState(appState);
+		// Only Crr is locked: the profile solve cannot apply, so the toggle
+		// is disabled but keeps whatever the user last chose.
+		expect(el("profileSolveToggle").disabled).toBe(true);
+
+		appState.autoConverge.cdaLocked = true;
+		syncAutoConvergeControlState(appState);
+		expect(el("profileSolveToggle").disabled).toBe(false);
+
+		const changes: number[] = [];
+		bindAutoConvergeLocks(appState, () => changes.push(1));
+		const toggle = el("profileSolveToggle");
+		toggle.checked = true;
+		toggle.dispatchEvent(new Event("change"));
+		expect(appState.autoConverge.profileSolve).toBe(true);
+		expect(changes).toHaveLength(1);
+	});
+
 	it("ensureAutoConvergeState creates the state on bare test doubles", () => {
 		const bare = {} as AppState;
 		const state = ensureAutoConvergeState(bare);
-		expect(state).toEqual({ enabled: false, cdaLocked: false, crrLocked: false });
+		expect(state).toEqual({
+		enabled: false,
+		cdaLocked: false,
+		crrLocked: false,
+		profileSolve: false,
+	});
 		expect(ensureAutoConvergeState(bare)).toBe(state);
 	});
 });
