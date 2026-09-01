@@ -267,6 +267,17 @@ describe('outAndBackMode.getUpdateSegments', () => {
         ]);
     });
 
+    it('labels each leg with its direction, for the manual closure target', () => {
+        // `resolveClosureTarget` negates a manual difference on the inbound
+        // leg, and it reads this field -- never the ordinal or the key suffix.
+        const handler = getAnalysisModeHandler('GPS based out and back');
+        const segments = handler.getUpdateSegments(oabState());
+
+        expect(segments.map(s => s.legDirection)).toEqual([
+            'outbound', 'inbound', 'outbound', 'inbound',
+        ]);
+    });
+
     it('summarize writes all three AppState result fields -- this is N-1 / D-17a', () => {
         const handler = getAnalysisModeHandler('GPS based out and back');
         const appState = oabState();

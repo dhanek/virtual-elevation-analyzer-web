@@ -471,7 +471,7 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${autoConvergeLockControlsMarkup()}
-                                ${elevationDiffControlsMarkup(appState.currentParameters!)}
+                                ${elevationDiffControlsMarkup(appState.currentParameters!, "standard")}
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
                                 ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}
                             </div>

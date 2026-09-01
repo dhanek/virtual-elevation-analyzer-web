@@ -165,3 +165,55 @@ describe("getSelectedElevationDiffSource", () => {
 		expect(getSelectedElevationDiffSource()).toBe("dem");
 	});
 });
+
+describe("the manual field's wording is mode-specific", () => {
+	const manualMarkup = (mode?: "standard" | "gpsLap" | "outAndBack") =>
+		elevationDiffControlsMarkup(
+			makeParams({ elevation_diff_source: "manual" }),
+			mode,
+		);
+
+	it("out-and-back says the number is the outbound leg, gate to gate", () => {
+		document.body.innerHTML = manualMarkup("outAndBack");
+		const label = document.querySelector(
+			'label[for="elevationDiffManual"]',
+		)!.textContent!;
+		const title = document
+			.getElementById("elevationDiffManual")!
+			.getAttribute("title")!;
+
+		expect(label).toContain("outbound");
+		expect(title).toContain("outbound");
+		expect(title).toContain("negated");
+	});
+
+	it("the lap modes keep the window start-to-end wording", () => {
+		for (const mode of ["standard", "gpsLap", undefined] as const) {
+			document.body.innerHTML = manualMarkup(mode);
+			const label = document.querySelector(
+				'label[for="elevationDiffManual"]',
+			)!.textContent!;
+
+			expect(label).toBe("Δ elevation (m):");
+			expect(
+				document.getElementById("elevationDiffManual")!.getAttribute("title"),
+			).toContain("window start to window end");
+		}
+	});
+
+	it("only out-and-back's tooltip promises the automatic negation", () => {
+		const info = (mode?: "standard" | "outAndBack") => {
+			document.body.innerHTML = manualMarkup(mode);
+			return document
+				.querySelector(".crr-temp-controls__info")!
+				.getAttribute("title")!;
+		};
+
+		expect(info("outAndBack")).toContain("OUTBOUND");
+		expect(info("standard")).not.toContain("OUTBOUND");
+		// The old advice -- "0 for a lap or out-and-back that starts and ends
+		// at the same spot" -- was wrong for a section between gates at
+		// different heights, which is the whole case this feature serves.
+		expect(info("outAndBack")).toContain("same height");
+	});
+});

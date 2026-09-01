@@ -18,7 +18,17 @@
  *     regardless of which display profile the analysis runs on.
  *   - `'manual'`: a user-entered difference in metres, taken verbatim — the
  *     user asserted the number, so neither the velodrome flag nor channel
- *     usability second-guesses it. An unset/non-finite value means 0.
+ *     usability second-guesses it. An unset/non-finite value means 0. The one
+ *     thing that does touch it is the leg direction: see below.
+ *
+ * MANUAL DESCRIBES THE OUTBOUND LEG. An out-and-back section is two segments
+ * over the same ground in opposite directions, so one elevation difference
+ * describes both: `+manual` outbound, `-manual` inbound. Without the negation a
+ * single typed number claims both legs climbed, which no real course does — and
+ * it would disagree with the channel-backed sources, which already come out with
+ * opposite signs simply because each leg's target is measured over its own
+ * window. `legDirection` is undefined in every other mode (a lap has no
+ * direction), where the sign is `+1` and behaviour is unchanged.
  *
  * The channel-backed sources reproduce the branches of `calculate_metrics`
  * (`backend/src/virtual_elevation.rs`) so target and gain always describe the
@@ -58,8 +68,16 @@ export interface ClosureTargetInput {
 	demAltitude?: ArrayLike<number> | null;
 	/** The raw barometric channel (segment-local), for `'barometer'`. */
 	barometricAltitude?: ArrayLike<number> | null;
-	/** A user-entered difference in metres, for `'manual'`. */
+	/**
+	 * A user-entered difference in metres, for `'manual'`. Describes the
+	 * OUTBOUND leg when `legDirection` says the segment has one.
+	 */
 	manualDiffMetres?: number | null;
+	/**
+	 * The out-and-back leg this segment is (`ModeSegment.legDirection`).
+	 * Undefined outside out-and-back mode. Read by `'manual'` only.
+	 */
+	legDirection?: "outbound" | "inbound";
 	velodrome: boolean;
 	/** Segment-local trim window, clamped here exactly as the solver clamps. */
 	trimStart: number;
@@ -69,7 +87,12 @@ export interface ClosureTargetInput {
 export function resolveClosureTarget(input: ClosureTargetInput): number {
 	if (input.source === "manual") {
 		const manual = input.manualDiffMetres;
-		return typeof manual === "number" && Number.isFinite(manual) ? manual : 0;
+		if (typeof manual !== "number" || !Number.isFinite(manual)) {
+			return 0;
+		}
+		// `-0` for an inbound leg with a 0 difference would be a pointless way
+		// to differ from every other zero this module returns.
+		return input.legDirection === "inbound" && manual !== 0 ? -manual : manual;
 	}
 
 	const channel =

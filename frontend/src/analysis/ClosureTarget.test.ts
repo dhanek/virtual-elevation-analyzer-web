@@ -247,3 +247,67 @@ describe("resolveClosureTarget (manual)", () => {
 		}
 	});
 });
+
+describe("resolveClosureTarget (manual, out-and-back legs)", () => {
+	const manualLeg = (legDirection?: "outbound" | "inbound") =>
+		resolveClosureTarget({
+			source: "manual",
+			altitude: ramp(100),
+			manualDiffMetres: 4.2,
+			legDirection,
+			velodrome: false,
+			trimStart: 0,
+			trimEnd: 99,
+		});
+
+	test("the outbound leg takes the number as typed", () => {
+		expect(manualLeg("outbound")).toBe(4.2);
+	});
+
+	test("the inbound leg negates it — one number describes both legs", () => {
+		expect(manualLeg("inbound")).toBe(-4.2);
+	});
+
+	test("the two legs of a section are equal and opposite", () => {
+		expect(manualLeg("outbound")).toBe(-manualLeg("inbound"));
+	});
+
+	test("an absent direction is unchanged, so the lap modes cannot move", () => {
+		expect(manualLeg(undefined)).toBe(4.2);
+	});
+
+	test("a 0 difference stays +0 inbound rather than -0", () => {
+		expect(
+			Object.is(
+				resolveClosureTarget({
+					source: "manual",
+					altitude: ramp(100),
+					manualDiffMetres: 0,
+					legDirection: "inbound",
+					velodrome: false,
+					trimStart: 0,
+					trimEnd: 99,
+				}),
+				0,
+			),
+		).toBe(true);
+	});
+
+	test("the channel sources ignore the leg — they already differ by window", () => {
+		// The inbound leg's own window supplies the opposite sign; negating on
+		// top of that would cancel the very effect it is there to produce.
+		for (const source of ["dem", "barometer"] as const) {
+			const args = {
+				source,
+				altitude: ramp(100),
+				manualDiffMetres: 4.2,
+				velodrome: false,
+				trimStart: 10,
+				trimEnd: 60,
+			};
+			expect(resolveClosureTarget({ ...args, legDirection: "inbound" })).toBe(
+				resolveClosureTarget({ ...args, legDirection: "outbound" }),
+			);
+		}
+	});
+});

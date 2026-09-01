@@ -128,6 +128,22 @@ export interface ModeSegment {
 	 * trim mapping.
 	 */
 	itemNumber?: number;
+	/**
+	 * Which leg of an out-and-back section this segment is. Undefined in every
+	 * other mode — a lap has no direction.
+	 *
+	 * Read by the closure target: a MANUAL elevation difference describes the
+	 * OUTBOUND leg, so the inbound leg — which retraces the same ground
+	 * backwards — takes its negation (`resolveClosureTarget`). The channel-backed
+	 * sources need nothing here; they already come out with opposite signs
+	 * because each leg's target is measured over its own window.
+	 *
+	 * Carried on the segment for `itemNumber`'s reason: the fact is certain in
+	 * `getUpdateSegments` and nowhere else. The keys happen to end in `-out` /
+	 * `-in`, but a parse of those would be a derived identity of exactly the
+	 * kind `itemNumber` exists to avoid.
+	 */
+	legDirection?: "outbound" | "inbound";
 	trim?: { start: number; end: number };
 }
 

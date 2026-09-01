@@ -232,6 +232,9 @@ export function prepareSegments(args: PrepareSegmentsArgs): PreparedSegment[] {
 								)
 							: null,
 					manualDiffMetres: closure.manualDiffMetres,
+					// One typed difference describes the OUTBOUND leg; the
+					// inbound leg negates it. Undefined outside out-and-back.
+					legDirection: segment.legDirection,
 					velodrome: params.velodrome,
 					trimStart,
 					trimEnd,

@@ -65,6 +65,10 @@ export const outAndBackMode: AnalysisModeHandler = {
      * load-bearing: D-10 mutation (b) swaps them and a section VE assertion
      * must fail.
      *
+     * `legDirection` states the same fact for consumers that must not depend on
+     * position — the manual closure target negates on the inbound leg, and it
+     * reads the field, never the ordinal or the key suffix.
+     *
      * Sections come from `resolveActiveOutAndBackSections`, NOT from the
      * detection list filtered by the checkbox state. The pre-primitive update
      * path looped `currentOutAndBackSections` (`updateOutAndBack.ts:100`); see
@@ -77,11 +81,13 @@ export const outAndBackMode: AnalysisModeHandler = {
                 {
                     key: `s${section.sectionNumber}-out`,
                     label: `Section ${section.sectionNumber} outbound`,
+                    legDirection: 'outbound',
                     range: { startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
                 },
                 {
                     key: `s${section.sectionNumber}-in`,
                     label: `Section ${section.sectionNumber} inbound`,
+                    legDirection: 'inbound',
                     range: { startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
                 },
             ]));
