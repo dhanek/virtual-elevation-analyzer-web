@@ -422,6 +422,44 @@ describe("the VE panel in GPS-lap mode", () => {
 			expect(appState.currentVEResult).toBeNull();
 		});
 
+		/**
+		 * A RE-DETECTION THAT CHANGED NOTHING MUST NOT RE-TICK WHAT THE USER
+		 * UNTICKED.
+		 *
+		 * Auto-selecting every detected lap was harmless while a checkbox change
+		 * tore the panel down. Once a checkbox NARROWS the panel instead, an
+		 * unconditional reset leaves the sidebar claiming five laps over a panel
+		 * computing four, and no gesture resyncs them.
+		 */
+		it("keeps a narrowed selection when the detection is unchanged", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			const laps = [lap(1, 0, 80), lap(2, 81, 160), lap(3, 161, 240)];
+			analyzedLaps(appState, laps);
+			appState.gpsSelectedLaps = [1, 3];
+
+			detected.laps = laps.map((l) => ({ ...l }));
+			await runGpsLapDetection(52.52, 13.405, 0);
+
+			expect(appState.gpsSelectedLaps).toEqual([1, 3]);
+			expect(veSectionHidden()).toBe(false);
+		});
+
+		it("selects everything again when the detection did move", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+			appState.gpsSelectedLaps = [1];
+
+			// The panel is torn down by this, so there is nothing left for the
+			// selection to contradict and all-selected is the right fresh start.
+			detected.laps = [lap(1, 5, 85), lap(2, 86, 165)];
+			await runGpsLapDetection(52.52, 13.405, 0);
+
+			expect(appState.gpsSelectedLaps).toEqual([1, 2]);
+			expect(veSectionHidden()).toBe(true);
+		});
+
 		it("leaves the panel alone when the gate has not moved", async () => {
 			const appState = makeAppState();
 			configureWithFitLap(appState);

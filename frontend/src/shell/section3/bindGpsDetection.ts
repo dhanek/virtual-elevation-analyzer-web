@@ -50,44 +50,60 @@ export async function bindGpsDetection(
         return;
     }
 
-    // Calculate the duration of selected data
-    const timeRange = callbacks.getSelectedDataTimeRange();
-    const { duration } = timeRange;
+    /**
+     * Point the slider at the gate belonging to THE CURRENT FIT LAP SELECTION.
+     *
+     * Gates are stored per `(fileHash, selectedLaps)` — see
+     * `ParameterStorage.loadGpsMarkerSettings` — so the selection is part of the
+     * key, not just of the window. That makes this the whole of "resolve the
+     * gate": read the new window's length, load the offset saved for THIS
+     * combination (defaults if there is none), and clamp it in.
+     *
+     * Called at bind time and again whenever the FIT selection moves, which is
+     * why it is a function rather than the straight-line block it used to be. A
+     * selection change is not "the same gate in a different window": it is a
+     * different key, and quite possibly a different gate the user set the last
+     * time they looked at these laps.
+     *
+     * Returns false when the selection spans no time, which is the one case
+     * where there is no gate to resolve.
+     */
+    const resolveGateForSelection = async (): Promise<boolean> => {
+        const maxSeconds = Math.floor(callbacks.getSelectedDataTimeRange().duration);
+        if (maxSeconds <= 0) {
+            log.warn('Invalid duration for GPS lap detection:', maxSeconds);
+            return false;
+        }
 
-    // Set slider max to duration in seconds
-    const maxSeconds = Math.floor(duration);
-    if (maxSeconds <= 0) {
-        log.warn('Invalid duration for GPS lap detection:', maxSeconds);
-        return;
-    }
+        gateSlider.max = String(maxSeconds);
+        gateValue.max = String(maxSeconds);
 
-    gateSlider.max = String(maxSeconds);
-    gateValue.max = String(maxSeconds);
+        let offset = 5; // Default 5 seconds
+        if (appState.currentFileHash) {
+            try {
+                const savedMarker = await parameterStorage.loadGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps);
+                if (savedMarker && savedMarker.gateTimeOffset !== undefined) {
+                    offset = savedMarker.gateTimeOffset;
+                    log.debug('Loading saved GPS gate time offset:', offset);
+                }
+            } catch (err) {
+                log.error('Failed to load saved GPS marker settings:', err);
+            }
+        }
+
+        offset = Math.max(0, Math.min(offset, maxSeconds));
+        gateSlider.value = String(offset);
+        gateValue.value = String(offset);
+        return true;
+    };
+
+    if (!(await resolveGateForSelection())) return;
 
     // Show slider controls
     sliderControls.classList.remove('hidden');
 
-    // Load saved gate position or use default
-    let initialOffset = 5; // Default 5 seconds
-    if (appState.currentFileHash) {
-        try {
-            const savedMarker = await parameterStorage.loadGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps);
-            if (savedMarker && savedMarker.gateTimeOffset !== undefined) {
-                initialOffset = savedMarker.gateTimeOffset;
-                log.debug('Loading saved GPS gate time offset:', initialOffset);
-            }
-        } catch (err) {
-            log.error('Failed to load saved GPS marker settings:', err);
-        }
-    }
-
-    // Clamp to valid range
-    initialOffset = Math.max(0, Math.min(initialOffset, maxSeconds));
-    gateSlider.value = String(initialOffset);
-    gateValue.value = String(initialOffset);
-
     // Helper to update gate position and run detection
-    const updateGatePosition = async (timeOffset: number) => {
+    const updateGatePosition = async (timeOffset: number, persist = true) => {
         // Re-fetch current time range to handle lap selection changes
         const currentTimeRange = callbacks.getSelectedDataTimeRange();
         // Find the data index for this time offset
@@ -106,8 +122,16 @@ export async function bindGpsDetection(
             // Show marker on map
             mapVisualization?.setGpsMarker(lat, lon);
 
-            // Save settings
-            if (appState.currentFileHash) {
+            // Save settings — ONLY WHEN THE USER MOVED THE GATE.
+            //
+            // The key includes `appState.selectedLaps`, read here at call time.
+            // A pass triggered by a FIT selection change therefore writes under
+            // the NEW combination's key, so persisting there would overwrite
+            // whatever gate the user had saved for those laps with the offset
+            // carried over from the laps they just left — before they had
+            // touched anything. `resolveGateForSelection` has just LOADED that
+            // combination's gate; there is nothing to write back.
+            if (persist && appState.currentFileHash) {
                 try {
                     await parameterStorage.saveGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps, {
                         gateTimeOffset: timeOffset
@@ -136,14 +160,20 @@ export async function bindGpsDetection(
     };
 
     callbacks.registerRedetect?.(() => {
-        void updateGatePosition(parseInt(gateSlider.value));
+        void (async () => {
+            if (!(await resolveGateForSelection())) return;
+            void updateGatePosition(parseInt(gateSlider.value), false);
+        })();
     });
 
-    // Initial detection with loaded/default offset — only when FIT laps are
+    // Initial detection with the loaded/default offset — only when FIT laps are
     // selected. Detection must not start before the user has chosen which laps
     // to analyze; otherwise the time-range/detection helpers fall back to the
     // full activity and detect over the whole track.
+    //
+    // Not persisted: this offset was just read out of storage (or is the
+    // default for a combination that has none), so writing it back says nothing.
     if (appState.selectedLaps.length > 0) {
-        void updateGatePosition(initialOffset);
+        void updateGatePosition(parseInt(gateSlider.value), false);
     }
 }
