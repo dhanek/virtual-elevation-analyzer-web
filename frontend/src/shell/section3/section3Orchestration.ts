@@ -1,4 +1,5 @@
 import { AppState } from "../../state/AppState";
+import type { Section3Selection } from "../../analysis/SettingsBundle";
 import {
 	ParameterStorage,
 	type LapSettings,
@@ -81,6 +82,33 @@ let currentGpsAnalysisMode: GpsAnalysisMode = "None";
  */
 export function getGpsAnalysisMode(): GpsAnalysisMode {
 	return currentGpsAnalysisMode;
+}
+
+/**
+ * Restore Section 3's selection state from an imported settings bundle:
+ * the analysis-type dropdown value and the ticked FIT laps.
+ *
+ * STATE ONLY, no render — by design. The import path calls this right after
+ * `processSelectedFile()` resolves, i.e. in the microtask gap BEFORE the
+ * 100 ms `initializeSection3` timer that load scheduled can fire, so the one
+ * render Section 3 was getting anyway paints the restored state: cards
+ * checked, dropdown set, and — because the detection binders it runs load
+ * their gate from ParameterStorage (which the import just seeded) and
+ * auto-detect when laps are selected — the map markers and detected laps
+ * come back without any code here touching them. Rendering here instead
+ * would race that timer and paint Section 3 twice.
+ *
+ * `Section3AnalysisMode` is `SettingsBundle`'s restatement of
+ * `GpsAnalysisMode` (that module must stay shell-free); the assignment below
+ * is where the compiler proves the two lists agree.
+ */
+export function restoreSection3Selection(section3: Section3Selection): void {
+	const deps = getDependencies();
+	const lapCount = deps.appState.currentLaps.length;
+	deps.appState.selectedLaps = section3.selectedLaps.filter(
+		(lap) => lap >= 1 && lap <= lapCount,
+	);
+	currentGpsAnalysisMode = section3.gpsAnalysisMode;
 }
 
 /**

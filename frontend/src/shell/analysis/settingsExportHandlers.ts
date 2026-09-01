@@ -11,6 +11,7 @@
  */
 import { fileSave } from "browser-fs-access";
 import { buildSettingsEnvelope } from "../../analysis/SettingsBundle";
+import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import { buildZip } from "../../utils/zip";
@@ -36,6 +37,10 @@ async function currentSettingsJson(
 		parameters: appState.currentParameters,
 		activityFileName: appState.selectedFile?.name ?? record?.fileName ?? null,
 		activityFileHash: appState.currentFileHash,
+		section3: {
+			gpsAnalysisMode: getGpsAnalysisMode(),
+			selectedLaps: [...appState.selectedLaps],
+		},
 	});
 	return JSON.stringify(envelope, null, 2);
 }

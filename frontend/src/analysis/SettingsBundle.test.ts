@@ -32,6 +32,10 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 			parameters: params(),
 			activityFileName: "ride.fit",
 			activityFileHash: "abc_ride",
+			section3: {
+				gpsAnalysisMode: "GPS based out and back",
+				selectedLaps: [2, 4],
+			},
 		});
 		const parsed = parseSettingsEnvelope(JSON.stringify(envelope));
 		expect(parsed.ok).toBe(true);
@@ -41,6 +45,10 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 		expect(parsed.envelope.gpsMarkerSettings["1-2"].gateTimeOffset).toBe(30);
 		expect(parsed.envelope.outAndBackMarkerSettings["3"].gateBTimeOffset).toBe(250);
 		expect(parsed.envelope.activityFileHash).toBe("abc_ride");
+		expect(parsed.envelope.section3).toEqual({
+			gpsAnalysisMode: "GPS based out and back",
+			selectedLaps: [2, 4],
+		});
 	});
 
 	it("the live form parameters win over the stored record's", () => {
@@ -49,6 +57,7 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 			parameters: { ...params(), cda: 0.999 },
 			activityFileName: null,
 			activityFileHash: null,
+			section3: null,
 		});
 		expect(envelope.parameters.cda).toBe(0.999);
 	});
@@ -67,6 +76,7 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 			parameters: params(),
 			activityFileName: null,
 			activityFileHash: null,
+			section3: null,
 		});
 		const bumped = { ...newer, schemaVersion: SETTINGS_SCHEMA_VERSION + 1 };
 		expect(parseSettingsEnvelope(JSON.stringify(bumped))).toMatchObject({
@@ -81,6 +91,7 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 			parameters: params(),
 			activityFileName: null,
 			activityFileHash: null,
+			section3: null,
 		});
 		const legacyParams = { ...params() } as Record<string, unknown>;
 		delete legacyParams.wind_height_factor;
@@ -92,6 +103,31 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 		expect(parsed.envelope.parameters.wind_height_factor).toBe(
 			LEGACY_WIND_HEIGHT_FACTOR,
 		);
+	});
+
+	it("salvages a mangled section3 instead of refusing the file", () => {
+		const envelope = buildSettingsEnvelope({
+			record: null,
+			parameters: params(),
+			activityFileName: null,
+			activityFileHash: null,
+			section3: null,
+		});
+		const parsed = parseSettingsEnvelope(
+			JSON.stringify({
+				...envelope,
+				section3: {
+					gpsAnalysisMode: "invented mode",
+					selectedLaps: [0, 1, "2", 3.5, 4],
+				},
+			}),
+		);
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		expect(parsed.envelope.section3).toEqual({
+			gpsAnalysisMode: "None",
+			selectedLaps: [1, 4],
+		});
 	});
 
 	it("tolerates absent settings maps, defaulting them empty", () => {
@@ -106,6 +142,7 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 		if (!parsed.ok) return;
 		expect(parsed.envelope.lapSettings).toEqual({});
 		expect(parsed.envelope.outAndBackMarkerSettings).toEqual({});
+		expect(parsed.envelope.section3).toBeNull();
 	});
 });
 
@@ -116,6 +153,7 @@ describe("envelopeToStoredRecord", () => {
 			parameters: params(),
 			activityFileName: "ride.fit",
 			activityFileHash: "abc_ride",
+			section3: null,
 		});
 		const record = envelopeToStoredRecord(envelope, "other_hash", "other.fit", 42);
 		expect(record.fileHash).toBe("other_hash");

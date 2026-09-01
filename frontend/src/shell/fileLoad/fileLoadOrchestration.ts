@@ -23,6 +23,7 @@ import { AnalysisParametersComponent } from "../../components/AnalysisParameters
 import {
 	initializeSection3,
 	resetAnalysisForNewActivity,
+	restoreSection3Selection,
 } from "../section3/section3Orchestration";
 import {
 	calculateAvgCda,
@@ -203,6 +204,11 @@ export async function importSettingsJsonFile(file: File): Promise<void> {
 		);
 		// Re-analyze so the imported parameters restore into the form now.
 		await processSelectedFile();
+		// Synchronously after the await, so this beats the initializeSection3
+		// timer that processSelectedFile scheduled — see restoreSection3Selection.
+		if (parsed.envelope.section3) {
+			restoreSection3Selection(parsed.envelope.section3);
+		}
 		return;
 	}
 
@@ -285,6 +291,9 @@ export async function importSettingsZipFile(file: File): Promise<void> {
 	// A bundle is a complete analysis, so run it — the drop should end on the
 	// analyzed screen, not on an armed Analyze button.
 	await processSelectedFile();
+	if (envelope?.section3) {
+		restoreSection3Selection(envelope.section3);
+	}
 }
 
 // Process FIT file
