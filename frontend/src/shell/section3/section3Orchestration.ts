@@ -38,6 +38,7 @@ import {
 	resetRecomputeThrottle,
 } from "../analysis/recomputeRunner";
 import { purgePlotlyGraphsIn } from "../dom/plotlyPurge";
+import { requestModeUpdate } from "../analysis/requestModeUpdate";
 import { sameItems } from "../ve/veSelectionGuard";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
@@ -323,6 +324,46 @@ function invalidateVePanelIfDetectionChanged(
 		return;
 	}
 	tearDownVeAnalysisPanel(appState);
+}
+
+/**
+ * A DETECTED ITEM WAS TICKED OR UNTICKED — recompute the panel over the new
+ * subset instead of throwing it away.
+ *
+ * These checkboxes are not the detection. Unticking one of six detected GPS
+ * laps leaves the cut of the ride exactly where it was and asks a narrower
+ * question of the same data, so tearing the panel down and making the user press
+ * Analyze again is more destructive than the change warrants (maintainer,
+ * 2026-09-01). A gate move or a wider FIT window is the opposite case and still
+ * tears down, through `invalidateVePanelIfDetectionChanged`.
+ *
+ * THIS IS THE DELIBERATE REVERSAL OF A DELIBERATE CHOICE, so it is worth saying
+ * which. `activeOutAndBackSections.ts` prefers the ON-SCREEN list over the
+ * selection precisely so that a checkbox toggle could not SILENTLY change what
+ * the next slider drag computed. That reasoning stands and the seam is
+ * unchanged: the on-screen list is still authoritative, and the toggle now
+ * MOVES it and asks for a recompute in the same breath, rather than moving it
+ * behind the panel's back.
+ *
+ * `currentAnalyzedLaps` is untouched, which is the WR-01 rule and not an
+ * oversight: it is the key the saved CdA/Crr and trim live under, it belongs to
+ * the analyze that produced them, and a narrowed VIEW must not re-key them.
+ * Coverage moves instead — `summarize` rewrites `currentCoveredItems` from the
+ * profiles that survive this pass, so Store Result and the CSV stay truthful.
+ *
+ * Emptying the selection is not a narrower question, it is no question: there
+ * is nothing to compute and the panel goes.
+ */
+function recomputePanelForSelection(
+	appState: AppState,
+	applySelection: () => boolean,
+): void {
+	if (!gpsPanelIsAnalyzed(appState)) return;
+	if (!applySelection()) {
+		tearDownVeAnalysisPanel(appState);
+		return;
+	}
+	requestModeUpdate("segmentSelection");
 }
 
 /**
@@ -940,16 +981,25 @@ export function handleGpsLapSelectionChange(): void {
 		})
 		.filter((lap) => lap > 0);
 
-	// The twin of `handleOutAndBackSectionSelectionChange`'s guard, which the
-	// GPS-lap list never had: unticking an analysed lap leaves the panel showing
-	// a curve that includes it. `currentCoveredItems` is the right basis in BOTH
-	// segment modes — `writeSegmentModeResultState` (`segmentSummary.ts:316`) is
-	// shared, and `gpsLapMode.summarize` passes the REAL lap numbers of the
-	// surviving profiles, the same namespace `gpsSelectedLaps` counts in.
-	invalidateVePanelIfBasisChanged(
-		deps.appState.currentCoveredItems,
-		deps.appState.gpsSelectedLaps,
-	);
+	// The panel follows the selection rather than dying with it: see
+	// `recomputePanelForSelection`.
+	recomputePanelForSelection(deps.appState, () => {
+		const selected = deps.appState.gpsDetectedLaps.filter((lap) =>
+			deps.appState.gpsSelectedLaps.includes(lap.lapNumber),
+		);
+		if (selected.length === 0) return false;
+		deps.appState.currentGpsLapIndexRanges = selected.map((lap) => ({
+			startIdx: lap.startIdx,
+			endIdx: lap.endIdx,
+		}));
+		// IN LOCKSTEP. `gpsLapNumberAt` (`gpsLapMode.ts:17`) indexes this by the
+		// RANGE ordinal, so a ranges list that moved without it would label every
+		// lap after the removed one with its neighbour's number.
+		deps.appState.currentOverlayLapNumbers = selected.map(
+			(lap) => lap.lapNumber,
+		);
+		return true;
+	});
 
 	// Update visual selection state
 	document
@@ -1152,13 +1202,18 @@ export function handleOutAndBackSectionSelectionChange(): void {
 		})
 		.filter((section) => section > 0);
 
-	// The segment modes record their analyzed set on `currentCoveredItems`, not
-	// `currentAnalyzedLaps` — that is the field `summarize` writes and the one
-	// Store Result and the CSV report coverage from.
-	invalidateVePanelIfBasisChanged(
-		deps.appState.currentCoveredItems,
-		deps.appState.outAndBackSelectedSections,
-	);
+	// The GPS-lap twin, and the same rule: a section checkbox narrows the
+	// question, it does not re-cut the ride. See `recomputePanelForSelection`.
+	recomputePanelForSelection(deps.appState, () => {
+		const selected = deps.appState.outAndBackSections.filter((section) =>
+			deps.appState.outAndBackSelectedSections.includes(section.sectionNumber),
+		);
+		if (selected.length === 0) return false;
+		// Sections carry their own `sectionNumber`, so unlike GPS-lap there is no
+		// parallel numbering array to keep aligned.
+		deps.appState.currentOutAndBackSections = selected;
+		return true;
+	});
 
 	// Update visual selection state
 	document

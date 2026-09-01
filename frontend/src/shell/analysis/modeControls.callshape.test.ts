@@ -852,11 +852,13 @@ describe("the GPS modes render no trim markup, and the matrix says so", () => {
 });
 
 describe("every ModeUpdateReason is exercised by the matrix", () => {
-	it("covers all of them except `parameters`, which is not a control", () => {
-		// `parameters` reaches the funnel from `handleParametersChange`, not from
-		// a row, so it is deliberately absent from the table. Every OTHER reason
-		// must appear in at least one executed pair -- otherwise a control added
-		// to the table without a matrix case would ship untested.
+	it("covers all of them except the two that are not panel controls", () => {
+		// Two reasons reach the funnel from outside the mode panel and are
+		// deliberately absent from the table: `parameters`, from
+		// `handleParametersChange`, and `segmentSelection`, from Section 3's
+		// detected-lap and section checkboxes. Every OTHER reason must appear in
+		// at least one executed pair -- otherwise a control added to the table
+		// without a matrix case would ship untested.
 		const exercised = new Set<string>();
 		for (const modeCase of MODE_CASES) {
 			for (const spec of MODE_CONTROL_TABLE) {
