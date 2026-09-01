@@ -71,6 +71,8 @@ export interface StandardVeCallbacks {
 	onSaveScreenshot: () => void;
 	onStoreResult: () => void;
 	onExportAll: () => void;
+	onExportSettings: () => void;
+	onExportBundle: () => void;
 	onShowAllResults: () => void;
 	saveCurrentLapSettings: () => void;
 }
@@ -518,6 +520,8 @@ export async function showVirtualElevationAnalysisInline(
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
                         <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
                 <div class="ve-plots-main">
@@ -701,6 +705,8 @@ export async function showVirtualElevationAnalysisInline(
 		onSaveScreenshot: callbacks.onSaveScreenshot,
 		onStoreResult: callbacks.onStoreResult,
 		onExportAll: callbacks.onExportAll,
+		onExportSettings: callbacks.onExportSettings,
+		onExportBundle: callbacks.onExportBundle,
 		onShowAllResults: callbacks.onShowAllResults,
 	});
 

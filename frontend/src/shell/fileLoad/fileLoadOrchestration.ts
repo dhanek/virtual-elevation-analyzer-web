@@ -30,6 +30,14 @@ import {
 	formatFileSize,
 } from "../dem/demHandlers";
 import init from "../../../pkg/virtual_elevation_analyzer.js";
+import {
+	entryBaseName,
+	envelopeToStoredRecord,
+	parseSettingsEnvelope,
+	splitBundleEntries,
+	type SettingsEnvelope,
+} from "../../analysis/SettingsBundle";
+import { readZip } from "../../utils/zip";
 
 interface FileLoadDependencies {
 	appState: AppState;
@@ -109,6 +117,19 @@ export async function initializeFitProcessor(): Promise<void> {
 export async function handleFileSelection(file: File): Promise<void> {
 	const deps = getDependencies();
 
+	// The one drop zone takes three shapes: an activity file, an exported
+	// settings JSON, or a zip bundling both. Dispatch on extension here so
+	// the activity path below stays exactly what it was.
+	const lowerName = file.name.toLowerCase();
+	if (lowerName.endsWith(".json")) {
+		await importSettingsJsonFile(file);
+		return;
+	}
+	if (lowerName.endsWith(".zip")) {
+		await importSettingsZipFile(file);
+		return;
+	}
+
 	// Validate file type and size
 	if (!validateActivityFile(file)) {
 		deps.showError(
@@ -141,6 +162,129 @@ export function displayFileInfo(file: File): void {
     `;
 
 	deps.fileInfo.classList.remove("hidden");
+}
+
+/**
+ * Store an imported envelope for `targetHash` and, when that is the loaded
+ * file, re-run the analyze path so the restored parameters actually reach
+ * the form — the same route a reload takes, which is what makes an import
+ * indistinguishable from having had the settings all along.
+ */
+async function applyImportedEnvelope(
+	envelope: SettingsEnvelope,
+	targetHash: string,
+	targetFileName: string | undefined,
+): Promise<void> {
+	const deps = getDependencies();
+	await deps.parameterStorage.importStoredRecord(
+		envelopeToStoredRecord(envelope, targetHash, targetFileName),
+	);
+	log.debug("Imported settings stored under", targetHash);
+}
+
+// A dropped settings JSON: apply to the loaded activity if there is one,
+// otherwise park the settings under the hash the export recorded so they
+// restore when that activity is loaded.
+export async function importSettingsJsonFile(file: File): Promise<void> {
+	const deps = getDependencies();
+
+	const parsed = parseSettingsEnvelope(await file.text());
+	if (!parsed.ok) {
+		deps.showError(`Could not import settings: ${parsed.error}`);
+		return;
+	}
+	deps.hideError();
+
+	if (deps.appState.selectedFile && deps.appState.currentFileHash) {
+		await applyImportedEnvelope(
+			parsed.envelope,
+			deps.appState.currentFileHash,
+			deps.appState.selectedFile.name,
+		);
+		// Re-analyze so the imported parameters restore into the form now.
+		await processSelectedFile();
+		return;
+	}
+
+	if (parsed.envelope.activityFileHash) {
+		await applyImportedEnvelope(
+			parsed.envelope,
+			parsed.envelope.activityFileHash,
+			parsed.envelope.activityFileName ?? undefined,
+		);
+		deps.fileDetails.innerHTML = `
+        <div><strong>Settings imported</strong> for ${parsed.envelope.activityFileName ?? "an activity"}.</div>
+        <div>Load that activity file and its settings will restore automatically.</div>
+    `;
+		deps.fileInfo.classList.remove("hidden");
+		return;
+	}
+
+	deps.showError(
+		"This settings file names no activity — load a FIT or CSV file first, " +
+			"then drop the settings JSON to apply it.",
+	);
+}
+
+// A dropped zip bundle: load the activity inside it through the normal file
+// path, seed its settings under the hash that load computed, and analyze.
+export async function importSettingsZipFile(file: File): Promise<void> {
+	const deps = getDependencies();
+
+	let entries;
+	try {
+		entries = await readZip(new Uint8Array(await file.arrayBuffer()));
+	} catch (err) {
+		deps.showError(
+			`Could not read the zip: ${err instanceof Error ? err.message : err}`,
+		);
+		return;
+	}
+
+	const { activity, settings } = splitBundleEntries(entries);
+	if (!activity) {
+		deps.showError(
+			"The zip contains no .fit or .csv activity file. A bundle needs the " +
+				"activity plus (optionally) its settings JSON.",
+	);
+		return;
+	}
+
+	let envelope: SettingsEnvelope | null = null;
+	if (settings) {
+		const parsed = parseSettingsEnvelope(
+			new TextDecoder().decode(settings.data),
+		);
+		if (!parsed.ok) {
+			deps.showError(
+				`The zip's settings file could not be read: ${parsed.error}`,
+			);
+			return;
+		}
+		envelope = parsed.envelope;
+	}
+
+	const activityFile = new File(
+		[activity.data as BlobPart],
+		entryBaseName(activity.name),
+	);
+	await handleFileSelection(activityFile);
+	if (deps.appState.selectedFile !== activityFile) {
+		// The activity failed validation; handleFileSelection already said why.
+		return;
+	}
+
+	if (envelope && deps.appState.currentFileHash) {
+		await applyImportedEnvelope(
+			envelope,
+			deps.appState.currentFileHash,
+			activityFile.name,
+		);
+	}
+
+	// A bundle is a complete analysis, so run it — the drop should end on the
+	// analyzed screen, not on an armed Analyze button.
+	await processSelectedFile();
 }
 
 // Process FIT file

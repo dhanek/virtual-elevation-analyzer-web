@@ -12,6 +12,9 @@ export interface ActionFooterCallbacks {
      * a panel that never renders one is not forced to pass a no-op.
      */
     onShowAllResults?: () => void
+    /** Settings export pair; optional for the same reason as above. */
+    onExportSettings?: () => void
+    onExportBundle?: () => void
 }
 
 /**
@@ -52,6 +55,24 @@ export function bindActionFooter(callbacks: ActionFooterCallbacks): void {
         exportBtn.addEventListener('click', () => {
             log.debug('Action footer: exportAllResults clicked')
             callbacks.onExportAll()
+        })
+    }
+
+    const exportSettingsBtn = document.getElementById('exportSettingsJson')
+    if (exportSettingsBtn && callbacks.onExportSettings) {
+        const onExportSettings = callbacks.onExportSettings
+        exportSettingsBtn.addEventListener('click', () => {
+            log.debug('Action footer: exportSettingsJson clicked')
+            onExportSettings()
+        })
+    }
+
+    const exportBundleBtn = document.getElementById('exportBundleZip')
+    if (exportBundleBtn && callbacks.onExportBundle) {
+        const onExportBundle = callbacks.onExportBundle
+        exportBundleBtn.addEventListener('click', () => {
+            log.debug('Action footer: exportBundleZip clicked')
+            onExportBundle()
         })
     }
 }

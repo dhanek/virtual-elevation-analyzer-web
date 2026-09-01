@@ -526,6 +526,8 @@ async function analyzeStandard(appState: AppState): Promise<void> {
 			onSaveScreenshot: () => {},
 			onStoreResult: () => {},
 			onExportAll: () => {},
+			onExportSettings: () => {},
+			onExportBundle: () => {},
 			onShowAllResults: () => {},
 			saveCurrentLapSettings: () => {},
 		},

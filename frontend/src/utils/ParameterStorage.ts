@@ -5,7 +5,7 @@ import {
 import { AnalysisParameters } from "../components/AnalysisParameters";
 import { log } from "./log";
 
-interface LapSettings {
+export interface LapSettings {
 	trimStart: number;
 	trimEnd: number;
 	cda: number | null;
@@ -14,7 +14,7 @@ interface LapSettings {
 }
 
 // GPS marker settings for lap detection (time-based)
-interface GpsMarkerSettings {
+export interface GpsMarkerSettings {
 	gateTimeOffset: number; // Time offset in seconds from start of selected data
 	// Legacy fields for backwards compatibility (deprecated)
 	lat?: number;
@@ -23,7 +23,7 @@ interface GpsMarkerSettings {
 }
 
 // GPS marker settings for Out and Back mode (time-based, two gates)
-interface OutAndBackMarkerSettings {
+export interface OutAndBackMarkerSettings {
 	gateATimeOffset: number; // Gate A time offset in seconds from start
 	gateBTimeOffset: number; // Gate B time offset in seconds from start (must be > gateA)
 	// Legacy fields for backwards compatibility (deprecated)
@@ -39,7 +39,7 @@ interface OutAndBackMarkerSettings {
 	};
 }
 
-interface StoredParameters {
+export interface StoredParameters {
 	fileHash: string;
 	parameters: AnalysisParameters;
 	lapSettings: { [lapKey: string]: LapSettings }; // Key is lap indices joined by '-' (e.g., "0", "1-2-3")
@@ -297,6 +297,58 @@ export class ParameterStorage {
 
 			request.onerror = () => {
 				log.error("Failed to get all files:", request.error);
+				reject(request.error);
+			};
+		});
+	}
+
+	/**
+	 * The RAW stored record for a file — parameters, per-lap settings and GPS
+	 * gate settings together. This is the unit the settings export ships and
+	 * the unit the import writes back; `loadParameters` stays the read path the
+	 * app uses so the export can never invent a shape the restore path lacks.
+	 */
+	async getStoredRecord(fileHash: string): Promise<StoredParameters | null> {
+		if (!this.db) {
+			log.warn("IndexedDB not initialized, cannot read stored record");
+			return null;
+		}
+
+		return new Promise((resolve, reject) => {
+			const transaction = this.db!.transaction([this.storeName], "readonly");
+			const objectStore = transaction.objectStore(this.storeName);
+			const request = objectStore.get(fileHash);
+
+			request.onsuccess = () => {
+				resolve((request.result as StoredParameters | undefined) ?? null);
+			};
+
+			request.onerror = () => {
+				log.error("\u274c Failed to read stored record:", request.error);
+				reject(request.error);
+			};
+		});
+	}
+
+	/**
+	 * Write a whole record under `record.fileHash`, replacing anything there.
+	 * The settings-import path: an imported bundle IS the new truth for that
+	 * file, so no field-by-field merge with whatever was stored before.
+	 */
+	async importStoredRecord(record: StoredParameters): Promise<void> {
+		if (!this.db) {
+			log.warn("IndexedDB not initialized, cannot import stored record");
+			return;
+		}
+
+		return new Promise((resolve, reject) => {
+			const transaction = this.db!.transaction([this.storeName], "readwrite");
+			const objectStore = transaction.objectStore(this.storeName);
+			const request = objectStore.put(record);
+
+			request.onsuccess = () => resolve();
+			request.onerror = () => {
+				log.error("\u274c Failed to import stored record:", request.error);
 				reject(request.error);
 			};
 		});
@@ -881,4 +933,3 @@ export class ParameterStorage {
 	}
 }
 
-export type { LapSettings, GpsMarkerSettings, OutAndBackMarkerSettings };

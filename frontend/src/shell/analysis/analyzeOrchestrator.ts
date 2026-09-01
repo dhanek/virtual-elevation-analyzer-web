@@ -23,6 +23,10 @@ import {
 	saveCurrentLapSettings,
 } from "./storageHandlers";
 import {
+	handleExportBundle,
+	handleExportSettings,
+} from "./settingsExportHandlers";
+import {
 	isGpsLapSelectionMode,
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
@@ -514,6 +518,18 @@ export async function handleAnalyze(): Promise<void> {
 							},
 							onExportAll: () => {
 								void handleExportAllResults(deps.resultsStorage);
+							},
+							onExportSettings: () => {
+								void handleExportSettings(
+									deps.appState,
+									deps.parameterStorage,
+								);
+							},
+							onExportBundle: () => {
+								void handleExportBundle(
+									deps.appState,
+									deps.parameterStorage,
+								);
 							},
 							saveCurrentLapSettings: () => {
 								void saveCurrentLapSettings(

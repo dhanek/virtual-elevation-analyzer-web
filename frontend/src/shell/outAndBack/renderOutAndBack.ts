@@ -50,6 +50,10 @@ import {
 } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
 import {
+	handleExportBundle,
+	handleExportSettings,
+} from "../analysis/settingsExportHandlers";
+import {
 	handleStoreResult,
 	handleExportAllResults,
 	handleShowAllResults,
@@ -588,6 +592,8 @@ export function buildOutAndBackVeAnalysisTemplate(
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
                         <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
 
@@ -842,6 +848,12 @@ export async function showOutAndBackVEPlot(
 		},
 		onExportAll: () => {
 			void handleExportAllResults(resultsStorage);
+		},
+		onExportSettings: () => {
+			void handleExportSettings(appState, parameterStorage);
+		},
+		onExportBundle: () => {
+			void handleExportBundle(appState, parameterStorage);
 		},
 	});
 
