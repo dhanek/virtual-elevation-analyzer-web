@@ -82,7 +82,7 @@ function makeInput(overrides: Partial<ConvergenceUpdateInput> = {}): {
 beforeEach(() => {
 	resetConvergenceSurfaceCache();
 	plotlySpy.react.mockClear();
-	document.body.innerHTML = `<div id="convergencePlot"></div>`;
+	document.body.innerHTML = `<div id="convergencePlot"></div><div id="convergenceBand"></div>`;
 });
 
 describe("the convergence surface cache", () => {

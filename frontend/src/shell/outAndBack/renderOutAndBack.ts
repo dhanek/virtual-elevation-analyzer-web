@@ -76,6 +76,7 @@ import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
+import { convergenceBandMarkup } from "../analysis/convergenceBandReadout";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
@@ -688,6 +689,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
                         <div class="ve-tab-content" id="convergence-tab">
                             <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
+                            ${convergenceBandMarkup()}
                         </div>
                     </div>
                 </div>

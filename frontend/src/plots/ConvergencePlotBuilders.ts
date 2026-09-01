@@ -17,8 +17,13 @@
  * figure outside the below-axis-legend convention entirely — a test pins
  * `layout.legend` undefined so "just add a legend" fails loudly rather than
  * quietly colliding with the axis title.
+ *
+ * THE BAND is drawn as a genuine iso-line of the pooled surface (a second
+ * contour trace pinned to one level), not as an ellipse fitted to it: the
+ * valley is a tilted trough, and a fitted ellipse would draw a symmetry the
+ * surface does not have. The "5 cm" label sits on the band's right edge.
  */
-import type { ClosureSurfaceResult } from '../analysis/ClosureSurface';
+import type { ClosureBand, ClosureSurfaceResult } from '../analysis/ClosureSurface';
 import { getDefaultPlotConfig, type PlotDefinition, type PlotTrace } from './StandardPlotBuilders';
 
 export interface ConvergencePlotInput {
@@ -37,10 +42,20 @@ export interface ConvergencePlotInput {
      * shown in the title so the map never hides what it is measured against.
      */
     targetLabel: string;
+    /**
+     * The tolerance band around the optimum (`closureBand`), drawn as an
+     * iso-line at `band.threshold`. Null or absent when there is no optimum
+     * to draw it around.
+     */
+    band?: ClosureBand | null;
 }
+
+/** Colour shared by the band's iso-line and its label. */
+const BAND_COLOR = '#ff7f0e';
 
 export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefinition {
     const { surface, cdaValues, crrValues, marker, segmentCount, gridSteps, targetLabel } = input;
+    const band = input.band ?? null;
 
     const data: PlotTrace[] = [
         {
@@ -67,6 +82,28 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
         },
     ];
 
+    if (band) {
+        data.push({
+            type: 'contour',
+            name: 'Band',
+            x: cdaValues,
+            y: crrValues,
+            z: surface.z,
+            autocontour: false,
+            contours: {
+                type: 'levels',
+                coloring: 'lines',
+                start: band.threshold,
+                end: band.threshold,
+                size: 1,
+                showlabels: false,
+            },
+            line: { color: BAND_COLOR, width: 2 },
+            showscale: false,
+            hoverinfo: 'skip',
+        });
+    }
+
     if (surface.best) {
         data.push({
             type: 'scatter',
@@ -92,6 +129,20 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
     });
 
     const annotations: Array<Record<string, unknown>> = [];
+    if (band && surface.best) {
+        annotations.push({
+            text: formatBandLabel(band.toleranceM),
+            x: band.cdaHigh,
+            y: surface.best.crr,
+            xanchor: 'left',
+            yanchor: 'middle',
+            xshift: 4,
+            showarrow: false,
+            font: { size: 11, color: BAND_COLOR },
+            bgcolor: 'rgba(255, 255, 255, 0.75)',
+            borderpad: 2,
+        });
+    }
     if (surface.underdetermined) {
         annotations.push({
             text: wrapAnnotation(surface.underdetermined),
@@ -142,6 +193,11 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
         },
         config: getDefaultPlotConfig(),
     };
+}
+
+/** "5 cm" for 0.05, "1 m" for 1 — the tolerance in the unit it reads best in. */
+export function formatBandLabel(toleranceM: number): string {
+    return toleranceM < 1 ? `${Math.round(toleranceM * 100)} cm` : `${toleranceM} m`;
 }
 
 /** Soft-wrap annotation text with <br> so it stays inside the plot area. */

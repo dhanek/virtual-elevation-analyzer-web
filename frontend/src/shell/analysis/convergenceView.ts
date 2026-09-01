@@ -34,15 +34,19 @@
  * cache keeps the cost to pooling + drawing when the physics is unchanged.
  */
 import {
+	DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 	chooseGridSteps,
+	closureBand,
 	gridAxis,
 	poolClosureSurface,
+	type ClosureBand,
 	type ClosureSurfaceResult,
 	type SegmentGain,
 } from "../../analysis/ClosureSurface";
 import type { ConvergenceUpdateInput } from "../../modes/analysis/types";
 import { buildClosureContourFigure } from "../../plots/ConvergencePlotBuilders";
 import { log } from "../../utils/log";
+import { renderConvergenceBandReadout } from "./convergenceBandReadout";
 import { waitForPlotly } from "./plotlyLoader";
 import { requestModeUpdate } from "./requestModeUpdate";
 
@@ -58,6 +62,8 @@ interface CachedGains {
 interface CachedPool {
 	signature: string;
 	surface: ClosureSurfaceResult;
+	/** The tolerance band around `surface.best`; derived, so cached with it. */
+	band: ClosureBand | null;
 	segmentCount: number;
 }
 
@@ -145,12 +151,19 @@ export async function renderConvergenceView(
 			target: targetByKey.get(entry.key) ?? 0,
 		}));
 
+		const surface = poolClosureSurface(
+			segmentGains,
+			cachedGains.cdaValues,
+			cachedGains.crrValues,
+		);
 		cachedPool = {
 			signature: input.signature,
-			surface: poolClosureSurface(
-				segmentGains,
+			surface,
+			band: closureBand(
+				surface,
 				cachedGains.cdaValues,
 				cachedGains.crrValues,
+				DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 			),
 			segmentCount: segmentGains.length,
 		};
@@ -164,6 +177,15 @@ export async function renderConvergenceView(
 		segmentCount: cachedPool.segmentCount,
 		gridSteps: cachedGains.gridSteps,
 		targetLabel: input.targetLabel,
+		band: cachedPool.band,
+	});
+
+	// Written from the same pooled surface the map is drawn from, before the
+	// (async) Plotly draw so the numbers never lag the picture.
+	renderConvergenceBandReadout({
+		best: cachedPool.surface.best,
+		band: cachedPool.band,
+		toleranceM: DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 	});
 
 	const Plotly = (await waitForPlotly()) as {

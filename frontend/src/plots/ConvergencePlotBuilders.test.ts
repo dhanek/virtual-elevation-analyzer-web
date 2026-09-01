@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ClosureSurfaceResult } from '../analysis/ClosureSurface'
-import { buildClosureContourFigure, type ConvergencePlotInput } from './ConvergencePlotBuilders'
+import type { ClosureBand, ClosureSurfaceResult } from '../analysis/ClosureSurface'
+import {
+    buildClosureContourFigure,
+    formatBandLabel,
+    type ConvergencePlotInput,
+} from './ConvergencePlotBuilders'
 
 const CDA = [0.2, 0.3, 0.4]
 const CRR = [0.003, 0.004, 0.005, 0.006]
@@ -22,6 +26,16 @@ const input = (surface: ClosureSurfaceResult): ConvergencePlotInput => ({
     segmentCount: 3,
     gridSteps: 41,
     targetLabel: 'DEM',
+})
+
+const band = (): ClosureBand => ({
+    toleranceM: 0.05,
+    threshold: 0.17,
+    cdaLow: 0.28,
+    cdaHigh: 0.33,
+    crrLow: 0.0045,
+    crrHigh: 0.0056,
+    touchesEdge: false,
 })
 
 describe('buildClosureContourFigure', () => {
@@ -99,6 +113,49 @@ describe('buildClosureContourFigure', () => {
         expect(annotations[0].text).toContain('grid edge')
         // The optimum is still drawn — clipped qualifies it, it does not erase it.
         expect(figure.data.some(trace => trace.name === 'Best fit')).toBe(true)
+    })
+
+    it('draws the band as one iso-line of the same z at the band threshold', () => {
+        const surface = determinedSurface()
+        const figure = buildClosureContourFigure({ ...input(surface), band: band() })
+        expect(figure.data.map(trace => trace.name ?? trace.type)).toEqual([
+            'contour',
+            'Ridge',
+            'Band',
+            'Best fit',
+            'Current',
+        ])
+        const iso = figure.data[2]
+        expect(iso.type).toBe('contour')
+        // The SAME surface, not a re-pooled or fitted one.
+        expect(iso.z).toBe(surface.z)
+        expect(iso.autocontour).toBe(false)
+        expect(iso.contours).toMatchObject({
+            coloring: 'lines',
+            start: 0.17,
+            end: 0.17,
+        })
+        // It must not add a second colorbar next to the heatmap's.
+        expect(iso.showscale).toBe(false)
+    })
+
+    it('labels the band on its right edge at the optimum Crr', () => {
+        const figure = buildClosureContourFigure({ ...input(determinedSurface()), band: band() })
+        const annotations = figure.layout.annotations as Array<{ text: string; x: number; y: number }>
+        expect(annotations).toHaveLength(1)
+        expect(annotations[0]).toMatchObject({ text: '5 cm', x: 0.33, y: 0.005 })
+    })
+
+    it('draws no band when none is supplied', () => {
+        const figure = buildClosureContourFigure(input(determinedSurface()))
+        expect(figure.data.some(trace => trace.name === 'Band')).toBe(false)
+        expect(figure.layout.annotations).toEqual([])
+    })
+
+    it('formats the band label in centimetres below a metre', () => {
+        expect(formatBandLabel(0.05)).toBe('5 cm')
+        expect(formatBandLabel(0.1)).toBe('10 cm')
+        expect(formatBandLabel(1)).toBe('1 m')
     })
 
     it('uses the shared default config', () => {

@@ -55,6 +55,7 @@ import {
 	updateCombinedVirtualDistanceHeader,
 	virtualDistanceHeaderMarkup,
 } from "./vdHeader";
+import { convergenceBandMarkup } from "../analysis/convergenceBandReadout";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 import {
@@ -627,6 +628,7 @@ export async function showVirtualElevationAnalysisInline(
                         </div>
                         <div class="ve-tab-content" id="convergence-tab">
                             <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
+                            ${convergenceBandMarkup()}
                         </div>
                     </div>
                 </div>

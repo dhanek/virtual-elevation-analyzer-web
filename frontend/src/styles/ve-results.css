@@ -748,3 +748,17 @@
 .plot-x-axis-toggle[hidden].plot-x-axis-toggle[hidden] {
 	display: none;
 }
+
+/* Convergence band readout, under the closure-error map. One line: the best
+   fit and how far CdA / Crr can move before closure worsens by the band
+   tolerance. Written by `shell/analysis/convergenceBandReadout.ts`. */
+.ve-convergence-band {
+	margin-top: var(--space-sm);
+	margin-bottom: 0;
+	white-space: normal;
+	/* Larger than the other compact readouts and in the site's own face, not
+	   the monospace the compact class uses: this is the answer the tab exists
+	   to give, not a footnote. */
+	font-size: 1rem;
+	font-family: inherit;
+}

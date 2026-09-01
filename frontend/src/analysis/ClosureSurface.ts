@@ -239,3 +239,134 @@ export function gridAxis(min: number, max: number, steps: number): number[] {
 	}
 	return axis;
 }
+
+/**
+ * The "5 cm band": the level set of the pooled surface at `best.error +
+ * toleranceM`, and its CdA / Crr extents.
+ *
+ * WHY RELATIVE TO THE MINIMUM, NOT AN ABSOLUTE 5 cm. The pooled RSS at the
+ * optimum is rarely near zero — barometric closure noise alone is of order a
+ * metre per run — so an absolute `z <= 0.05 m` contour would usually be
+ * empty and say nothing. What the band answers is the identifiability
+ * question: how far can the sliders move from the best fit before the
+ * closure worsens by 5 cm? On a perfectly closing selection (best error 0,
+ * the two-segment case) the two readings coincide.
+ *
+ * The extents are the axis-aligned bounding box of the level set, with the
+ * crossing interpolated linearly between the last in-band cell and its
+ * out-of-band neighbour so a coarse (41x41) grid does not quantise a
+ * millimetre-scale answer to a whole cell. The box is deliberately NOT an
+ * ellipse fit: the valley is a tilted trough, and a fitted ellipse would
+ * report a symmetric ± that the surface does not have. `low`/`high` are
+ * therefore reported separately, as offsets from `best`.
+ *
+ * `touchesEdge` is true when the level set reaches a grid boundary; the
+ * extents on that side are then the grid bound, and the true band is at
+ * least that wide.
+ */
+export interface ClosureBand {
+	/** The tolerance the band was cut at, metres. */
+	toleranceM: number;
+	/** Absolute pooled error of the iso-line: `best.error + toleranceM`. */
+	threshold: number;
+	/** Extents of the level set, in slider units. */
+	cdaLow: number;
+	cdaHigh: number;
+	crrLow: number;
+	crrHigh: number;
+	touchesEdge: boolean;
+}
+
+/** The band tolerance the Convergence tab draws and reads out. */
+export const DEFAULT_CLOSURE_BAND_TOLERANCE_M = 0.05;
+
+export function closureBand(
+	surface: ClosureSurfaceResult,
+	cdaValues: readonly number[],
+	crrValues: readonly number[],
+	toleranceM: number = DEFAULT_CLOSURE_BAND_TOLERANCE_M,
+): ClosureBand | null {
+	if (!surface.best) {
+		return null;
+	}
+	if (!(toleranceM > 0)) {
+		throw new Error(`closure band tolerance must be positive, got ${toleranceM}`);
+	}
+	const threshold = surface.best.error + toleranceM;
+	const { z } = surface;
+	const cdaCount = cdaValues.length;
+	const crrCount = crrValues.length;
+
+	let cdaLow = Number.POSITIVE_INFINITY;
+	let cdaHigh = Number.NEGATIVE_INFINITY;
+	let crrLow = Number.POSITIVE_INFINITY;
+	let crrHigh = Number.NEGATIVE_INFINITY;
+	let touchesEdge = false;
+
+	// Where the threshold is crossed between an in-band cell and its
+	// out-of-band neighbour, in axis units.
+	const crossing = (
+		axis: readonly number[],
+		inside: number,
+		outside: number,
+		zInside: number,
+		zOutside: number,
+	): number =>
+		axis[inside] +
+		(axis[outside] - axis[inside]) *
+			((threshold - zInside) / (zOutside - zInside));
+
+	for (let j = 0; j < crrCount; j++) {
+		const row = z[j];
+		for (let i = 0; i < cdaCount; i++) {
+			if (!(row[i] <= threshold)) {
+				continue;
+			}
+			// CdA extent along this row.
+			if (i === 0) {
+				touchesEdge = true;
+				cdaLow = Math.min(cdaLow, cdaValues[0]);
+			} else if (!(row[i - 1] <= threshold)) {
+				cdaLow = Math.min(cdaLow, crossing(cdaValues, i, i - 1, row[i], row[i - 1]));
+			}
+			if (i === cdaCount - 1) {
+				touchesEdge = true;
+				cdaHigh = Math.max(cdaHigh, cdaValues[i]);
+			} else if (!(row[i + 1] <= threshold)) {
+				cdaHigh = Math.max(cdaHigh, crossing(cdaValues, i, i + 1, row[i], row[i + 1]));
+			}
+			// Crr extent along this column.
+			if (j === 0) {
+				touchesEdge = true;
+				crrLow = Math.min(crrLow, crrValues[0]);
+			} else if (!(z[j - 1][i] <= threshold)) {
+				crrLow = Math.min(crrLow, crossing(crrValues, j, j - 1, row[i], z[j - 1][i]));
+			}
+			if (j === crrCount - 1) {
+				touchesEdge = true;
+				crrHigh = Math.max(crrHigh, crrValues[j]);
+			} else if (!(z[j + 1][i] <= threshold)) {
+				crrHigh = Math.max(crrHigh, crossing(crrValues, j, j + 1, row[i], z[j + 1][i]));
+			}
+		}
+	}
+
+	if (!Number.isFinite(cdaLow)) {
+		// `best` came from this surface, so its cell is in band by
+		// construction; an empty level set means the surface was mutated.
+		return null;
+	}
+
+	// The refined optimum can sit a fraction of a cell outside the lattice
+	// level set; the band must always contain the point it is reported around.
+	const { cda, crr } = surface.best;
+	return {
+		toleranceM,
+		threshold,
+		cdaLow: Math.min(cdaLow, cda),
+		cdaHigh: Math.max(cdaHigh, cda),
+		crrLow: Math.min(crrLow, crr),
+		crrHigh: Math.max(crrHigh, crr),
+		touchesEdge,
+	};
+}
