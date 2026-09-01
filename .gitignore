@@ -84,3 +84,7 @@ vw-demo/
 # which must never be swept into a commit by a stray `git add -A`.
 .claude/
 /scripts/deploy-s3.sh
+
+# Python
+__pycache__/
+*.pyc
