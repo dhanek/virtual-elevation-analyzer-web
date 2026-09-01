@@ -1117,29 +1117,74 @@ describe("the VE panel after a Section 3 selection change", () => {
 		expect(appState.selectedLaps).toEqual([1, 2]);
 	});
 
-	it("tears the panel down when the out-and-back section selection changes", async () => {
+	/**
+	 * A section checkbox NARROWS THE QUESTION; it does not re-cut the ride.
+	 *
+	 * These two cases used to assert a teardown, which was more destructive than
+	 * the change warranted (maintainer, 2026-09-01): the detection underneath is
+	 * untouched, so the panel can simply recompute over the ticked subset. A gate
+	 * move or a wider FIT window is the other case and still tears down — see
+	 * `gateRedetectInvalidation.test.ts`.
+	 *
+	 * `requestModeUpdate` is deliberately unconfigured in this file, so what is
+	 * observable here is the panel SURVIVING and the on-screen section list
+	 * having moved to the new subset — which is the state the recompute reads
+	 * (`activeOutAndBackSections.ts`). That the funnel then draws it is
+	 * `outAndBackFixtureChain.test.ts`' subject, not this file's.
+	 */
+	function analyzedOutAndBackPanel(appState: AppState, sections: number[]): void {
+		const section = (n: number) => ({
+			sectionNumber: n,
+			outboundStartIdx: (n - 1) * 40,
+			outboundEndIdx: (n - 1) * 40 + 19,
+			inboundStartIdx: (n - 1) * 40 + 20,
+			inboundEndIdx: (n - 1) * 40 + 39,
+		});
+		appState.outAndBackSections = sections.map(section) as never;
+		appState.currentOutAndBackSections = sections.map(section) as never;
+		appState.currentCoveredItems = [...sections];
+	}
+
+	it("narrows the panel to the ticked sections instead of tearing it down", async () => {
 		const appState = await analyzedStandardPanel();
-		// What `segmentSummary` writes as the analyzed set for the segment modes.
-		appState.currentCoveredItems = [1, 2];
+		analyzedOutAndBackPanel(appState, [1, 2, 3]);
 
 		renderSectionCheckboxes([1, 2, 3], [1, 3]);
 		handleOutAndBackSectionSelectionChange();
 		await settle();
 
-		expect(veSectionHidden()).toBe(true);
-		expect(appState.currentVEResult).toBeNull();
+		expect(veSectionHidden()).toBe(false);
+		expect(appState.currentVEResult).not.toBeNull();
+		expect(
+			appState.currentOutAndBackSections.map((s) => s.sectionNumber),
+		).toEqual([1, 3]);
 	});
 
-	it("does not tear the panel down when the section selection still matches", async () => {
+	it("leaves the on-screen sections alone when the selection still matches", async () => {
 		const appState = await analyzedStandardPanel();
-		appState.currentCoveredItems = [1, 2];
+		analyzedOutAndBackPanel(appState, [1, 2]);
 
 		renderSectionCheckboxes([1, 2, 3], [2, 1]);
 		handleOutAndBackSectionSelectionChange();
 		await settle();
 
 		expect(veSectionHidden()).toBe(false);
-		expect(appState.currentVEResult).not.toBeNull();
+		expect(
+			appState.currentOutAndBackSections.map((s) => s.sectionNumber),
+		).toEqual([1, 2]);
+	});
+
+	it("tears the panel down when every section is unticked", async () => {
+		const appState = await analyzedStandardPanel();
+		analyzedOutAndBackPanel(appState, [1, 2]);
+
+		// Not a narrower question — no question. There is nothing to compute.
+		renderSectionCheckboxes([1, 2, 3], []);
+		handleOutAndBackSectionSelectionChange();
+		await settle();
+
+		expect(veSectionHidden()).toBe(true);
+		expect(appState.currentVEResult).toBeNull();
 	});
 
 	/**

@@ -464,30 +464,65 @@ describe("the VE panel in GPS-lap mode", () => {
 				.join("");
 		}
 
-		it("tears the panel down when an analysed lap is unticked", () => {
+		/**
+		 * A LAP CHECKBOX NARROWS THE QUESTION; it does not re-cut the ride.
+		 *
+		 * Tearing down here was more destructive than the change warranted
+		 * (maintainer, 2026-09-01): the detection is untouched, so the panel can
+		 * recompute over the ticked subset. The gate cases above are the other
+		 * kind of change and still tear down.
+		 *
+		 * `requestModeUpdate` is unconfigured in this file, so what is asserted is
+		 * the panel SURVIVING and the on-screen range list having moved — the
+		 * state `resolveActiveGpsLapRanges` hands the recompute.
+		 */
+		it("narrows the panel to the ticked laps instead of tearing it down", () => {
 			const appState = makeAppState();
 			configure(appState);
-			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160), lap(3, 161, 240)]);
 
-			renderGpsLapCheckboxes([1, 2, 3], [1]);
-			handleGpsLapSelectionChange();
-
-			expect(veSectionHidden()).toBe(true);
-			expect(appState.currentVEResult).toBeNull();
-		});
-
-		it("leaves the panel alone when the selection still matches", () => {
-			const appState = makeAppState();
-			configure(appState);
-			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
-
-			// Order-insensitive, like the FIT-lap and section guards: the list is
-			// derived by walking rendered checkboxes and has no meaningful order.
-			renderGpsLapCheckboxes([1, 2, 3], [2, 1]);
+			renderGpsLapCheckboxes([1, 2, 3], [1, 3]);
 			handleGpsLapSelectionChange();
 
 			expect(veSectionHidden()).toBe(false);
 			expect(appState.currentVEResult).not.toBeNull();
+			expect(appState.currentGpsLapIndexRanges).toEqual([
+				{ startIdx: 0, endIdx: 80 },
+				{ startIdx: 161, endIdx: 240 },
+			]);
+			// `gpsLapNumberAt` indexes this by RANGE ordinal, so it has to move
+			// with the ranges or lap 3 would be drawn as "Lap 2".
+			expect(appState.currentOverlayLapNumbers).toEqual([1, 3]);
+		});
+
+		it("leaves the on-screen ranges alone when the selection still matches", () => {
+			const appState = makeAppState();
+			configure(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+
+			// Order-insensitive: the list is derived by walking rendered
+			// checkboxes and has no meaningful order.
+			renderGpsLapCheckboxes([1, 2, 3], [2, 1]);
+			handleGpsLapSelectionChange();
+
+			expect(veSectionHidden()).toBe(false);
+			expect(appState.currentGpsLapIndexRanges).toEqual([
+				{ startIdx: 0, endIdx: 80 },
+				{ startIdx: 81, endIdx: 160 },
+			]);
+		});
+
+		it("tears the panel down when every lap is unticked", () => {
+			const appState = makeAppState();
+			configure(appState);
+			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160)]);
+
+			// Not a narrower question — no question.
+			renderGpsLapCheckboxes([1, 2, 3], []);
+			handleGpsLapSelectionChange();
+
+			expect(veSectionHidden()).toBe(true);
+			expect(appState.currentVEResult).toBeNull();
 		});
 
 		it("does not tear down when nothing has been analysed yet", () => {
