@@ -235,10 +235,16 @@ export async function showGpsLapVEAnalysis(
 			// stopped emitting mid-ride is still accepted, and the tail indices
 			// here pushed `undefined` into a `number[]` — NaN rho across the
 			// WASM boundary for the whole lap. Same rule as
-			// `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a short or
-			// hole-punched array under the calculator is a worse bug than a
-			// constant one, so a lap the series does not span falls back to the
-			// constant `params.rho` instead.
+			// `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a short
+			// array under the calculator is a worse bug than a constant one, so
+			// a lap the series does not span falls back to the constant
+			// `params.rho` instead.
+			//
+			// A LENGTH CHECK, AND ONLY THAT. An interior NaN in an
+			// otherwise-full-length channel still reaches the calculator —
+			// `hasAirDensityData` accepts the series on a `.some(...)`. That is
+			// pre-existing and out of this fix's scope; do not read the guard
+			// below as covering it.
 			if (allRho && i < allRho.length) lapRho.push(allRho[i]);
 		}
 

@@ -167,7 +167,13 @@ describe("virtual elevation comparison figure sizing", () => {
 		expect(top.margin.r).toBe(bottom.margin.r);
 		expect(top.legend).toEqual(bottom.legend);
 		expect(top.range).toEqual(bottom.range);
-		expect(top.range).toEqual([context.xMin, context.xMax]);
+
+		// THE MAIN WINDOW, not `[context.xMin, context.xMax]`. The non-compare
+		// builder may pin the extended range because it DRAWS the faded
+		// before/after context slices; these two figures draw `xPointsMain` and
+		// nothing else, so the extended range would be dead margin at both ends.
+		expect(top.range).toEqual([context.xTrimStart, context.xTrimEnd]);
+		expect(context.xTrimStart).toBeGreaterThan(context.xMin);
 	});
 
 	it("puts the shared axis title on the residuals plot, not the elevation plot", () => {

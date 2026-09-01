@@ -16,6 +16,14 @@
  * under D-09. So prefer the on-screen list and fall back to the selection only
  * when nothing has been analysed yet.
  *
+ * THAT STILL HOLDS, and note what changed around it (2026-09-01). The section
+ * checkboxes now DO move the on-screen list — `recomputePanelForSelection`
+ * (`section3Orchestration.ts`) writes it and asks the funnel to redraw in the
+ * same breath, because tearing the panel down over a narrowed selection was
+ * more destructive than the change warranted. The rule this comment defends is
+ * untouched: what the next slider drag computes is still exactly what is on
+ * screen, and it is never changed behind the panel's back.
+ *
  * Kept in `modes/analysis/` rather than `shell/` so `outAndBackMode` can reach
  * it without importing from the shell (D-03).
  */

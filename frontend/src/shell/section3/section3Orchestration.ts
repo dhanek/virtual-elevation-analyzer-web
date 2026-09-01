@@ -39,6 +39,7 @@ import {
 	resetRecomputeThrottle,
 } from "../analysis/recomputeRunner";
 import { purgePlotlyGraphsIn } from "../dom/plotlyPurge";
+import { requestModeUpdate } from "../analysis/requestModeUpdate";
 import { sameItems } from "../ve/veSelectionGuard";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
@@ -297,7 +298,7 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	appState.currentGpsLapIndexRanges = null;
 	appState.currentOverlayLapNumbers = null;
 	// The out-and-back twin of the two above, and the basis
-	// `invalidateVePanelIfSectionCutChanged` reads: left behind, a torn-down
+	// `invalidateVePanelIfDetectionChanged` reads: left behind, a torn-down
 	// panel would still report an analysed cut, and `resolveActiveOutAndBackSections`
 	// would still prefer it over the live selection.
 	appState.currentOutAndBackSections = [];
@@ -372,13 +373,62 @@ function invalidateVePanelIfDetectionChanged(
 ): void {
 	const { appState } = getDependencies();
 	if (!gpsPanelIsAnalyzed(appState)) return;
-	if (
+	if (sameDetection(before, after)) return;
+	tearDownVeAnalysisPanel(appState);
+}
+
+/**
+ * Did a re-detection produce the same cut of the ride?
+ *
+ * ORDER-SENSITIVE, unlike `sameItems`: both detectors walk the ride and emit in
+ * ride order, so position carries meaning here and two lists that agree as sets
+ * but not in order describe different cuts.
+ */
+function sameDetection(before: string[], after: string[]): boolean {
+	return (
 		before.length === after.length &&
 		before.every((cut, index) => cut === after[index])
-	) {
+	);
+}
+
+/**
+ * A DETECTED ITEM WAS TICKED OR UNTICKED — recompute the panel over the new
+ * subset instead of throwing it away.
+ *
+ * These checkboxes are not the detection. Unticking one of six detected GPS
+ * laps leaves the cut of the ride exactly where it was and asks a narrower
+ * question of the same data, so tearing the panel down and making the user press
+ * Analyze again is more destructive than the change warrants (maintainer,
+ * 2026-09-01). A gate move or a wider FIT window is the opposite case and still
+ * tears down, through `invalidateVePanelIfDetectionChanged`.
+ *
+ * THIS IS THE DELIBERATE REVERSAL OF A DELIBERATE CHOICE, so it is worth saying
+ * which. `activeOutAndBackSections.ts` prefers the ON-SCREEN list over the
+ * selection precisely so that a checkbox toggle could not SILENTLY change what
+ * the next slider drag computed. That reasoning stands and the seam is
+ * unchanged: the on-screen list is still authoritative, and the toggle now
+ * MOVES it and asks for a recompute in the same breath, rather than moving it
+ * behind the panel's back.
+ *
+ * `currentAnalyzedLaps` is untouched, which is the WR-01 rule and not an
+ * oversight: it is the key the saved CdA/Crr and trim live under, it belongs to
+ * the analyze that produced them, and a narrowed VIEW must not re-key them.
+ * Coverage moves instead — `summarize` rewrites `currentCoveredItems` from the
+ * profiles that survive this pass, so Store Result and the CSV stay truthful.
+ *
+ * Emptying the selection is not a narrower question, it is no question: there
+ * is nothing to compute and the panel goes.
+ */
+function recomputePanelForSelection(
+	appState: AppState,
+	applySelection: () => boolean,
+): void {
+	if (!gpsPanelIsAnalyzed(appState)) return;
+	if (!applySelection()) {
+		tearDownVeAnalysisPanel(appState);
 		return;
 	}
-	tearDownVeAnalysisPanel(appState);
+	requestModeUpdate("segmentSelection");
 }
 
 /**
@@ -541,13 +591,18 @@ function rerenderSection3(): void {
 	// depends on the map succeeding, so nothing about it should be sequenced behind
 	// the map.
 	setTimeout(async () => {
-		// Cleared BEFORE the controls are restored, not after:
-		// `restoreSection3Controls` ends in `updateSelectedLaps()`, which calls
-		// `redetectForFitSelection?.()` in the GPS modes. Clearing afterwards
-		// leaves that call reaching the PREVIOUS render's closure -- and on a
-		// file-over-file load that closure writes the old file's gate offset
-		// into the new file's stored settings. The binders below re-publish the
-		// slot; until they do, no closure here belongs to the markup on screen.
+		// BEFORE `restoreSection3Controls`, not after, because that function ENDS
+		// IN `updateSelectedLaps()` (`:652`) and `updateSelectedLaps` now fires
+		// the redetect closure. Cleared one line too late, a mode switch ran the
+		// PREVIOUS mode's closure: leaving out-and-back for GPS-lap re-ran
+		// `updateGates()` against detached `#oabGate*` sliders, repopulating the
+		// very arrays `setGpsAnalysisMode` had just cleared, redrawing A/B markers
+		// on a map about to be destroyed, and persisting gate offsets for a mode
+		// the user had left. The binders below re-publish it a few lines later,
+		// and each runs its own initial detection, so nothing is lost by clearing
+		// first.
+		// The same ordering matters on a file-over-file load: the stale closure
+		// would write the old file's gate offset into the new file's settings.
 		clearGpsRedetect();
 		restoreSection3Controls(hasGpsData);
 
@@ -910,23 +965,36 @@ export async function runGpsLapDetection(
 		);
 	}
 
-	// Update UI
-	updateGpsDetectedLapsUI();
+	const detectionAfter = deps.appState.gpsDetectedLaps.map(lapRangeCut);
 
-	// Auto-select all laps initially
-	deps.appState.gpsSelectedLaps = deps.appState.gpsDetectedLaps.map(
-		(lap) => lap.lapNumber,
-	);
+	// AUTO-SELECT ALL, BUT ONLY WHEN THE DETECTION ACTUALLY MOVED.
+	//
+	// Resetting the selection unconditionally was harmless while every selection
+	// change tore the panel down. It is not now that a checkbox NARROWS the panel
+	// instead: untick lap 5 of 5, then tick a FIT lap that adds no gate passing,
+	// and the re-detection reproduces the identical list — so the panel rightly
+	// survives at four laps while the checkboxes silently go back to five. Every
+	// later slider drag then computes four laps and Store Result reports four
+	// while the sidebar claims five, with no gesture that resyncs them.
+	//
+	// When the detection DID move, the panel is being torn down two lines below,
+	// so there is nothing left for the selection to contradict and all-selected
+	// is the right fresh start.
+	if (!sameDetection(detectionBefore, detectionAfter)) {
+		deps.appState.gpsSelectedLaps = deps.appState.gpsDetectedLaps.map(
+			(lap) => lap.lapNumber,
+		);
+	}
+
+	// AFTER the selection is settled: the list renders each checkbox from it.
+	updateGpsDetectedLapsUI();
 
 	// The out-and-back twin, and for the identical reason: moving the gate — or
 	// widening the FIT window this detection is scoped to — re-cuts the ride, and
 	// a panel built on the previous cut is describing laps that are no longer the
-	// laps under those numbers. Compared on the RANGES, because the auto-select
-	// above has just written the detector's own 1..N into `gpsSelectedLaps`.
-	invalidateVePanelIfDetectionChanged(
-		detectionBefore,
-		deps.appState.gpsDetectedLaps.map(lapRangeCut),
-	);
+	// laps under those numbers. Compared on the RANGES, because the numbers are
+	// the detector's own 1..N and compare equal to themselves.
+	invalidateVePanelIfDetectionChanged(detectionBefore, detectionAfter);
 
 	deps.updateAnalyzeButton();
 }
@@ -951,12 +1019,18 @@ export function updateGpsDetectedLapsUI(): void {
 	lapsInfo.classList.remove("hidden");
 	lapCountSpan.textContent = deps.appState.gpsDetectedLaps.length.toString();
 
+	// FROM THE SELECTION, not hardcoded `checked`. A re-detection that did not
+	// move the cut leaves a narrowed selection in place (see
+	// `runGpsLapDetection`), and a list that always renders every box ticked
+	// would then contradict both the selection and the panel.
+	const selected = deps.appState.gpsSelectedLaps;
+
 	// Populate lap list
 	lapList.innerHTML = deps.appState.gpsDetectedLaps
 		.map(
 			(lap) => `
-        <div class="lap-checkbox-item lap-checkbox-item--selected" data-gps-lap="${lap.lapNumber}">
-            <input type="checkbox" class="gps-lap-checkbox" id="gps-lap-${lap.lapNumber}" checked>
+        <div class="lap-checkbox-item${selected.includes(lap.lapNumber) ? " lap-checkbox-item--selected" : ""}" data-gps-lap="${lap.lapNumber}">
+            <input type="checkbox" class="gps-lap-checkbox" id="gps-lap-${lap.lapNumber}"${selected.includes(lap.lapNumber) ? " checked" : ""}>
             <div class="lap-info">
                 <div class="lap-number">Lap ${lap.lapNumber}</div>
                 <div class="lap-details">
@@ -1008,16 +1082,25 @@ export function handleGpsLapSelectionChange(): void {
 		})
 		.filter((lap) => lap > 0);
 
-	// The twin of `handleOutAndBackSectionSelectionChange`'s guard, which the
-	// GPS-lap list never had: unticking an analysed lap leaves the panel showing
-	// a curve that includes it. `currentCoveredItems` is the right basis in BOTH
-	// segment modes — `writeSegmentModeResultState` (`segmentSummary.ts:316`) is
-	// shared, and `gpsLapMode.summarize` passes the REAL lap numbers of the
-	// surviving profiles, the same namespace `gpsSelectedLaps` counts in.
-	invalidateVePanelIfBasisChanged(
-		deps.appState.currentCoveredItems,
-		deps.appState.gpsSelectedLaps,
-	);
+	// The panel follows the selection rather than dying with it: see
+	// `recomputePanelForSelection`.
+	recomputePanelForSelection(deps.appState, () => {
+		const selected = deps.appState.gpsDetectedLaps.filter((lap) =>
+			deps.appState.gpsSelectedLaps.includes(lap.lapNumber),
+		);
+		if (selected.length === 0) return false;
+		deps.appState.currentGpsLapIndexRanges = selected.map((lap) => ({
+			startIdx: lap.startIdx,
+			endIdx: lap.endIdx,
+		}));
+		// IN LOCKSTEP. `gpsLapNumberAt` (`gpsLapMode.ts:17`) indexes this by the
+		// RANGE ordinal, so a ranges list that moved without it would label every
+		// lap after the removed one with its neighbour's number.
+		deps.appState.currentOverlayLapNumbers = selected.map(
+			(lap) => lap.lapNumber,
+		);
+		return true;
+	});
 
 	// Update visual selection state
 	document
@@ -1123,21 +1206,24 @@ export async function runOutAndBackDetection(
 		);
 	}
 
-	// Update UI
-	updateOutAndBackSectionsUI();
+	const detectionAfter = deps.appState.outAndBackSections.map(outAndBackCut);
 
-	// Auto-select all sections initially
-	deps.appState.outAndBackSelectedSections =
-		deps.appState.outAndBackSections.map((s) => s.sectionNumber);
+	// Auto-select all sections, but only when the detection moved — see the
+	// GPS-lap twin in `runGpsLapDetection` for why the unconditional reset
+	// contradicts a narrowed panel.
+	if (!sameDetection(detectionBefore, detectionAfter)) {
+		deps.appState.outAndBackSelectedSections =
+			deps.appState.outAndBackSections.map((s) => s.sectionNumber);
+	}
+
+	// AFTER the selection is settled: the list renders each checkbox from it.
+	updateOutAndBackSectionsUI();
 
 	// Moving a gate re-cuts the ride into different sections, so a panel
 	// analyzed from the previous cut describes segments that no longer exist —
 	// the same invalidation as ticking the section boxes, by a blunter route.
 	// Compared on the RANGES, not the section numbers: see the helper.
-	invalidateVePanelIfDetectionChanged(
-		detectionBefore,
-		deps.appState.outAndBackSections.map(outAndBackCut),
-	);
+	invalidateVePanelIfDetectionChanged(detectionBefore, detectionAfter);
 
 	deps.updateAnalyzeButton();
 }
@@ -1163,12 +1249,15 @@ export function updateOutAndBackSectionsUI(): void {
 	sectionCountSpan.textContent =
 		deps.appState.outAndBackSections.length.toString();
 
+	// From the selection, like the GPS-lap list above.
+	const selected = deps.appState.outAndBackSelectedSections;
+
 	// Populate section list
 	sectionList.innerHTML = deps.appState.outAndBackSections
 		.map(
 			(section) => `
-        <div class="lap-checkbox-item lap-checkbox-item--selected" data-oab-section="${section.sectionNumber}">
-            <input type="checkbox" class="oab-section-checkbox" id="oab-section-${section.sectionNumber}" checked>
+        <div class="lap-checkbox-item${selected.includes(section.sectionNumber) ? " lap-checkbox-item--selected" : ""}" data-oab-section="${section.sectionNumber}">
+            <input type="checkbox" class="oab-section-checkbox" id="oab-section-${section.sectionNumber}"${selected.includes(section.sectionNumber) ? " checked" : ""}>
             <div class="lap-info">
                 <div class="lap-number">Section ${section.sectionNumber}</div>
                 <div class="lap-details">
@@ -1220,13 +1309,18 @@ export function handleOutAndBackSectionSelectionChange(): void {
 		})
 		.filter((section) => section > 0);
 
-	// The segment modes record their analyzed set on `currentCoveredItems`, not
-	// `currentAnalyzedLaps` — that is the field `summarize` writes and the one
-	// Store Result and the CSV report coverage from.
-	invalidateVePanelIfBasisChanged(
-		deps.appState.currentCoveredItems,
-		deps.appState.outAndBackSelectedSections,
-	);
+	// The GPS-lap twin, and the same rule: a section checkbox narrows the
+	// question, it does not re-cut the ride. See `recomputePanelForSelection`.
+	recomputePanelForSelection(deps.appState, () => {
+		const selected = deps.appState.outAndBackSections.filter((section) =>
+			deps.appState.outAndBackSelectedSections.includes(section.sectionNumber),
+		);
+		if (selected.length === 0) return false;
+		// Sections carry their own `sectionNumber`, so unlike GPS-lap there is no
+		// parallel numbering array to keep aligned.
+		deps.appState.currentOutAndBackSections = selected;
+		return true;
+	});
 
 	// Update visual selection state
 	document
@@ -1313,7 +1407,7 @@ export function updateSelectedLaps(): void {
 	// made `[1,2,3]` match `[1,2,3]` and skipped an invalidation that was due;
 	// the mirror case tore down a perfectly valid GPS panel. The GPS modes
 	// invalidate on their own basis instead — out-and-back through
-	// `invalidateVePanelIfSectionCutChanged`, which the FIT-lap selection
+	// `invalidateVePanelIfDetectionChanged`, which the FIT-lap selection
 	// reaches anyway because it re-trims the detector's input.
 	const isFitLapSelectionMode =
 		!isGpsLapSelectionMode(lapDetectionMode) &&
@@ -1764,13 +1858,18 @@ export function initializeSection3(): void {
 	// Controls first, map second, separate trys -- same reasoning as
 	// rerenderSection3: a map failure must not leave Section 3 inert.
 	setTimeout(async () => {
-		// Cleared BEFORE the controls are restored, not after:
-		// `restoreSection3Controls` ends in `updateSelectedLaps()`, which calls
-		// `redetectForFitSelection?.()` in the GPS modes. Clearing afterwards
-		// leaves that call reaching the PREVIOUS render's closure -- and on a
-		// file-over-file load that closure writes the old file's gate offset
-		// into the new file's stored settings. The binders below re-publish the
-		// slot; until they do, no closure here belongs to the markup on screen.
+		// BEFORE `restoreSection3Controls`, not after, because that function ENDS
+		// IN `updateSelectedLaps()` (`:652`) and `updateSelectedLaps` now fires
+		// the redetect closure. Cleared one line too late, a mode switch ran the
+		// PREVIOUS mode's closure: leaving out-and-back for GPS-lap re-ran
+		// `updateGates()` against detached `#oabGate*` sliders, repopulating the
+		// very arrays `setGpsAnalysisMode` had just cleared, redrawing A/B markers
+		// on a map about to be destroyed, and persisting gate offsets for a mode
+		// the user had left. The binders below re-publish it a few lines later,
+		// and each runs its own initial detection, so nothing is lost by clearing
+		// first.
+		// The same ordering matters on a file-over-file load: the stale closure
+		// would write the old file's gate offset into the new file's settings.
 		clearGpsRedetect();
 		restoreSection3Controls(hasGpsData);
 
