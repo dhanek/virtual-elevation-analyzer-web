@@ -318,7 +318,11 @@ export async function importSettingsJsonFile(file: File): Promise<void> {
 			parsed.envelope.activityFileName ?? undefined,
 		);
 		deps.fileDetails.innerHTML = `
-        <div><strong>Settings imported</strong> for ${parsed.envelope.activityFileName ?? "an activity"}.</div>
+        <div><strong>Settings imported</strong> for ${
+					parsed.envelope.activityFileName
+						? escapeHtml(parsed.envelope.activityFileName)
+						: "an activity"
+				}.</div>
         <div>Load that activity file and its settings will restore automatically.</div>
     `;
 		deps.fileInfo.classList.remove("hidden");

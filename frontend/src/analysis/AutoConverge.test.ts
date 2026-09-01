@@ -5,6 +5,7 @@ import {
 	solveBoth,
 	solveCdaForCrr,
 	solveCrrForCda,
+	usableSegments,
 	type AutoConvergeSegment,
 } from "./AutoConverge";
 
@@ -197,5 +198,56 @@ describe("resolveAutoConvergedControls — the lock table", () => {
 			state: { enabled: true, cdaLocked: true, crrLocked: false },
 		});
 		expect(resolved.status).toBe("idle");
+	});
+});
+
+/**
+ * A segment whose trim window has nothing in it: `ve_gain` reports NaN for
+ * every (CdA, Crr), the same window for which `ve_gain_grid` returns an empty
+ * grid and the Convergence tab drops the segment. The solver must drop it
+ * too — the pair disagreeing is what let a degenerate segment steer a solve
+ * the plot knew nothing about.
+ */
+const DEGENERATE: AutoConvergeSegment = {
+	veGain: () => Number.NaN,
+	target: 0,
+	weight: 1000,
+};
+
+describe("degenerate segments", () => {
+	test("usableSegments drops a segment whose gain is not a number", () => {
+		expect(usableSegments([...CROSSING, DEGENERATE], BOUNDS)).toEqual(CROSSING);
+	});
+
+	test("a degenerate segment does not reach the solve", () => {
+		const withIt = resolveAutoConvergedControls({
+			state: { enabled: true, cdaLocked: false, crrLocked: true },
+			cda: CDA_STAR,
+			crr: 0.02,
+			segments: [...CROSSING, DEGENERATE],
+			bounds: BOUNDS,
+		});
+		const withoutIt = resolveAutoConvergedControls({
+			state: { enabled: true, cdaLocked: false, crrLocked: true },
+			cda: CDA_STAR,
+			crr: 0.02,
+			segments: CROSSING,
+			bounds: BOUNDS,
+		});
+		expect(withIt.status).toBe("ok");
+		expect(withIt.crr).toBe(withoutIt.crr);
+	});
+
+	test("nothing measurable leaves the sliders exactly where they were", () => {
+		const resolved = resolveAutoConvergedControls({
+			state: { enabled: true, cdaLocked: true, crrLocked: true },
+			cda: 0.271,
+			crr: 0.0071,
+			segments: [DEGENERATE, DEGENERATE],
+			bounds: BOUNDS,
+		});
+		expect(resolved.status).toBe("idle");
+		expect(resolved.cda).toBe(0.271);
+		expect(resolved.crr).toBe(0.0071);
 	});
 });

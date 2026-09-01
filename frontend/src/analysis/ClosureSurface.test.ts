@@ -3,6 +3,7 @@ import {
 	COARSE_GRID_STEPS,
 	COARSE_GRID_WINDOW_SAMPLES,
 	DEFAULT_GRID_STEPS,
+	DEFAULT_RIDGE_FLATNESS_FLOOR_M,
 	DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 	chooseGridSteps,
 	closureBand,
@@ -173,6 +174,58 @@ describe("poolClosureSurface refusals", () => {
 		);
 		expect(surface.best).toBeNull();
 		expect(surface.underdetermined).toMatch(/ridge is flat/);
+	});
+
+	/**
+	 * THE ARTEFACT THE SOLVER ALREADY REFUSED, and the surface did not.
+	 *
+	 * Two coincident-ridge segments (identical gain models — the degenerate
+	 * case) on a ridge steep enough to leave the Crr axis a third of the way
+	 * out. The columns it has left pin their minimum to the first or last Crr
+	 * row, and their error climbs to ~1.7 m: measured over every column the
+	 * spread clears the 0.5 m floor easily and the old code drew a confident
+	 * marker. Measured over the columns actually on the ridge it is a few
+	 * centimetres of lattice quantisation — flat, and refused, which is what
+	 * `AutoConverge.solveBoth` has always said about the same selection.
+	 */
+	test("columns pinned to the Crr edge do not make a flat ridge look determined", () => {
+		const cdaAxis = gridAxis(0.25, 0.35, 41);
+		const crrAxis = gridAxis(0.003, 0.007, 41);
+		const steepAndCoincident = [
+			plantedGains(cdaAxis, crrAxis, 40, 400, 0.3, 0.005),
+			plantedGains(cdaAxis, crrAxis, 40, 400, 0.3, 0.005),
+		];
+		const surface = poolClosureSurface(steepAndCoincident, cdaAxis, crrAxis);
+
+		// The spread the old whole-ridge test would have measured, and passed.
+		const ridgeErrors = surface.ridgeCda.map((_, i) => {
+			const j = crrAxis.indexOf(surface.ridgeCrr[i]);
+			return surface.z[j][i];
+		});
+		expect(Math.max(...ridgeErrors) - Math.min(...ridgeErrors)).toBeGreaterThan(
+			DEFAULT_RIDGE_FLATNESS_FLOOR_M,
+		);
+
+		expect(surface.best).toBeNull();
+		expect(surface.underdetermined).toMatch(/ridge is flat/);
+	});
+
+	test("a ridge that leaves the bounds almost everywhere says so", () => {
+		// Steeper still: the zero line is inside the Crr axis for only a
+		// couple of columns, so there is no ridge left to judge the flatness
+		// of — a different refusal, with different advice.
+		const cdaAxis = gridAxis(0.25, 0.35, 41);
+		const crrAxis = gridAxis(0.003, 0.007, 41);
+		const surface = poolClosureSurface(
+			[
+				plantedGains(cdaAxis, crrAxis, 40, 20, 0.3, 0.005),
+				plantedGains(cdaAxis, crrAxis, 40, 20, 0.3, 0.005),
+			],
+			cdaAxis,
+			crrAxis,
+		);
+		expect(surface.best).toBeNull();
+		expect(surface.underdetermined).toMatch(/outside the CdA\/Crr/);
 	});
 
 	test("the flatness floor is adjustable", () => {

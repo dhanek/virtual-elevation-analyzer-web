@@ -257,18 +257,40 @@ export async function updateModeVEPlots(
 	//     byte for byte. The funnel writes any driven value back to the DOM
 	//     from the outcome (`drivenControls.ts`); this function still never
 	//     touches an element.
-	const autoConverge = resolveAutoConvergedControls({
-		state: appState.autoConverge ?? AUTO_CONVERGE_DEFAULT,
-		cda: args.cda,
-		crr: args.crr,
-		segments: buildAutoConvergeSegments(prepared, params),
-		bounds: {
-			cdaMin: params.cda_min ?? 0.15,
-			cdaMax: params.cda_max ?? 0.5,
-			crrMin: params.crr_min ?? 0.0015,
-			crrMax: params.crr_max ?? 0.03,
-		},
-	});
+	//
+	//     AND IT IS FALLIBLE IN A WAY THE PER-SEGMENT LOOP IS NOT. The solver
+	//     calls `ve_gain` on EVERY prepared calculator, ahead of the loop below
+	//     whose try/catch has always let one unusable segment be logged and
+	//     skipped. Without this guard a single throwing calculator escapes the
+	//     whole pass: no plots, no metrics, no `summarize` write — the panel
+	//     keeps the previous render's numbers with no indication they are stale.
+	//     A solver that cannot run leaves the sliders where the user put them,
+	//     which is exactly the idle resolution.
+	let autoConverge: AutoConvergeResolution;
+	try {
+		autoConverge = resolveAutoConvergedControls({
+			state: appState.autoConverge ?? AUTO_CONVERGE_DEFAULT,
+			cda: args.cda,
+			crr: args.crr,
+			segments: buildAutoConvergeSegments(prepared, params),
+			bounds: {
+				cdaMin: params.cda_min ?? 0.15,
+				cdaMax: params.cda_max ?? 0.5,
+				crrMin: params.crr_min ?? 0.0015,
+				crrMax: params.crr_max ?? 0.03,
+			},
+		});
+	} catch (err) {
+		log.error("Auto-converge failed; using the slider values as they are:", err);
+		autoConverge = {
+			cda: args.cda,
+			crr: args.crr,
+			drivenCda: false,
+			drivenCrr: false,
+			status: "idle",
+			reason: null,
+		};
+	}
 	const cda = autoConverge.cda;
 	const crr = autoConverge.crr;
 

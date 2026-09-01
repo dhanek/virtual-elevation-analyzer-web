@@ -30,6 +30,15 @@
  * feature that stops this tool from confidently fabricating a CdA.
  */
 
+import {
+	judgeRidge,
+	RIDGE_FLATNESS_FLOOR_M,
+	type RidgeColumn,
+} from "./ClosureRidge";
+
+/** Re-exported so the solver's own floor stays one constant with the surface's. */
+export { RIDGE_FLATNESS_FLOOR_M };
+
 export interface AutoConvergeSegment {
 	/** Pooled closure gain at one (CdA, Crr), in SLIDER-value space. */
 	veGain(cda: number, crr: number): number;
@@ -54,6 +63,34 @@ export interface SolveResult {
 }
 
 const BISECTION_ITERATIONS = 60;
+
+/**
+ * The segments this solver is entitled to use.
+ *
+ * `ve_gain` reports NaN for a window it cannot measure — one `metrics_window`
+ * rejects, or one spanning no samples — exactly as `ve_gain_grid` reports an
+ * empty grid for the same window and the Convergence tab drops that segment.
+ * Both consumers now drop it. Left in, such a segment contributes
+ * `w_s · (NaN − target_s)` and poisons every bisection it touches; before the
+ * gain said NaN it contributed `w_s · (0 − target_s)` and quietly moved the
+ * answer, which is the bug this pair of changes closes.
+ *
+ * One probe at the centre of the bounds is enough: a window either has samples
+ * or it does not, and that does not depend on (CdA, Crr).
+ */
+export function usableSegments(
+	segments: readonly AutoConvergeSegment[],
+	bounds: AutoConvergeBounds,
+): AutoConvergeSegment[] {
+	const cda = 0.5 * (bounds.cdaMin + bounds.cdaMax);
+	const crr = 0.5 * (bounds.crrMin + bounds.crrMax);
+	return segments.filter(
+		(segment) =>
+			Number.isFinite(segment.veGain(cda, crr)) &&
+			Number.isFinite(segment.target) &&
+			Number.isFinite(segment.weight),
+	);
+}
 
 /** Σ w_s · (gain_s(cda, crr) − target_s) — strictly decreasing in both axes. */
 export function pooledResidual(
@@ -125,12 +162,6 @@ export function solveCdaForCrr(
 	return bisect((cda) => pooledResidual(segments, cda, crr), cdaLo, cdaHi);
 }
 
-/**
- * Below this along-ridge RSS spread (metres) the valley floor is flat and no
- * optimum is reported. Matches `ClosureSurface.DEFAULT_RIDGE_FLATNESS_FLOOR_M`
- * in spirit: barometric closure noise is of order a metre per run.
- */
-export const RIDGE_FLATNESS_FLOOR_M = 0.5;
 
 /** CdA columns sampled when tracing the ridge for `solveBoth`. */
 const RIDGE_SAMPLES = 41;
@@ -166,8 +197,7 @@ export function solveBoth(
 
 	const cdaValues: number[] = [];
 	const ridgeCrr: number[] = [];
-	const ridgeError: number[] = [];
-	const ridgeOnRidge: boolean[] = [];
+	const ridge: RidgeColumn[] = [];
 	for (let i = 0; i < RIDGE_SAMPLES; i++) {
 		const cda =
 			bounds.cdaMin +
@@ -180,48 +210,28 @@ export function solveBoth(
 		}
 		cdaValues.push(cda);
 		ridgeCrr.push(crr.value);
-		ridgeError.push(Math.sqrt(sumOfSquares));
-		ridgeOnRidge.push(crr.status === "ok");
+		// A clamped bisection means this column's Crr sits on a bound: off the
+		// ridge, and excluded by `judgeRidge` from both tests it applies.
+		ridge.push({ error: Math.sqrt(sumOfSquares), onRidge: crr.status === "ok" });
 	}
 
-	// FLATNESS IS MEASURED OVER THE UNCLAMPED COLUMNS ONLY. Where the valley
-	// exits the Crr bounds the solve clamps and the error rises steeply — an
-	// artefact of the box, not curvature of the valley. Including those
-	// columns would let a perfectly degenerate selection (identical laps)
-	// masquerade as determined whenever its ridge leaves the box, which for
-	// realistic bounds is always. That artefact is exactly what this check
-	// exists to refuse.
-	const unclamped = ridgeError.filter((_, i) => ridgeOnRidge[i]);
-	if (unclamped.length < 5) {
+	// The flatness and outside-the-bounds verdicts are `judgeRidge`'s, shared
+	// with the Convergence tab's surface so the plot and this solver cannot
+	// disagree about whether a selection is determined.
+	const verdict = judgeRidge(ridge, {
+		ridgeFlatnessFloorM: options?.ridgeFlatnessFloorM,
+	});
+	if (verdict.status === "underdetermined") {
 		return {
 			cda: NaN,
 			crr: NaN,
 			status: "underdetermined",
-			reason:
-				"The closure valley lies almost entirely outside the CdA/Crr " +
-				"bounds — widen them, or analyse a different selection.",
+			reason: verdict.reason,
 		};
 	}
-
-	const floor = options?.ridgeFlatnessFloorM ?? RIDGE_FLATNESS_FLOOR_M;
-	const spread = Math.max(...unclamped) - Math.min(...unclamped);
-	if (!(spread >= floor)) {
-		return {
-			cda: NaN,
-			crr: NaN,
-			status: "underdetermined",
-			reason:
-				"The ridge is flat — closure error alone cannot separate CdA from " +
-				"Crr for this selection. Analyse two or more runs at different speeds.",
-		};
-	}
-
-	let minIndex = -1;
-	for (let i = 0; i < RIDGE_SAMPLES; i++) {
-		if (ridgeOnRidge[i] && (minIndex < 0 || ridgeError[i] < ridgeError[minIndex])) {
-			minIndex = i;
-		}
-	}
+	const minIndex = verdict.bestIndex;
+	const ridgeError = ridge.map((column) => column.error);
+	const ridgeOnRidge = ridge.map((column) => column.onRidge);
 
 	// Parabolic vertex through the argmin and its neighbours, clamped to half
 	// a lattice cell; the lattice value where a neighbour is missing or
@@ -302,7 +312,7 @@ export function resolveAutoConvergedControls(args: {
 	bounds: AutoConvergeBounds;
 	ridgeFlatnessFloorM?: number;
 }): AutoConvergeResolution {
-	const { state, cda, crr, segments, bounds } = args;
+	const { state, cda, crr, bounds } = args;
 	const idle: AutoConvergeResolution = {
 		cda,
 		crr,
@@ -315,6 +325,10 @@ export function resolveAutoConvergedControls(args: {
 	if (!state.enabled || (!state.cdaLocked && !state.crrLocked)) {
 		return idle;
 	}
+	// Degenerate segments are dropped HERE, once, rather than inside each
+	// solve: `pooledResidual` stays a plain sum over what it is given, and
+	// what it is given is only ever measurable.
+	const segments = usableSegments(args.segments, bounds);
 	if (segments.length === 0) {
 		return idle;
 	}

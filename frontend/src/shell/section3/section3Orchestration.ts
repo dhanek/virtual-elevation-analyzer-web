@@ -541,10 +541,15 @@ function rerenderSection3(): void {
 	// depends on the map succeeding, so nothing about it should be sequenced behind
 	// the map.
 	setTimeout(async () => {
-		restoreSection3Controls(hasGpsData);
-		// The binders below re-publish this; until they do, the previous
-		// render's closure belongs to markup that no longer exists.
+		// Cleared BEFORE the controls are restored, not after:
+		// `restoreSection3Controls` ends in `updateSelectedLaps()`, which calls
+		// `redetectForFitSelection?.()` in the GPS modes. Clearing afterwards
+		// leaves that call reaching the PREVIOUS render's closure -- and on a
+		// file-over-file load that closure writes the old file's gate offset
+		// into the new file's stored settings. The binders below re-publish the
+		// slot; until they do, no closure here belongs to the markup on screen.
 		clearGpsRedetect();
+		restoreSection3Controls(hasGpsData);
 
 		try {
 			// Setup map visualization if GPS data available
@@ -1759,10 +1764,15 @@ export function initializeSection3(): void {
 	// Controls first, map second, separate trys -- same reasoning as
 	// rerenderSection3: a map failure must not leave Section 3 inert.
 	setTimeout(async () => {
-		restoreSection3Controls(hasGpsData);
-		// The binders below re-publish this; until they do, the previous
-		// render's closure belongs to markup that no longer exists.
+		// Cleared BEFORE the controls are restored, not after:
+		// `restoreSection3Controls` ends in `updateSelectedLaps()`, which calls
+		// `redetectForFitSelection?.()` in the GPS modes. Clearing afterwards
+		// leaves that call reaching the PREVIOUS render's closure -- and on a
+		// file-over-file load that closure writes the old file's gate offset
+		// into the new file's stored settings. The binders below re-publish the
+		// slot; until they do, no closure here belongs to the markup on screen.
 		clearGpsRedetect();
+		restoreSection3Controls(hasGpsData);
 
 		try {
 			if (hasGpsData) {

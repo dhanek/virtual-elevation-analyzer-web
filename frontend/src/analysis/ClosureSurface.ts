@@ -23,6 +23,11 @@
  * `underdetermined` says why in words the plot can display.
  */
 
+import {
+	judgeRidge,
+	RIDGE_FLATNESS_FLOOR_M,
+	type RidgeColumn,
+} from "./ClosureRidge";
 import { linearInterpolate } from "../utils/DataInterpolation";
 
 export interface SegmentGain {
@@ -59,12 +64,10 @@ export interface ClosureSurfaceResult {
 }
 
 /**
- * Below this along-ridge error spread (metres) the valley floor is treated as
- * flat. Barometric closure noise is of order a metre per run; an optimum
- * separated from the rest of the ridge by less than half that is noise, not
- * signal.
+ * The along-ridge flatness floor, in metres. One constant with the solver's:
+ * see `ClosureRidge` for what it means and why both use it.
  */
-export const DEFAULT_RIDGE_FLATNESS_FLOOR_M = 0.5;
+export const DEFAULT_RIDGE_FLATNESS_FLOOR_M = RIDGE_FLATNESS_FLOOR_M;
 
 export interface PoolClosureSurfaceOptions {
 	ridgeFlatnessFloorM?: number;
@@ -110,7 +113,7 @@ export function poolClosureSurface(
 	// The ridge: per CdA column, the Crr minimising pooled error.
 	const ridgeCda: number[] = [];
 	const ridgeCrr: number[] = [];
-	const ridgeErrors: number[] = [];
+	const ridge: RidgeColumn[] = [];
 	for (let i = 0; i < cdaCount; i++) {
 		let bestJ = 0;
 		for (let j = 1; j < crrCount; j++) {
@@ -120,7 +123,14 @@ export function poolClosureSurface(
 		}
 		ridgeCda.push(cdaValues[i]);
 		ridgeCrr.push(crrValues[bestJ]);
-		ridgeErrors.push(z[bestJ][i]);
+		// A column whose best Crr is the first or last row has its minimum
+		// pinned by the grid edge, not found inside it — the lattice form of
+		// the solver's clamped bisection, and off the ridge for the same
+		// reason.
+		ridge.push({
+			error: z[bestJ][i],
+			onRidge: bestJ > 0 && bestJ < crrCount - 1,
+		});
 	}
 
 	const refused = (reason: string): ClosureSurfaceResult => ({
@@ -142,13 +152,16 @@ export function poolClosureSurface(
 		);
 	}
 
-	const floor = options?.ridgeFlatnessFloorM ?? DEFAULT_RIDGE_FLATNESS_FLOOR_M;
-	const spread = Math.max(...ridgeErrors) - Math.min(...ridgeErrors);
-	if (!(spread >= floor)) {
-		return refused(
-			"The ridge is flat — closure error alone cannot separate CdA from " +
-				"Crr for this selection. Analyse two or more runs at different speeds.",
-		);
+	// Shared with the both-locked solver (`AutoConverge.solveBoth`), which
+	// traces the same ridge by bisection: the two must not disagree about
+	// whether a selection is determined. Only the verdict is taken from it —
+	// the argmin below is refined over the whole surface, which is finer than
+	// anything a per-column ridge can offer.
+	const verdict = judgeRidge(ridge, {
+		ridgeFlatnessFloorM: options?.ridgeFlatnessFloorM,
+	});
+	if (verdict.status === "underdetermined") {
+		return refused(verdict.reason);
 	}
 
 	// Raw argmin over the whole surface.

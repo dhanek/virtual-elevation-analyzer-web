@@ -683,16 +683,34 @@ impl VirtualElevationCalculator {
     /// branch that function has: with a reference altitude, without one,
     /// and under velodrome.
     ///
+    /// NaN WHEN THE WINDOW HAS NOTHING TO SAY -- rejected by `metrics_window`,
+    /// or spanning no samples -- which is what `ve_gain_grid` reports as an
+    /// empty grid and `crr_for_gain` as NaN. It used to return 0.0 there, and
+    /// 0.0 is indistinguishable from a measured gain: a pooled caller folded
+    /// a degenerate segment in as though it had closed perfectly, while the
+    /// grid's caller dropped the same segment. One rule, three functions,
+    /// three ways of saying "no answer" -- but all of them unmistakable.
+    ///
+    /// The profile reports a placeholder 0.0 for those windows and this does
+    /// not, which is the one point where the two deliberately differ; every
+    /// window with samples in it still matches the profile exactly.
+    ///
     /// This is the closure-error primitive, and it is deliberately
     /// target-free: the caller subtracts its own reference elevation
     /// difference. Pooling across segments and choosing where the reference
     /// comes from both stay in TypeScript, with no change on this side.
     #[wasm_bindgen]
     pub fn ve_gain(&self, cda: f64, crr: f64, trim_start: usize, trim_end: usize) -> f64 {
-        match self.metrics_window(self.data.velocity.len(), trim_start, trim_end) {
-            Some((start, end)) => self.build_gain_kernel(start, end).gain(cda, crr),
-            None => 0.0,
+        let Some((start, end)) =
+            self.metrics_window(self.data.velocity.len(), trim_start, trim_end)
+        else {
+            return f64::NAN;
+        };
+        let kernel = self.build_gain_kernel(start, end);
+        if kernel.step.is_empty() {
+            return f64::NAN;
         }
+        kernel.gain(cda, crr)
     }
 
     /// `ve_gain` over a CdA × Crr grid, row-major over CdA:
@@ -1592,6 +1610,13 @@ mod tests {
     /// window shape — interior, clamped past the end, a span of exactly two
     /// (the smallest `calculate_metrics` accepts), a span of one (which it
     /// rejects), and an empty one.
+    ///
+    /// The two degenerate shapes are where the pair deliberately parts: the
+    /// profile reports a placeholder 0.0, `ve_gain` reports NaN so a pooled
+    /// caller cannot read it as a measurement. The NaN is allowed here only
+    /// where the profile said exactly 0.0 — anything else is the arithmetic
+    /// mismatch this test exists to catch — and is pinned by shape in
+    /// `ve_gain_is_nan_on_degenerate_window`.
     fn assert_gain_matches_profile(calc: &VirtualElevationCalculator, label: &str) {
         let windows = [(0, N - 1), (10, 60), (5, 7), (5, 6), (0, 10 * N), (N - 1, N - 1)];
         for &cda in &[0.20, 0.30, 0.45] {
@@ -1601,6 +1626,15 @@ mod tests {
                         .calculate_virtual_elevation(cda, crr, start, end)
                         .ve_elevation_diff();
                     let actual = calc.ve_gain(cda, crr, start, end);
+                    if actual.is_nan() {
+                        assert_eq!(
+                            expected, 0.0,
+                            "{}: ve_gain({}, {}, {}, {}) refused a window the profile \
+                             answered with {}",
+                            label, cda, crr, start, end, expected
+                        );
+                        continue;
+                    }
                     assert!(
                         (expected - actual).abs() < GAIN_TOLERANCE,
                         "{}: ve_gain({}, {}, {}, {}) = {} but the profile says {}",
@@ -1748,11 +1782,35 @@ mod tests {
         assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, 50, 51).is_empty());
 
         // The no-altitude branch never rejects a window, but a zero-span one
-        // still has no samples to sum: an empty grid, and a gain of exactly 0
-        // — which is also what the profile reports for it.
+        // still has no samples to sum: an empty grid, and — since this change
+        // — a NaN gain rather than a 0.0 a pooled caller would spend.
         let data = constant_ride(steady_state_power(), 0.0, vec![0.0; N]);
         let calc = VirtualElevationCalculator::new(data, reference_params());
         assert!(calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, 50, 50).is_empty());
-        assert_eq!(calc.ve_gain(0.3, 0.005, 50, 50), 0.0);
+        assert!(calc.ve_gain(0.3, 0.005, 50, 50).is_nan());
+    }
+
+    /// The gain/grid agreement that finding #4 was about: every window shape
+    /// for which `ve_gain_grid` has nothing to return must be one for which
+    /// `ve_gain` has nothing to return either. A 0.0 here is the defect —
+    /// pooled solves weight it as a segment that closed perfectly, while the
+    /// Convergence tab drops the same segment for having no grid.
+    #[test]
+    fn ve_gain_is_nan_on_degenerate_window() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        // Rejected by `metrics_window`: empty, reversed, and a span of one.
+        assert!(calc.ve_gain(0.3, 0.005, 50, 50).is_nan());
+        assert!(calc.ve_gain(0.3, 0.005, 60, 50).is_nan());
+        assert!(calc.ve_gain(0.3, 0.005, 50, 51).is_nan());
+        // A span of two is the smallest window that is NOT degenerate.
+        assert!(calc.ve_gain(0.3, 0.005, 50, 52).is_finite());
+
+        for &(start, end) in &[(50usize, 50usize), (60, 50), (50, 51)] {
+            assert!(
+                calc.ve_gain_grid(0.2, 0.4, 3, 0.002, 0.008, 4, start, end)
+                    .is_empty(),
+                "grid and gain disagree about ({start}, {end})"
+            );
+        }
     }
 }
