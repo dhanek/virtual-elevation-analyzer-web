@@ -32,6 +32,9 @@ export interface GpsDetectionCallbacks {
  * @param mapVisualization - Leaflet map wrapper
  * @param callbacks - Callbacks for time range, indexing, and running detection
  */
+/** The gate offset a combination with nothing saved starts at. */
+const DEFAULT_GATE_OFFSET_SECONDS = 5;
+
 export async function bindGpsDetection(
     appState: AppState,
     parameterStorage: ParameterStorage,
@@ -57,7 +60,7 @@ export async function bindGpsDetection(
      * `ParameterStorage.loadGpsMarkerSettings` — so the selection is part of the
      * key, not just of the window. That makes this the whole of "resolve the
      * gate": read the new window's length, load the offset saved for THIS
-     * combination (defaults if there is none), and clamp it in.
+     * combination, and clamp it in.
      *
      * Called at bind time and again whenever the FIT selection moves, which is
      * why it is a function rather than the straight-line block it used to be. A
@@ -65,20 +68,33 @@ export async function bindGpsDetection(
      * different key, and quite possibly a different gate the user set the last
      * time they looked at these laps.
      *
-     * Returns false when the selection spans no time, which is the one case
-     * where there is no gate to resolve.
+     * `carry` IS WHAT TO USE WHEN THAT KEY HOLDS NOTHING, and the two callers
+     * differ. At bind time there is no user intent to preserve, so it is the
+     * hard default. On a selection change there is — the gate the user just
+     * placed — and resetting to 5 s threw it away: ticking a LATER lap does not
+     * move the window's start, so the offset still named the same point on the
+     * course, and the reset silently re-cut the ride from somewhere else and
+     * took any analysed panel with it. Nothing is persisted on that path, so the
+     * value was simply lost.
+     *
+     * `isSuperseded` guards the await. Two quick checkbox clicks start two of
+     * these, and IndexedDB reads are not ordered, so the first can resolve last
+     * and write `max`/`value` for a selection that is no longer current. Every
+     * write below happens after that check, so a superseded pass writes nothing.
+     *
+     * Returns false when the selection spans no time, or when it was superseded.
      */
-    const resolveGateForSelection = async (): Promise<boolean> => {
+    const resolveGateForSelection = async (
+        carry: number | null,
+        isSuperseded: () => boolean = () => false,
+    ): Promise<boolean> => {
         const maxSeconds = Math.floor(callbacks.getSelectedDataTimeRange().duration);
         if (maxSeconds <= 0) {
             log.warn('Invalid duration for GPS lap detection:', maxSeconds);
             return false;
         }
 
-        gateSlider.max = String(maxSeconds);
-        gateValue.max = String(maxSeconds);
-
-        let offset = 5; // Default 5 seconds
+        let offset = carry ?? DEFAULT_GATE_OFFSET_SECONDS;
         if (appState.currentFileHash) {
             try {
                 const savedMarker = await parameterStorage.loadGpsMarkerSettings(appState.currentFileHash, appState.selectedLaps);
@@ -91,13 +107,17 @@ export async function bindGpsDetection(
             }
         }
 
+        if (isSuperseded()) return false;
+
+        gateSlider.max = String(maxSeconds);
+        gateValue.max = String(maxSeconds);
         offset = Math.max(0, Math.min(offset, maxSeconds));
         gateSlider.value = String(offset);
         gateValue.value = String(offset);
         return true;
     };
 
-    if (!(await resolveGateForSelection())) return;
+    if (!(await resolveGateForSelection(null))) return;
 
     // Show slider controls
     sliderControls.classList.remove('hidden');
@@ -159,9 +179,12 @@ export async function bindGpsDetection(
         void updateGatePosition(val);
     };
 
+    let redetectToken = 0;
     callbacks.registerRedetect?.(() => {
+        const token = ++redetectToken;
         void (async () => {
-            if (!(await resolveGateForSelection())) return;
+            const carry = parseInt(gateSlider.value);
+            if (!(await resolveGateForSelection(carry, () => token !== redetectToken))) return;
             void updateGatePosition(parseInt(gateSlider.value), false);
         })();
     });
