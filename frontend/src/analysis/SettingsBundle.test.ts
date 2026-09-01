@@ -161,6 +161,24 @@ describe("envelopeToStoredRecord", () => {
 		expect(record.lastUsed).toBe(42);
 		expect(record.lapSettings["1-2"].cda).toBe(0.27);
 	});
+
+	it("carries section3 into the record, so every analyze can replicate it", () => {
+		const envelope = buildSettingsEnvelope({
+			record: storedRecord(),
+			parameters: params(),
+			activityFileName: "ride.fit",
+			activityFileHash: "abc_ride",
+			section3: {
+				gpsAnalysisMode: "GPS based out and back",
+				selectedLaps: [3, 5],
+			},
+		});
+		const record = envelopeToStoredRecord(envelope, "abc_ride", "ride.fit", 42);
+		expect(record.section3).toEqual({
+			gpsAnalysisMode: "GPS based out and back",
+			selectedLaps: [3, 5],
+		});
+	});
 });
 
 describe("splitBundleEntries", () => {

@@ -173,8 +173,12 @@ export function parseSettingsEnvelope(text: string): ParsedSettingsEnvelope {
  * Salvage what is valid rather than refuse the file: a hand-edited mode
  * falls back to "None" and non-lap-number noise is dropped, because the
  * envelope's parameters are still worth importing either way.
+ *
+ * Exported because it is also the read-path validator for the `section3`
+ * field ParameterStorage persists — stored data is as untrusted as a
+ * hand-edited JSON, and both must degrade the same way.
  */
-function parseSection3(value: unknown): Section3Selection | null {
+export function parseSection3(value: unknown): Section3Selection | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		return null;
 	}
@@ -209,6 +213,7 @@ export function envelopeToStoredRecord(
 		lapSettings: envelope.lapSettings,
 		gpsMarkerSettings: envelope.gpsMarkerSettings,
 		outAndBackMarkerSettings: envelope.outAndBackMarkerSettings,
+		section3: envelope.section3,
 		lastUsed: now,
 		fileName: targetFileName,
 	};

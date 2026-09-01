@@ -82,3 +82,71 @@ describe("getStoredRecord / importStoredRecord", () => {
 		expect(record?.lapSettings).toEqual({});
 	});
 });
+
+describe("saveParameters field preservation", () => {
+	it("keeps gate maps and the Section-3 selection across a parameters save", async () => {
+		const storage = await freshStorage();
+		await storage.importStoredRecord({
+			fileHash: "hash_d",
+			parameters: { ...DEFAULT_PARAMETERS, cda: 0.3 },
+			lapSettings: { "3-5": { trimStart: 0, trimEnd: 50, cda: 0.3, crr: 0.005 } },
+			gpsMarkerSettings: { "3-5": { gateTimeOffset: 20 } },
+			outAndBackMarkerSettings: {
+				"3-5": { gateATimeOffset: 15, gateBTimeOffset: 150 },
+			},
+			section3: {
+				gpsAnalysisMode: "GPS based out and back",
+				selectedLaps: [3, 5],
+			},
+			lastUsed: 1,
+			fileName: "d.fit",
+		});
+
+		await storage.saveParameters("hash_d", { ...DEFAULT_PARAMETERS, cda: 0.29 });
+
+		const record = await storage.getStoredRecord("hash_d");
+		expect(record?.parameters.cda).toBe(0.29);
+		expect(record?.gpsMarkerSettings).toEqual({ "3-5": { gateTimeOffset: 20 } });
+		expect(record?.outAndBackMarkerSettings).toEqual({
+			"3-5": { gateATimeOffset: 15, gateBTimeOffset: 150 },
+		});
+		expect(record?.section3).toEqual({
+			gpsAnalysisMode: "GPS based out and back",
+			selectedLaps: [3, 5],
+		});
+	});
+});
+
+describe("saveSection3", () => {
+	it("merges into an existing record without touching its other fields", async () => {
+		const storage = await freshStorage();
+		await storage.saveParameters("hash_e", { ...DEFAULT_PARAMETERS, cda: 0.27 });
+		await storage.saveGpsMarkerSettings("hash_e", [2], { gateTimeOffset: 7 });
+
+		await storage.saveSection3("hash_e", {
+			gpsAnalysisMode: "GPS based lap splitting",
+			selectedLaps: [2],
+		});
+
+		const record = await storage.getStoredRecord("hash_e");
+		expect(record?.section3).toEqual({
+			gpsAnalysisMode: "GPS based lap splitting",
+			selectedLaps: [2],
+		});
+		expect(record?.parameters.cda).toBe(0.27);
+		expect(record?.gpsMarkerSettings).toEqual({ "2": { gateTimeOffset: 7 } });
+	});
+
+	it("creates a default record when the file has none yet", async () => {
+		const storage = await freshStorage();
+		await storage.saveSection3("hash_f", {
+			gpsAnalysisMode: "None",
+			selectedLaps: [1],
+		});
+
+		const record = await storage.getStoredRecord("hash_f");
+		expect(record?.section3?.selectedLaps).toEqual([1]);
+		// The record must be loadable through the normal read path.
+		expect(await storage.loadParameters("hash_f")).not.toBeNull();
+	});
+});

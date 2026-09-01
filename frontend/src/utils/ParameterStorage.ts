@@ -39,12 +39,26 @@ export interface OutAndBackMarkerSettings {
 	};
 }
 
+/**
+ * Section 3's selection, as persisted: the map-analysis dropdown value and
+ * the ticked FIT laps. `gpsAnalysisMode` is deliberately a plain string here
+ * — this is untrusted stored data, and `parseSection3` (SettingsBundle)
+ * validates it back into the closed mode union on every read, so an
+ * unrecognised value degrades to "None" instead of poisoning the dropdown.
+ */
+export interface StoredSection3 {
+	gpsAnalysisMode: string;
+	selectedLaps: number[];
+}
+
 export interface StoredParameters {
 	fileHash: string;
 	parameters: AnalysisParameters;
 	lapSettings: { [lapKey: string]: LapSettings }; // Key is lap indices joined by '-' (e.g., "0", "1-2-3")
 	gpsMarkerSettings?: { [lapKey: string]: GpsMarkerSettings }; // GPS marker per lap selection
 	outAndBackMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // Out and Back markers per lap selection
+	/** Last Section-3 selection (mode + laps), so an analyze can replicate it. */
+	section3?: StoredSection3 | null;
 	lastUsed: number; // timestamp
 	fileName?: string; // optional, for debugging
 }
@@ -220,10 +234,18 @@ export class ParameterStorage {
 			getRequest.onsuccess = () => {
 				const existingData = getRequest.result as StoredParameters | undefined;
 
+				// Preserve every sibling field of `parameters`: lap trims, GPS
+				// gate maps and the Section-3 selection all live in this record,
+				// and a parameters save must not silently drop them (it did,
+				// for the two marker maps, until the settings-import feature
+				// made the loss visible).
 				const data: StoredParameters = {
 					fileHash,
 					parameters,
-					lapSettings: existingData?.lapSettings || {}, // Preserve existing lap settings
+					lapSettings: existingData?.lapSettings || {},
+					gpsMarkerSettings: existingData?.gpsMarkerSettings,
+					outAndBackMarkerSettings: existingData?.outAndBackMarkerSettings,
+					section3: existingData?.section3,
 					lastUsed: Date.now(),
 					fileName,
 				};
@@ -355,6 +377,94 @@ export class ParameterStorage {
 	}
 
 	/**
+	 * The minimal record a merge-style save creates when a file has none yet
+	 * (a selection or lap trim can be made before any parameters save runs).
+	 */
+	private buildDefaultRecord(fileHash: string): StoredParameters {
+		return {
+			fileHash,
+			parameters: {
+				system_mass: 75,
+				rho: 1.225,
+				eta: 0.97,
+				cda: null,
+				crr: null,
+				cda_min: 0.15,
+				cda_max: 0.5,
+				crr_min: 0.002,
+				crr_max: 0.015,
+				wind_speed: null,
+				wind_direction: null,
+				wind_speed_unit: "m/s",
+				air_speed_offset: 2,
+				velodrome: false,
+				auto_calculate_rho: false,
+				// The Phase-6 precedent of leaving new optional fields out of
+				// these literals does NOT apply here. With the D-06 "unknown"
+				// normalisation above, a record created without these two
+				// fields would be indistinguishable from a pre-feature record
+				// on its next load and would reopen at 1.0 with the feature
+				// silently off. A genuinely new record must carry the fresh
+				// default. The constant is interpolated, never re-literalled,
+				// so there is still exactly one definition of it.
+				// "manual" is correct here because the record has no wind at
+				// all yet (wind_speed: null) - nothing has written one, so the
+				// first weather fill legitimately counts as a first fill.
+				wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+				wind_entry: "manual",
+			},
+			lapSettings: {},
+			lastUsed: Date.now(),
+		};
+	}
+
+	/**
+	 * Merge the current Section-3 selection into the file's record. A merge,
+	 * not a replace: parameters, lap trims and gate maps stay untouched, the
+	 * same shape as `saveLapSettings`.
+	 */
+	async saveSection3(
+		fileHash: string,
+		section3: StoredSection3,
+	): Promise<void> {
+		if (!this.db) {
+			log.warn("IndexedDB not initialized, cannot save Section 3 selection");
+			return;
+		}
+
+		return new Promise((resolve, reject) => {
+			const transaction = this.db!.transaction([this.storeName], "readwrite");
+			const objectStore = transaction.objectStore(this.storeName);
+
+			const getRequest = objectStore.get(fileHash);
+
+			getRequest.onsuccess = () => {
+				const existingData =
+					(getRequest.result as StoredParameters | undefined) ??
+					this.buildDefaultRecord(fileHash);
+
+				existingData.section3 = section3;
+				existingData.lastUsed = Date.now();
+
+				const putRequest = objectStore.put(existingData);
+				putRequest.onsuccess = () => resolve();
+				putRequest.onerror = () => {
+					log.error(
+						"\u274c Failed to save Section 3 selection:",
+						putRequest.error,
+					);
+					reject(putRequest.error);
+				};
+			};
+
+			getRequest.onerror = () => {
+				log.error("\u274c Failed to get existing data:", getRequest.error);
+				reject(getRequest.error);
+			};
+		});
+	}
+
+	/**
 	 * Clean up old entries (keep only last N files or last X days)
 	 */
 	async cleanup(maxFiles: number = 50, maxAgeDays: number = 30): Promise<void> {
@@ -450,42 +560,7 @@ export class ParameterStorage {
 					log.warn(
 						"⚠️ No existing data found for file, creating default entry for lap settings",
 					);
-					// Create a minimal entry with default parameters
-					existingData = {
-						fileHash,
-						parameters: {
-							system_mass: 75,
-							rho: 1.225,
-							eta: 0.97,
-							cda: null,
-							crr: null,
-							cda_min: 0.15,
-							cda_max: 0.5,
-							crr_min: 0.002,
-							crr_max: 0.015,
-							wind_speed: null,
-							wind_direction: null,
-							wind_speed_unit: "m/s",
-							air_speed_offset: 2,
-							velodrome: false,
-							auto_calculate_rho: false,
-							// The Phase-6 precedent of leaving new optional fields out of
-							// these literals does NOT apply here. With the D-06 "unknown"
-							// normalisation above, a record created without these two
-							// fields would be indistinguishable from a pre-feature record
-							// on its next load and would reopen at 1.0 with the feature
-							// silently off. A genuinely new record must carry the fresh
-							// default. The constant is interpolated, never re-literalled,
-							// so there is still exactly one definition of it.
-							// "manual" is correct here because the record has no wind at
-							// all yet (wind_speed: null) - nothing has written one, so the
-							// first weather fill legitimately counts as a first fill.
-							wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
-							wind_entry: "manual",
-						},
-						lapSettings: {},
-						lastUsed: Date.now(),
-					};
+					existingData = this.buildDefaultRecord(fileHash);
 				}
 
 				// Ensure lapSettings exists (for backwards compatibility with old data)

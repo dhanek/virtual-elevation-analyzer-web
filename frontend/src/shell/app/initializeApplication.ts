@@ -34,6 +34,11 @@ import {
 	configureSection3Orchestration,
 	initializeSection3,
 } from "../section3/section3Orchestration";
+import {
+	restoreDevSession,
+	startDevSessionSnapshots,
+} from "../dev/devSessionRestore";
+import { clearDevSession } from "../dev/devSessionStore";
 
 interface ShellDomElements {
 	fitFileInput: HTMLInputElement;
@@ -334,6 +339,10 @@ export async function initializeApplicationShell(
 				await parameterStorage.clearAll();
 				await resultsStorage.clearAllResults();
 
+				// The dev warm-reload cache is saved parameters too, as far as
+				// the person clicking this is concerned. No-op in production.
+				await clearDevSession();
+
 				// Also clear weather cache
 				const weatherCacheInstance = new WeatherCache();
 				await weatherCacheInstance.clearCache();
@@ -374,4 +383,11 @@ export async function initializeApplicationShell(
 
 	// Initialize FIT processor
 	await initializeFitProcessor();
+
+	// DEV ONLY: come back to the ride that was loaded before the last reload.
+	// After `initializeFitProcessor`, because the replay parses the file and
+	// reads ParameterStorage, both of which it just set up. No-op in a
+	// production build; `?fresh` skips it. See shell/dev/devSessionRestore.
+	startDevSessionSnapshots(appState);
+	await restoreDevSession(appState);
 }

@@ -34,11 +34,13 @@ import init from "../../../pkg/virtual_elevation_analyzer.js";
 import {
 	entryBaseName,
 	envelopeToStoredRecord,
+	parseSection3,
 	parseSettingsEnvelope,
 	splitBundleEntries,
 	type SettingsEnvelope,
 } from "../../analysis/SettingsBundle";
 import { readZip } from "../../utils/zip";
+import { rememberActivityFile } from "../dev/devSessionStore";
 
 interface FileLoadDependencies {
 	appState: AppState;
@@ -142,9 +144,23 @@ export async function handleFileSelection(file: File): Promise<void> {
 	deps.appState.selectedFile = file;
 	displayFileInfo(file);
 
+	// DEV ONLY, and it does not await: cache the bytes so a Vite reload can
+	// come back to this ride instead of an empty drop zone. No-op in a
+	// production build. See shell/dev/devSessionStore.
+	void rememberActivityFile(file);
+
 	// Calculate file hash immediately for parameter persistence
 	deps.appState.currentFileHash =
 		await deps.parameterStorage.calculateFileHash(file);
+
+	// A DIFFERENT activity: any imported-settings note belongs to the old one.
+	// The SAME activity keeps its note — the imported record still governs it.
+	if (
+		importedSettingsNote &&
+		importedSettingsNote.fileHash !== deps.appState.currentFileHash
+	) {
+		importedSettingsNote = null;
+	}
 
 	deps.analyzeButton.disabled = false;
 	deps.hideError();
@@ -163,6 +179,87 @@ export function displayFileInfo(file: File): void {
     `;
 
 	deps.fileInfo.classList.remove("hidden");
+}
+
+/**
+ * The "what did that JSON bring in" block shown UNDER the activity's details
+ * in the file-info box. Held per file hash rather than written once, because
+ * `displayResults`/`displayCsvResults` rewrite `fileDetails` on EVERY
+ * analyze — including a later Analyze press — and the note must survive
+ * those rewrites for as long as the imported file stays loaded.
+ */
+let importedSettingsNote: { fileHash: string; html: string } | null = null;
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
+}
+
+function setImportedSettingsNote(
+	envelope: SettingsEnvelope,
+	settingsFileName: string,
+	fileHash: string,
+): void {
+	const lines: string[] = [
+		`<div><strong>Imported settings:</strong> ${escapeHtml(settingsFileName)}</div>`,
+	];
+
+	const exportedAt = envelope.exportedAt ? new Date(envelope.exportedAt) : null;
+	const exportedText =
+		exportedAt && !Number.isNaN(exportedAt.getTime())
+			? exportedAt.toLocaleString()
+			: null;
+	const sourceName = envelope.activityFileName
+		? escapeHtml(envelope.activityFileName)
+		: null;
+	if (exportedText || sourceName) {
+		const from = sourceName ? ` from ${sourceName}` : "";
+		lines.push(
+			`<div><strong>Exported:</strong> ${exportedText ?? "unknown date"}${from}</div>`,
+		);
+	}
+
+	if (envelope.section3) {
+		const laps = envelope.section3.selectedLaps;
+		const lapsText = laps.length > 0 ? ` — laps ${laps.join(", ")}` : "";
+		lines.push(
+			`<div><strong>Map analysis:</strong> ${escapeHtml(envelope.section3.gpsAnalysisMode)}${lapsText}</div>`,
+		);
+	}
+
+	lines.push(
+		"<div>These settings replace this file's stored settings and apply on every analyze.</div>",
+	);
+
+	importedSettingsNote = {
+		fileHash,
+		html: `<div class="settings-import-note">${lines.join("\n")}</div>`,
+	};
+}
+
+/** Append the note below whatever details the analyze just rendered. */
+function appendImportedSettingsNote(): void {
+	const deps = getDependencies();
+
+	// The FIT path never rewrites `fileDetails` after `displayFileInfo`, so a
+	// note appended by an earlier analyze is still there — drop any existing
+	// copies first, or every Analyze press / re-import stacks another one
+	// (and a superseded import's note would shadow the current one).
+	for (const el of Array.from(
+		deps.fileDetails.querySelectorAll(".settings-import-note"),
+	)) {
+		el.remove();
+	}
+
+	if (
+		!importedSettingsNote ||
+		importedSettingsNote.fileHash !== deps.appState.currentFileHash
+	) {
+		return;
+	}
+	deps.fileDetails.insertAdjacentHTML("beforeend", importedSettingsNote.html);
 }
 
 /**
@@ -202,13 +299,15 @@ export async function importSettingsJsonFile(file: File): Promise<void> {
 			deps.appState.currentFileHash,
 			deps.appState.selectedFile.name,
 		);
-		// Re-analyze so the imported parameters restore into the form now.
+		setImportedSettingsNote(
+			parsed.envelope,
+			file.name,
+			deps.appState.currentFileHash,
+		);
+		// Re-analyze so the imported settings restore now, through the same
+		// load path a reload takes — the Section-3 selection included, since
+		// it is part of the record processFitFile restores from.
 		await processSelectedFile();
-		// Synchronously after the await, so this beats the initializeSection3
-		// timer that processSelectedFile scheduled — see restoreSection3Selection.
-		if (parsed.envelope.section3) {
-			restoreSection3Selection(parsed.envelope.section3);
-		}
 		return;
 	}
 
@@ -280,20 +379,23 @@ export async function importSettingsZipFile(file: File): Promise<void> {
 		return;
 	}
 
-	if (envelope && deps.appState.currentFileHash) {
+	if (envelope && settings && deps.appState.currentFileHash) {
 		await applyImportedEnvelope(
 			envelope,
 			deps.appState.currentFileHash,
 			activityFile.name,
 		);
+		setImportedSettingsNote(
+			envelope,
+			entryBaseName(settings.name),
+			deps.appState.currentFileHash,
+		);
 	}
 
 	// A bundle is a complete analysis, so run it — the drop should end on the
-	// analyzed screen, not on an armed Analyze button.
+	// analyzed screen, not on an armed Analyze button. Section 3 restores
+	// inside processFitFile, from the record seeded above.
 	await processSelectedFile();
-	if (envelope?.section3) {
-		restoreSection3Selection(envelope.section3);
-	}
 }
 
 // Process FIT file
@@ -531,6 +633,7 @@ export async function processFitFile(file: File): Promise<void> {
 
 		deps.hideLoading();
 		await displayResults(result);
+		appendImportedSettingsNote();
 
 		// Activate section 2 (parameters) and 3 (lap selection) after successful file analysis
 		deps.activateSection(2);
@@ -563,6 +666,14 @@ export async function processFitFile(file: File): Promise<void> {
 		if (result.laps.length > 0) {
 			deps.activateSection(3);
 
+			// Replicate the stored Section-3 selection (mode + ticked laps).
+			// EVERY analyze passes through here, so imported or previously
+			// chosen settings survive the Analyze button and a reload — not
+			// just the drop that imported them. State-only, and the timer
+			// below is not yet scheduled, so the one render initializeSection3
+			// performs paints the restored state (see restoreSection3Selection).
+			await restoreStoredSection3();
+
 			// Initialize section 3 after a brief delay to ensure DOM is ready
 			setTimeout(() => {
 				initializeSection3();
@@ -572,6 +683,28 @@ export async function processFitFile(file: File): Promise<void> {
 		deps.hideLoading();
 		log.error("Error processing FIT file:", err);
 		deps.showError(`Error processing FIT file: ${err}`);
+	}
+}
+
+/**
+ * Read the loaded file's stored record and restore its Section-3 selection,
+ * validated through the same `parseSection3` an imported JSON goes through —
+ * stored data is equally untrusted, and both must degrade to "None" + no
+ * laps rather than break the load.
+ */
+async function restoreStoredSection3(): Promise<void> {
+	const deps = getDependencies();
+	if (!deps.appState.currentFileHash) return;
+	try {
+		const record = await deps.parameterStorage.getStoredRecord(
+			deps.appState.currentFileHash,
+		);
+		const section3 = parseSection3(record?.section3);
+		if (section3) {
+			restoreSection3Selection(section3);
+		}
+	} catch (err) {
+		log.error("Failed to restore Section 3 selection:", err);
 	}
 }
 
@@ -686,6 +819,7 @@ export async function processCsvFile(file: File): Promise<void> {
 
 		deps.hideLoading();
 		await displayCsvResults(csvData, result);
+		appendImportedSettingsNote();
 
 		// Activate section 2 (parameters) and section 3 (map/laps)
 		// CSV files work just like FIT files - both sections are active after loading
@@ -696,6 +830,10 @@ export async function processCsvFile(file: File): Promise<void> {
 		if (result.laps.length > 0) {
 			log.debug("📍 Activating section 3 for CSV lap analysis...");
 			deps.activateSection(3);
+
+			// Same replication as the FIT path, for the same reason.
+			await restoreStoredSection3();
+
 			setTimeout(() => {
 				initializeSection3Csv(csvData, result);
 				log.debug("✅ Section 3 initialized for CSV");

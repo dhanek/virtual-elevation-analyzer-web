@@ -112,6 +112,30 @@ export function restoreSection3Selection(section3: Section3Selection): void {
 }
 
 /**
+ * Persist the CURRENT Section-3 selection into the file's stored record, so
+ * the next analyze of this file — an Analyze press, a reload, a re-import —
+ * replicates it.
+ *
+ * Called ONLY from user-interaction paths (the mode dropdown, the lap cards,
+ * select-all), never from render reconciliation: `updateSelectedLaps` also
+ * runs as Section 3's post-render hook, and a save there would let a
+ * load-time render write the empty just-reset selection over the stored one
+ * before `processFitFile`'s restore has read it.
+ */
+function persistSection3Selection(): void {
+	const deps = getDependencies();
+	if (!deps.appState.currentFileHash) return;
+	deps.parameterStorage
+		.saveSection3(deps.appState.currentFileHash, {
+			gpsAnalysisMode: currentGpsAnalysisMode,
+			selectedLaps: [...deps.appState.selectedLaps],
+		})
+		.catch((err) => {
+			log.error("Failed to persist Section 3 selection:", err);
+		});
+}
+
+/**
  * Set the GPS analysis mode and update all dependent UI elements
  */
 export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
@@ -181,6 +205,10 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
 			mapViz.clearOutAndBackMarkers();
 		}
 	}
+
+	// The dropdown is a user control (restore paths set the module variable
+	// directly, never through here), so the new mode is worth persisting.
+	persistSection3Selection();
 
 	log.debug(`GPS analysis mode changed: ${previousMode} -> ${mode}`);
 }
@@ -630,10 +658,17 @@ function restoreSection3Controls(hasGpsData: boolean): void {
 
 		const lapListEl = document.getElementById("lapList");
 		if (lapListEl) {
-			bindLapSelection(lapListEl, () => updateSelectedLaps());
-			bindSelectAllButton("selectAllLaps", "lapList", () =>
-				updateSelectedLaps(),
-			);
+			// Persist AFTER the state update, and only on these user-event
+			// bindings — the bare reconciliation call below must not save
+			// (see persistSection3Selection).
+			bindLapSelection(lapListEl, () => {
+				updateSelectedLaps();
+				persistSection3Selection();
+			});
+			bindSelectAllButton("selectAllLaps", "lapList", () => {
+				updateSelectedLaps();
+				persistSection3Selection();
+			});
 		}
 		deps.setupAnalyzeButton();
 		updateSelectedLaps();
