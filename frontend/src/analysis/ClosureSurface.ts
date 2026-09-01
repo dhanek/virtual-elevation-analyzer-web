@@ -23,6 +23,8 @@
  * `underdetermined` says why in words the plot can display.
  */
 
+import { linearInterpolate } from "../utils/DataInterpolation";
+
 export interface SegmentGain {
 	/** Flat `ve_gain_grid` result: `gains[cdaIndex * crrCount + crrIndex]`. */
 	gains: ArrayLike<number>;
@@ -265,6 +267,8 @@ export function gridAxis(min: number, max: number, steps: number): number[] {
  * least that wide.
  */
 export interface ClosureBand {
+	/** The optimum the band is cut around; the extents are offsets from it. */
+	best: ClosureOptimum;
 	/** The tolerance the band was cut at, metres. */
 	toleranceM: number;
 	/** Absolute pooled error of the iso-line: `best.error + toleranceM`. */
@@ -280,6 +284,11 @@ export interface ClosureBand {
 /** The band tolerance the Convergence tab draws and reads out. */
 export const DEFAULT_CLOSURE_BAND_TOLERANCE_M = 0.05;
 
+/** "5 cm" for 0.05, "1 m" for 1 — the tolerance in the unit it reads best in. */
+export function formatBandLabel(toleranceM: number): string {
+	return toleranceM < 1 ? `${Math.round(toleranceM * 100)} cm` : `${toleranceM} m`;
+}
+
 export function closureBand(
 	surface: ClosureSurfaceResult,
 	cdaValues: readonly number[],
@@ -294,64 +303,21 @@ export function closureBand(
 	}
 	const threshold = surface.best.error + toleranceM;
 	const { z } = surface;
-	const cdaCount = cdaValues.length;
-	const crrCount = crrValues.length;
 
-	let cdaLow = Number.POSITIVE_INFINITY;
-	let cdaHigh = Number.NEGATIVE_INFINITY;
-	let crrLow = Number.POSITIVE_INFINITY;
-	let crrHigh = Number.NEGATIVE_INFINITY;
-	let touchesEdge = false;
+	const cdaExtent = levelSetExtent(
+		cdaValues,
+		crrValues.length,
+		(j, i) => z[j][i],
+		threshold,
+	);
+	const crrExtent = levelSetExtent(
+		crrValues,
+		cdaValues.length,
+		(i, j) => z[j][i],
+		threshold,
+	);
 
-	// Where the threshold is crossed between an in-band cell and its
-	// out-of-band neighbour, in axis units.
-	const crossing = (
-		axis: readonly number[],
-		inside: number,
-		outside: number,
-		zInside: number,
-		zOutside: number,
-	): number =>
-		axis[inside] +
-		(axis[outside] - axis[inside]) *
-			((threshold - zInside) / (zOutside - zInside));
-
-	for (let j = 0; j < crrCount; j++) {
-		const row = z[j];
-		for (let i = 0; i < cdaCount; i++) {
-			if (!(row[i] <= threshold)) {
-				continue;
-			}
-			// CdA extent along this row.
-			if (i === 0) {
-				touchesEdge = true;
-				cdaLow = Math.min(cdaLow, cdaValues[0]);
-			} else if (!(row[i - 1] <= threshold)) {
-				cdaLow = Math.min(cdaLow, crossing(cdaValues, i, i - 1, row[i], row[i - 1]));
-			}
-			if (i === cdaCount - 1) {
-				touchesEdge = true;
-				cdaHigh = Math.max(cdaHigh, cdaValues[i]);
-			} else if (!(row[i + 1] <= threshold)) {
-				cdaHigh = Math.max(cdaHigh, crossing(cdaValues, i, i + 1, row[i], row[i + 1]));
-			}
-			// Crr extent along this column.
-			if (j === 0) {
-				touchesEdge = true;
-				crrLow = Math.min(crrLow, crrValues[0]);
-			} else if (!(z[j - 1][i] <= threshold)) {
-				crrLow = Math.min(crrLow, crossing(crrValues, j, j - 1, row[i], z[j - 1][i]));
-			}
-			if (j === crrCount - 1) {
-				touchesEdge = true;
-				crrHigh = Math.max(crrHigh, crrValues[j]);
-			} else if (!(z[j + 1][i] <= threshold)) {
-				crrHigh = Math.max(crrHigh, crossing(crrValues, j, j + 1, row[i], z[j + 1][i]));
-			}
-		}
-	}
-
-	if (!Number.isFinite(cdaLow)) {
+	if (!Number.isFinite(cdaExtent.low)) {
 		// `best` came from this surface, so its cell is in band by
 		// construction; an empty level set means the surface was mutated.
 		return null;
@@ -359,14 +325,69 @@ export function closureBand(
 
 	// The refined optimum can sit a fraction of a cell outside the lattice
 	// level set; the band must always contain the point it is reported around.
-	const { cda, crr } = surface.best;
+	const { best } = surface;
 	return {
+		best,
 		toleranceM,
 		threshold,
-		cdaLow: Math.min(cdaLow, cda),
-		cdaHigh: Math.max(cdaHigh, cda),
-		crrLow: Math.min(crrLow, crr),
-		crrHigh: Math.max(crrHigh, crr),
-		touchesEdge,
+		cdaLow: Math.min(cdaExtent.low, best.cda),
+		cdaHigh: Math.max(cdaExtent.high, best.cda),
+		crrLow: Math.min(crrExtent.low, best.crr),
+		crrHigh: Math.max(crrExtent.high, best.crr),
+		touchesEdge: cdaExtent.touchesEdge || crrExtent.touchesEdge,
 	};
+}
+
+interface AxisExtent {
+	low: number;
+	high: number;
+	touchesEdge: boolean;
+}
+
+/**
+ * The extent of the level set `z <= threshold` along one axis, scanned line
+ * by line across the other: `zAt(line, k)` is the cell at index `k` on
+ * `axis` in the `line`-th line. Each crossing between an in-band cell and
+ * its out-of-band neighbour is interpolated linearly; a cell on the grid
+ * boundary marks the band as touching the edge.
+ */
+function levelSetExtent(
+	axis: readonly number[],
+	lineCount: number,
+	zAt: (line: number, k: number) => number,
+	threshold: number,
+): AxisExtent {
+	const last = axis.length - 1;
+	let low = Number.POSITIVE_INFINITY;
+	let high = Number.NEGATIVE_INFINITY;
+	let touchesEdge = false;
+	const crossing = (line: number, inside: number, outside: number): number =>
+		linearInterpolate(
+			threshold,
+			zAt(line, inside),
+			zAt(line, outside),
+			axis[inside],
+			axis[outside],
+		);
+
+	for (let line = 0; line < lineCount; line++) {
+		for (let k = 0; k <= last; k++) {
+			if (!(zAt(line, k) <= threshold)) {
+				continue;
+			}
+			if (k === 0) {
+				touchesEdge = true;
+				low = Math.min(low, axis[0]);
+			} else if (!(zAt(line, k - 1) <= threshold)) {
+				low = Math.min(low, crossing(line, k, k - 1));
+			}
+			if (k === last) {
+				touchesEdge = true;
+				high = Math.max(high, axis[last]);
+			} else if (!(zAt(line, k + 1) <= threshold)) {
+				high = Math.max(high, crossing(line, k, k + 1));
+			}
+		}
+	}
+	return { low, high, touchesEdge };
 }

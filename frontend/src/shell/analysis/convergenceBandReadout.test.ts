@@ -11,6 +11,7 @@ import {
 } from "./convergenceBandReadout";
 
 const band = (overrides: Partial<ClosureBand> = {}): ClosureBand => ({
+	best: { cda: 0.312, crr: 0.005, error: 0.12 },
 	toleranceM: 0.05,
 	threshold: 0.17,
 	cdaLow: 0.304,
@@ -20,7 +21,8 @@ const band = (overrides: Partial<ClosureBand> = {}): ClosureBand => ({
 	touchesEdge: false,
 	...overrides,
 });
-const best = { cda: 0.312, crr: 0.005, error: 0.12 };
+const render = (band: ClosureBand | null): void =>
+	renderConvergenceBandReadout({ band, toleranceM: 0.05 });
 
 beforeEach(() => {
 	document.body.innerHTML = convergenceBandMarkup();
@@ -33,7 +35,7 @@ describe("renderConvergenceBandReadout", () => {
 	});
 
 	it("writes the best fit with the offsets below and above it, per axis", () => {
-		renderConvergenceBandReadout({ best, band: band(), toleranceM: 0.05 });
+		render(band());
 		const container = document.getElementById(CONVERGENCE_BAND_ID)!;
 		expect(container.textContent).toContain("Within 5 cm of best closure");
 		expect(document.getElementById("convergenceBandCda")!.textContent).toBe(
@@ -46,18 +48,14 @@ describe("renderConvergenceBandReadout", () => {
 	});
 
 	it("says when the band reaches the grid edge", () => {
-		renderConvergenceBandReadout({
-			best,
-			band: band({ touchesEdge: true }),
-			toleranceM: 0.05,
-		});
+		render(band({ touchesEdge: true }));
 		expect(document.getElementById(CONVERGENCE_BAND_ID)!.textContent).toContain(
 			"lower bound",
 		);
 	});
 
 	it("shows n/a for both axes when there is no optimum", () => {
-		renderConvergenceBandReadout({ best: null, band: null, toleranceM: 0.05 });
+		render(null);
 		const container = document.getElementById(CONVERGENCE_BAND_ID)!;
 		expect(container.textContent).toContain("Within 5 cm of best closure");
 		expect(document.getElementById("convergenceBandCda")!.textContent).toBe("n/a");
@@ -65,16 +63,14 @@ describe("renderConvergenceBandReadout", () => {
 	});
 
 	it("rewrites rather than appends on a second draw", () => {
-		renderConvergenceBandReadout({ best, band: band(), toleranceM: 0.05 });
-		renderConvergenceBandReadout({ best: null, band: null, toleranceM: 0.05 });
+		render(band());
+		render(null);
 		expect(document.querySelectorAll(`#${CONVERGENCE_BAND_ID} > *`)).toHaveLength(1);
 	});
 
 	it("is a no-op without the container", () => {
 		document.body.innerHTML = "";
-		expect(() =>
-			renderConvergenceBandReadout({ best, band: band(), toleranceM: 0.05 }),
-		).not.toThrow();
+		expect(() => render(band())).not.toThrow();
 	});
 });
 

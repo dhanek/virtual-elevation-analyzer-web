@@ -4,10 +4,10 @@
  * worsens by the band tolerance (5 cm by default).
  *
  * Owned here, on the vdHeader pattern: the markup is an EMPTY container
- * interpolated into all three mode templates, and its content is written by
- * `renderConvergenceBandReadout` from the same pooled surface the plot is
- * drawn from, on every draw. Baking numbers into a template freezes them
- * (see `shell/ve/vdHeader.ts`, defect 1).
+ * interpolated into all three mode templates (via `convergenceTabMarkup`),
+ * and its content is written by `renderConvergenceBandReadout` from the same
+ * pooled surface the plot is drawn from, on every draw. Baking numbers into
+ * a template freezes them (see `shell/ve/vdHeader.ts`, defect 1).
  *
  * The offsets are shown separately below and above the optimum rather than
  * as one symmetric ±: the valley is a tilted trough, and the band is wider
@@ -15,23 +15,20 @@
  * line says so — the numbers are then a lower bound on the band's width,
  * not the width.
  */
-import type { ClosureBand, ClosureOptimum } from "../../analysis/ClosureSurface";
-import { formatBandLabel } from "../../plots/ConvergencePlotBuilders";
+import { formatBandLabel, type ClosureBand } from "../../analysis/ClosureSurface";
+import { VD_NOT_APPLICABLE, span } from "../ve/vdHeader";
 
 /** Container the readout owns outright. Empty in the templates on purpose. */
 export const CONVERGENCE_BAND_ID = "convergenceBand";
-
-/** Shown when the surface has no optimum to cut a band around. */
-export const CONVERGENCE_BAND_NOT_APPLICABLE = "n/a";
 
 export function convergenceBandMarkup(): string {
 	return `<div class="ve-metrics-compact ve-convergence-band" id="${CONVERGENCE_BAND_ID}"></div>`;
 }
 
 export interface ConvergenceBandReadoutInput {
-	best: ClosureOptimum | null;
+	/** Null when the surface has no optimum to cut a band around. */
 	band: ClosureBand | null;
-	/** The tolerance to name when there is no band to read it from. */
+	/** The tolerance the band was (or would have been) cut at, metres. */
 	toleranceM: number;
 }
 
@@ -59,49 +56,30 @@ export function renderConvergenceBandReadout(
 	}
 	container.replaceChildren();
 
-	const { best, band } = input;
-	const label = formatBandLabel(band?.toleranceM ?? input.toleranceM);
+	const { band } = input;
+	const cdaText = band
+		? `${formatBandValue(band.best.cda, band.cdaLow, band.cdaHigh, 3)} m²`
+		: VD_NOT_APPLICABLE;
+	const crrText = band
+		? formatBandValue(band.best.crr, band.crrLow, band.crrHigh, 4)
+		: VD_NOT_APPLICABLE;
+
 	const line = document.createElement("div");
 	line.className = "ve-metrics-compact__line";
-	line.append(`Within ${label} of best closure: `);
-
-	if (!best || !band) {
-		line.append(
-			"CdA ",
-			span("convergenceBandCda", CONVERGENCE_BAND_NOT_APPLICABLE),
-			"Crr ",
-			span("convergenceBandCrr", CONVERGENCE_BAND_NOT_APPLICABLE),
-		);
-		container.append(line);
-		return;
-	}
-
 	line.append(
+		`Within ${formatBandLabel(input.toleranceM)} of best closure: `,
 		"CdA ",
-		span(
-			"convergenceBandCda",
-			`${formatBandValue(best.cda, band.cdaLow, band.cdaHigh, 3)} m²`,
-		),
+		span("convergenceBandCda", cdaText),
 		"Crr ",
-		span(
-			"convergenceBandCrr",
-			formatBandValue(best.crr, band.crrLow, band.crrHigh, 4),
-		),
+		span("convergenceBandCrr", crrText),
 	);
 	container.append(line);
 
-	if (band.touchesEdge) {
+	if (band?.touchesEdge) {
 		const caveat = document.createElement("div");
 		caveat.className = "ve-metrics-compact__line ve-metrics-compact__caveat";
 		caveat.textContent =
 			"The band reaches the grid edge — these offsets are a lower bound on its width.";
 		container.append(caveat);
 	}
-}
-
-function span(id: string, text: string): HTMLElement {
-	const element = document.createElement("span");
-	element.id = id;
-	element.textContent = text;
-	return element;
 }

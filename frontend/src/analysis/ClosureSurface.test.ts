@@ -241,6 +241,7 @@ describe("closureBand", () => {
 		const surface = paraboloid(CDA, CRR, 500, 50_000, 0.3, 0.005);
 		const band = closureBand(surface, CDA, CRR, 0.05);
 		expect(band).not.toBeNull();
+		expect(band!.best).toBe(surface.best);
 		expect(band!.toleranceM).toBe(0.05);
 		expect(band!.threshold).toBeCloseTo(0.05, 12);
 		expect(band!.cdaLow).toBeCloseTo(0.29, 4);

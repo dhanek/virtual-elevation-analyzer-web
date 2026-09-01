@@ -47,6 +47,7 @@ import type { ConvergenceUpdateInput } from "../../modes/analysis/types";
 import { buildClosureContourFigure } from "../../plots/ConvergencePlotBuilders";
 import { log } from "../../utils/log";
 import { renderConvergenceBandReadout } from "./convergenceBandReadout";
+import { CONVERGENCE_PLOT_ID } from "./convergenceTab";
 import { waitForPlotly } from "./plotlyLoader";
 import { requestModeUpdate } from "./requestModeUpdate";
 
@@ -90,7 +91,7 @@ export async function renderConvergenceView(
 	if (typeof document === "undefined") {
 		return;
 	}
-	const container = document.getElementById("convergencePlot");
+	const container = document.getElementById(CONVERGENCE_PLOT_ID);
 	if (!container) {
 		return;
 	}
@@ -183,7 +184,6 @@ export async function renderConvergenceView(
 	// Written from the same pooled surface the map is drawn from, before the
 	// (async) Plotly draw so the numbers never lag the picture.
 	renderConvergenceBandReadout({
-		best: cachedPool.surface.best,
 		band: cachedPool.band,
 		toleranceM: DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 	});
@@ -197,7 +197,7 @@ export async function renderConvergenceView(
 		) => Promise<unknown>;
 	};
 	await Plotly.react(
-		"convergencePlot",
+		CONVERGENCE_PLOT_ID,
 		figure.data,
 		figure.layout,
 		figure.config,

@@ -23,7 +23,7 @@
  * valley is a tilted trough, and a fitted ellipse would draw a symmetry the
  * surface does not have. The "5 cm" label sits on the band's right edge.
  */
-import type { ClosureBand, ClosureSurfaceResult } from '../analysis/ClosureSurface';
+import { formatBandLabel, type ClosureBand, type ClosureSurfaceResult } from '../analysis/ClosureSurface';
 import { getDefaultPlotConfig, type PlotDefinition, type PlotTrace } from './StandardPlotBuilders';
 
 export interface ConvergencePlotInput {
@@ -44,18 +44,17 @@ export interface ConvergencePlotInput {
     targetLabel: string;
     /**
      * The tolerance band around the optimum (`closureBand`), drawn as an
-     * iso-line at `band.threshold`. Null or absent when there is no optimum
-     * to draw it around.
+     * iso-line at `band.threshold`. Null when there is no optimum to draw it
+     * around.
      */
-    band?: ClosureBand | null;
+    band: ClosureBand | null;
 }
 
 /** Colour shared by the band's iso-line and its label. */
 const BAND_COLOR = '#ff7f0e';
 
 export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefinition {
-    const { surface, cdaValues, crrValues, marker, segmentCount, gridSteps, targetLabel } = input;
-    const band = input.band ?? null;
+    const { surface, cdaValues, crrValues, marker, segmentCount, gridSteps, targetLabel, band } = input;
 
     const data: PlotTrace[] = [
         {
@@ -129,11 +128,11 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
     });
 
     const annotations: Array<Record<string, unknown>> = [];
-    if (band && surface.best) {
+    if (band) {
         annotations.push({
             text: formatBandLabel(band.toleranceM),
             x: band.cdaHigh,
-            y: surface.best.crr,
+            y: band.best.crr,
             xanchor: 'left',
             yanchor: 'middle',
             xshift: 4,
@@ -193,11 +192,6 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
         },
         config: getDefaultPlotConfig(),
     };
-}
-
-/** "5 cm" for 0.05, "1 m" for 1 — the tolerance in the unit it reads best in. */
-export function formatBandLabel(toleranceM: number): string {
-    return toleranceM < 1 ? `${Math.round(toleranceM * 100)} cm` : `${toleranceM} m`;
 }
 
 /** Soft-wrap annotation text with <br> so it stays inside the plot area. */

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ClosureBand, ClosureSurfaceResult } from '../analysis/ClosureSurface'
 import {
-    buildClosureContourFigure,
     formatBandLabel,
-    type ConvergencePlotInput,
-} from './ConvergencePlotBuilders'
+    type ClosureBand,
+    type ClosureSurfaceResult,
+} from '../analysis/ClosureSurface'
+import { buildClosureContourFigure, type ConvergencePlotInput } from './ConvergencePlotBuilders'
 
 const CDA = [0.2, 0.3, 0.4]
 const CRR = [0.003, 0.004, 0.005, 0.006]
@@ -26,9 +26,11 @@ const input = (surface: ClosureSurfaceResult): ConvergencePlotInput => ({
     segmentCount: 3,
     gridSteps: 41,
     targetLabel: 'DEM',
+    band: null,
 })
 
 const band = (): ClosureBand => ({
+    best: { cda: 0.3, crr: 0.005, error: 0.12 },
     toleranceM: 0.05,
     threshold: 0.17,
     cdaLow: 0.28,

@@ -90,6 +90,7 @@ const figures: Array<[string, { layout: Record<string, unknown> }]> = [
         crrValues: [0.004, 0.005],
         marker: { cda: 0.25, crr: 0.0045 },
         segmentCount: 1,
+        band: null,
         targetLabel: 'DEM',
         gridSteps: 41,
     })],

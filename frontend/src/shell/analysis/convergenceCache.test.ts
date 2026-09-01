@@ -23,6 +23,7 @@ vi.mock("./requestModeUpdate", () => ({
 
 import type { ConvergenceUpdateInput } from "../../modes/analysis/types";
 import { DEFAULT_GRID_STEPS } from "../../analysis/ClosureSurface";
+import { convergenceTabMarkup } from "./convergenceTab";
 import {
 	renderConvergenceView,
 	resetConvergenceSurfaceCache,
@@ -82,7 +83,7 @@ function makeInput(overrides: Partial<ConvergenceUpdateInput> = {}): {
 beforeEach(() => {
 	resetConvergenceSurfaceCache();
 	plotlySpy.react.mockClear();
-	document.body.innerHTML = `<div id="convergencePlot"></div><div id="convergenceBand"></div>`;
+	document.body.innerHTML = convergenceTabMarkup();
 });
 
 describe("the convergence surface cache", () => {

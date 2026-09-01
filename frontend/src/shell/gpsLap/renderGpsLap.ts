@@ -77,7 +77,7 @@ import { stackedVirtualDistances } from "../../modes/analysis/segmentVirtualDist
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
-import { convergenceBandMarkup } from "../analysis/convergenceBandReadout";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
@@ -926,10 +926,7 @@ export function buildGpsLapVeAnalysisTemplate(
                         `
 														: ""
 												}
-                        <div class="ve-tab-content" id="convergence-tab">
-                            <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
-                            ${convergenceBandMarkup()}
-                        </div>
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>

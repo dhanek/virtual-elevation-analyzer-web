@@ -55,7 +55,7 @@ import {
 	updateCombinedVirtualDistanceHeader,
 	virtualDistanceHeaderMarkup,
 } from "./vdHeader";
-import { convergenceBandMarkup } from "../analysis/convergenceBandReadout";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 import {
@@ -626,10 +626,7 @@ export async function showVirtualElevationAnalysisInline(
                             <div class="ve-plot-container"><div id="vdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                             ${plotXAxisToggleMarkup()}
                         </div>
-                        <div class="ve-tab-content" id="convergence-tab">
-                            <div class="ve-plot-container"><div id="convergencePlot" class="ve-plot-container__plot ve-plot-container__plot--square"></div></div>
-                            ${convergenceBandMarkup()}
-                        </div>
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>
