@@ -62,20 +62,21 @@ export async function bindOutAndBackDetection(
      *
      * Returns false when the selection spans no time.
      */
-    const resolveGatesForSelection = async (): Promise<boolean> => {
+    const resolveGatesForSelection = async (
+        carry: { a: number; b: number } | null,
+        isSuperseded: () => boolean = () => false,
+    ): Promise<boolean> => {
         const maxSeconds = Math.floor(callbacks.getSelectedDataTimeRange().duration);
         if (maxSeconds <= 0) {
             log.warn('Invalid duration for Out and Back detection:', maxSeconds);
             return false;
         }
 
-        gateASlider.max = String(maxSeconds);
-        gateAValue.max = String(maxSeconds);
-        gateBSlider.max = String(maxSeconds);
-        gateBValue.max = String(maxSeconds);
-
-        let offsetA = 5;  // Default 5 seconds
-        let offsetB = Math.min(60, maxSeconds - 5);  // Default 60 seconds or near end
+        // Defaults only where there is no user intent to preserve — see the
+        // GPS-lap twin for why a selection change carries the current pair
+        // instead of resetting to them.
+        let offsetA = carry?.a ?? 5;  // Default 5 seconds
+        let offsetB = carry?.b ?? Math.min(60, maxSeconds - 5);  // Default 60 seconds or near end
         if (appState.currentFileHash) {
             try {
                 const savedMarkers = await parameterStorage.loadOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps);
@@ -89,6 +90,13 @@ export async function bindOutAndBackDetection(
             }
         }
 
+        if (isSuperseded()) return false;
+
+        gateASlider.max = String(maxSeconds);
+        gateAValue.max = String(maxSeconds);
+        gateBSlider.max = String(maxSeconds);
+        gateBValue.max = String(maxSeconds);
+
         // Clamp to valid range, A strictly before B.
         offsetA = Math.max(0, Math.min(offsetA, maxSeconds - 1));
         offsetB = Math.max(offsetA + 1, Math.min(offsetB, maxSeconds));
@@ -99,7 +107,7 @@ export async function bindOutAndBackDetection(
         return true;
     };
 
-    if (!(await resolveGatesForSelection())) return;
+    if (!(await resolveGatesForSelection(null))) return;
 
     // Show slider controls
     sliderControls.classList.remove('hidden');
@@ -200,14 +208,31 @@ export async function bindOutAndBackDetection(
         void updateGates();
     };
 
+    let redetectToken = 0;
     callbacks.registerRedetect?.(() => {
+        const token = ++redetectToken;
         void (async () => {
-            if (!(await resolveGatesForSelection())) return;
+            const carry = {
+                a: parseInt(gateASlider.value),
+                b: parseInt(gateBSlider.value),
+            };
+            if (!(await resolveGatesForSelection(carry, () => token !== redetectToken))) return;
             void updateGates(false);
         })();
     });
 
-    // Initial detection with the loaded/default offsets. Not persisted: they
-    // were just read out of storage, so writing them back says nothing.
-    void updateGates(false);
+    // Initial detection with the loaded/default offsets — ONLY WHEN FIT LAPS
+    // ARE SELECTED, matching `bindGpsDetection`. Without a selection the
+    // time-range helpers fall back to the whole activity, so this detected
+    // whole-track sections; and now that `runOutAndBackDetection` auto-selects
+    // what it finds, those went straight into `outAndBackSelectedSections` —
+    // which is exactly what `analyzeOrchestrator.ts:245` reads for
+    // `hasSelectedLaps`, so Analyze came up enabled over the entire ride before
+    // the user had chosen anything.
+    //
+    // Not persisted: the offsets were just read out of storage, so writing them
+    // back says nothing.
+    if (appState.selectedLaps.length > 0) {
+        void updateGates(false);
+    }
 }

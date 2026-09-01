@@ -168,6 +168,85 @@ describe("the GPS gate follows the FIT lap selection", () => {
 		expect(el("gpsGateSlider").max).toBe("20");
 	});
 
+	/**
+	 * A KEY WITH NOTHING SAVED INHERITS THE GATE THE USER JUST PLACED, rather
+	 * than snapping back to the 5 s default.
+	 *
+	 * The default belongs at bind time, where there is no user intent to
+	 * preserve. On a selection change there is: ticking a LATER lap does not move
+	 * the window's start, so the offset still names the same point on the course.
+	 * Resetting it re-cut the ride from somewhere else, changed the detected lap
+	 * list, and took any analysed panel with it — and since this path does not
+	 * persist, the gate the user had placed was simply gone.
+	 */
+	it("carries the placed gate into a selection with nothing saved", async () => {
+		// Put the slider somewhere deliberate, then move to a key with no entry.
+		const slider = el("gpsGateSlider");
+		slider.value = "14";
+		slider.dispatchEvent(new Event("input"));
+		await settle();
+
+		saved.delete("1,2");
+		appState.selectedLaps = [1, 2];
+		redetect();
+		await settle();
+
+		expect(slider.value).toBe("14");
+		expect(slider.max).toBe("300");
+	});
+
+	it("still prefers a saved gate over the carried one", async () => {
+		const slider = el("gpsGateSlider");
+		slider.value = "14";
+		slider.dispatchEvent(new Event("input"));
+		await settle();
+
+		// `1,2` DOES have one, so the carry must not win.
+		appState.selectedLaps = [1, 2];
+		redetect();
+		await settle();
+
+		expect(slider.value).toBe("250");
+	});
+
+	/**
+	 * Two checkbox clicks in quick succession start two of these closures, and
+	 * the IndexedDB reads behind them are not ordered. Without a generation
+	 * guard the FIRST could resolve last and leave `max`/`value` describing the
+	 * selection the user had already left.
+	 */
+	it("lets the newest selection win when two changes overlap", async () => {
+		// Initialised to a callable no-op rather than `null`: TS narrows a
+		// null-initialised binding assigned only inside the executor down to
+		// `never`, and `release?.()` then fails to typecheck.
+		let release: () => void = () => {};
+		const firstLoadBlocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		loadGpsMarkerSettings.mockImplementationOnce(async (_h: string, laps: number[]) => {
+			await firstLoadBlocked;
+			const offset = saved.get(key(laps));
+			return offset === undefined ? null : { gateTimeOffset: offset };
+		});
+
+		// First change: two laps, its load parked mid-flight.
+		appState.selectedLaps = [1, 2];
+		redetect();
+		await settle();
+
+		// Second change lands and completes while the first is still waiting.
+		appState.selectedLaps = [1];
+		redetect();
+		await settle();
+
+		// Now let the stale one finish. It must write nothing.
+		release();
+		await settle();
+
+		expect(el("gpsGateSlider").max).toBe("20");
+		expect(el("gpsGateSlider").value).toBe("8");
+	});
+
 	it("does not write the outgoing gate under the incoming selection's key", async () => {
 		appState.selectedLaps = [1, 2];
 		redetect();
@@ -275,6 +354,22 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 		const b = Number(el("oabGateBSlider").value);
 		expect(a).toBeLessThan(b);
 		expect(b).toBeLessThanOrEqual(20);
+	});
+
+	it("carries the placed gates into a selection with nothing saved", async () => {
+		const a = el("oabGateASlider");
+		a.value = "6";
+		a.dispatchEvent(new Event("input"));
+		await settle();
+
+		saved.delete("1,2");
+		appState.selectedLaps = [1, 2];
+		redetect();
+		await settle();
+
+		expect(el("oabGateASlider").value).toBe("6");
+		expect(el("oabGateBSlider").value).toBe("15");
+		expect(el("oabGateBSlider").max).toBe("300");
 	});
 
 	it("does not write the outgoing gates under the incoming selection's key", async () => {
