@@ -1,4 +1,5 @@
 import {
+	isClosureTargetPinned,
 	toElevationDiffSource,
 	type ElevationDiffSource,
 } from "../../analysis/ClosureTarget";
@@ -10,11 +11,17 @@ import { log } from "../../utils/log";
  * Shared "Closure target" control block (phase 2 of the Convergence plan),
  * rendered under the auto-converge locks in all three VE mode sidebars.
  *
- * The block takes the mode id only to word the MANUAL field: out-and-back's
- * typed number is one leg's gate-to-gate difference (the inbound leg negates it
- * — `resolveClosureTarget`), which is a different claim from the lap modes'
- * window start-to-end difference, and telling the user "0 for a lap" there would
- * be wrong on any sloping course. Nothing else in the block varies by mode.
+ * The block takes the mode id for two things. It words the MANUAL field:
+ * out-and-back's typed number is one leg's gate-to-gate difference (the
+ * inbound leg negates it — `resolveClosureTarget`), which is a different claim
+ * from a window start-to-end difference, and telling the user "0 for a lap"
+ * there would be wrong on any sloping course. And in GPS-lap mode it PINS the
+ * block (`isClosureTargetPinned`): every GPS lap starts and ends at the gate,
+ * so the radio is locked on Manual, the Δh input reads 0 and is disabled, and
+ * the info button says why. The binder attaches nothing there — the pinned
+ * selection is applied by `resolveClosureSelection` on the compute side and
+ * never written to the persisted parameters, so the user's choice for the
+ * other modes survives a visit to GPS laps.
  *
  * The radio picks where the REFERENCE elevation difference comes from — the
  * number the Convergence tab's closure error and the auto-converge solve
@@ -50,7 +57,23 @@ const ELEVATION_DIFF_INFO_MANUAL: Record<"outAndBack" | "other", string> = {
 		"0 for a lap that finishes where it began.&#10;&#10;",
 };
 
+const ELEVATION_DIFF_INFO_PINNED =
+	"Where the closure target — the elevation difference the Convergence tab " +
+	"and Auto-converge measure the VE gain against — comes from.&#10;&#10;" +
+	"In GPS lap mode every lap starts and ends at the gate, so the elevation " +
+	"difference is assumed to be zero and the target is fixed at Manual, " +
+	"0 m. DEM and Barometer are not offered: they would only add gate " +
+	"slack and barometric drift to a difference that is zero by " +
+	"construction.&#10;&#10;";
+
+/** The status line under the pinned block, GPS-lap mode only. */
+export const ELEVATION_DIFF_PINNED_STATUS =
+	"GPS laps start and end at the gate — closure target fixed at 0 m.";
+
 function infoTooltip(mode?: AnalysisModeId): string {
+	if (isClosureTargetPinned(mode)) {
+		return ELEVATION_DIFF_INFO_PINNED + ELEVATION_DIFF_INFO_TAIL;
+	}
 	return (
 		ELEVATION_DIFF_INFO_BASE +
 		ELEVATION_DIFF_INFO_MANUAL[mode === "outAndBack" ? "outAndBack" : "other"] +
@@ -63,6 +86,13 @@ export function manualFieldText(mode?: AnalysisModeId): {
 	label: string;
 	title: string;
 } {
+	if (isClosureTargetPinned(mode)) {
+		return {
+			label: "Δ elevation (m):",
+			title:
+				"Fixed at 0 in GPS lap mode: every lap starts and ends at the gate.",
+		};
+	}
 	return mode === "outAndBack"
 		? {
 				label: "Δ elevation, outbound (m):",
@@ -93,18 +123,22 @@ export function elevationDiffControlsMarkup(
 	params: AnalysisParameters,
 	mode?: AnalysisModeId,
 ): string {
-	const source = params.elevation_diff_source ?? "dem";
-	const manual = params.manual_elevation_diff_m ?? null;
+	const pinned = isClosureTargetPinned(mode);
+	const source: ElevationDiffSource = pinned
+		? "manual"
+		: (params.elevation_diff_source ?? "dem");
+	const manual = pinned ? 0 : (params.manual_elevation_diff_m ?? null);
 	const manualField = manualFieldText(mode);
+	const disabled = pinned ? " disabled" : "";
 
 	const radio = (value: ElevationDiffSource, label: string) => `
                 <label class="ve-radio-label">
-                    <input type="radio" name="elevationDiffSource" value="${value}" ${source === value ? "checked" : ""}>
+                    <input type="radio" name="elevationDiffSource" value="${value}" ${source === value ? "checked" : ""}${disabled}>
                     <span>${label}</span>
                 </label>`;
 
 	return `
-        <div class="ve-control-group elevation-diff-controls" id="elevationDiffControls">
+        <div class="ve-control-group elevation-diff-controls" id="elevationDiffControls"${pinned ? ' data-pinned="true"' : ""}>
             <label>Closure target
                 <span class="crr-temp-controls__info" title="${infoTooltip(mode)}">i</span>
             </label>
@@ -117,9 +151,9 @@ export function elevationDiffControlsMarkup(
                 <label for="elevationDiffManual">${manualField.label}</label>
                 <input type="number" id="elevationDiffManual" step="0.1"
                        value="${manual !== null ? manual : ""}" placeholder="0.0"
-                       title="${manualField.title}">
+                       title="${manualField.title}"${disabled}>
             </div>
-            <div id="elevationDiffStatus" class="elevation-diff-controls__status"></div>
+            <div id="elevationDiffStatus" class="elevation-diff-controls__status">${pinned ? ELEVATION_DIFF_PINNED_STATUS : ""}</div>
         </div>
     `;
 }
@@ -168,6 +202,17 @@ export function bindElevationDiffControls(
 
 	if (radios.length === 0 || !manualRow || !manualInput || !status) {
 		return false;
+	}
+
+	// A pinned block (GPS-lap mode) is rendered locked on Manual 0 with its
+	// status already written; there is nothing to listen for, and syncing the
+	// status from the radio would blank the explanation.
+	if (
+		document
+			.getElementById("elevationDiffControls")
+			?.getAttribute("data-pinned") === "true"
+	) {
+		return true;
 	}
 
 	const sync = (source: ElevationDiffSource) => {

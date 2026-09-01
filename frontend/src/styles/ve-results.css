@@ -287,6 +287,14 @@
 	width: 5.5rem;
 }
 
+/* GPS-lap mode pins the block on Manual 0 (`isClosureTargetPinned`); the
+   disabled inputs read as informational, not broken. */
+.elevation-diff-controls__radios .ve-radio-label:has(input:disabled),
+.elevation-diff-controls__manual input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
 .elevation-diff-controls__status {
 	margin-top: var(--space-xs);
 	font-size: 0.8rem;

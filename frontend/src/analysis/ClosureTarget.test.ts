@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
 	ELEVATION_DIFF_SOURCES,
 	hasUsableAltitude,
+	isClosureTargetPinned,
+	resolveClosureSelection,
 	resolveClosureTarget,
 	toElevationDiffSource,
 } from "./ClosureTarget";
@@ -309,5 +311,51 @@ describe("resolveClosureTarget (manual, out-and-back legs)", () => {
 				resolveClosureTarget({ ...args, legDirection: "outbound" }),
 			);
 		}
+	});
+});
+
+describe("resolveClosureSelection", () => {
+	test("GPS-lap mode is pinned to manual 0 regardless of the persisted choice", () => {
+		expect(isClosureTargetPinned("gpsLap")).toBe(true);
+		expect(
+			resolveClosureSelection("gpsLap", {
+				elevation_diff_source: "barometer",
+				manual_elevation_diff_m: 4.2,
+			}),
+		).toEqual({ source: "manual", manualDiffMetres: 0 });
+	});
+
+	test("the other modes read the persisted choice, validated not cast", () => {
+		for (const mode of ["standard", "outAndBack", undefined] as const) {
+			expect(isClosureTargetPinned(mode)).toBe(false);
+			expect(
+				resolveClosureSelection(mode, {
+					elevation_diff_source: "barometer",
+					manual_elevation_diff_m: 4.2,
+				}),
+			).toEqual({ source: "barometer", manualDiffMetres: 4.2 });
+			expect(resolveClosureSelection(mode, {})).toEqual({
+				source: "dem",
+				manualDiffMetres: null,
+			});
+			expect(
+				resolveClosureSelection(mode, { elevation_diff_source: "bogus" }),
+			).toEqual({ source: "dem", manualDiffMetres: null });
+		}
+	});
+
+	test("a pinned selection resolves to a 0 target through resolveClosureTarget", () => {
+		const selection = resolveClosureSelection("gpsLap", {
+			elevation_diff_source: "dem",
+		});
+		expect(
+			resolveClosureTarget({
+				...selection,
+				altitude: ramp(20),
+				velodrome: false,
+				trimStart: 0,
+				trimEnd: 19,
+			}),
+		).toBe(0);
 	});
 });

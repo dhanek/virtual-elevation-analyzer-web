@@ -12,6 +12,7 @@ import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
 import {
 	bindElevationDiffControls,
+	ELEVATION_DIFF_PINNED_STATUS,
 	elevationDiffControlsMarkup,
 	elevationDiffStatusText,
 	getSelectedElevationDiffSource,
@@ -187,8 +188,8 @@ describe("the manual field's wording is mode-specific", () => {
 		expect(title).toContain("negated");
 	});
 
-	it("the lap modes keep the window start-to-end wording", () => {
-		for (const mode of ["standard", "gpsLap", undefined] as const) {
+	it("standard mode keeps the window start-to-end wording", () => {
+		for (const mode of ["standard", undefined] as const) {
 			document.body.innerHTML = manualMarkup(mode);
 			const label = document.querySelector(
 				'label[for="elevationDiffManual"]',
@@ -215,5 +216,93 @@ describe("the manual field's wording is mode-specific", () => {
 		// at the same spot" -- was wrong for a section between gates at
 		// different heights, which is the whole case this feature serves.
 		expect(info("outAndBack")).toContain("same height");
+	});
+});
+
+/**
+ * GPS-lap mode pins the block: every lap starts and ends at the gate, so the
+ * target is Manual 0 and the user is told rather than asked.
+ */
+describe("GPS-lap mode pins the closure target to Manual 0", () => {
+	it("locks the radios on Manual and the Δh input on 0, whatever is persisted", () => {
+		document.body.innerHTML = elevationDiffControlsMarkup(
+			makeParams({
+				elevation_diff_source: "barometer",
+				manual_elevation_diff_m: 4.2,
+			}),
+			"gpsLap",
+		);
+
+		for (const value of ["dem", "barometer", "manual"]) {
+			expect(radio(value).disabled).toBe(true);
+		}
+		expect(radio("manual").checked).toBe(true);
+		expect(radio("barometer").checked).toBe(false);
+
+		const input = document.getElementById(
+			"elevationDiffManual",
+		) as HTMLInputElement;
+		expect(input.disabled).toBe(true);
+		expect(input.value).toBe("0");
+		expect(
+			document
+				.getElementById("elevationDiffManualRow")!
+				.classList.contains("elevation-diff-controls__manual--hidden"),
+		).toBe(false);
+	});
+
+	it("explains the assumption on the info button and the status line", () => {
+		document.body.innerHTML = elevationDiffControlsMarkup(
+			makeParams(),
+			"gpsLap",
+		);
+		const info = document
+			.querySelector(".crr-temp-controls__info")!
+			.getAttribute("title")!;
+		expect(info).toContain("assumed to be zero");
+		expect(info).not.toContain("DEM: the terrain elevation");
+		expect(
+			document.getElementById("elevationDiffStatus")!.textContent,
+		).toBe(ELEVATION_DIFF_PINNED_STATUS);
+		expect(
+			document.getElementById("elevationDiffManual")!.getAttribute("title"),
+		).toContain("Fixed at 0");
+	});
+
+	it("binds as present but writes nothing and keeps its status", () => {
+		document.body.innerHTML = elevationDiffControlsMarkup(
+			makeParams({ elevation_diff_source: "dem" }),
+			"gpsLap",
+		);
+		const merged: Array<Partial<AnalysisParameters>> = [];
+		let changes = 0;
+		const attached = bindElevationDiffControls(
+			{
+				getParams: () => makeParams(),
+				setParams: (fields) => {
+					merged.push(fields);
+				},
+				onChange: () => {
+					changes++;
+				},
+			},
+			false,
+		);
+		expect(attached).toBe(true);
+
+		// A synthetic change on a disabled radio must not reach the store.
+		radio("dem").dispatchEvent(new Event("change"));
+		const input = document.getElementById(
+			"elevationDiffManual",
+		) as HTMLInputElement;
+		input.value = "3";
+		input.dispatchEvent(new Event("change"));
+
+		expect(merged).toEqual([]);
+		expect(changes).toBe(0);
+		// The bind did not blank the explanation with the DEM status text.
+		expect(
+			document.getElementById("elevationDiffStatus")!.textContent,
+		).toBe(ELEVATION_DIFF_PINNED_STATUS);
 	});
 });

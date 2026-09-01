@@ -38,6 +38,8 @@
  *   - otherwise `channel[trimEnd] - channel[trimStart]`, trim clamped
  */
 
+import type { AnalysisModeId } from "../modes/analysis/types";
+
 export type ElevationDiffSource = "dem" | "barometer" | "manual";
 
 export const ELEVATION_DIFF_SOURCES: readonly ElevationDiffSource[] = [
@@ -55,6 +57,53 @@ export function toElevationDiffSource(value: string): ElevationDiffSource | null
 	return (ELEVATION_DIFF_SOURCES as readonly string[]).includes(value)
 		? (value as ElevationDiffSource)
 		: null;
+}
+
+/**
+ * GPS-LAP MODE PINS THE TARGET TO 0. A GPS lap runs from one passing of the
+ * gate to the next passing in the same direction, so by construction every lap
+ * starts and ends at the same point and its true elevation difference is 0.
+ * Offering DEM / Barometer there only lets gate slack (the 20 m proximity
+ * threshold) and barometric drift leak into the closure the solve chases, so
+ * the radio is pinned to Manual at 0 and the user is told why instead
+ * (`elevationDiffControls`). The persisted `elevation_diff_source` /
+ * `manual_elevation_diff_m` are left untouched: they still describe the user's
+ * choice in the modes that offer one.
+ *
+ * Standard mode is NOT pinned. Its laps come from the FIT lap button, which
+ * carries no promise of returning to the start.
+ */
+export function isClosureTargetPinned(mode: AnalysisModeId | undefined): boolean {
+	return mode === "gpsLap";
+}
+
+export interface ClosureSelection {
+	source: ElevationDiffSource;
+	manualDiffMetres: number | null;
+}
+
+/**
+ * The closure source an update pass runs on: the pinned selection for a
+ * pinned mode, else the persisted one. Persisted parameters are untrusted
+ * strings, so the source is validated rather than cast; the default is 'dem',
+ * which — with no DEM loaded — falls back to the resolved profile.
+ */
+export function resolveClosureSelection(
+	mode: AnalysisModeId | undefined,
+	params: {
+		elevation_diff_source?: string;
+		manual_elevation_diff_m?: number | null;
+	},
+): ClosureSelection {
+	if (isClosureTargetPinned(mode)) {
+		return { source: "manual", manualDiffMetres: 0 };
+	}
+	return {
+		source: params.elevation_diff_source
+			? (toElevationDiffSource(params.elevation_diff_source) ?? "dem")
+			: "dem",
+		manualDiffMetres: params.manual_elevation_diff_m ?? null,
+	};
 }
 
 export interface ClosureTargetInput {

@@ -54,7 +54,10 @@ import type { ActivityDataLike, AppState, WindSource } from "../../state/AppStat
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
 import { log } from "../../utils/log";
-import { toElevationDiffSource } from "../../analysis/ClosureTarget";
+import {
+	isClosureTargetPinned,
+	resolveClosureSelection,
+} from "../../analysis/ClosureTarget";
 import {
 	resolveClosureBaroAltitude,
 	resolveClosureDemAltitude,
@@ -212,13 +215,14 @@ export async function updateModeVEPlots(
 	// `segmentPreparation.ts` so the Convergence grid and the auto-converge
 	// solve can reuse one preparation. Skips and preparation failures are
 	// logged there with the messages this loop used to emit.
-	// (3b) The closure target's source (phase 2), ONCE per pass. Persisted
-	//      parameters are untrusted strings, so validate rather than cast; the
-	//      default is 'dem', which — with no DEM loaded — falls back to the
-	//      resolved profile and reproduces phase 1 byte for byte.
-	const closureSource = params.elevation_diff_source
-		? (toElevationDiffSource(params.elevation_diff_source) ?? "dem")
-		: "dem";
+	// (3b) The closure target's source (phase 2), ONCE per pass. GPS-lap mode
+	//      pins it to manual 0 — every lap starts and ends at the gate — and
+	//      the other modes read the persisted choice, validated rather than
+	//      cast (`resolveClosureSelection`). The default 'dem' with no DEM
+	//      loaded falls back to the resolved profile and reproduces phase 1
+	//      byte for byte.
+	const closureSelection = resolveClosureSelection(handler.id, params);
+	const closureSource = closureSelection.source;
 	const closureDemAltitude =
 		closureSource === "dem"
 			? resolveClosureDemAltitude(appState, normalized.altitude.length)
@@ -230,7 +234,7 @@ export async function updateModeVEPlots(
 			closureSource === "barometer"
 				? resolveClosureBaroAltitude(appState, normalized.altitude)
 				: null,
-		manualDiffMetres: params.manual_elevation_diff_m ?? null,
+		manualDiffMetres: closureSelection.manualDiffMetres,
 	};
 
 	const prepared = prepareSegments({
@@ -399,8 +403,9 @@ export async function updateModeVEPlots(
 				targetSource: closureSource,
 				// 'dem' with no DEM channel loaded fell back to the resolved
 				// profile — say so rather than let the title claim DEM.
-				targetLabel:
-					closureSource === "manual"
+				targetLabel: isClosureTargetPinned(handler.id)
+					? "lap closure (0 m)"
+					: closureSource === "manual"
 						? "manual Δh"
 						: closureSource === "barometer"
 							? "barometer"
