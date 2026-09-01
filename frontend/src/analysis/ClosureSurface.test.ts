@@ -186,7 +186,7 @@ describe("poolClosureSurface refusals", () => {
 });
 
 describe("grid sizing", () => {
-	test("defaults to 41 and drops to 21 above the measured window budget", () => {
+	test("defaults to 100 and drops to 41 above the measured window budget", () => {
 		expect(chooseGridSteps(6_600)).toBe(DEFAULT_GRID_STEPS);
 		expect(chooseGridSteps(COARSE_GRID_WINDOW_SAMPLES)).toBe(DEFAULT_GRID_STEPS);
 		expect(chooseGridSteps(COARSE_GRID_WINDOW_SAMPLES + 1)).toBe(COARSE_GRID_STEPS);

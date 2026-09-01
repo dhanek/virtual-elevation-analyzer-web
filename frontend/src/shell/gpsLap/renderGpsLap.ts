@@ -43,7 +43,10 @@ import {
 	type BindModeControlsResult,
 } from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
-import { getSelectedWindSource } from "../dom/windSource";
+import {
+	getCheckedWindSource,
+	getSelectedWindSource,
+} from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
 import {
 	handleStoreResult,
@@ -348,8 +351,13 @@ export async function showGpsLapVEAnalysis(
 		resolvedParams.wind_speed !== 0 &&
 		resolvedParams.wind_direction !== undefined;
 
-	// Preserve current wind source selection if UI exists (for recalculations)
-	const preservedWindSource = getSelectedWindSource();
+	// Preserve the CHECKED wind source across the re-render — null when no
+	// radio is checked (first render, or a sensor-less ride), so the
+	// `preservedWindSource || (hasWindSpeed ? "fit" : "constant")` default below
+	// actually fires. `getSelectedWindSource`'s 'fit' fallback here made that
+	// default dead code: a ride with no wind channel opened stuck on 'fit',
+	// its lone constant radio unchecked and the wind-height control hidden.
+	const preservedWindSource = getCheckedWindSource();
 
 	// Show the GPS lap VE analysis interface with wind data info
 	await showGpsLapVEPlot(

@@ -18,6 +18,21 @@ export function getSelectedWindSource(): string {
 }
 
 /**
+ * The checked radio's value, or null when NO radio is checked (or none is
+ * rendered at all). The 'fit' fallback above is right for the thirteen query
+ * sites it replaced — they all run against a rendered panel — but it is wrong
+ * for a caller that wants to PRESERVE a selection across a re-render: on a
+ * sensor-less ride the first render has no radios yet, and the fallback made
+ * `preservedWindSource || (hasWindSpeed ? "fit" : "constant")` dead code — the
+ * panel opened claiming a FIT wind channel the ride does not have, with the
+ * lone constant radio unchecked and the wind-height control hidden.
+ */
+export function getCheckedWindSource(): string | null {
+    const checked = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null
+    return checked?.value ?? null
+}
+
+/**
  * Narrow a raw radio `value` to the WindSource union, CHECKED rather than cast.
  *
  * The value is whatever the template's `value=` attribute says, so a typo there

@@ -35,6 +35,9 @@ describe('buildClosureContourFigure', () => {
         ])
         expect(figure.data[2].name).toBe('Best fit')
         expect(figure.data[3].name).toBe('Current')
+        // Reversed Viridis: the low-error valley reads bright against a dark
+        // field, which is what makes the minimum findable at a glance.
+        expect(figure.data[0].reversescale).toBe(true)
     })
 
     it('hands Plotly the pooled z in its [crr][cda] orientation untouched', () => {

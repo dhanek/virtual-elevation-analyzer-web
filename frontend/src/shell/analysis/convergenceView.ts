@@ -7,8 +7,8 @@
  * `renderConvergence` callback is a one-line delegation to this function.
  *
  * THE SURFACE CACHE, and what it exists for. The closure-error grid is by far
- * the most expensive thing the app computes (~70 ms for six GPS laps at the
- * default 41×41 — `npm run profile:convergence`), and the interaction that
+ * the most expensive thing the app computes (~430 ms for six GPS laps at the
+ * default 100×100 — `npm run profile:convergence`), and the interaction that
  * fires updates most often is exactly the one that must NOT recompute it: a
  * CdA/Crr drag. Since phase 2 the cache has TWO levels, matching the two
  * signatures `buildConvergenceUpdateInput` builds:

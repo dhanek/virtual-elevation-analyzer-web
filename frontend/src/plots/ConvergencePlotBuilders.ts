@@ -50,6 +50,7 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
             z: surface.z,
             contours: { coloring: 'heatmap' },
             colorscale: 'Viridis',
+            reversescale: true,
             colorbar: { title: { text: 'Closure error (m)', side: 'right' } },
             hovertemplate:
                 'CdA %{x:.3f} m²<br>Crr %{y:.4f}<br>closure error %{z:.2f} m<extra></extra>',

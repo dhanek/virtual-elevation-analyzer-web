@@ -32,7 +32,7 @@ const SAMPLE_COUNT = 7_200
 const WARMUP_ITERATIONS = 2
 const MEASURED_ITERATIONS = 10
 const GPS_LAP_COUNT = 6
-const RESOLUTIONS = [21, 41, 61]
+const RESOLUTIONS = [41, 100]
 const BISECTION_CALLS = 40
 
 // Grid bounds mirror the AnalysisParameters defaults the tab will use.

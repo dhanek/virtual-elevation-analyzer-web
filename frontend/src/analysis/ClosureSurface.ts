@@ -215,14 +215,15 @@ function refineAxis(
 /**
  * Grid resolution for a pooled surface, from measurement
  * (`npm run profile:convergence`, 2026-09-01): ~6.2 ns per cell-sample, so
- * 41x41 over a 6-segment GPS-lap pass (~6 600 window samples) is ~70 ms and
- * stays a one-off hitch. Above ~40 000 window samples 41x41 would pass
- * ~400 ms, so the grid drops to 21x21 there; the resolution is shown in the
- * plot title so the number on screen is never unexplained.
+ * 100x100 over a 6-segment GPS-lap pass (~6 600 window samples) is ~430 ms
+ * and stays a one-off hitch — the surface is cached across CdA/Crr drags.
+ * Above ~16 000 window samples 100x100 would pass ~1 s, so the grid drops
+ * to 41x41 there; the resolution is shown in the plot title so the number
+ * on screen is never unexplained.
  */
-export const DEFAULT_GRID_STEPS = 41;
-export const COARSE_GRID_STEPS = 21;
-export const COARSE_GRID_WINDOW_SAMPLES = 40_000;
+export const DEFAULT_GRID_STEPS = 100;
+export const COARSE_GRID_STEPS = 41;
+export const COARSE_GRID_WINDOW_SAMPLES = 16_000;
 
 export function chooseGridSteps(totalWindowSamples: number): number {
 	return totalWindowSamples > COARSE_GRID_WINDOW_SAMPLES
