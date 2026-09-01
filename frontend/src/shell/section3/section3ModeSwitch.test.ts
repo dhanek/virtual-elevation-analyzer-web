@@ -1374,6 +1374,75 @@ describe("the VE panel after a Section 3 selection change", () => {
 		expect(appState.currentVEResult).toBeNull();
 	});
 
+	/**
+	 * AND THE DETECTION GOES WITH THE PANEL.
+	 *
+	 * Tearing the panel down was only half of "no basis". `updateAnalyzeButton`
+	 * does not read the panel — it reads
+	 * `outAndBackSelectedSections`/`outAndBackSections` in out-and-back mode and
+	 * `gpsSelectedLaps`/`gpsDetectedLaps` in GPS-lap mode
+	 * (`analyzeOrchestrator.ts:245-251`) — so with those left standing the
+	 * button stayed enabled over the PREVIOUS window's detection while the panel
+	 * said there was nothing to analyse. One gesture cannot mean both.
+	 *
+	 * THE ASSERTION IS ON THE APPSTATE FIELDS, deliberately, and it is a
+	 * STRUCTURAL guard: importing the real `analyzeOrchestrator` here would drag
+	 * in Plotly, Leaflet and the WASM glue (see this file's header at the
+	 * `makeUpdateAnalyzeButton` stub), and asserting against that stub would
+	 * prove the stub. The four fields named above are exactly what the real
+	 * `updateAnalyzeButton` reads, so emptying all of them is what disables the
+	 * button.
+	 *
+	 * The A/B gate markers are NOT asserted gone: the gates are the user's
+	 * placement and survive a window change by design (03de804/40bbc64).
+	 */
+	it("clears the out-and-back detection when the FIT selection is emptied", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("GPS based out and back");
+		await settle();
+		await analyzeStandard(appState);
+		await settle();
+
+		analyzedOutAndBackPanel(appState, [1, 2]);
+		appState.outAndBackSelectedSections = [1, 2];
+		appState.outAndBackResult = { detectedSections: [] } as never;
+		expect(veSectionHidden()).toBe(false);
+
+		renderLapCheckboxes([1, 2], []);
+		updateSelectedLaps();
+		await settle();
+
+		expect(appState.outAndBackSections).toEqual([]);
+		expect(appState.outAndBackSelectedSections).toEqual([]);
+		expect(appState.outAndBackResult).toBeNull();
+	});
+
+	it("clears the GPS-lap detection when the FIT selection is emptied", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		setGpsAnalysisMode("GPS based lap splitting");
+		await settle();
+		await analyzeStandard(appState);
+		await settle();
+
+		appState.gpsDetectedLaps = [
+			{ lapNumber: 1, startIdx: 0, endIdx: 99 },
+			{ lapNumber: 2, startIdx: 100, endIdx: 199 },
+		] as never;
+		appState.gpsSelectedLaps = [1, 2];
+		appState.gpsLapDetectionResult = { detectedLaps: [] } as never;
+		expect(veSectionHidden()).toBe(false);
+
+		renderLapCheckboxes([1, 2], []);
+		updateSelectedLaps();
+		await settle();
+
+		expect(appState.gpsDetectedLaps).toEqual([]);
+		expect(appState.gpsSelectedLaps).toEqual([]);
+		expect(appState.gpsLapDetectionResult).toBeNull();
+	});
+
 	it("leaves an auto-rho recompute scheduled before the teardown unable to write", async () => {
 		const appState = await analyzedStandardPanel();
 

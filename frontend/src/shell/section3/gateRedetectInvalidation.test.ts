@@ -195,9 +195,25 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 		resetModeUpdateRequests();
 	});
 
+	/**
+	 * Out-and-back detection is SCOPED TO THE FIT SELECTION and bails outright
+	 * without one, exactly as its GPS-lap twin does, so these tests carry a FIT
+	 * lap spanning the whole activity. One lap over everything keeps the trim
+	 * branch a no-op, so the assertions below mean what they meant before the
+	 * bail existed. `makeAppState()` itself deliberately stays empty — the
+	 * empty-selection test needs it that way.
+	 */
+	function configureWithFitLap(appState: AppState): void {
+		configure(appState);
+		appState.currentLaps = [
+			{ start_time: 0, end_time: SAMPLE_COUNT - 1 },
+		] as never;
+		appState.selectedLaps = [1];
+	}
+
 	it("tears the panel down when a gate move re-cuts the ride", async () => {
 		const appState = makeAppState();
-		configure(appState);
+		configureWithFitLap(appState);
 		analyzed(appState, [
 			section(1, 0, 40, 41, 80),
 			section(2, 81, 120, 121, 160),
@@ -219,7 +235,7 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 
 	it("tears the panel down when the re-cut drops an analysed section", async () => {
 		const appState = makeAppState();
-		configure(appState);
+		configureWithFitLap(appState);
 		analyzed(appState, [
 			section(1, 0, 40, 41, 80),
 			section(2, 81, 120, 121, 160),
@@ -234,7 +250,7 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 
 	it("leaves the panel alone when the gates have not moved", async () => {
 		const appState = makeAppState();
-		configure(appState);
+		configureWithFitLap(appState);
 		const cut = [section(1, 0, 40, 41, 80), section(2, 81, 120, 121, 160)];
 		analyzed(appState, cut);
 
@@ -261,7 +277,7 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 	 */
 	it("tears the panel down when the re-cut only adds a section", async () => {
 		const appState = makeAppState();
-		configure(appState);
+		configureWithFitLap(appState);
 		analyzed(appState, [section(1, 0, 40, 41, 80)]);
 
 		detected.sections = [
@@ -276,7 +292,7 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 
 	it("does not tear down when nothing has been analysed yet", async () => {
 		const appState = makeAppState();
-		configure(appState);
+		configureWithFitLap(appState);
 
 		// The FIRST detection, before any analyze. `currentOutAndBackSections` is
 		// empty, so there is no panel to invalidate and the guard must not fire.
@@ -297,7 +313,7 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 	 */
 	it("still invalidates before the first recompute has reported coverage", async () => {
 		const appState = makeAppState();
-		configure(appState);
+		configureWithFitLap(appState);
 		analyzed(appState, [section(1, 0, 40, 41, 80)]);
 		appState.currentCoveredItems = null;
 
@@ -306,6 +322,24 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 
 		expect(veSectionHidden()).toBe(true);
 		expect(appState.currentVEResult).toBeNull();
+	});
+
+	/**
+	 * AN EMPTY FIT SELECTION IS NOT A BASIS. Without this bail the detector
+	 * fell back to the whole activity and cut sections over a window the user
+	 * had not asked for — and the re-cut then took the analysed panel with it.
+	 * The GPS-lap twin has refused the same input since 40bbc64.
+	 */
+	it("does not detect when no FIT lap is selected", async () => {
+		const appState = makeAppState(); // selectedLaps: [], currentLaps: []
+		configure(appState);
+		analyzed(appState, [section(1, 0, 40, 41, 80)]);
+		detected.sections = [section(1, 5, 45, 46, 85)]; // would re-cut, if it ran
+
+		await runOutAndBackDetection(52.52, 13.405, 52.53, 13.406);
+
+		expect(appState.outAndBackSections).toEqual([section(1, 0, 40, 41, 80)]); // untouched by the call
+		expect(veSectionHidden()).toBe(false); // and the panel survives
 	});
 });
 

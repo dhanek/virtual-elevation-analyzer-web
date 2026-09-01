@@ -1068,6 +1068,17 @@ export async function runOutAndBackDetection(
 
 	if (!deps.appState.currentFitData) return;
 
+	// Detection is scoped to the selected FIT laps. With no selection there
+	// is no scope to detect within, so bail out rather than fall back to the
+	// whole activity (which would detect sections the user never asked for).
+	if (
+		deps.appState.selectedLaps.length === 0 ||
+		deps.appState.currentLaps.length === 0
+	) {
+		log.debug("Skipping Out and Back detection: no FIT laps selected");
+		return;
+	}
+
 	// Calculate trim indices from selected FIT laps' time ranges
 	let trimStart = 0;
 	let trimEnd = deps.appState.currentFitData.timestamps.length - 1;
@@ -1385,6 +1396,23 @@ export function updateSelectedLaps(): void {
 			if (gpsPanelIsAnalyzed(deps.appState)) {
 				tearDownVeAnalysisPanel(deps.appState);
 			}
+			// AND THE DETECTION ITSELF. The window that produced it is gone, so
+			// `updateAnalyzeButton` (`analyzeOrchestrator.ts:244-252`) must not
+			// still find a selection to analyse in it — one gesture cannot mean
+			// "no basis" for the panel and "the whole previous window" for
+			// Analyze. Both GPS mode families, because this branch covers both.
+			// The A/B gate markers stay: the gates are the user's placement and
+			// survive a window change by design. Only the DETECTION derived from
+			// the window is stale.
+			deps.appState.gpsDetectedLaps = [];
+			deps.appState.gpsSelectedLaps = [];
+			deps.appState.gpsLapDetectionResult = null;
+			deps.appState.outAndBackSections = [];
+			deps.appState.outAndBackSelectedSections = [];
+			deps.appState.outAndBackResult = null;
+			deps.getMapVisualization()?.clearDetectedLaps();
+			updateGpsDetectedLapsUI();
+			updateOutAndBackSectionsUI();
 		} else {
 			redetectForFitSelection?.();
 		}
