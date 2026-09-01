@@ -169,7 +169,11 @@ export async function showOutAndBackVEAnalysis(
 	 * `number[]` — NaN rho across the WASM boundary for that leg. Same rule as
 	 * `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a leg the series
 	 * does not span falls back to the constant `params.rho` rather than to a
-	 * hole-punched array.
+	 * short one.
+	 *
+	 * A LENGTH CHECK, AND ONLY THAT — an interior NaN in a full-length channel
+	 * still reaches the calculator, since `hasAirDensityData` accepts the series
+	 * on a `.some(...)`. Pre-existing, and not what this guard covers.
 	 */
 	const legRho = (startIdx: number, endIdx: number): number[] | null => {
 		if (!allRho) return null;
