@@ -176,6 +176,21 @@ export function belowAxisLegend(): PlotLayout {
 /** Bottom margin that fits an x-axis title AND `belowAxisLegend` under it. */
 export const BELOW_AXIS_LEGEND_MARGIN_B = 100;
 
+/**
+ * The x range covering exactly the samples the compare figures plot.
+ *
+ * Spread into a layout rather than returned as a bare tuple so that a context
+ * with no main window contributes NO `range` key at all and Plotly autoranges,
+ * instead of being handed `[undefined, undefined]`.
+ */
+function mainWindowRange(context: PlotContext): PlotLayout {
+    const points = context.xPointsMain;
+    if (points.length === 0) {
+        return {};
+    }
+    return { range: [points[0], points[points.length - 1]] };
+}
+
 export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): VirtualElevationFigures {
     const virtualSlices = createContextSlices(input.virtualElevation, input.context);
     const actualSlices = createContextSlices(input.actualElevation, input.context);
@@ -450,10 +465,17 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 xaxis: {
                     title: '',
                     showticklabels: false,
-                    // PINNED, like the non-compare pair's two axes. Two
+                    // PINNED, like the non-compare pair's two axes: two
                     // autoranged plots agree only by luck, and this pair is read
                     // as one stacked chart.
-                    range: [input.context.xMin, input.context.xMax],
+                    //
+                    // TO THE MAIN WINDOW, not to `context.xMin`/`xMax`.
+                    // `buildVirtualElevationFigures` may use the extended range
+                    // because it DRAWS the before and after slices as faded
+                    // context; these two figures draw `xPointsMain` and nothing
+                    // else, so the extended range would just be up to
+                    // `sideContext` samples of dead margin at each end.
+                    ...mainWindowRange(input.context),
                 },
                 yaxis: { title: 'Elevation (m)' },
                 showlegend: true,
@@ -506,7 +528,7 @@ export function buildVirtualElevationComparisonFigures(input: VirtualElevationCo
                 title: 'Residuals Comparison (Virtual - Actual)',
                 xaxis: {
                     title: input.context.xAxisTitle,
-                    range: [input.context.xMin, input.context.xMax],
+                    ...mainWindowRange(input.context),
                 },
                 yaxis: { title: 'Residual (m)' },
                 showlegend: true,

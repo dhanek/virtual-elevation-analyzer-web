@@ -53,48 +53,56 @@ export async function bindOutAndBackDetection(
         return;
     }
 
-    // Calculate the duration of selected data
-    const timeRange = callbacks.getSelectedDataTimeRange();
-    const { duration } = timeRange;
+    /**
+     * Point both sliders at the gates belonging to THE CURRENT FIT LAP
+     * SELECTION. The GPS-lap twin's doc (`bindGpsDetection.ts`) explains why
+     * this is a function: gates are stored per `(fileHash, selectedLaps)`, so a
+     * selection change is a different KEY and quite possibly a different pair of
+     * gates, not the same pair in a resized window.
+     *
+     * Returns false when the selection spans no time.
+     */
+    const resolveGatesForSelection = async (): Promise<boolean> => {
+        const maxSeconds = Math.floor(callbacks.getSelectedDataTimeRange().duration);
+        if (maxSeconds <= 0) {
+            log.warn('Invalid duration for Out and Back detection:', maxSeconds);
+            return false;
+        }
 
-    // Set slider max to duration in seconds
-    const maxSeconds = Math.floor(duration);
-    if (maxSeconds <= 0) {
-        log.warn('Invalid duration for Out and Back detection:', maxSeconds);
-        return;
-    }
+        gateASlider.max = String(maxSeconds);
+        gateAValue.max = String(maxSeconds);
+        gateBSlider.max = String(maxSeconds);
+        gateBValue.max = String(maxSeconds);
 
-    gateASlider.max = String(maxSeconds);
-    gateAValue.max = String(maxSeconds);
-    gateBSlider.max = String(maxSeconds);
-    gateBValue.max = String(maxSeconds);
+        let offsetA = 5;  // Default 5 seconds
+        let offsetB = Math.min(60, maxSeconds - 5);  // Default 60 seconds or near end
+        if (appState.currentFileHash) {
+            try {
+                const savedMarkers = await parameterStorage.loadOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps);
+                if (savedMarkers && savedMarkers.gateATimeOffset !== undefined && savedMarkers.gateBTimeOffset !== undefined) {
+                    offsetA = savedMarkers.gateATimeOffset;
+                    offsetB = savedMarkers.gateBTimeOffset;
+                    log.debug('Loading saved Out and Back gate time offsets:', { A: offsetA, B: offsetB });
+                }
+            } catch (err) {
+                log.error('Failed to load saved Out and Back marker settings:', err);
+            }
+        }
+
+        // Clamp to valid range, A strictly before B.
+        offsetA = Math.max(0, Math.min(offsetA, maxSeconds - 1));
+        offsetB = Math.max(offsetA + 1, Math.min(offsetB, maxSeconds));
+        gateASlider.value = String(offsetA);
+        gateAValue.value = String(offsetA);
+        gateBSlider.value = String(offsetB);
+        gateBValue.value = String(offsetB);
+        return true;
+    };
+
+    if (!(await resolveGatesForSelection())) return;
 
     // Show slider controls
     sliderControls.classList.remove('hidden');
-
-    // Load saved gate positions or use defaults
-    let initialOffsetA = 5;  // Default 5 seconds
-    let initialOffsetB = Math.min(60, maxSeconds - 5);  // Default 60 seconds or near end
-    if (appState.currentFileHash) {
-        try {
-            const savedMarkers = await parameterStorage.loadOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps);
-            if (savedMarkers && savedMarkers.gateATimeOffset !== undefined && savedMarkers.gateBTimeOffset !== undefined) {
-                initialOffsetA = savedMarkers.gateATimeOffset;
-                initialOffsetB = savedMarkers.gateBTimeOffset;
-                log.debug('Loading saved Out and Back gate time offsets:', { A: initialOffsetA, B: initialOffsetB });
-            }
-        } catch (err) {
-            log.error('Failed to load saved Out and Back marker settings:', err);
-        }
-    }
-
-    // Clamp to valid range
-    initialOffsetA = Math.max(0, Math.min(initialOffsetA, maxSeconds - 1));
-    initialOffsetB = Math.max(initialOffsetA + 1, Math.min(initialOffsetB, maxSeconds));
-    gateASlider.value = String(initialOffsetA);
-    gateAValue.value = String(initialOffsetA);
-    gateBSlider.value = String(initialOffsetB);
-    gateBValue.value = String(initialOffsetB);
 
     // Helper to get gate position info from time offset
     const getGatePosition = (timeOffset: number) => {
@@ -112,7 +120,7 @@ export async function bindOutAndBackDetection(
     };
 
     // Helper to update gates and run detection
-    const updateGates = async () => {
+    const updateGates = async (persist = true) => {
         const offsetA = parseInt(gateASlider.value);
         const offsetB = parseInt(gateBSlider.value);
 
@@ -131,8 +139,12 @@ export async function bindOutAndBackDetection(
         if (posA) mapVisualization?.setGpsMarkerA(posA.lat, posA.lon);
         if (posB) mapVisualization?.setGpsMarkerB(posB.lat, posB.lon);
 
-        // Save settings
-        if (appState.currentFileHash) {
+        // Save settings — ONLY WHEN THE USER MOVED A GATE. The key includes
+        // `appState.selectedLaps`, read here at call time, so a pass triggered by
+        // a FIT selection change would write the outgoing combination's offsets
+        // under the incoming combination's key and destroy the gates the user had
+        // saved for those laps. See the GPS-lap twin.
+        if (persist && appState.currentFileHash) {
             try {
                 await parameterStorage.saveOutAndBackMarkerSettings(appState.currentFileHash, appState.selectedLaps, {
                     gateATimeOffset: offsetA,
@@ -189,9 +201,13 @@ export async function bindOutAndBackDetection(
     };
 
     callbacks.registerRedetect?.(() => {
-        void updateGates();
+        void (async () => {
+            if (!(await resolveGatesForSelection())) return;
+            void updateGates(false);
+        })();
     });
 
-    // Initial detection with loaded/defaults
-    void updateGates();
+    // Initial detection with the loaded/default offsets. Not persisted: they
+    // were just read out of storage, so writing them back says nothing.
+    void updateGates(false);
 }

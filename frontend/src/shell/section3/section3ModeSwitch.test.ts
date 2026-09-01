@@ -78,8 +78,22 @@ class FakeMap {
 	// Out-and-back's gate markers. Absent until the new-activity block exercised
 	// that mode, where the miss surfaced as an UNHANDLED rejection rather than a
 	// failing assertion -- noise that hides real failures in this file's output.
-	setGpsMarkerA(): void {}
-	setGpsMarkerB(): void {}
+	// COUNTED, and these two specifically: `bindOutAndBackDetection` paints its
+	// A/B gates through `setGpsMarkerA`/`setGpsMarkerB` (`:131-132`), while
+	// `bindGpsDetection` uses the singular `setGpsMarker` (`:107`). So a count on
+	// the pair is a clean signal for "the OUT-AND-BACK closure ran", with no
+	// contribution from the GPS-lap binder.
+	//
+	// It has to be the markers rather than the detection itself: the real
+	// detector finds nothing on this file's constant coordinates, so "the
+	// detection came back" is indistinguishable from "it stayed cleared".
+	public oabMarkerPaints = 0;
+	setGpsMarkerA(): void {
+		this.oabMarkerPaints++;
+	}
+	setGpsMarkerB(): void {
+		this.oabMarkerPaints++;
+	}
 	setOutAndBackMarkerA(): void {}
 	setOutAndBackMarkerB(): void {}
 	showWindIndicator(): void {}
@@ -1278,6 +1292,61 @@ describe("the VE panel after a Section 3 selection change", () => {
 		await settle();
 
 		expect(appState.gpsDetectedLaps).toEqual([]);
+	});
+
+	/**
+	 * LEAVING A MODE MUST NOT RE-DETECT INTO IT.
+	 *
+	 * The redetect closure is module-level state holding a closure over the
+	 * binder's own gate sliders, and `restoreSection3Controls` ENDS IN
+	 * `updateSelectedLaps()` — which fires that closure. Cleared one line too
+	 * late, a mode switch ran the PREVIOUS mode's closure against detached
+	 * sliders: it re-ran detection, repopulated the arrays `setGpsAnalysisMode`
+	 * had just cleared, redrew markers on a map about to be destroyed, and
+	 * persisted gate offsets for a mode the user had left.
+	 *
+	 * BETWEEN THE TWO GPS MODES, deliberately. Switching to `None` cannot show
+	 * this: `updateSelectedLaps` only reaches the closure in a GPS mode, so the
+	 * obvious "switch away and check" test passes against the defect.
+	 */
+	it("does not re-detect into a GPS mode that has just been left", async () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		// The same shape `currentFitResult.laps` carries: `renderSection3Template`
+		// formats distance and duration off these, and detection is scoped to a
+		// non-empty FIT selection.
+		appState.currentLaps = [
+			{
+				total_elapsed_time: 60,
+				total_distance: 1000,
+				avg_power: 200,
+				start_time: 0,
+				end_time: HALF - 1,
+			},
+			{
+				total_elapsed_time: 60,
+				total_distance: 1000,
+				avg_power: 200,
+				start_time: HALF,
+				end_time: SAMPLE_COUNT - 1,
+			},
+		] as never;
+
+		setGpsAnalysisMode("GPS based out and back");
+		await settle();
+
+		const map = mapInstances.find((m) => !m.destroyed);
+		if (!map) throw new Error("no live map after the out-and-back render");
+		const paintsBeforeSwitch = map.oabMarkerPaints;
+
+		setGpsAnalysisMode("GPS based lap splitting");
+		await settle();
+
+		// Nothing may paint an out-and-back gate from here on: that mode is gone,
+		// its sliders are detached, and its closure has no business running.
+		expect(
+			mapInstances.reduce((total, m) => total + m.oabMarkerPaints, 0),
+		).toBe(paintsBeforeSwitch);
 	});
 
 	/**
