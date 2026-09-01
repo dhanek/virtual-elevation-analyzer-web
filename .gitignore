@@ -83,3 +83,4 @@ vw-demo/
 # Claude Code local state — also holds agent worktrees under .claude/worktrees/,
 # which must never be swept into a commit by a stray `git add -A`.
 .claude/
+/scripts/deploy-s3.sh
