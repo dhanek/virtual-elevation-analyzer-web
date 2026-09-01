@@ -440,7 +440,9 @@ export function resetAnalysisForNewActivity(): void {
 	const { appState } = deps;
 
 	// The three selections, one per mode family.
-	appState.selectedLaps = [];
+	// A file with exactly ONE lap has no choice to make, so do not charge the
+	// user a click for it. Every other count starts empty, as before.
+	appState.selectedLaps = appState.currentLaps.length === 1 ? [1] : [];
 	appState.gpsSelectedLaps = [];
 	appState.outAndBackSelectedSections = [];
 	appState.currentOutAndBackSections = [];

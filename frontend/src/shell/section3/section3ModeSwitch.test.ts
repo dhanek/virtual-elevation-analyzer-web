@@ -163,6 +163,7 @@ import {
 	configureSection3Orchestration,
 	getGpsAnalysisMode,
 	handleOutAndBackSectionSelectionChange,
+	initializeSection3,
 	resetAnalysisForNewActivity,
 	setGpsAnalysisMode,
 	updateSelectedLaps,
@@ -1544,13 +1545,74 @@ describe("loading a new activity resets the analysis", () => {
 		return appState;
 	}
 
-	it("clears the lap selection", async () => {
+	it("leaves the selection empty on a multi-lap file", async () => {
 		const appState = await analyzedStandardPanel();
 		appState.selectedLaps = [2, 4, 6];
 
 		resetAnalysisForNewActivity();
 
+		// Explicitly pinned so the direction below cannot go vacuous if this
+		// file's fixture ever drops to a single lap — at which point the
+		// single-lap default would make an empty selection the wrong answer.
+		expect(appState.currentLaps).toHaveLength(2);
 		expect(appState.selectedLaps).toEqual([]);
+	});
+
+	/**
+	 * A FILE WITH EXACTLY ONE LAP HAS NO CHOICE TO MAKE.
+	 *
+	 * Charging the user a click for the only lap there is made the empty
+	 * selection an attractive state to sit in — which is what made the GPS
+	 * modes' "no selection" fallbacks reachable in ordinary use. Removed at the
+	 * source: exactly one lap ticks itself, every other count still starts
+	 * empty.
+	 */
+	function makeSingleLapAppState(): AppState {
+		const appState = makeAppState();
+		const [firstLap] = appState.currentLaps;
+		// Through the `currentFitResult` setter, which is what a file load uses
+		// (`AppState.ts:362`), so `currentLaps` is re-derived rather than
+		// written past its own source.
+		appState.currentFitResult = {
+			...appState.currentFitResult,
+			laps: [firstLap],
+		} as never;
+		return appState;
+	}
+
+	it("ticks the only lap on a single-lap file", async () => {
+		const appState = makeSingleLapAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		expect(appState.currentLaps).toHaveLength(1);
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.selectedLaps).toEqual([1]);
+	});
+
+	/**
+	 * THE STATE IS NOT THE BEHAVIOUR. `renderSection3Template` ticks the boxes
+	 * from `selectedLaps`, and `restoreSection3Controls` ends in
+	 * `updateSelectedLaps()`, which re-derives the selection FROM THE DOM. A
+	 * default that the render path did not carry through would be silently
+	 * reverted to `[]` by that reconciliation, with the unit assertion above
+	 * still green. So this drives the real render and asserts both ends.
+	 */
+	it("comes back from the render with lap 1 ticked and re-derived", async () => {
+		const appState = makeSingleLapAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+
+		resetAnalysisForNewActivity();
+		initializeSection3();
+		await settle();
+
+		const box = document.getElementById("lap-1") as HTMLInputElement | null;
+		if (!box) throw new Error("the rendered template has no #lap-1 checkbox");
+		expect(box.checked).toBe(true);
+
+		// And the reconciliation agrees with the markup rather than undoing it.
+		updateSelectedLaps();
+		expect(appState.selectedLaps).toEqual([1]);
 	});
 
 	it("tears the panel down even though the mode is already None", async () => {
