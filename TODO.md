@@ -198,15 +198,6 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
-- [ ] **[M–L] Section 3 destroys the map-trim slider bindings on every re-render.**
-      `initializeMapTrimControlsForSelectedLaps` clones and replaces the four `mapTrim` nodes
-      (`section3Orchestration.ts:1110-1138`), stripping the listeners `MODE_CONTROL_TABLE` bound,
-      and its replacements never call `requestModeUpdate`. Reached from any lap-checkbox change.
-      Self-heals only on the next Analyze. The clone-to-unbind idiom is what fights the mode
-      control table, so the fix is structural — bind once and read live state — which is why this
-      carries real regression risk and should **not** ride along with other work.
-      `frontend/src/shell/section3/section3Orchestration.ts:1103-1200` · *origin: audit WR-5*
-
 - [ ] **[XL] Outdoor velodrome auto-calibration.** `velodrome: true` today does exactly one thing —
       zero the actual elevation (`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`,
       `renderOutAndBack.ts:219`). An outdoor velodrome sweeps every heading within a lap, which is
@@ -305,6 +296,66 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Section 3's map-trim sliders get one owner — 2026-09-03
+
+Implemented on `bundle-map-trim-single-owner`, branched from `origin/main` at `2b963d3`.
+1061 tests pass (up 3 net on 1058: seven new guards, minus four per-row cases generated for the
+two table rows that no longer exist), `npm run check` and `npm run lint` clean.
+
+- [x] **[M–L] Section 3 destroys the map-trim slider bindings on every re-render.**
+      Closed, but NOT the way the item prescribed, and the item's own framing was wrong twice.
+
+      **The mechanism was confirmed by measurement**, counting `syncRangeAndNumber`'s
+      `Range [mapTrimStartSlider] changed to N` line, which only the TABLE binding emits: present
+      immediately after Analyze, ABSENT after one lap-checkbox click. The same probe **refuted a
+      double-firing hypothesis** — exactly one table listener was bound after Analyze, not two.
+
+      **It was LATENT, not user-visible.** Every path reaching the clone also hides the panel
+      first: checkbox and select-all go through `invalidateVePanelIfBasisChanged`, and the only
+      other route is `setGpsAnalysisMode`, whose sole UI caller is a `change` listener — so
+      `previousMode !== mode` always holds and `tearDownVeAnalysisPanel` runs before the
+      re-render. No flow was found leaving the panel VISIBLE with the binding dead. Fixed anyway,
+      by maintainer decision, for the duplication and for a hazard one caller away:
+      `rerenderSection3()` is unconditional inside `setGpsAnalysisMode`, so only the impossibility
+      of a no-op `change` event holds the window shut.
+
+      **The item prescribed "bind once and read live state". That is under-specified**, and a
+      first design that moved the controls INTO `MODE_CONTROL_TABLE` was abandoned after two
+      structural blockers surfaced: `handleTrim` reads its window from
+      `trimStartSlider`/`trimEndSlider` and returns early when no panel has rendered them, so the
+      binder could never serve these sliders pre-Analyze; and nothing in the binder writes
+      `appState.presetTrimStart/End`, which auto-rho and `initializeVEAnalysis` read. That
+      approach was [L–XL] and would have modified `handleTrim`, shared by all three modes.
+
+      **What shipped applies the table's OWN doctrine instead** (`modeControlTable.ts:34-39`): a
+      reason from a control that is not inside the mode panel gets no row and is raised by
+      Section 3 directly, exactly as `segmentSelection` already is. The two `mapTrim` rows are
+      gone; Section 3's handlers now end in `commitMapTrim`, which mirrors onto the panel's trim
+      pair, persists, then raises `requestModeUpdate("mapTrim")`. The clone is harmless because
+      the only listeners it can strip are the ones re-added on the next lines. `handleTrim` is
+      untouched, and the panel-to-map mirroring still works because `writeTrim` reaches the map
+      inputs by hard-coded id rather than through the rows.
+
+      **The mirror is load-bearing, not cosmetic.** `requestModeUpdate` reads the window it
+      recomputes with from the PANEL's sliders (`requestModeUpdate.ts:116-131`), so raising the
+      reason without mirroring would have recomputed against the previous window — quietly wrong,
+      and worse than not recomputing. A stale guard in `modeControls.callshape.test.ts` caught it.
+
+      Seven guards, each with a unique killer: M1 the funnel call removed kills the three funnel
+      cases; M2 the mirror removed, M3 a `mapTrim` row put back, M4 the map fit removed and M5 the
+      `presetTrim` write removed each kill exactly one.
+
+      **Checked in the app, 2026-09-03**, `13.07.fit`, Standard:
+        - post-Analyze drag: **exactly one** `requestModeUpdate(mapTrim)`, panel pair mirrored,
+          RMSE 8.69 m → 7.44 m, so the panel really recomputed;
+        - after a lap tick (the clone) and a re-Analyze: still exactly one, RMSE 10.25 m → 6.36 m,
+          and `Range [mapTrim…]` count 0, confirming the binder no longer touches these nodes;
+        - pre-Analyze, no panel: the mirror is a safe no-op, the funnel bails `not configured
+          yet`, no JS errors.
+      `section3Orchestration.ts`, `modeControlTable.ts` · test:
+      `section3/mapTrimModeUpdate.test.ts` (new), `modeControls.callshape.test.ts` (one guard
+      inverted) · *origin: audit WR-5*
 
 ### Bundle F · Condition (a) — the weather cache is bounded — 2026-09-02
 

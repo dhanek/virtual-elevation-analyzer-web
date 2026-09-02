@@ -1688,6 +1688,44 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		// Set map markers with loaded/default trim values.
 		drawTrimRegionOnMap();
 
+		/**
+		 * What every map-trim gesture ends with: persist, then ASK THE PANEL TO
+		 * RECOMPUTE.
+		 *
+		 * The funnel call is raised here rather than by `bindModeControls`, and that
+		 * follows the control table's own doctrine (`modeControlTable.ts:34-39`): a
+		 * reason coming from a control that is NOT inside the mode panel gets no row
+		 * and is raised by Section 3 directly, exactly as `segmentSelection` already
+		 * is (`:384`). These four sliders live in Section 3 and are usable before any
+		 * panel exists.
+		 *
+		 * That ownership is also what makes the clone above harmless. It used to strip
+		 * the table's `mapTrim` listeners along with the stale ones, leaving the
+		 * sliders moving the map and saving settings while the VE panel went on
+		 * describing the previous window. The only listeners it can strip now are the
+		 * ones re-added on the very next lines.
+		 */
+		const commitMapTrim = (role: "start" | "end", value: number): void => {
+			// MIRROR FIRST, and this ordering is load-bearing. `requestModeUpdate`
+			// reads the window it recomputes with from `trimStartSlider` /
+			// `trimEndSlider` -- the PANEL's pair, not these
+			// (`requestModeUpdate.ts:116-131`). The binder used to keep the two
+			// faces in step through `writeTrim`; with no `mapTrim` row it no
+			// longer runs here, so raising the reason without mirroring would
+			// recompute the panel against the PREVIOUS window.
+			const panelSlider = document.getElementById(
+				role === "start" ? "trimStartSlider" : "trimEndSlider",
+			) as HTMLInputElement | null;
+			const panelNumber = document.getElementById(
+				role === "start" ? "trimStartValue" : "trimEndValue",
+			) as HTMLInputElement | null;
+			if (panelSlider) panelSlider.value = value.toString();
+			if (panelNumber) panelNumber.value = value.toString();
+
+			saveMapTrimSettings(deps.appState, deps.parameterStorage);
+			requestModeUpdate("mapTrim");
+		};
+
 		// Add new listeners
 		newMapTrimStartSlider.addEventListener("input", () => {
 			const value = parseInt(newMapTrimStartSlider.value);
@@ -1706,8 +1744,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 				);
 			}
 
-			// Save map trim settings
-			saveMapTrimSettings(deps.appState, deps.parameterStorage);
+			commitMapTrim("start", value);
 		});
 
 		newMapTrimEndSlider.addEventListener("input", () => {
@@ -1725,8 +1762,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 					filteredLapPositionLong,
 				);
 
-			// Save map trim settings
-			saveMapTrimSettings(deps.appState, deps.parameterStorage);
+			commitMapTrim("end", value);
 		});
 
 		newMapTrimStartValue.addEventListener("change", () => {
@@ -1751,8 +1787,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 						filteredLapPositionLong,
 					);
 
-				// Save map trim settings
-				saveMapTrimSettings(deps.appState, deps.parameterStorage);
+				commitMapTrim("start", clamped);
 			}
 		});
 
@@ -1777,8 +1812,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 						filteredLapPositionLong,
 					);
 
-				// Save map trim settings
-				saveMapTrimSettings(deps.appState, deps.parameterStorage);
+				commitMapTrim("end", clamped);
 			}
 		});
 
