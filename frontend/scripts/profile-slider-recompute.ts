@@ -21,6 +21,16 @@ import {
     formatMs,
 } from './syntheticActivity'
 
+/**
+ * A profiling run always FIXES CdA and Crr — it measures the recompute path,
+ * not the optimizer — but `AnalysisParameters` types both as `number | null`
+ * because `null` means "optimize this one". `calculate_virtual_elevation`
+ * takes numbers, and production only ever reaches it with the resolved values
+ * (`renderStandardVe.ts:148`, `updateModeVEPlots.ts:260`). Naming the
+ * precondition here keeps the wasm boundary honest instead of widening it.
+ */
+type FixedParameters = AnalysisParameters & { cda: number; crr: number }
+
 const SAMPLE_COUNT = 7_200
 const WARMUP_ITERATIONS = 5
 const MEASURED_ITERATIONS = 20
@@ -40,7 +50,7 @@ async function main(): Promise<void> {
     await init({ module_or_path: wasm })
 
     const activity = createSyntheticActivity(SAMPLE_COUNT)
-    const params: AnalysisParameters = {
+    const params: FixedParameters = {
         ...DEFAULT_PARAMETERS,
         cda: 0.23,
         crr: 0.004,
@@ -120,7 +130,7 @@ async function measureScenario(name: string, run: () => void): Promise<ScenarioM
 
 function runStandardFitRecompute(
     activity: ActivityData,
-    params: AnalysisParameters,
+    params: FixedParameters,
     trimStart: number,
     trimEnd: number,
 ): void {
@@ -154,7 +164,7 @@ function runStandardFitRecompute(
 
 function runStandardCompareRecompute(
     activity: ActivityData,
-    params: AnalysisParameters,
+    params: FixedParameters,
     trimStart: number,
     trimEnd: number,
 ): void {
@@ -206,7 +216,7 @@ function runStandardCompareRecompute(
 
 function runGpsLapRecompute(
     activity: ActivityData,
-    params: AnalysisParameters,
+    params: FixedParameters,
     lapRanges: Array<{ startIdx: number; endIdx: number }>,
 ): void {
     const normalized = getNormalizedActivityArrays(activity)
@@ -265,7 +275,7 @@ function runGpsLapRecompute(
 
 function runOutAndBackRecompute(
     activity: ActivityData,
-    params: AnalysisParameters,
+    params: FixedParameters,
     sections: OutAndBackSection[],
 ): void {
     const normalized = getNormalizedActivityArrays(activity)

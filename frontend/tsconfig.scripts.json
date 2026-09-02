@@ -1,0 +1,37 @@
+{
+  // The Node-side program: `scripts`, which `tsconfig.json` deliberately does
+  // not include — its `include` names `src` only, so until this file existed
+  // `npm run check` passed on a script that could not run.
+  //
+  // Three things make this more than a one-line `include` override, and each
+  // was measured rather than assumed:
+  //
+  // 1. `types` must carry BOTH. The scripts are Node programs, but they import
+  //    from `src` directly, so those browser modules land in this program too
+  //    and still need `vite/client` for `import.meta.env` (`utils/log.ts`) and
+  //    for the CSS side-effect import in `MapVisualization.ts`.
+  //
+  // 2. The ambient declarations must be included EXPLICITLY. A `.d.ts` that
+  //    nothing imports is reached through `include`, not through the import
+  //    graph, so `src/types/plotly-basic-dist.d.ts` is invisible to a
+  //    program that includes only the scripts — and `plotlyLoader.ts` arrives
+  //    anyway, via the import graph, without its declaration.
+  //
+  // 3. The `@wasm/*` `paths` mapping DOES resolve through `extends` on the
+  //    TypeScript in this repo. An earlier attempt recorded that it did not;
+  //    re-measured 2026-09-02 and it does, so `paths` is not restated here.
+  //
+  // WHY `@types/jsdom` IS `^30` AGAINST `jsdom@29`. This program is what made
+  // those types necessary, so the reason lives here rather than in
+  // `package.json`, which cannot carry a comment. The runtime dependency is
+  // jsdom 29. No `@types/jsdom@29` was EVER published — the majors on npm are
+  // 2, 11, 12, 16, 20, 21, 27, 28 and 30 — so there is no exact pairing to
+  // reach for, and 30 is the nearest maintained major. The mismatch is
+  // deliberate, not a stale bump: do not "fix" it by pinning to `^28`, and do
+  // not repeat the `npm view` investigation that established this.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": ["scripts/**/*", "src/types/**/*.d.ts"]
+}
