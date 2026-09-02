@@ -73,7 +73,19 @@ class FakeMap {
 	}
 	showDetectedLaps(): void {}
 	showOutAndBackSections(): void {}
-	fitBoundsToTrimRegion(): void {}
+	// Recorded, not ignored: whether this is called AT ALL on a first load is
+	// the whole of F2-01. A no-op stub cannot tell a drawn region from a
+	// skipped one.
+	public trimRegionFits: Array<{ start: number; end: number; latCount: number }> =
+		[];
+	fitBoundsToTrimRegion(
+		start: number,
+		end: number,
+		lat: number[],
+		_long: number[],
+	): void {
+		this.trimRegionFits.push({ start, end, latCount: lat.length });
+	}
 	setGpsMarker(): void {}
 	// Out-and-back's gate markers. Absent until the new-activity block exercised
 	// that mode, where the miss surfaced as an UNHANDLED rejection rather than a
@@ -1613,6 +1625,45 @@ describe("loading a new activity resets the analysis", () => {
 		// And the reconciliation agrees with the markup rather than undoing it.
 		updateSelectedLaps();
 		expect(appState.selectedLaps).toEqual([1]);
+	});
+
+	/**
+	 * F2-01. `initializeSection3` runs `restoreSection3Controls` -- which ends in
+	 * `updateSelectedLaps()` -- BEFORE the map is constructed, by design. Both
+	 * of that function's map-dependent branches are guarded on a map that is
+	 * still `null` at that point, so on a single-lap file's first load the map
+	 * was published having never been told the selection, and the trim region
+	 * was never drawn. The fix applies both at the moment the map is published.
+	 */
+	it("hands the map the ticked lap at first paint, not an empty selection", async () => {
+		const appState = makeSingleLapAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+
+		resetAnalysisForNewActivity();
+		initializeSection3();
+		await settle();
+
+		// Exactly one map is built on this path; `.at(-1)` would hide a second.
+		expect(mapInstances).toHaveLength(1);
+		expect(mapInstances[0].selectedLaps).toEqual([1]);
+	});
+
+	it("draws the trim region once the map exists, not only if it already did", async () => {
+		const appState = makeSingleLapAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+
+		resetAnalysisForNewActivity();
+		initializeSection3();
+		await settle();
+
+		// One call, not two: `currentFileHash` is null in this fixture, so the trim
+		// init runs to completion synchronously with no map, and its own call bails
+		// at the guard. The one recorded fit is `initializeSection3`'s.
+		const fits = mapInstances[0].trimRegionFits;
+		expect(fits).toHaveLength(1);
+		expect(fits[0].start).toBe(appState.presetTrimStart);
+		expect(fits[0].end).toBe(appState.presetTrimEnd);
+		expect(fits[0].latCount).toBeGreaterThan(0);
 	});
 
 	it("tears the panel down even though the mode is already None", async () => {
