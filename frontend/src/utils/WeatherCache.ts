@@ -1,6 +1,11 @@
 /**
- * Permanent IndexedDB cache for weather data
- * Weather data never expires - identical queries return cached results indefinitely
+ * IndexedDB cache for weather data.
+ *
+ * Entries do not EXPIRE -- an entry is the weather at a fixed instant at a
+ * fixed place, so an identical query returns the cached result however old it
+ * is. They are still evicted: the store is capped at
+ * `WEATHER_CACHE_MAX_ENTRIES` rows and the oldest-inserted go first, because
+ * nothing about the key stops a session from minting rows without limit.
  */
 
 import { TrimRegionMetadata, roundToNearest15Min } from './GeoCalculations';
@@ -18,7 +23,7 @@ export interface WeatherCacheKey {
 export interface WeatherCacheEntry {
     key: WeatherCacheKey;
     data: WeatherResponse;
-    cachedAt: number;     // Timestamp when stored (for statistics only)
+    cachedAt: number;     // Timestamp when stored; also the eviction order
     source: 'api' | 'cache';
 }
 
@@ -29,12 +34,32 @@ interface WeatherCacheStats {
     totalSizeEstimate: number; // Rough estimate in bytes
 }
 
+/**
+ * Largest number of rows the cache keeps. An entry is six numbers plus its key,
+ * so ~300 bytes of JSON — 5000 rows is roughly 1.5 MB, and far more distinct
+ * trim windows than a session produces.
+ *
+ * The cap exists because the key cannot absorb this on its own: `buildCacheKey`
+ * uses the trim region's centroid at 6 decimals (~0.1 m) while the data behind
+ * it has kilometre-scale spatial and 15-minute temporal resolution, so every
+ * trim-slider move misses the cache and mints another row. Coarsening the key
+ * is the fix for THAT, and it is deliberately not done here — it would round
+ * the wind value the cache returns, and bundle F's condition (b) has to
+ * re-measure wind accuracy against a 0.3 m/s bar first.
+ */
+export const WEATHER_CACHE_MAX_ENTRIES = 5000;
+
 export class WeatherCache {
     private readonly dbName = 've-weather-cache';
     private readonly dbVersion = 1;
     private readonly storeName = 'weather-data';
+    private readonly maxEntries: number;
     private db: IDBDatabase | null = null;
     private initPromise: Promise<void> | null = null;
+
+    constructor(maxEntries: number = WEATHER_CACHE_MAX_ENTRIES) {
+        this.maxEntries = maxEntries;
+    }
 
     /**
      * Initialize IndexedDB
@@ -105,7 +130,7 @@ export class WeatherCache {
         // Try cache first
         const cached = await this.getCached(cacheKey);
         if (cached) {
-            log.debug('💾 Weather data found in cache (permanent):', {
+            log.debug('💾 Weather data found in cache:', {
                 location: `${key.lat}, ${key.lon}`,
                 date: key.date,
                 time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`,
@@ -120,7 +145,7 @@ export class WeatherCache {
         try {
             const apiData = await api.fetchWeatherData(metadata);
 
-            // Store permanently in cache
+            // Store, evicting the oldest rows if this takes the store over its cap
             const entry: WeatherCacheEntry = {
                 key,
                 data: apiData,
@@ -129,7 +154,7 @@ export class WeatherCache {
             };
 
             await this.store(cacheKey, entry);
-            log.debug('💾 Weather data cached permanently:', {
+            log.debug('💾 Weather data cached:', {
                 location: `${key.lat}, ${key.lon}`,
                 date: key.date,
                 time: `${String(key.slotHour).padStart(2, '0')}:${String(key.slotMinute).padStart(2, '0')}`
@@ -202,7 +227,9 @@ export class WeatherCache {
     }
 
     /**
-     * Store weather data permanently (no expiration)
+     * Store weather data, then drop the oldest rows if that put took the store
+     * over its cap. Entries do not expire — see `evictOverflow` for why the
+     * removal is a cap rather than a TTL.
      */
     private async store(cacheKey: string, entry: WeatherCacheEntry): Promise<void> {
         if (!this.db) {
@@ -217,14 +244,92 @@ export class WeatherCache {
             const request = store.put({ ...entry, cacheKey });
 
             request.onsuccess = () => {
-                resolve();
+                // Counted AFTER the put lands, and on the store rather than on a
+                // running total, so overwriting an existing key -- which leaves
+                // the row count where it was -- evicts nothing.
+                this.evictOverflow(store);
             };
 
             request.onerror = () => {
                 log.error('Failed to store in cache:', request.error);
                 reject(new Error(`Cache storage error: ${request.error?.message}`));
             };
+
+            // Resolved on the transaction rather than on the put, so the entry
+            // and the evictions it triggered commit together.
+            transaction.oncomplete = () => {
+                resolve();
+            };
+
+            transaction.onabort = () => {
+                log.error('Weather cache write aborted:', transaction.error);
+                reject(new Error(`Cache storage error: ${transaction.error?.message}`));
+            };
         });
+    }
+
+    /**
+     * Delete oldest-first until the store is back at the cap.
+     *
+     * FIFO by insertion, not LRU: `cachedAt` is written once and never touched
+     * on a read, so this is oldest-INSERTED. True LRU would need a write on
+     * every cache hit, turning each read into a readwrite transaction, and it
+     * would buy nothing here -- re-reading a ride hits the same key, and a
+     * moved trim window is a new key either way.
+     *
+     * There is no TTL, deliberately. An entry is the weather at a fixed instant
+     * at a fixed place: rides past `forecastMaxDays` come from the archive,
+     * which does not change, so an expiry would re-fetch immutable data forever
+     * to serve only the recent-ride case. `autoRho` already re-fetches the one
+     * case that matters -- a cached row that came back without wind data.
+     *
+     * Runs inside the caller's transaction. Failures here are logged and
+     * swallowed: `preventDefault()` stops a failed delete from aborting the
+     * transaction, because a ride's analysis must not fail over a row the cache
+     * could not tidy up.
+     */
+    private evictOverflow(store: IDBObjectStore): void {
+        const countRequest = store.count();
+
+        countRequest.onerror = (event) => {
+            event.preventDefault();
+            log.warn('Weather cache eviction skipped, count failed:', countRequest.error);
+        };
+
+        countRequest.onsuccess = () => {
+            let remaining = countRequest.result - this.maxEntries;
+            if (remaining <= 0) {
+                return;
+            }
+
+            log.debug(`🧹 Weather cache over cap, evicting ${remaining} oldest ${remaining === 1 ? 'entry' : 'entries'}`);
+
+            // Ascending over `cachedAt`, so the cursor reaches the oldest row
+            // first. The index is declared in `onupgradeneeded` already, so no
+            // schema change and no `dbVersion` bump is owed for this.
+            const cursorRequest = store.index('cachedAt').openCursor();
+
+            cursorRequest.onerror = (event) => {
+                event.preventDefault();
+                log.warn('Weather cache eviction stopped, cursor failed:', cursorRequest.error);
+            };
+
+            cursorRequest.onsuccess = () => {
+                const cursor = cursorRequest.result;
+                if (!cursor || remaining <= 0) {
+                    return;
+                }
+
+                const deleteRequest = cursor.delete();
+                deleteRequest.onerror = (event) => {
+                    event.preventDefault();
+                    log.warn('Weather cache eviction skipped a row:', deleteRequest.error);
+                };
+
+                remaining -= 1;
+                cursor.continue();
+            };
+        };
     }
 
     /**
