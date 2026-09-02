@@ -40,12 +40,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** Every `createVeCalculator` call the chain made, in order. */
 const calculatorCalls = vi.hoisted(
-	() => [] as Array<{ cda: number; crr: number }>,
+	() => [] as Array<{
+		cda: number;
+		crr: number;
+		altitude: number[];
+		rhoArray: number[] | null;
+		timestamps: number;
+	}>,
 );
 
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	createVeCalculator: (input: any) => {
-		calculatorCalls.push({ cda: input.cda, crr: input.crr });
+		calculatorCalls.push({
+			cda: input.cda,
+			crr: input.crr,
+			// WR-1's probe: WHICH elevation series reached the physics, which is
+			// the only place the analyze leg's choice of profile is observable.
+			altitude: Array.from(input.altitude ?? []),
+			// And WHAT AIR DENSITY it was given. Kept unconverted -- an
+			// `Array.from` would turn the `undefined` holes this probe exists to
+			// catch into something that still looks like a number array.
+			rhoArray: input.rhoArray ?? null,
+			timestamps: input.timestamps.length,
+		});
 		const n = input.timestamps.length;
 		return {
 			calculate_virtual_elevation: () => ({
@@ -110,9 +127,13 @@ import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "./types";
-import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
-import { showOutAndBackVEPlot } from "../outAndBack/renderOutAndBack";
+import { showGpsLapVEAnalysis, showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
+import {
+	showOutAndBackVEAnalysis,
+	showOutAndBackVEPlot,
+} from "../outAndBack/renderOutAndBack";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
+import { resetRecomputeThrottle } from "./recomputeRunner";
 import { resetModeUpdateRequests } from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
@@ -187,6 +208,15 @@ function makeAppState(): AppState {
 		selectedLaps: [1],
 		currentAnalyzedLaps: [1, 2],
 		airSpeedCalibrationPercent: 0,
+		// A FRESH SESSION, at the real AppState defaults (AppState.ts:272,284-285).
+		// Without these the fixture leaves them `undefined`, and the WR-3/WR-4
+		// assertions pass vacuously against `undefined !== "none"` and
+		// `undefined !== null` — the exact vacuous-guard shape this file exists
+		// to answer. Both bugs were first "caught" by tests that did that.
+		currentWindSource: "none",
+		currentVirtualDistances: [],
+		currentCoveredItems: null,
+		currentVEResult: null,
 		activeDisplayProfile: "fit-raw",
 		isCalculatingAutoRho: false,
 		demProfilesAvailable: true,
@@ -228,12 +258,30 @@ const lapProfile = (lapNumber: number) => ({
 	distances: [0, 1, 2],
 	virtualElevation: [0, 1, 2],
 	actualElevation: [0, 1, 2],
-	supplementarySeries: null,
+	// The analyze leg builds one of these for every lap it keeps
+	// (`buildSegmentSupplementarySeries`), so a null here modelled a state
+	// production never reaches — and WR-3's seed reads it.
+	supplementarySeries: {
+		distancesKm: [0, 1, 2],
+		powerWatts: [200, 200, 200],
+		apparentWindSpeedMps: [3, 3, 3],
+		virtualDistanceAirKm: [0, 1, 2],
+		virtualDistanceGroundKm: [0, 1, 2.2],
+	},
 	duration: HALF,
 	totalDistance: 2,
 });
 
 const meanElevation = { distances: [0, 1, 2], elevation: [0, 1, 2] };
+
+/** A minimal but well-formed supplementary series for one leg. */
+const legSeries = (scale: number) => ({
+	distancesKm: [0, 1, 2].map((d) => d * scale),
+	powerWatts: [200, 200, 200],
+	apparentWindSpeedMps: [3, 3, 3],
+	virtualDistanceAirKm: [0, 1, 2].map((d) => d * scale),
+	virtualDistanceGroundKm: [0, 1, 2.2].map((d) => d * scale),
+});
 
 const sectionProfile = {
 	sectionNumber: 1,
@@ -242,11 +290,13 @@ const sectionProfile = {
 	outboundDistances: [0, 1, 2],
 	outboundVE: [0, 1, 2],
 	outboundActualElevation: [0, 1, 2],
-	outboundSeries: null,
+	// As with lapProfile above: the analyze leg builds a series per surviving
+	// leg, and WR-3's seed reads them to total the section.
+	outboundSeries: legSeries(1.0),
 	inboundDistances: [0, 1, 2],
 	inboundVE: [0, 1, 2],
 	inboundActualElevation: [0, 1, 2],
-	inboundSeries: null,
+	inboundSeries: legSeries(0.9),
 	outboundDuration: HALF,
 	inboundDuration: HALF,
 	totalDistance: 4,
@@ -299,6 +349,13 @@ interface ModeUnderTest {
 	gpsAnalysisMode: string;
 	/** Renders the real sidebar and does the real binding. */
 	render: (appState: AppState) => Promise<void>;
+	/**
+	 * The ANALYZE leg — the entry point that COMPUTES the per-segment profiles
+	 * and only then renders. `render` above is handed profiles already computed,
+	 * so it never reaches a calculator and cannot see which elevation series the
+	 * physics was given.
+	 */
+	analyze: (appState: AppState) => Promise<unknown>;
 	drawSpy: ReturnType<typeof vi.fn>;
 	/** That mode's three secondary-tab draws, in tab order. */
 	secondary: {
@@ -318,6 +375,17 @@ const MODES: readonly ModeUnderTest[] = [
 			power: drawn.gpsLapPower,
 			vd: drawn.gpsLapVd,
 		},
+		analyze: (appState) =>
+			showGpsLapVEAnalysis(
+				makeServices(appState),
+				parameterStorage,
+				resultsStorage,
+				async () => ({}),
+				appState.currentGpsLapIndexRanges!,
+				appState.currentFitData,
+				appState.currentParameters!,
+				0,
+			),
 		render: (appState) =>
 			showGpsLapVEPlot(
 				makeServices(appState),
@@ -342,6 +410,17 @@ const MODES: readonly ModeUnderTest[] = [
 			power: drawn.outAndBackPower,
 			vd: drawn.outAndBackVd,
 		},
+		analyze: (appState) =>
+			showOutAndBackVEAnalysis(
+				makeServices(appState),
+				parameterStorage,
+				resultsStorage,
+				appState.outAndBackSections as any,
+				appState.currentFitData,
+				appState.currentParameters!,
+				0,
+				async () => ({}),
+			),
 		render: (appState) =>
 			showOutAndBackVEPlot(
 				makeServices(appState),
@@ -392,6 +471,21 @@ describe.each(MODES)(
 		});
 
 		afterEach(() => {
+			// FIRST, and before `useRealTimers` -- this is CROSS-TEST state.
+			//
+			// `scheduleRecompute` guards on a MODULE-LEVEL `throttleTimer`
+			// handle that is only nulled inside its own callback
+			// (`recomputeRunner.ts:239`). `useRealTimers` DISCARDS a pending
+			// fake timer without running it, so a test that ends with a
+			// recompute still armed leaves that handle set forever -- and every
+			// later test then hits `if (throttleTimer !== null) return`, arms
+			// nothing, and observes no recompute at all. Its assertion fails for
+			// a reason with nothing to do with what it tests.
+			//
+			// `standardModeRealChain.test.ts:387-398` carries the same hook for
+			// the same reason; it is why Standard's post-bind kick was testable
+			// and this file's was not.
+			resetRecomputeThrottle();
 			vi.useRealTimers();
 			clearModeUpdateCallbacks();
 			resetModeUpdateRequests();
@@ -411,6 +505,54 @@ describe.each(MODES)(
 		 * The `beforeEach` above renders and then clears the spies, so reaching
 		 * this assertion means the panel is up and NOTHING has been dragged.
 		 */
+		/**
+		 * WR-3, the rest of the same seam.
+		 *
+		 * `currentWindSource` and `currentVirtualDistances` had exactly ONE
+		 * writer between them -- `summarize`, i.e. the UPDATE path. So Analyze ->
+		 * Store Result with nothing in between persisted `windSource: "none"` on
+		 * a fresh session, or the PREVIOUS analysis's virtual distances on a
+		 * second analyze. The `beforeEach` renders and clears, so reaching these
+		 * assertions means the panel is up and nothing has been dragged.
+		 */
+		it("records the wind source before any control is touched", () => {
+			expect(appState.currentWindSource).not.toBe("none");
+		});
+
+		it("records this analysis's virtual distances, not a previous one's", () => {
+			expect(appState.currentVirtualDistances.length).toBeGreaterThan(0);
+		});
+
+		/**
+		 * WR-4, and the trap the re-scoping note called out: a seed that does
+		 * not reproduce the first update is the SAME defect in a new place.
+		 *
+		 * `analyzeOrchestrator.ts` used to assign `payload.initialResult` -- ONE
+		 * stitched fit over the concatenated selection -- while these panels
+		 * display N per-lap fits (2N legs for out-and-back). Store Result
+		 * straight after Analyze therefore persisted an r2/RMSE no screen ever
+		 * showed, and the first control nudge silently replaced it.
+		 *
+		 * Asserted as an EQUALITY against a nudge that changes nothing, not as
+		 * a non-null check: "a result exists" would pass against the stitched
+		 * fit too. What has to hold is that the analyze-time value and the
+		 * update-time value are the same number.
+		 */
+		it("seeds the result the first recompute goes on to write", async () => {
+			await settle();
+
+			const seeded = appState.currentVEResult;
+			expect(seeded).not.toBeNull();
+			const beforeNudge = JSON.stringify(seeded);
+
+			// A gesture that changes NOTHING: re-fire `input` at the value the
+			// slider already holds. Same inputs, so the same result -- unless
+			// the seed came from somewhere else.
+			await drag("cdaSlider", parseFloat(el("cdaSlider").value));
+
+			expect(JSON.stringify(appState.currentVEResult)).toBe(beforeNudge);
+		});
+
 		it("has the analysed samples in AppState before any control is touched", () => {
 			expect(appState.currentFilteredData).not.toBeNull();
 			expect(appState.currentFilteredData!.power.length).toBeGreaterThan(0);
@@ -638,6 +780,175 @@ describe.each(MODES)(
 			expect(secondary.wind).toHaveBeenCalledTimes(1);
 			expect(secondary.power).toHaveBeenCalledTimes(0);
 			expect(secondary.vd).toHaveBeenCalledTimes(0);
+		});
+	},
+);
+
+/**
+ * WR-1 — THE ANALYZE LEG MUST HONOUR THE ACTIVE ELEVATION PROFILE.
+ *
+ * `resolveElevationProfile` is what turns "the smoothing toggle is ON" into an
+ * actual array. Four production callers route through it; the two GPS ANALYZE
+ * legs did not, reading `getNormalizedActivityArrays(fitData).altitude` — the
+ * raw FIT channel — straight into the per-lap calculators. With a DEM applied
+ * the toggle therefore rendered ON while the first paint was computed from
+ * something else, and the numbers moved on the first control nudge, when the
+ * update path (which DOES resolve) took over.
+ *
+ * `elevationToggle.integration.test.ts` claimed to cover exactly this in three
+ * cases named "standard mode", "gps-lap mode" and "out-and-back mode". All
+ * three called `resolveElevationProfile` directly with the same fixture and
+ * imported no mode module at all, so all three passed against both GPS legs
+ * being wired to the raw channel. That is the same vacuous-guard shape this
+ * file was created to answer, which is why the real guard belongs here: the
+ * assertion is on the series that reached the physics, through the real render.
+ */
+describe.each(MODES)(
+	"$name: the analyze leg honours the active elevation profile",
+	({ gpsAnalysisMode, analyze }) => {
+		/** Distinct per index, and distinct BETWEEN profiles, so a slice of one
+		 * can never be mistaken for the same slice of another. */
+		const FIT_RAW = Array.from({ length: SAMPLE_COUNT }, (_, i) => i);
+		const DEM_NEAREST = Array.from(
+			{ length: SAMPLE_COUNT },
+			(_, i) => 1000 + i,
+		);
+		const DEM_SMOOTHED = Array.from(
+			{ length: SAMPLE_COUNT },
+			(_, i) => 5000 + i,
+		);
+
+		/** Both modes compute their FIRST segment over indices 0..HALF-1 — lap 1
+		 * for GPS-lap, the outbound leg for out-and-back. */
+		const firstSegment = (profile: number[]) => profile.slice(0, HALF);
+
+		function appStateWithProfiles(
+			active: "fit-raw" | "dem-raw-nearest" | "dem-interpolated-smoothed-5pt",
+		): AppState {
+			const appState = makeAppState();
+			// Replaced wholesale rather than mutated: `altitude` is readonly on
+			// ActivityDataLike, and the resolver reads the normalized arrays that
+			// are derived from this object.
+			appState.currentFitData = {
+				...makeFitData(),
+				altitude: [...FIT_RAW],
+			} as unknown as AppState["currentFitData"];
+			appState.fitRawElevation = [...FIT_RAW];
+			appState.demRawNearestElevation = [...DEM_NEAREST];
+			appState.demInterpolatedSmoothed5ptElevation = [...DEM_SMOOTHED];
+			appState.demProfilesAvailable = true;
+			appState.activeDisplayProfile = active;
+			return appState;
+		}
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+			Element.prototype.scrollIntoView = () => {};
+			clearModeUpdateCallbacks();
+			resetModeUpdateRequests();
+			modeState.gps = gpsAnalysisMode;
+			calculatorCalls.length = 0;
+			renderHostPage();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+			clearModeUpdateCallbacks();
+			resetModeUpdateRequests();
+		});
+
+		it("computes the first paint from the smoothed DEM profile when that is active", async () => {
+			await analyze(appStateWithProfiles("dem-interpolated-smoothed-5pt"));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(calculatorCalls[0].altitude).toEqual(firstSegment(DEM_SMOOTHED));
+		});
+
+		it("computes the first paint from the nearest-DEM profile when that is active", async () => {
+			await analyze(appStateWithProfiles("dem-raw-nearest"));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(calculatorCalls[0].altitude).toEqual(firstSegment(DEM_NEAREST));
+		});
+
+		it("still uses the raw FIT channel when no DEM profile is active", async () => {
+			// The other half of the guard: resolving must not mean "always DEM".
+			await analyze(appStateWithProfiles("fit-raw"));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(calculatorCalls[0].altitude).toEqual(firstSegment(FIT_RAW));
+		});
+	},
+);
+
+
+/**
+ * THE AIR-DENSITY SERIES AND THE SEGMENT IT IS SLICED FOR.
+ *
+ * Both analyze legs walked their segment on `allTimestamps.length` and indexed
+ * `allRho` with the same counter — `renderGpsLap.ts:210`'s
+ * `if (allRho) lapRho.push(allRho[i])` and `renderOutAndBack.ts`' `legRho`.
+ * Nothing checks that the density channel is as long as the ride.
+ * `resolveRhoArray` accepts it on `.some(rho => rho > 0)`, and
+ * `getNormalizedActivityArrays` converts it without padding, so a device that
+ * stopped emitting air density mid-ride yields a SHORT array: the tail indices
+ * pushed `undefined` into a `number[]` and NaN rho crossed the WASM boundary
+ * for the rest of that segment.
+ *
+ * The Standard leg had already been given this guard, with the rule written
+ * down at `rhoArrayResolver.ts:86` — "a short or hole-punched array under the
+ * calculator is a worse bug than a constant one". These two legs are that rule
+ * applied where it was missed, so the assertion is not "rho is right" but
+ * "rho is either complete or absent, never partial".
+ */
+describe.each(MODES)(
+	"$name: the analyze leg's air-density slice",
+	({ gpsAnalysisMode, analyze }) => {
+		beforeEach(() => {
+			modeState.gps = gpsAnalysisMode;
+			calculatorCalls.length = 0;
+			Element.prototype.scrollIntoView = () => {};
+			renderHostPage();
+		});
+
+		/** An activity whose recorded air density stops after `covered` samples. */
+		function appStateWithRho(covered: number): AppState {
+			const appState = makeAppState();
+			appState.currentFitData = {
+				...makeFitData(),
+				air_density_data: new Array<number>(covered).fill(1.22),
+			} as unknown as AppState["currentFitData"];
+			return appState;
+		}
+
+		it("hands the calculator a complete series when the channel spans the ride", async () => {
+			await analyze(appStateWithRho(SAMPLE_COUNT));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			for (const call of calculatorCalls) {
+				expect(call.rhoArray).not.toBeNull();
+				expect(call.rhoArray).toHaveLength(call.timestamps);
+				expect(call.rhoArray!.every(Number.isFinite)).toBe(true);
+			}
+		});
+
+		it("falls back to a constant rather than a hole-punched series", async () => {
+			// Density for the first quarter of the ride only, so the first
+			// segment of BOTH modes (0..HALF-1) runs off the end of it.
+			await analyze(appStateWithRho(SAMPLE_COUNT / 4));
+
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			for (const call of calculatorCalls) {
+				// Null is the fallback; what must never reach the physics is an
+				// array with holes in it or one shorter than the other series.
+				if (call.rhoArray !== null) {
+					expect(call.rhoArray).toHaveLength(call.timestamps);
+					expect(call.rhoArray.every(Number.isFinite)).toBe(true);
+				}
+			}
+			// And at least one segment actually hit the short tail, or this test
+			// proves nothing.
+			expect(calculatorCalls.some((call) => call.rhoArray === null)).toBe(true);
 		});
 	},
 );

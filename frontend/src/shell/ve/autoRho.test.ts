@@ -189,6 +189,78 @@ describe("calculateAutoRho — successful fetch", () => {
 	});
 });
 
+describe("calculateAutoRho — a stored wind is never overwritten (D-a)", () => {
+	/**
+	 * Maintainer ruling, 2026-08-30: reopening a previously analysed file must
+	 * restore the EXACT conditions it was analysed under — the wind, where that
+	 * wind came from, and the height factor.
+	 *
+	 * Auto-rho re-runs on load (fileLoadOrchestration.ts:389,
+	 * bindStandardSliders.ts:632, neither suppressed by isLoadingParameters) and
+	 * assigned `updateParams.wind_speed` from the API unconditionally. So a
+	 * saved analysis reopened with auto_calculate_rho: true had its wind
+	 * replaced, and only THEN did k follow. Preserving k alone was never enough:
+	 * a changed wind re-fits the analysis just as surely as a changed k.
+	 */
+	test("a hand-typed wind survives, with its provenance and factor", async () => {
+		const h = setupHarness();
+		h.parametersComponent.setParameters({
+			wind_speed: 4.2,
+			wind_direction: 130,
+			wind_entry: "manual",
+			wind_height_factor: 0.8,
+		});
+
+		await succeedOnT1(h);
+
+		const params = h.parametersComponent.getParameters();
+		// The rho IS the point of the fetch and must still update.
+		expect(params.rho).toBe(1.1984);
+		expect(params.rho_source).toBe("weather_api");
+		// The analysis's own conditions must not move.
+		expect(params.wind_speed).toBe(4.2);
+		expect(params.wind_direction).toBe(130);
+		expect(params.wind_entry).toBe("manual");
+		expect(params.wind_height_factor).toBe(0.8);
+	});
+
+	test("a legacy wind of unknown provenance survives too", async () => {
+		// normalizeLoadedParameters stamps "unknown" on records predating the
+		// height factor. D-07 requires those to reproduce the number the
+		// maintainer already read, which a replaced wind would break.
+		const h = setupHarness();
+		h.parametersComponent.setParameters({
+			wind_speed: 2.75,
+			wind_direction: 45,
+			wind_entry: "unknown",
+			wind_height_factor: 1.0,
+		});
+
+		await succeedOnT1(h);
+
+		expect(h.parametersComponent.getParameters().wind_speed).toBe(2.75);
+		expect(h.parametersComponent.getParameters().wind_direction).toBe(45);
+		expect(h.parametersComponent.getParameters().wind_height_factor).toBe(1.0);
+	});
+
+	test("a previously weather-filled wind is refreshed", async () => {
+		// The other half of the guard: provenance "weather" means the API owns
+		// this number, so a new fetch must be allowed to update it. Without this
+		// the fix would freeze the wind for everyone.
+		const h = setupHarness();
+		h.parametersComponent.setParameters({
+			wind_speed: 9.9,
+			wind_direction: 10,
+			wind_entry: "weather",
+		});
+
+		await succeedOnT1(h);
+
+		expect(h.parametersComponent.getParameters().wind_speed).toBe(3.5);
+		expect(h.parametersComponent.getParameters().wind_direction).toBe(220);
+	});
+});
+
 describe("calculateAutoRho — weather failure degrades (T-06-08)", () => {
 	test("resolves null, clears the in-progress flag and warns the user", async () => {
 		const h = setupHarness();

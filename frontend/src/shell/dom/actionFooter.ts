@@ -7,6 +7,11 @@ export interface ActionFooterCallbacks {
     onSaveScreenshot: () => void
     onStoreResult: () => void
     onExportAll: () => void
+    /**
+     * Optional so the three sidebars can adopt the button independently, and so
+     * a panel that never renders one is not forced to pass a no-op.
+     */
+    onShowAllResults?: () => void
 }
 
 /**
@@ -30,6 +35,15 @@ export function bindActionFooter(callbacks: ActionFooterCallbacks): void {
         storeBtn.addEventListener('click', () => {
             log.debug('Action footer: storeResult clicked')
             callbacks.onStoreResult()
+        })
+    }
+
+    const showAllBtn = document.getElementById('showAllResults')
+    if (showAllBtn && callbacks.onShowAllResults) {
+        const onShowAllResults = callbacks.onShowAllResults
+        showAllBtn.addEventListener('click', () => {
+            log.debug('Action footer: showAllResults clicked')
+            onShowAllResults()
         })
     }
 

@@ -8,7 +8,7 @@ import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js
 import { showNotification } from '../dom/notifications';
 import { ShellServices } from '../analysis/types';
 import { refreshCrrTempReadout, syncCrrTempAmbientFromWeather } from './crrTempControls';
-import { refreshWindHeightReadout, syncWindHeightFromWeather } from './windHeightControls';
+import { refreshWindHeightReadout, syncWindHeightFromWeather, weatherMayFillWind } from './windHeightControls';
 import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallback';
 
 /**
@@ -231,11 +231,16 @@ export async function calculateAutoRho(
                 }
             };
 
-            // Only set wind parameters if they are valid numbers
-            if (weatherEntry.data.windSpeed !== undefined && weatherEntry.data.windSpeed !== null) {
+            // Only set wind parameters if they are valid numbers AND the wind is
+            // the API's to write (D-a). A hand-typed wind, or a legacy one whose
+            // provenance is unknown, is left exactly as stored: auto-rho re-runs
+            // on load, so overwriting here silently re-fits an analysis the user
+            // has already read. `weatherMayFillWind` is the single decision site.
+            const mayFillWind = weatherMayFillWind(parametersComponent.getParameters());
+            if (mayFillWind && weatherEntry.data.windSpeed !== undefined && weatherEntry.data.windSpeed !== null) {
                 updateParams.wind_speed = weatherEntry.data.windSpeed;  // Always store in m/s
             }
-            if (weatherEntry.data.windDirection !== undefined && weatherEntry.data.windDirection !== null) {
+            if (mayFillWind && weatherEntry.data.windDirection !== undefined && weatherEntry.data.windDirection !== null) {
                 updateParams.wind_direction = weatherEntry.data.windDirection;
             }
 

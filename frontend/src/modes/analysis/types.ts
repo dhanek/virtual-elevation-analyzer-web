@@ -51,7 +51,6 @@ export interface FilteredAnalysisPayload {
 }
 
 export interface StandardRenderArgs extends FilteredAnalysisPayload {
-	initialResult: any;
 	analyzedLaps: number[];
 	selectedIndices: number[];
 	defaultAirSpeedOffset: number;
@@ -79,7 +78,6 @@ export interface ModeRenderArgs {
 	fitData: ActivityDataLike;
 	params: AnalysisParameters;
 	defaultAirSpeedOffset: number;
-	initialResult: any;
 	filteredData: FilteredAnalysisPayload;
 	selectedIndices: number[];
 	callbacks: ModeRenderCallbacks;

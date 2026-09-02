@@ -340,3 +340,41 @@ function fakeDb(captured: Record<string, unknown>[]) {
 		},
 	};
 }
+
+describe("the CSV carries the wind height factor (WR-02)", () => {
+	// k scales the wind that reaches the rider, so two results fitted at 50% and
+	// at 100% describe different physics. Without this column they were
+	// indistinguishable in the export, and the stored WindSpeed is the raw 10 m
+	// value -- the number the physics used is WindSpeed x k. `crr`/`crrApplied`
+	// is the same shape and the pattern this follows.
+	it("writes the stored factor as a percent, next to the wind it scales", () => {
+		const csv = generateCSVFromResults([
+			legacyRecord({ windSpeed: 3.5, windHeightFactor: 0.5 }),
+		]);
+
+		expect(CSV_HEADERS).toContain("WindHeightPct");
+		expect(cellsOf(csv)[headerIndex("WindHeightPct")]).toBe("50");
+	});
+
+	it("distinguishes two results that differ only in k", () => {
+		const rows = generateCSVFromResults([
+			legacyRecord({ lapKey: "1", windSpeed: 3.5, windHeightFactor: 0.5 }),
+			legacyRecord({ lapKey: "2", windSpeed: 3.5, windHeightFactor: 1.0 }),
+		])
+			.trim()
+			.split("\n")
+			.slice(1);
+
+		const column = headerIndex("WindHeightPct");
+		expect(rows[0].split(",")[column]).not.toBe(rows[1].split(",")[column]);
+	});
+
+	it("leaves the cell empty for a record saved before the column existed", () => {
+		// Every other optional column degrades this way; a fabricated 100 would
+		// claim the analysis was fitted at no transfer, which is not known.
+		const csv = generateCSVFromResults([legacyRecord()]);
+
+		expect(cellsOf(csv)[headerIndex("WindHeightPct")]).toBe("");
+		expect(cellsOf(csv)).toHaveLength(CSV_HEADERS.length);
+	});
+});

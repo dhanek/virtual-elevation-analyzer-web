@@ -139,8 +139,6 @@ function createInput(
 		fitData,
 		selection: createSelection(),
 		params: defaultParams,
-		cda: 0.3,
-		crr: 0.008,
 		getNormalizedActivityArrays: () => createMockNormalizedArrays(fitData),
 		...overrides,
 	};
@@ -158,6 +156,26 @@ describe("prepareAnalysisPayload", () => {
 		expect(result.filteredData.distance).toEqual([0, 10, 20]);
 	});
 
+	it("slices the ACTIVE elevation profile, not the raw FIT channel", () => {
+		// WR-1, Standard's leg. Standard resolves here rather than in its render,
+		// so this is where "the smoothing toggle is ON" has to become an actual
+		// array. The two GPS analyze legs are guarded the equivalent way in
+		// gpsModeRealChain.test.ts; before that work all three modes were
+		// "covered" by elevationToggle.integration.test.ts, which called the
+		// resolver directly and imported no mode at all.
+		const appState = new AppState();
+		appState.fitRawElevation = [100, 101, 102, 100, 103];
+		appState.demRawNearestElevation = [200, 201, 202, 200, 203];
+		appState.demInterpolatedSmoothed5ptElevation = [300, 301, 302, 300, 303];
+		appState.demProfilesAvailable = true;
+		appState.activeDisplayProfile = "dem-interpolated-smoothed-5pt";
+
+		const result = prepareAnalysisPayload(createInput({ appState }));
+
+		// The selection is indices 0..2, so the DEM profile sliced to match.
+		expect(result.filteredData.altitude).toEqual([300, 301, 302]);
+	});
+
 	it("returns correct defaultAirSpeedOffset from resolveWindSeries", () => {
 		const result = prepareAnalysisPayload(createInput());
 
@@ -165,24 +183,12 @@ describe("prepareAnalysisPayload", () => {
 		expect(result.defaultAirSpeedOffset).toBe(2);
 	});
 
-	it("returns null rhoArray when calculateRhoArray is not provided", () => {
-		const result = prepareAnalysisPayload(createInput());
-
-		expect(result.rhoArray).toBeNull();
-	});
-
-	it("returns selected rho values when calculateRhoArray returns a full array", () => {
-		const fullRhoArray = [1.225, 1.226, 1.227, 1.224, 1.225];
-
-		const result = prepareAnalysisPayload(
-			createInput({
-				calculateRhoArray: () => fullRhoArray,
-			}),
-		);
-
-		// selectedIndices = [0, 1, 2]
-		expect(result.rhoArray).toEqual([1.225, 1.226, 1.227]);
-	});
+	// NO rho TESTS HERE ANY MORE (WR-4). `rhoArray` and the `calculateRhoArray`
+	// injection existed only to feed this function's own calculator, which
+	// integrated the concatenated selection and is deleted -- see the file
+	// header. Rho reaches WASM through the update primitive, which resolves it
+	// per update (D-06); `veGolden.wasm.test.ts` pins that path in every mode,
+	// on both sides of the rho axis.
 
 	it("throws when filteredTimestamps is empty (no valid data points)", () => {
 		const selection = createSelection({

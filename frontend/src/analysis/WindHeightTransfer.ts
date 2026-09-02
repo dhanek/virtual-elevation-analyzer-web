@@ -42,10 +42,43 @@ export const DEFAULT_WIND_HEIGHT_FACTOR = 0.5;
  */
 export const LEGACY_WIND_HEIGHT_FACTOR = 1.0;
 
-/** D-02: slider bounds. The top of the range, 1.0, means no transfer. */
-export const WIND_HEIGHT_FACTOR_MIN = 0.3;
+/**
+ * Factor bounds. The top of the range, 1.0, means no transfer.
+ *
+ * D-b (maintainer ruling, 2026-08-30): the floor opened from 0.3 to 0 so the
+ * control can span a full 0-100%. 0 is a legitimate setting — a fully sheltered
+ * course where no wind reaches the rider — and `resolveWindHeightFactor` honours
+ * it; see the guard there for why that had to change with these bounds.
+ */
+export const WIND_HEIGHT_FACTOR_MIN = 0;
 export const WIND_HEIGHT_FACTOR_MAX = 1.0;
-export const WIND_HEIGHT_FACTOR_STEP = 0.05;
+export const WIND_HEIGHT_FACTOR_STEP = 0.01;
+
+/**
+ * The scale the CONTROL speaks (D-b). Storage stays the 0-1 factor above, so no
+ * persisted record changes meaning and no migration is owed — only the numbers
+ * on screen move. Every conversion goes through the two helpers below so the
+ * rounding rule lives in exactly one place.
+ */
+export const WIND_HEIGHT_PERCENT_MIN = 0;
+export const WIND_HEIGHT_PERCENT_MAX = 100;
+export const WIND_HEIGHT_PERCENT_STEP = 1;
+
+/**
+ * Stored factor -> displayed percent, and back.
+ *
+ * Both round. 0.01 steps are not representable in IEEE754, so an unrounded
+ * round-trip yields 0.07000000000000001 and a readout of "7.000000000000001%".
+ * Rounding at the boundary keeps the stored factor to two decimals and the
+ * displayed percent to an integer, which is what makes the two agree.
+ */
+export function factorToPercent(factor: number): number {
+	return Math.round(factor * 100);
+}
+
+export function percentToFactor(percent: number): number {
+	return Math.round(percent) / 100;
+}
 
 /**
  * The fitted |P| range. The slider deliberately extends past both ends: the fit
@@ -105,7 +138,17 @@ export function resolveWindHeightFactor(
 	if (typeof factor !== "number") return LEGACY_WIND_HEIGHT_FACTOR;
 	// A hand-edited or corrupt IndexedDB record must not reach the physics.
 	if (!Number.isFinite(factor)) return LEGACY_WIND_HEIGHT_FACTOR;
-	if (factor <= 0) return LEGACY_WIND_HEIGHT_FACTOR;
+	// D-b: `<= 0` here, not `< 0`, until the control gained its 0-100% scale.
+	// Once 0% is reachable a stored 0 is a CHOICE — "no wind reaches the rider"
+	// on a fully sheltered course — and mapping it to 1.0 would have applied the
+	// full wind, the exact opposite of what the slider reads. Negative values
+	// remain impossible from any input and still degrade to no transfer.
+	//
+	// Consequence, stated rather than hidden: a pre-existing record storing
+	// exactly 0 changes meaning. The UI could never write one (the old floor was
+	// 0.3 and the number input clamped to it), so this reaches only a corrupt or
+	// hand-edited row.
+	if (factor < 0) return LEGACY_WIND_HEIGHT_FACTOR;
 	return factor;
 }
 

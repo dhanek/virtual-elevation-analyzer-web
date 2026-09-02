@@ -1,6 +1,10 @@
 import { AppState } from '../../state/AppState';
+import { openResultsModal, type StoredResultKey } from '../dom/resultsModal';
 import { log } from '../../utils/log';
-import { ResultsStorage } from '../../utils/ResultsStorage';
+import {
+    ResultsStorage,
+    type StoredVEResult,
+} from '../../utils/ResultsStorage';
 import { ParameterStorage, LapSettings } from '../../utils/ParameterStorage';
 import { resolveAppliedCrr } from '../../analysis/CrrTemperatureCorrection';
 
@@ -345,6 +349,59 @@ export async function handleStoreResult(
     } finally {
         storeInFlight = false;
     }
+}
+
+/**
+ * What the results view needs from storage, and nothing else.
+ *
+ * `ResultsStorage` satisfies this structurally, so callers pass the real one —
+ * but the view is handed only these two. Giving it the class would put
+ * `clearAllResults` and `deleteDatabase` within reach of a surface whose job is
+ * to delete ONE row, and it is what lets the entry point be driven in a test
+ * with no IndexedDB at all.
+ */
+export interface ResultsViewStorage {
+    getAllResults: () => Promise<StoredVEResult[]>;
+    deleteResult: (key: StoredResultKey) => Promise<void>;
+}
+
+/**
+ * Handle a Show All Results click, from either entry point.
+ */
+export async function handleShowAllResults(
+    resultsStorage: ResultsViewStorage
+) {
+    await openResultsModal({
+        getAllResults: () => resultsStorage.getAllResults(),
+        deleteResult: key => resultsStorage.deleteResult(key),
+    });
+}
+
+/**
+ * Wire the APP-FOOTER entry point — the one that works before any file is
+ * loaded.
+ *
+ * The stored results are global; nothing about them depends on the ride
+ * currently open. The sidebar button stays as the convenient path right after
+ * Store Result, and both call the same handler, so the two entry points cannot
+ * drift.
+ *
+ * `button` is nullable because `initializeApplication` resolves its DOM with
+ * `getElementById` and a cast: a renamed or removed element arrives here as
+ * `null` rather than as a type error, and must not take app startup down.
+ */
+export function bindShowAllResultsButton(
+    button: HTMLElement | null,
+    resultsStorage: ResultsViewStorage
+): void {
+    if (!button) {
+        log.warn('Show All Results button not found; the footer entry point is unbound');
+        return;
+    }
+
+    button.addEventListener('click', () => {
+        void handleShowAllResults(resultsStorage);
+    });
 }
 
 /**

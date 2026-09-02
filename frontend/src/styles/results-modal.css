@@ -1,0 +1,174 @@
+/* The app footer now carries two buttons side by side — Show All Results, then
+   Clear Results — and `.clear-storage-btn` has only a top margin, so without
+   this they touch. */
+.app-footer__btn + .app-footer__btn {
+	margin-left: var(--space-sm);
+}
+
+/* The stored-results view (bundle H).
+   Tokens only — no literal colours or spacing, per D-02. */
+
+.results-modal {
+	position: fixed;
+	inset: 0;
+	/* Above the map's own controls (map.css, 1000) and in the same band as the
+	   app's existing modal, `.notes-dialog` (dem.css, 9999/10000). Deliberately
+	   BELOW `.notification` at 10000: a toast reporting the outcome of a delete
+	   has to be readable over the table that triggered it. */
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-lg);
+}
+
+.results-modal__backdrop {
+	position: absolute;
+	inset: 0;
+	background: rgb(0 0 0 / 45%);
+}
+
+.results-modal__dialog {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-md);
+	width: 100%;
+	max-width: 96vw;
+	/* The table is the tall element; the dialog caps it and scrolls inside. */
+	max-height: 90vh;
+	padding: var(--space-lg);
+	background: var(--color-surface-white);
+	border-radius: var(--radius-lg);
+	box-shadow: 0 10px 40px rgb(0 0 0 / 25%);
+}
+
+.results-modal__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-md);
+}
+
+.results-modal__header h2 {
+	margin: 0;
+	font-size: 1.15rem;
+	color: var(--color-text-heading);
+}
+
+.results-modal__close {
+	border: none;
+	background: none;
+	font-size: 1.5rem;
+	line-height: 1;
+	cursor: pointer;
+	color: var(--color-text-secondary);
+	padding: 0 var(--space-sm);
+}
+
+.results-modal__close:hover {
+	color: var(--color-text);
+}
+
+.results-modal__columns summary {
+	cursor: pointer;
+	color: var(--color-text-secondary);
+	font-size: 0.85rem;
+}
+
+.results-modal__column-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-xs) var(--space-lg);
+	padding: var(--space-md) 0 0;
+	font-size: 0.8rem;
+	color: var(--color-text-secondary);
+}
+
+.results-modal__column-list label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
+	white-space: nowrap;
+}
+
+/* 32 columns will not fit any viewport: the TABLE scrolls, never the page. */
+.results-modal__scroll {
+	overflow: auto;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+}
+
+.results-table {
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 0.8rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.results-table th,
+.results-table td {
+	padding: var(--space-xs) var(--space-sm);
+	border-bottom: 1px solid var(--color-border);
+	text-align: left;
+	white-space: nowrap;
+}
+
+.results-table thead th {
+	position: sticky;
+	top: 0;
+	background: var(--color-surface-alt);
+	color: var(--color-text-secondary);
+	font-weight: 600;
+	z-index: 1;
+}
+
+.results-table tbody tr:hover {
+	background: var(--color-surface);
+}
+
+.results-table__actions {
+	/* Kept reachable while the table scrolls sideways. */
+	position: sticky;
+	right: 0;
+	background: var(--color-surface-white);
+}
+
+.results-table__delete,
+.results-table__confirm,
+.results-table__cancel {
+	cursor: pointer;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--color-border-strong);
+	background: var(--color-surface-white);
+	padding: var(--space-xs) var(--space-sm);
+	font-size: 0.75rem;
+}
+
+.results-table__delete:hover {
+	border-color: var(--color-danger);
+	color: var(--color-danger);
+}
+
+.results-table__confirm {
+	border-color: var(--color-danger);
+	background: var(--color-danger);
+	color: var(--color-surface-white);
+	margin-right: var(--space-xs);
+}
+
+.results-table__confirm:hover:not(:disabled) {
+	background: var(--color-danger-strong);
+}
+
+.results-table__confirm:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.results-modal__empty {
+	margin: 0;
+	padding: var(--space-2xl) 0;
+	text-align: center;
+	color: var(--color-text-muted);
+}

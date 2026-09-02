@@ -1,8 +1,26 @@
 /**
- * Pure analysis payload preparation extracted from handleAnalyze.
+ * Selection filtering for the analyze path. NO PHYSICS.
  *
  * Per D-05: no AppState mutation, no DOM dependency.
- * The caller syncs rhoArray and other state after getting the result.
+ *
+ * THIS FUNCTION USED TO RUN A CALCULATOR (WR-4). It integrated the whole
+ * CONCATENATED selection in one pass, with no trim window and with the wind
+ * source forced to `"fit"` and the offset off, and returned the fit as
+ * `initialResult`. Two things consumed it, and neither should have:
+ *
+ *   - Standard's header spans, which sat directly above a plot drawn from a
+ *     DIFFERENT fit -- `initializeVEAnalysis`'s own, trimmed and on the selected
+ *     wind source. The spans are filled from that one now, on the same rule the
+ *     virtual-distance header already followed.
+ *   - `appState.currentVEResult`, assigned for EVERY mode. The GPS panels
+ *     display N per-lap fits (2N legs for out-and-back) and never received
+ *     `initialResult` at all, so Store Result straight after Analyze persisted
+ *     an r2/RMSE no screen had shown.
+ *
+ * `handler.summarize`, off the shared update primitive, is the one writer of
+ * that field now, for all three modes. With the calculator went `rhoArray` and
+ * the `calculateRhoArray` injection: nothing outside the deleted calculator read
+ * either, and the primitive resolves rho itself per update (D-06).
  */
 import type {
 	PreparedAnalysisSelection,
@@ -14,29 +32,21 @@ import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { collectSelectionIndices } from "../../modes/analysis/AnalysisModes";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { log } from "../../utils/log";
 
 export interface PayloadPreparationInput {
 	appState: AppState;
 	fitData: ActivityDataLike;
 	selection: PreparedAnalysisSelection;
 	params: AnalysisParameters;
-	cda: number | null | undefined;
-	crr: number | null | undefined;
 	getNormalizedActivityArrays: (
 		fitData: ActivityDataLike,
 	) => NormalizedActivityArrays;
-	calculateRhoArray?: (fitData: ActivityDataLike) => number[] | null;
 }
 
 export interface PreparedPayload {
 	filteredData: FilteredAnalysisPayload;
-	initialResult: any;
 	selectedIndices: number[];
 	defaultAirSpeedOffset: number;
-	rhoArray: number[] | null;
 }
 
 export function prepareAnalysisPayload(
@@ -100,47 +110,6 @@ export function prepareAnalysisPayload(
 		throw new Error("No valid data points found in selected laps");
 	}
 
-	// Handle rho array via injected dependency
-	let rhoArray: number[] | null = null;
-	if (input.calculateRhoArray) {
-		const fullRhoArray = input.calculateRhoArray(input.fitData);
-		if (fullRhoArray) {
-			rhoArray = selectedIndices.map((index) => fullRhoArray[index]);
-			log.debug("Using calculated rho array for VE analysis");
-		}
-	}
-
-	// Create VE calculator and compute initial result. Crr inputs are
-	// 22 °C-referenced; the physics uses the temperature-corrected value when
-	// the correction is enabled.
-	const appliedCrr =
-		input.crr !== null && input.crr !== undefined
-			? resolveAppliedCrr(input.params, input.crr)
-			: input.crr;
-	const calculator = createVeCalculator({
-		timestamps: filteredTimestamps,
-		power: filteredPower,
-		velocity: filteredVelocity,
-		positionLat: filteredPositionLat,
-		positionLong: filteredPositionLong,
-		altitude: filteredAltitude,
-		distance: filteredDistance,
-		windSpeed: filteredWindSpeed,
-		rhoArray,
-		params: input.params,
-		cda: input.cda,
-		crr: appliedCrr,
-	});
-
-	const effectiveCda = input.cda ?? 0.3;
-	const effectiveCrr = resolveAppliedCrr(input.params, input.crr ?? 0.008);
-	const initialResult = calculator.calculate_virtual_elevation(
-		effectiveCda,
-		effectiveCrr,
-		0,
-		filteredTimestamps.length - 1,
-	);
-
 	// Filter CdA reference if available
 	let filteredCdaReference: number[] | null = null;
 	if (normalized.cdaReference) {
@@ -164,9 +133,7 @@ export function prepareAnalysisPayload(
 
 	return {
 		filteredData,
-		initialResult,
 		selectedIndices,
 		defaultAirSpeedOffset,
-		rhoArray,
 	};
 }

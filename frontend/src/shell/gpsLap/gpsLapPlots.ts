@@ -5,6 +5,7 @@
  */
 import type { LapVEProfile } from './types';
 import { anchorSeriesTo, residualsAgainst } from '../../plots/comparisonTraces';
+import { BELOW_AXIS_LEGEND_MARGIN_B, belowAxisLegend } from '../../plots/StandardPlotBuilders';
 import { log } from '../../utils/log';
 import {
     buildMultiSegmentWindFigure,
@@ -410,11 +411,8 @@ function buildStackedLayouts(maxDist: number) {
             yaxis: {
                 title: 'Elevation (m)'
             },
-            legend: {
-                orientation: 'h',
-                y: -0.2
-            },
-            margin: { t: 40, b: 80, l: 60, r: 20 },
+            legend: belowAxisLegend(),
+            margin: { t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B, l: 60, r: 20 },
             hovermode: 'closest'
         },
         // Residual plot layout

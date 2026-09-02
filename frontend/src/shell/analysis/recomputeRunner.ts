@@ -116,13 +116,21 @@ function setRecomputeStatus(status: RecomputeStatus): void {
 	// Nothing ever read that field back — not even this function, which renders
 	// from its own argument — so it was the same write-only class `3fed12d`
 	// deleted for `currentRhoArray`. The pill below IS the status.
-	const node = ensureStatusNode();
-	if (!node) return;
-
-	if (statusFlashTimer) {
-		clearTimeout(statusFlashTimer);
-		statusFlashTimer = null;
+	// GOING IDLE NEVER CREATES THE PILL (bundle D). `ensureStatusNode` builds one
+	// wherever it does not find one, and the 250 ms flash timer below outlives
+	// the panel: a mode change tears the panel down, the timer fires, and "hide
+	// the pill" MINTED a fresh `#veRecomputeStatus` inside the hidden panel it
+	// was meant to be hiding something in. Idle means "hide what is there", so
+	// there is nothing for it to build.
+	const node = status === "idle" ? findStatusNode() : ensureStatusNode();
+	if (!node) {
+		// Still drop the timer -- an idle with no pill on screen is the state
+		// this function was asked to reach, so it must not leave one armed.
+		clearStatusFlashTimer();
+		return;
 	}
+
+	clearStatusFlashTimer();
 
 	if (status === "idle") {
 		node.hidden = true;
@@ -335,23 +343,53 @@ function flashUpdatedStatus(): void {
 		node.textContent = UPDATED_COPY;
 	}
 
-	if (statusFlashTimer) {
-		clearTimeout(statusFlashTimer);
-	}
+	clearStatusFlashTimer();
 
 	statusFlashTimer = setTimeout(() => {
 		setRecomputeStatus("idle");
 	}, 250);
 }
 
-function ensureStatusNode(): HTMLElement | null {
+function clearStatusFlashTimer(): void {
+	if (statusFlashTimer) {
+		clearTimeout(statusFlashTimer);
+		statusFlashTimer = null;
+	}
+}
+
+/** The pill if one is already on the page. Never builds one. */
+function findStatusNode(): HTMLElement | null {
 	if (typeof document === "undefined") {
 		return null;
 	}
+	return document.getElementById("veRecomputeStatus") as HTMLElement | null;
+}
 
-	let node = document.getElementById("veRecomputeStatus") as HTMLElement | null;
+/**
+ * Drop a pending status flash and hide any pill that is on screen.
+ *
+ * EXPORTED, unlike `setRecomputeStatus` (WR-05), because the caller is in
+ * another module: `tearDownVeAnalysisPanel` is where the panel this pill lives
+ * in stops being the one on screen. `resetRecomputeThrottle` does not cover it —
+ * that clears `throttleTimer`, and the flash is a separate 250 ms timer that
+ * survives it.
+ */
+export function resetRecomputeStatus(): void {
+	clearStatusFlashTimer();
+	const node = findStatusNode();
+	if (node) {
+		node.hidden = true;
+	}
+}
+
+function ensureStatusNode(): HTMLElement | null {
+	const node = findStatusNode();
 	if (node) {
 		return node;
+	}
+
+	if (typeof document === "undefined") {
+		return null;
 	}
 
 	const host =
@@ -363,13 +401,13 @@ function ensureStatusNode(): HTMLElement | null {
 		return null;
 	}
 
-	node = document.createElement("div");
-	node.id = "veRecomputeStatus";
-	node.className = "ve-recompute-status";
-	node.setAttribute("role", "status");
-	node.setAttribute("aria-live", "polite");
-	node.hidden = true;
+	const created = document.createElement("div");
+	created.id = "veRecomputeStatus";
+	created.className = "ve-recompute-status";
+	created.setAttribute("role", "status");
+	created.setAttribute("aria-live", "polite");
+	created.hidden = true;
 
-	host.prepend(node);
-	return node;
+	host.prepend(created);
+	return created;
 }

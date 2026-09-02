@@ -4,9 +4,13 @@ import {
 	LEGACY_WIND_HEIGHT_FACTOR,
 	WIND_HEIGHT_FACTOR_MAX,
 	WIND_HEIGHT_FACTOR_MIN,
-	WIND_HEIGHT_FACTOR_STEP,
 	WIND_HEIGHT_FITTED_MAX,
 	WIND_HEIGHT_FITTED_MIN,
+	WIND_HEIGHT_PERCENT_MAX,
+	WIND_HEIGHT_PERCENT_MIN,
+	WIND_HEIGHT_PERCENT_STEP,
+	factorToPercent,
+	percentToFactor,
 	resolveAppliedWindSpeed,
 	resolveWindHeightFactor,
 } from "../../analysis/WindHeightTransfer";
@@ -41,9 +45,28 @@ import {
  * still read truthfully. Moving the slider off 1.00 is the single resolution
  * mechanism for both branches, which is why neither branch mutates wind_entry.
  */
-type WindHeightPrompt = "manual" | "unknown" | null;
+type WindHeightPrompt = "manual" | "unknown" | "unrepresentable" | null;
+
+/**
+ * Can the control actually render this factor? (WR-07)
+ *
+ * Storage never narrows a persisted value (D-03), so a factor outside 0-1 loads
+ * intact and reaches the physics intact. The range element cannot follow it: its
+ * thumb pins at the bound. Left unsaid, that produced three disagreeing views —
+ * slider at 100, number at 150, readout at 150% — and the first touch of the
+ * thumb committed the narrowing over a value the user never chose to change.
+ * Saying it is the fix; clamping storage would be the bug.
+ */
+function isUnrepresentableFactor(factor: number): boolean {
+	return factor < WIND_HEIGHT_FACTOR_MIN || factor > WIND_HEIGHT_FACTOR_MAX;
+}
 
 function windHeightPrompt(params: AnalysisParameters): WindHeightPrompt {
+	// Checked FIRST: an unrepresentable factor is about to be destroyed by the
+	// next gesture, which outranks a prompt about how the wind was measured.
+	if (isUnrepresentableFactor(resolveWindHeightFactor(params))) {
+		return "unrepresentable";
+	}
 	if (resolveWindHeightFactor(params) !== LEGACY_WIND_HEIGHT_FACTOR) {
 		return null;
 	}
@@ -76,9 +99,21 @@ export function formatWindHeightReadout(params: AnalysisParameters): string {
 	const applied = resolveAppliedWindSpeed(params, raw);
 	if (applied === null) return "";
 
-	let text = `Rider-height wind: ${applied.toFixed(2)} m/s (×${factor.toFixed(2)} of ${raw.toFixed(2)} m/s at 10 m)`;
+	// D-b: percent, not a ×factor. The control speaks the same units, so the two
+	// cannot drift apart in the user's head.
+	let text = `Rider-height wind: ${applied.toFixed(2)} m/s (${factorToPercent(factor)}% of ${raw.toFixed(2)} m/s at 10 m)`;
 
 	const prompt = windHeightPrompt(params);
+	if (prompt === "unrepresentable") {
+		// Names the stored value, says why the slider disagrees, and warns what
+		// the next gesture costs — in that order, because the warning is the
+		// part that has to arrive before the user drags.
+		text +=
+			` — this analysis was saved at ${factorToPercent(factor)}%, outside the 0–100% the slider covers,` +
+			" so the slider cannot show it and is parked at its limit;" +
+			" the stored value is what the physics uses, and moving the slider will replace it.";
+		return text;
+	}
 	if (prompt === "manual") {
 		// D-05: used exactly as typed, and said so out loud.
 		text +=
@@ -98,7 +133,7 @@ export function formatWindHeightReadout(params: AnalysisParameters): string {
 	// R-02: the fit is single-venue, so the slider deliberately extends past
 	// both ends of it. Parallel to the Crr validity-range suffix.
 	if (factor < WIND_HEIGHT_FITTED_MIN || factor > WIND_HEIGHT_FITTED_MAX) {
-		text += ` — outside the ${WIND_HEIGHT_FITTED_MIN.toFixed(2)}–${WIND_HEIGHT_FITTED_MAX.toFixed(2)} fitted range, measured at a single open venue`;
+		text += ` — outside the ${factorToPercent(WIND_HEIGHT_FITTED_MIN)}–${factorToPercent(WIND_HEIGHT_FITTED_MAX)}% fitted range, measured at a single open venue`;
 	}
 	return text;
 }
@@ -114,7 +149,7 @@ export function windHeightReadoutIsWarning(params: AnalysisParameters): boolean 
 const WIND_HEIGHT_INFO_TOOLTIP =
 	"Weather models report wind at a 10 m reference height, but the rider sits inside " +
 	"the surface shear layer, so only a fraction k of that wind actually loads them.&#10;&#10;" +
-	"The fitted exposure range is 0.40–0.65, measured at a single open venue — 0.5 is a " +
+	"The fitted exposure range is 40–65%, measured at a single open venue — 50% is a " +
 	"defensible default, not a constant. Sheltered courses will differ.&#10;&#10;" +
 	"Tuning this alongside CdA is not identifiable on arbitrary rides: more wind scaling " +
 	"can be compensated by less CdA to fit the same power balance. Set it from how the " +
@@ -185,11 +220,13 @@ export function windHeightControlsMarkup(
 	params: AnalysisParameters,
 	windSource?: string | null,
 ): string {
-	const factor = resolveWindHeightFactor(params).toFixed(2);
+	// D-b: the CONTROL is in percent, the MODEL stays a 0-1 factor. Every
+	// crossing goes through factorToPercent/percentToFactor.
+	const percent = factorToPercent(resolveWindHeightFactor(params));
 	// D-02: bounds come from the constants, never re-literalled here.
-	const min = WIND_HEIGHT_FACTOR_MIN;
-	const max = WIND_HEIGHT_FACTOR_MAX;
-	const step = WIND_HEIGHT_FACTOR_STEP;
+	const min = WIND_HEIGHT_PERCENT_MIN;
+	const max = WIND_HEIGHT_PERCENT_MAX;
+	const step = WIND_HEIGHT_PERCENT_STEP;
 	// Undefined means "the caller has not decided" — stay visible and let the
 	// bind-time sync settle it. An explicit source hides immediately.
 	const hidden =
@@ -204,8 +241,8 @@ export function windHeightControlsMarkup(
                 <span id="windHeightInfo" class="wind-height-controls__info" title="${WIND_HEIGHT_INFO_TOOLTIP}">i</span>
             </label>
             <div class="wind-height-controls__row">
-                <input type="range" id="windHeightSlider" min="${min}" max="${max}" value="${factor}" step="${step}" class="ve-slider">
-                <input type="number" id="windHeightValue" value="${factor}" min="${min}" max="${max}" step="${step}" class="ve-value-input">
+                <input type="range" id="windHeightSlider" min="${min}" max="${max}" value="${percent}" step="${step}" class="ve-slider">
+                <input type="number" id="windHeightValue" value="${percent}" min="${min}" max="${max}" step="${step}" class="ve-value-input">
             </div>
             <div id="windHeightReadout" class="wind-height-controls__readout">${formatWindHeightReadout(params)}</div>
         </div>
@@ -236,6 +273,39 @@ export function windHeightControlsMarkup(
  * weather-fill-then-hand-type sequence would misclassify as "weather" and
  * re-seed k = 0.5 onto a number the user typed — the exact D-05 harm.
  */
+/**
+ * May a weather fill WRITE the wind, or does the current one belong to the user?
+ *
+ * Maintainer ruling (D-a, 2026-08-30): reopening a previously analysed file must
+ * restore the exact conditions it was analysed under — the wind, its provenance
+ * and the height factor. Auto-rho re-runs on load
+ * (`fileLoadOrchestration.ts:389`, `bindStandardSliders.ts:632`, neither
+ * suppressed by `isLoadingParameters`), and it used to assign the API's wind
+ * unconditionally. Protecting only the FACTOR was never enough: a replaced wind
+ * re-fits the stored analysis just as surely as a re-seeded k.
+ *
+ * The rule is provenance, not value:
+ *   - no wind yet        -> the API fills it, and `syncWindHeightFromWeather`
+ *                           claims provenance and seeds k;
+ *   - "weather"          -> the API wrote it, so a fresh fetch may refresh it;
+ *   - "manual"/"unknown" -> the user's number, or a legacy one that D-07 says
+ *                           must reproduce as stored. Never overwritten.
+ *
+ * Provenance is never INFERRED here, for the same reason it is not inferred in
+ * `syncWindHeightFromWeather`: `rho_source` survives every form edit, so a
+ * weather-fill-then-hand-type sequence would read back as "weather" and clobber
+ * a typed number — the D-05 harm.
+ */
+export function weatherMayFillWind(params: AnalysisParameters): boolean {
+	const current = params.wind_speed;
+	// Nothing to protect. `Number.isFinite` so a NaN left by a failed parse
+	// counts as absent rather than freezing the field forever.
+	if (current === null || current === undefined || !Number.isFinite(current)) {
+		return true;
+	}
+	return params.wind_entry === "weather";
+}
+
 export function syncWindHeightFromWeather(
 	params: AnalysisParameters,
 ): Partial<AnalysisParameters> {
@@ -271,7 +341,34 @@ export interface WindHeightControlsBinding {
  * A WeakSet keyed on the element handles both directions — same node, skip; new
  * node, bind — and detached nodes stay garbage-collectable.
  */
-const windFieldsBound = new WeakSet<Element>();
+const windFieldBindings = new WeakMap<Element, WindHeightControlsBinding>();
+
+/**
+ * Attach the readout refresh to one wind field, keeping it pointed at the
+ * CURRENT binding (WR-06).
+ *
+ * The map does both jobs the WeakSet did one of. Membership still answers "has
+ * this node been bound?", so a listener is attached exactly once per node; the
+ * VALUE is overwritten on every call, so the listener — which reads the binding
+ * back out of the map rather than closing over it — follows the latest one. The
+ * WeakSet version froze the first binding's `getParams` onto the node, which was
+ * latent only because all three modes happen to pass an identical closure.
+ */
+function bindWindFieldRefresh(
+	id: string,
+	binding: WindHeightControlsBinding,
+): void {
+	const field = document.getElementById(id);
+	if (!field) return;
+
+	const alreadyBound = windFieldBindings.has(field);
+	windFieldBindings.set(field, binding);
+	if (alreadyBound) return;
+
+	field.addEventListener("input", () =>
+		refreshWindHeightReadout(windFieldBindings.get(field)?.getParams() ?? null),
+	);
+}
 
 /**
  * Write the readout text into the live DOM and toggle its warning modifier.
@@ -317,15 +414,15 @@ export function refreshWindHeightReadout(
 ): void {
 	if (!params) return;
 
-	const factor = resolveWindHeightFactor(params).toFixed(2);
+	const percent = String(factorToPercent(resolveWindHeightFactor(params)));
 	const slider = document.getElementById(
 		"windHeightSlider",
 	) as HTMLInputElement | null;
 	const valueInput = document.getElementById(
 		"windHeightValue",
 	) as HTMLInputElement | null;
-	if (slider) slider.value = factor;
-	if (valueInput) valueInput.value = factor;
+	if (slider) slider.value = percent;
+	if (valueInput) valueInput.value = percent;
 
 	refreshWindHeightText(params);
 }
@@ -347,9 +444,11 @@ export function bindWindHeightControls(
 	// The sidebar may not be rendered in this mode.
 	if (!slider || !valueInput) return false;
 
-	const initial = resolveWindHeightFactor(binding.getParams() ?? {});
-	slider.value = initial.toFixed(2);
-	valueInput.value = initial.toFixed(2);
+	const initial = String(
+		factorToPercent(resolveWindHeightFactor(binding.getParams() ?? {})),
+	);
+	slider.value = initial;
+	valueInput.value = initial;
 	refreshWindHeightReadout(binding.getParams());
 
 	/**
@@ -399,54 +498,46 @@ export function bindWindHeightControls(
 	 * range element cannot leave its own min/max; the typed number input below
 	 * is where an out-of-range value can arrive, and it still clamps.
 	 */
+	// D-b: both elements carry PERCENT. `commit` takes the 0-1 factor, so every
+	// handler converts exactly once, at the boundary.
 	slider.addEventListener("input", () => {
-		const dragged = parseFloat(slider.value);
-		if (Number.isNaN(dragged)) return;
-		valueInput.value = dragged.toFixed(2);
+		const draggedPercent = parseFloat(slider.value);
+		if (Number.isNaN(draggedPercent)) return;
+		valueInput.value = String(Math.round(draggedPercent));
 		// Commits, so this also clears the D-05 warning and the
 		// "unknown"-provenance prompt the moment the thumb moves, automatically,
 		// because both live in the readout formatter.
-		commit(dragged, false);
+		commit(percentToFactor(draggedPercent), false);
 	});
 
 	valueInput.addEventListener("change", () => {
-		const parsed = parseFloat(valueInput.value);
-		if (Number.isNaN(parsed)) {
+		const parsedPercent = parseFloat(valueInput.value);
+		if (Number.isNaN(parsedPercent)) {
 			// Restore the model value rather than committing garbage.
 			const current = resolveWindHeightFactor(binding.getParams() ?? {});
-			valueInput.value = current.toFixed(2);
+			valueInput.value = String(factorToPercent(current));
 			return;
 		}
 		// T-08-09: validating a live user gesture at the input boundary. This is
 		// not the storage-layer clamp Plan 01 forbids — a persisted value is
 		// still never rewritten.
-		const clamped = Math.min(
-			WIND_HEIGHT_FACTOR_MAX,
-			Math.max(WIND_HEIGHT_FACTOR_MIN, parsed),
+		const clampedPercent = Math.round(
+			Math.min(
+				WIND_HEIGHT_PERCENT_MAX,
+				Math.max(WIND_HEIGHT_PERCENT_MIN, parsedPercent),
+			),
 		);
-		valueInput.value = clamped.toFixed(2);
-		slider.value = clamped.toFixed(2);
-		commit(clamped);
+		valueInput.value = String(clampedPercent);
+		slider.value = String(clampedPercent);
+		commit(percentToFactor(clampedPercent));
 	});
 
 	// Keep the readout and its prompts current the moment the user types a wind.
 	// These are additive listeners; the modes' own handlers use oninput
 	// assignment or their own addEventListener, so there is no conflict. Guarded
-	// by node identity (see windFieldsBound above), not by a boolean latch.
-	const windSpeedField = document.getElementById("wind_speed");
-	if (windSpeedField && !windFieldsBound.has(windSpeedField)) {
-		windSpeedField.addEventListener("input", () =>
-			refreshWindHeightReadout(binding.getParams()),
-		);
-		windFieldsBound.add(windSpeedField);
-	}
-	const windDirectionField = document.getElementById("wind_direction");
-	if (windDirectionField && !windFieldsBound.has(windDirectionField)) {
-		windDirectionField.addEventListener("input", () =>
-			refreshWindHeightReadout(binding.getParams()),
-		);
-		windFieldsBound.add(windDirectionField);
-	}
+	// by node identity (see bindWindFieldRefresh above), not by a boolean latch.
+	bindWindFieldRefresh("wind_speed", binding);
+	bindWindFieldRefresh("wind_direction", binding);
 
 	return true;
 }

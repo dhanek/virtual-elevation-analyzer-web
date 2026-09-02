@@ -9,6 +9,11 @@ import {
 	WIND_HEIGHT_FACTOR_STEP,
 	WIND_HEIGHT_FITTED_MAX,
 	WIND_HEIGHT_FITTED_MIN,
+	WIND_HEIGHT_PERCENT_MAX,
+	WIND_HEIGHT_PERCENT_MIN,
+	WIND_HEIGHT_PERCENT_STEP,
+	factorToPercent,
+	percentToFactor,
 	type WindHeightTransferParams,
 } from "./WindHeightTransfer";
 
@@ -25,11 +30,14 @@ describe("resolveWindHeightFactor", () => {
 
 	// A record read back from IndexedDB can hold anything (T-08-01); every
 	// unusable value must degrade to today's behaviour, never to NaN wind.
+	//
+	// `zero` LEFT this table under D-b: once the control spans 0-100%, a stored
+	// 0 is a choice ("no wind reaches the rider"), not corruption. It is pinned
+	// as such in "resolveWindHeightFactor at zero" below.
 	const unusableFactors: Array<[string, number]> = [
 		["NaN", NaN],
 		["Infinity", Infinity],
 		["-Infinity", -Infinity],
-		["zero", 0],
 		["a negative factor", -0.5],
 	];
 
@@ -128,10 +136,12 @@ describe("constants", () => {
 		expect(LEGACY_WIND_HEIGHT_FACTOR).toBe(1.0);
 	});
 
-	test("pins the slider bounds and step", () => {
-		expect(WIND_HEIGHT_FACTOR_MIN).toBe(0.3);
+	test("pins the factor bounds and step", () => {
+		// D-b: the floor opened from 0.3 to 0, and the step went 0.05 -> 0.01 so
+		// every integer percent on the control maps to a distinct factor.
+		expect(WIND_HEIGHT_FACTOR_MIN).toBe(0);
 		expect(WIND_HEIGHT_FACTOR_MAX).toBe(1.0);
-		expect(WIND_HEIGHT_FACTOR_STEP).toBe(0.05);
+		expect(WIND_HEIGHT_FACTOR_STEP).toBe(0.01);
 	});
 
 	test("keeps the fitted exposure range inside the slider bounds", () => {
@@ -141,5 +151,54 @@ describe("constants", () => {
 			WIND_HEIGHT_FACTOR_MIN,
 		);
 		expect(WIND_HEIGHT_FITTED_MAX).toBeLessThanOrEqual(WIND_HEIGHT_FACTOR_MAX);
+	});
+});
+
+describe("the 0-100% scale (D-b)", () => {
+	// Maintainer ruling 2026-08-30: the CONTROL speaks percent, storage stays the
+	// 0-1 factor. So nothing persisted changes meaning and no migration is owed;
+	// only the numbers on screen move.
+	test("spans the full 0-100 with integer steps", () => {
+		expect(WIND_HEIGHT_PERCENT_MIN).toBe(0);
+		expect(WIND_HEIGHT_PERCENT_MAX).toBe(100);
+		expect(WIND_HEIGHT_PERCENT_STEP).toBe(1);
+	});
+
+	test("converts between the stored factor and the displayed percent", () => {
+		expect(factorToPercent(0.5)).toBe(50);
+		expect(factorToPercent(1)).toBe(100);
+		expect(factorToPercent(0)).toBe(0);
+		expect(percentToFactor(50)).toBe(0.5);
+		expect(percentToFactor(100)).toBe(1);
+		expect(percentToFactor(0)).toBe(0);
+	});
+
+	test("round-trips every integer percent without drift", () => {
+		// 0.01 steps are not exact in IEEE754, so the conversion must round
+		// rather than let 0.07000000000000001 reach storage or the readout.
+		for (let percent = 0; percent <= 100; percent++) {
+			expect(factorToPercent(percentToFactor(percent))).toBe(percent);
+		}
+	});
+
+	test("the fitted range maps onto the percent scale", () => {
+		expect(factorToPercent(WIND_HEIGHT_FITTED_MIN)).toBe(40);
+		expect(factorToPercent(WIND_HEIGHT_FITTED_MAX)).toBe(65);
+	});
+});
+
+describe("resolveWindHeightFactor at zero (D-b)", () => {
+	test("honours a stored factor of 0 instead of degrading to no transfer", () => {
+		// REQUIRED for coherence once the slider reaches 0%: the guard used to
+		// map `factor <= 0` onto LEGACY (1.0), so dragging to zero would have
+		// applied the FULL wind -- the exact opposite of what the control says.
+		// 0 now means what it reads as: no wind reaches the rider.
+		expect(resolveWindHeightFactor({ wind_height_factor: 0 })).toBe(0);
+	});
+
+	test("still degrades a negative factor, which no input can produce", () => {
+		expect(resolveWindHeightFactor({ wind_height_factor: -0.5 })).toBe(
+			LEGACY_WIND_HEIGHT_FACTOR,
+		);
 	});
 });

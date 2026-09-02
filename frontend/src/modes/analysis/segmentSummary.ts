@@ -226,6 +226,43 @@ export function seedSegmentModeFilteredData(
 }
 
 /**
+ * The rest of the analyze-time seed: the wind source and the virtual distances
+ * (WR-3).
+ *
+ * `currentWindSource` and `currentVirtualDistances` had exactly one writer
+ * between them — `writeSegmentModeResultState`, which runs on the UPDATE path.
+ * So Analyze -> Store Result with nothing in between persisted
+ * `windSource: "none"` on a fresh session, or the PREVIOUS analysis's virtual
+ * distances on a second analyze: values no analyze had ever written.
+ *
+ * This is the same invariant `seedSegmentModeFilteredData` established for the
+ * samples (CR-01), extended to the other two fields Store Result reads. It
+ * delegates to that function rather than repeating the range work, and routes
+ * the source through `resolveRecordedWindSource` — the same one-decision-site
+ * the update path uses, so "compare" survives here exactly as it does there.
+ *
+ * The virtual distances are passed in already built: GPS-lap stacks one entry
+ * per lap, out-and-back one per SECTION rather than one per leg, and that
+ * difference is the callers' to know, not this seam's.
+ */
+export function seedSegmentModeAnalyzeState(
+	appState: AppState,
+	seed: {
+		ranges: Array<{ startIdx: number; endIdx: number }>;
+		requestedWindSource: WindSource;
+		resolvedWindSource: "constant" | "fit" | "none";
+		virtualDistances: SegmentVirtualDistance[];
+	},
+): void {
+	seedSegmentModeFilteredData(appState, seed.ranges);
+	appState.currentWindSource = resolveRecordedWindSource(
+		seed.requestedWindSource,
+		seed.resolvedWindSource,
+	);
+	appState.currentVirtualDistances = seed.virtualDistances;
+}
+
+/**
  * The whole segment-mode AppState write, in one place.
  *
  * `virtualDistances` defaults to one entry per profile, read off the same

@@ -27,6 +27,9 @@ const statisticsContent = document.getElementById(
 const clearStorageButton = document.getElementById(
 	"clearStorageButton",
 ) as HTMLButtonElement;
+const showAllResultsFooter = document.getElementById(
+	"showAllResultsFooter",
+) as HTMLButtonElement;
 
 // DEM-related DOM elements
 const demFileInput = document.getElementById(
@@ -85,6 +88,7 @@ initializeApplicationShell({
 		results,
 		statisticsContent,
 		clearStorageButton,
+		showAllResultsFooter,
 		demFileInput,
 		demFileDropZone,
 		demFileInfo,

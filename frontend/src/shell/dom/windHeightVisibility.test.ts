@@ -194,19 +194,21 @@ describe("hiding the control is a visibility change only", () => {
 		const readoutBefore = (
 			document.getElementById("windHeightReadout") as HTMLElement
 		).textContent;
-		expect(slider().value).toBe("0.65");
+		// D-b: the inputs read percent; `params.wind_height_factor` below is the
+		// 0-1 factor and is deliberately still asserted in its own units.
+		expect(slider().value).toBe("65");
 
 		selectSource("fit");
 		// The element stays in the DOM carrying its value — removing it would make
 		// the value unreadable to refreshWindHeightReadout on the way back.
 		expect(controls()).not.toBeNull();
 		expect(controls().hidden).toBe(true);
-		expect(slider().value).toBe("0.65");
-		expect(numberInput().value).toBe("0.65");
+		expect(slider().value).toBe("65");
+		expect(numberInput().value).toBe("65");
 
 		selectSource("constant");
-		expect(slider().value).toBe("0.65");
-		expect(numberInput().value).toBe("0.65");
+		expect(slider().value).toBe("65");
+		expect(numberInput().value).toBe("65");
 		expect(
 			(document.getElementById("windHeightReadout") as HTMLElement).textContent,
 		).toBe(readoutBefore);

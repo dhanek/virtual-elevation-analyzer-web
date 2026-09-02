@@ -50,3 +50,54 @@ export function resolveRhoArray(
 	log.debug("💨 No air density found, using constant value from weather API");
 	return null;
 }
+
+/**
+ * The same series, sliced onto ONE analyze selection.
+ *
+ * Standard's analyze leg builds its calculator over the concatenated,
+ * deduplicated selection rather than over a full-activity range, so it cannot
+ * reuse `updateModeVEPlots`' per-segment `indices.map(...)` slice. It was
+ * therefore left with no `rhoArray` at all when the two GPS legs were fixed,
+ * which meant the placeholder fit integrated a constant `params.rho` while the
+ * update a macrotask later integrated the real per-point series — and, since
+ * that paint now also writes the R²/RMSE/VE/Actual header, the wrong numbers
+ * were on screen until the kick landed, or permanently on any path where the
+ * scheduled pass never reaches `renderVe`.
+ *
+ * `expectedLength` is the calculator's other series' length. Anything else
+ * means the selection and the density series are not in the same index space,
+ * and a short or hole-punched array under the calculator is a worse bug than a
+ * constant one — the same rule `resolvePlaceholderWindSpeed` applies to wind.
+ */
+export function resolveSelectionRhoArray(
+	fitData: ActivityDataLike,
+	selectedIndices: number[],
+	expectedLength: number,
+): number[] | null {
+	const all = resolveRhoArray(fitData);
+	if (!all) {
+		return null;
+	}
+
+	const sliced: number[] = [];
+	for (const index of selectedIndices) {
+		if (index < 0 || index >= all.length) {
+			log.warn(
+				`Air density series (${all.length}) does not span selection index ${index}; using constant rho`,
+			);
+			return null;
+		}
+		sliced.push(all[index]);
+	}
+
+	// An empty selection is "the whole activity", which is what the unsliced
+	// series already is.
+	const selection = selectedIndices.length === 0 ? all : sliced;
+	if (selection.length !== expectedLength) {
+		log.warn(
+			`Air density series (${selection.length}) does not match the analysed selection (${expectedLength}); using constant rho`,
+		);
+		return null;
+	}
+	return selection;
+}
