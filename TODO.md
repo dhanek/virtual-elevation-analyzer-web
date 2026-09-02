@@ -42,8 +42,9 @@ Every bundle above is now **committed** on `refactoring`; the per-bundle Done en
 open with the "not committed" wording they were written under, and that wording is stale rather than
 a second claim. **B**, **D** and **H** were exercised in the running app and the Done entries say
 what was measured. **A**, **C** and **E** have never been opened in the app — nothing since their
-2026-08-30 entries records one — so they keep the debt. One more in-app check is owed on top of all
-of it, for C1-01 at the end of *Done*.
+2026-08-30 entries records one — so they keep the debt. C1-01's own in-app check, at the end of
+*Done*, was run on 2026-09-02 at `d586961` and passed on all five steps; it covers Section 3's
+selection and map behaviour and nothing else, so **A**, **C** and **E** still keep theirs.
 
 Suggested order from here: **G**. A, B, C, D, E and H are done. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
@@ -211,16 +212,19 @@ changed and why.
 
 ### Section 3's invalidation rule, and the four review rounds on top of it — 2026-08-31 … 2026-09-01
 
-Eleven commits after `943c527`, all on `refactoring`, all under PR #7. They share one through-line:
+Thirteen commits after `943c527`, through `d586961`, all on `refactoring`, all under PR #7. The
+count names the SHA it is counted through so it stays checkable, and the documentation batch that
+rewrote this line is deliberately not in it — it records the thirteen rather than being one of
+them, so this is not an off-by-one. They share one through-line:
 **the VE panel on screen must describe the ride the Section 3 controls currently describe.**
 `tearDownVeAnalysisPanel` had stated that rule since bundle D, and a mode change was the only route
 that used it. Everything below is another route to it, a guard that could not fire, or the fallout
 of getting one of those wrong.
 
-1043 tests pass at `0ae92a7` (up 88 on the 955 of the previous entry), `npm run check` and
-`npm run lint` clean. Every new assertion in every commit was run against the pre-fix code and
-observed to fail; from `a4c9101` the mutation and the proof that it changed the file are recorded in
-the commit message.
+1048 tests pass after this documentation batch (up 93 on the 955 of the previous entry),
+`npm run check` and `npm run lint` clean. Every new assertion in every commit was run against the
+pre-fix code and observed to fail; from `a4c9101` the mutation and the proof that it changed the
+file are recorded in the commit message.
 
 **Two of these DELIBERATELY REVERSE an earlier decision.** They are called out as such below,
 because a reversal that survives only as a commit message reads later as drift.
@@ -403,16 +407,50 @@ because a reversal that survives only as a commit message reads later as drift.
       - [x] the persistence key moves from "all" to "1" on such files — intended, no migration
       - [x] the analysis window moves from `timestamps[0]..timestamps[last]` to
             `min(start_time)..max(end_time)` — intended
-      - [ ] **MANUAL, STILL OWED:** confirmed in the running app on a single-lap FIT file. The
-            fixture exists — `~/Downloads/13.07-lap10-single.fit`, one lap, 5928 records with 274
-            inside the lap and 5654 outside, which is what makes the window change observable rather
-            than a no-op — and it has never been opened. With `VITE_LOG_LEVEL=debug`: **(a)** lap 1
-            ticked, trim controls visible and Analyze reading "Analyze 1 Lap" with no click, and in
-            that SAME first paint whether the map zooms to the lap and draws the trim markers;
-            **(b)** switching to "GPS based out and back" runs detection off that selection without
-            waiting for a tick; **(c)** unticking lap 1 disables Analyze and empties the detected
-            list; **(d)** loading `~/Downloads/13.07.fit` ticks nothing and runs no detection until a
-            lap is ticked. Only the maintainer can mark this, by running it.
+      - [x] **MANUAL, RUN 2026-09-02 at `d586961`:** confirmed in the running app by the maintainer,
+            on `~/Downloads/13.07-lap10-single.fit` — one lap, 5928 records with 274 inside the lap
+            and 5654 outside, which is what makes the window change observable rather than a no-op —
+            and on `~/Downloads/13.07.fit`. All five steps passed. **(a)** lap 1 ticked with no
+            click, trim controls visible, Analyze reading `Analyze 1 Selected Lap` and
+            `Trim Range: 0 to 273`; **(a2)** that same first paint drew the lap and its trim markers;
+            **(b)** switching to "GPS based out and back" ran detection off that selection without
+            waiting for a tick; **(c)** unticking lap 1 disabled Analyze and emptied the detected
+            list; **(d)** `~/Downloads/13.07.fit` came up with nothing ticked and ran no detection
+            until a lap was ticked.
+
+- [x] **[S] The results export carries the k the physics actually used, and one conversion for it.**
+      Review round 1's three quality findings, landed together. `resultColumns.ts` had
+      re-implemented `Math.round(factor * 100)` beside the `factorToPercent` that exists so that
+      rounding rule lives in one place; it now calls it, with no behaviour change — the byte-for-byte
+      CSV pin (0.72 → 72) passes untouched. `saveResult` stored `parameters.wind_height_factor`
+      verbatim while the analysis had asked `resolveWindHeightFactor` and been handed something else
+      for every corrupt value — NaN, Infinity and negatives all degrade to
+      `LEGACY_WIND_HEIGHT_FACTOR` before a single wind sample is scaled — so the WindHeightPct column
+      could print a factor the run never applied. A **present** value now goes through the resolver,
+      the same rule `crrApplied` beside it already follows; the presence check is load-bearing rather
+      than defensive, because the resolver maps an absent factor onto 1.0 too and the column must
+      stay blank for a record written before the column existed. Both guards save through the real
+      `ResultsStorage` on `fake-indexeddb` and read back, so neither can pass over a hand-built
+      record. The third finding was the documentation pass itself — the Done section above, written
+      in one dated sitting. `resultColumns.ts`, `ResultsStorage.ts`, `WindHeightTransfer.ts` ·
+      test: `resultColumns.test.ts` · commit `1a64c06`
+
+- [x] **[S] The selection reaches the map at the moment the map exists.** Review round 4, F2-01. On
+      a single-lap file's first load the map drew the whole ride instead of the ticked lap, and
+      neither trim marker appeared until a slider was nudged and put back. `initializeSection3` runs
+      `restoreSection3Controls` before the map is constructed — deliberately, so a map that fails to
+      initialize cannot leave Section 3 inert — and that function ends in `updateSelectedLaps()`,
+      whose two map-dependent branches are both guarded on a `getMapVisualization()` that is still
+      null there. Since `0ae92a7` that call has a non-empty selection at first paint, so both
+      branches were skipped: the map went into `setData` with its constructor's `[]` and took
+      `drawFullRoute`, and the marker block was never reached. Fixed without reordering the two —
+      each ordering buys determinism with a new failure mode — by making the moment the map is
+      published the moment selection-derived state is applied to it: `setSelectedLaps` between
+      `setData` and `setMapVisualization`, and the marker block extracted to `drawTrimRegionOnMap`
+      and called from both places, with the guard making the loser a no-op. Its manual check was
+      subsequently run and passed, on 2026-09-02 — see C1-01's box above.
+      `section3Orchestration.ts` · test: two cases in `section3ModeSwitch.test.ts` ·
+      commit `d586961`
 
 ### Review follow-ups on PR #7 — 2026-08-31
 

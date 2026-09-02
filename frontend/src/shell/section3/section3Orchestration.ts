@@ -69,6 +69,15 @@ function clearGpsRedetect(): void {
 	redetectForFitSelection = null;
 }
 
+/**
+ * Whether `presetTrimStart`/`presetTrimEnd` came from a saved lap setting rather
+ * than from the defaults. Provenance belongs to the presets, not to the call:
+ * `initializeSection3` draws the region at the moment the map is published and
+ * has no `savedSettings` in scope, so a parameter there could only ever report
+ * the default. F4-01, PR #7 review round 4.
+ */
+let trimPresetsFromSavedSettings = false;
+
 // GPS Analysis Mode state - lives in Section 3 shell as single source of truth (per D-04)
 type GpsAnalysisMode =
 	| "None"
@@ -464,6 +473,9 @@ export function resetAnalysisForNewActivity(): void {
 	// activity they point at nothing in particular.
 	appState.presetTrimStart = 0;
 	appState.presetTrimEnd = null;
+	// And the provenance of those presets, so a previous activity's saved-settings
+	// `true` cannot be reported against a fresh load's defaults.
+	trimPresetsFromSavedSettings = false;
 
 	// The detections those selections indexed into. All are derived from the
 	// activity that has just been replaced.
@@ -1463,12 +1475,14 @@ export function updateSelectedLaps(): void {
  * runs before the map exists (`restoreSection3Controls` ends in
  * `updateSelectedLaps`, and that is sequenced ahead of the map by design), so the
  * guard below saw `null` and nothing ever redrew it -- every other
- * `fitBoundsToTrimRegion` call site is a slider handler.
+ * `fitBoundsToTrimRegion` call site in this module is a slider handler. The one
+ * outside it, `renderStandardVe.ts:674`, fires on a 500 ms timer at the end of a
+ * VE panel render, and no VE panel exists at Section 3's first paint.
  *
  * Always refresh markers when switching laps so stale markers from a previously
  * selected lap don't remain when the new lap has no saved config.
  */
-function drawTrimRegionOnMap(fromSavedSettings = false): void {
+function drawTrimRegionOnMap(): void {
 	const deps = getDependencies();
 	const mapVisualization = deps.getMapVisualization();
 	const filtered = deps.appState.filteredLapData;
@@ -1483,7 +1497,7 @@ function drawTrimRegionOnMap(fromSavedSettings = false): void {
 	log.debug("Setting map trim markers:", {
 		trimStart: deps.appState.presetTrimStart,
 		trimEnd: deps.appState.presetTrimEnd,
-		fromSavedSettings,
+		fromSavedSettings: trimPresetsFromSavedSettings,
 	});
 	const trimStartVal = deps.appState.presetTrimStart;
 	const trimEndVal = deps.appState.presetTrimEnd;
@@ -1592,21 +1606,25 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 				// Use saved trim values
 				deps.appState.presetTrimStart = savedSettings.trimStart;
 				deps.appState.presetTrimEnd = savedSettings.trimEnd;
+				trimPresetsFromSavedSettings = true;
 			} else {
 				// Set preset values to defaults
 				deps.appState.presetTrimStart = 0;
 				deps.appState.presetTrimEnd = dataLength - 1;
+				trimPresetsFromSavedSettings = false;
 			}
 		} catch (err) {
 			log.error("Failed to load lap settings:", err);
 			// Fallback to defaults
 			deps.appState.presetTrimStart = 0;
 			deps.appState.presetTrimEnd = dataLength - 1;
+			trimPresetsFromSavedSettings = false;
 		}
 	} else {
 		// No file hash, use defaults
 		deps.appState.presetTrimStart = 0;
 		deps.appState.presetTrimEnd = dataLength - 1;
+		trimPresetsFromSavedSettings = false;
 	}
 
 	// Set up event listeners for map trim controls
@@ -1667,7 +1685,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		newMapTrimEndValue.value = deps.appState.presetTrimEnd.toString();
 
 		// Set map markers with loaded/default trim values.
-		drawTrimRegionOnMap(!!savedSettings);
+		drawTrimRegionOnMap();
 
 		// Add new listeners
 		newMapTrimStartSlider.addEventListener("input", () => {
