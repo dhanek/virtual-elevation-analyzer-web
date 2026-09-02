@@ -82,6 +82,23 @@ itself. Nothing below (b) starts early.*
 - [x] **[M] Condition (a): the weather cache is unbounded, and it is reachable today.**
       **Done 2026-09-02.** See *Bundle F · Condition (a)* under **Done**.
 
+      Criteria (concretised 2026-09-02, PR #10 review round 9 — the item was prose, these were
+      derived from it and confirmed by the maintainer, so a later round reads this as tier A
+      rather than re-deriving it):
+
+      - [x] The store has a removal path besides the manual `clearCache()` button —
+            `evictOverflow`, `WeatherCache.ts:290-330`
+      - [x] The bound is enforced on the path `autoRho` actually reaches, i.e. on write rather
+            than on a manual action — eviction runs inside `store()` (`WeatherCache.ts:245`),
+            which both `getWeatherData` and `updateCachedEntry` call
+      - [x] Existing cached data survives: no migration, no `dbVersion` bump — the `cachedAt`
+            index the cursor walks was in the original `onupgradeneeded`; verified in Chrome
+            against a real 5-row store written by earlier sessions
+      - [x] A guard covers the bound and is non-vacuous — six cases, nine mutations, each case
+            killed by at least one and three by a mutation nothing else catches
+      - [x] The removal policy is a deliberate choice with its reasoning recorded — FIFO-not-LRU
+            and no-TTL, argued in the `evictOverflow` docstring and the Done entry
+
 - [ ] **[L] Condition (b): the spike's headline accuracy figure was measured on an endpoint
       production never calls.** Axis 3's "100% of windows resolved" was measured against
       `historical-forecast-api.open-meteo.com`. That host appears nowhere in this repo;
@@ -155,6 +172,20 @@ re-deriving it):
       what is fitted and how the fit is gated before any code — the vw-demo heading/air-speed
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
+
+- [ ] **[S–M] `WeatherCache` never closes its IndexedDB connection, and `autoRho` builds a new
+      one per weather query.** `initialize()` assigns `this.db` and nothing ever calls
+      `db.close()`; `autoRho.ts:170` does `new WeatherCache()` inside the query path, so a long
+      session accumulates one open connection per distinct trim window. `ResultsStorage` in the
+      same directory DOES close its connections (`ResultsStorage.ts:319,338`), so this is below
+      the repo's own standard rather than a general style opinion.
+      Not folded into the cap work: the fix is a service-lifecycle change that `autoRho` owns —
+      a shared instance, or a close after each use — and the cap bounds rows, which is a
+      different resource. No user-visible failure has been reproduced; browsers hold idle
+      connections cheaply and reclaim them on unload, which is why this is sized S–M and not
+      urgent.
+      `frontend/src/utils/WeatherCache.ts:60-85`, `autoRho.ts:170`
+      *origin: PR #10 review round 9, F9-01*
 
 - [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
       deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
