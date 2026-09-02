@@ -29,6 +29,15 @@ import type { AnalysisModeId } from "../../modes/analysis/types";
  * `parameters` has no row in the table — it is the AnalysisParameters FORM, not a
  * VE control, and it reaches the funnel from `handleParametersChange`.
  */
+/**
+ * Why the funnel was asked to recompute.
+ *
+ * Two members are deliberately NOT rows in `MODE_CONTROL_TABLE`, because they
+ * do not come from a control inside the mode panel: `parameters`, raised by
+ * `handleParametersChange`, and `segmentSelection`, raised by Section 3 when
+ * the user ticks a detected GPS lap or out-and-back section. `modeControls.
+ * callshape.test.ts` names both as exceptions.
+ */
 export type ModeUpdateReason =
 	| "cda"
 	| "crr"
@@ -41,7 +50,8 @@ export type ModeUpdateReason =
 	| "elevationSmoothing"
 	| "crrTemp"
 	| "windHeight"
-	| "parameters";
+	| "parameters"
+	| "segmentSelection";
 
 /** The DOM identity of one row. Absent ids mean the row is not element-driven. */
 export interface ModeControlElements {

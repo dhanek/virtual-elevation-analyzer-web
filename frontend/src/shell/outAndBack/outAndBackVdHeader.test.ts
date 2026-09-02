@@ -69,7 +69,12 @@ describe("the out-and-back VD header", () => {
             ${virtualDistanceHeaderMarkup()}
             <div id="oabVdPlot"></div>
         `;
-		(window as unknown as { Plotly: unknown }).Plotly = { newPlot: vi.fn() };
+		// Both draw methods, so this case pins the header rather than the choice
+		// of call -- which is `outAndBackPlotDrawMethod.test.ts`'s job.
+		(window as unknown as { Plotly: unknown }).Plotly = {
+			newPlot: vi.fn(),
+			react: vi.fn(),
+		};
 	});
 
 	it("is emitted by the sidebar template, above the plot", () => {

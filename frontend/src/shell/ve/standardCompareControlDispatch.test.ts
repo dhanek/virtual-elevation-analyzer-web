@@ -140,8 +140,8 @@ function renderPanel(): void {
 			<label><input type="radio" name="windSource" value="constant"> Constant</label>
 			<label><input type="radio" name="windSource" value="compare" checked> Compare</label>
 			<div class="ve-control-group" id="windHeightControls">
-				<input type="range" id="windHeightSlider" min="0.1" max="1.5" step="0.01" value="${INITIAL_K}">
-				<input type="number" id="windHeightValue" min="0.1" max="1.5" step="0.01" value="${INITIAL_K}">
+				<input type="range" id="windHeightSlider" min="0" max="100" step="1" value="${INITIAL_K * 100}">
+				<input type="number" id="windHeightValue" min="0" max="100" step="1" value="${INITIAL_K * 100}">
 				<div id="windHeightReadout"></div>
 			</div>
 			<div class="ve-tab-content" id="wind-tab"></div>
@@ -233,7 +233,8 @@ describe("Standard compare survives a control interaction", () => {
 		const slider = document.getElementById(
 			"windHeightSlider",
 		) as HTMLInputElement;
-		slider.value = NEW_K.toString();
+		// D-b: the thumb is on the 0-100% scale; the model still stores 0-1.
+		slider.value = (NEW_K * 100).toString();
 		// `input`, not `change`: k recomputes while the thumb moves, like every
 		// other slider in the panel.
 		slider.dispatchEvent(new Event("input"));

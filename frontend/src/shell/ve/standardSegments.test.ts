@@ -11,6 +11,7 @@ import type { ModeSegment, SegmentVeProfile } from "../../modes/analysis/types";
 import {
 	MIN_TRIMMED_SEGMENT_SAMPLES,
 	mapTrimToSegments,
+	hasUsableDistance,
 	resolvePlaceholderWindSpeed,
 	stitchStandardProfiles,
 } from "./standardSegments";
@@ -142,6 +143,141 @@ function profile(
 		},
 	};
 }
+
+/**
+ * The same fixture, but carrying a real per-segment distance channel:
+ * `buildRelativeDistanceSeries` zeroes each segment at its own first sample, so
+ * every lap here runs 0.00, 0.10, 0.20 ... km regardless of where it sat in the
+ * ride. That restart is exactly what the cumulative axis has to undo.
+ */
+function profileWithDistance(
+	key: string,
+	startIdx: number,
+	endIdx: number,
+	metresPerSample = 100,
+): SegmentVeProfile {
+	const base = profile(key, startIdx, endIdx);
+	return {
+		...base,
+		supplementarySeries: {
+			...base.supplementarySeries,
+			distancesKm: base.indices.map((_, i) => (i * metresPerSample) / 1000),
+		},
+	};
+}
+
+describe("stitchStandardProfiles: the cumulative distance axis", () => {
+	const normalized = {
+		timestamps: Array.from({ length: 40 }, (_, i) => i * 2),
+		velocity: Array.from({ length: 40 }, (_, i) => i),
+	};
+
+	it("carries the running total across lap boundaries instead of restarting", () => {
+		// Two ten-sample laps, 100 m apart: each segment's own channel runs
+		// 0.0..0.9 km. A bare concatenation would read 0.0..0.9, 0.0..0.9 and the
+		// axis would jump backwards at index 10 -- the defect the maintainer's
+		// ruling (2026-08-31) is about.
+		const stitched = stitchStandardProfiles(
+			[profileWithDistance("lap1", 0, 9), profileWithDistance("lap2", 9, 18)],
+			normalized,
+		);
+
+		expect(stitched.cumulativeDistanceKm).toHaveLength(20);
+		expect(stitched.cumulativeDistanceKm[0]).toBeCloseTo(0);
+		expect(stitched.cumulativeDistanceKm[9]).toBeCloseTo(0.9);
+		// The second lap CONTINUES from where the first ended.
+		expect(stitched.cumulativeDistanceKm[10]).toBeCloseTo(0.9);
+		expect(stitched.cumulativeDistanceKm[19]).toBeCloseTo(1.8);
+	});
+
+	it("never goes backwards, whatever the laps' recorded odometer said", () => {
+		// Non-contiguous laps chosen deliberately: the raw FIT odometer for
+		// lap3 starts far after lap1's, and picking them in this order is exactly
+		// where the recorded channel is non-monotonic.
+		const stitched = stitchStandardProfiles(
+			[profileWithDistance("lap3", 18, 27), profileWithDistance("lap1", 0, 9)],
+			normalized,
+		);
+
+		const km = stitched.cumulativeDistanceKm;
+		for (let i = 1; i < km.length; i += 1) {
+			expect(km[i]).toBeGreaterThanOrEqual(km[i - 1]);
+		}
+	});
+
+	it("stays the same length as the other series when a segment carries no distance", () => {
+		// A short or missing channel must contribute its own EXTENT, not fewer
+		// samples -- the same rule the compare leg follows. A shortened array
+		// would slide every later sample onto the wrong x position.
+		const stitched = stitchStandardProfiles(
+			[profile("lap1", 0, 9), profileWithDistance("lap2", 9, 18)],
+			normalized,
+		);
+
+		expect(stitched.cumulativeDistanceKm).toHaveLength(stitched.length);
+		expect(stitched.cumulativeDistanceKm.every(Number.isFinite)).toBe(true);
+		// The distance-less segment advanced the total by nothing, so the segment
+		// after it starts at zero rather than at an invented offset.
+		expect(stitched.cumulativeDistanceKm[10]).toBeCloseTo(0);
+	});
+
+	/**
+	 * A distance channel SHORTER than the VE series it accompanies.
+	 *
+	 * The padding rule above ("contributes its own extent, and zero length")
+	 * was applied to the samples but not to the running total: the offset
+	 * advanced by `segmentKm[segmentKm.length - 1]`, the end of the ARRAY, while
+	 * the loop that placed the samples walked `virtualElevation.length`. For a
+	 * short channel those are different distances, and the disagreement is
+	 * exactly the non-monotonic axis the padding exists to prevent: the padded
+	 * tail sits back at the segment's own origin while every later segment is
+	 * pushed past it, right where the trim lines are drawn.
+	 */
+	it("does not advance the total past the samples it actually placed", () => {
+		const short = profileWithDistance("lap1", 0, 9);
+		// Six of ten samples carry a distance; the VE series keeps all ten.
+		short.supplementarySeries.distancesKm =
+			short.supplementarySeries.distancesKm.slice(0, 6);
+
+		const stitched = stitchStandardProfiles(
+			[short, profileWithDistance("lap2", 9, 18)],
+			normalized,
+		);
+
+		const km = stitched.cumulativeDistanceKm;
+		expect(km).toHaveLength(stitched.length);
+		expect(km.every(Number.isFinite)).toBe(true);
+		for (let i = 1; i < km.length; i += 1) {
+			expect(km[i]).toBeGreaterThanOrEqual(km[i - 1]);
+		}
+		// The tail holds the last distance the channel actually reported (0.5 km
+		// at sample 5) instead of dropping back to the segment's origin, and the
+		// next segment continues from there.
+		expect(km[5]).toBeCloseTo(0.5);
+		expect(km[9]).toBeCloseTo(0.5);
+		expect(km[10]).toBeCloseTo(0.5);
+	});
+
+	it("reports a usable distance axis only when the selection actually moved", () => {
+		expect(
+			hasUsableDistance(
+				stitchStandardProfiles([profileWithDistance("lap1", 0, 9)], normalized),
+			),
+		).toBe(true);
+
+		// No distance channel at all: the series is flat at zero, and an axis
+		// whose every tick reads 0.00 km is worse than no switch.
+		expect(
+			hasUsableDistance(
+				stitchStandardProfiles([profile("lap1", 0, 9)], normalized),
+			),
+		).toBe(false);
+
+		expect(
+			hasUsableDistance(stitchStandardProfiles([], normalized)),
+		).toBe(false);
+	});
+});
 
 describe("stitchStandardProfiles", () => {
 	const normalized = {

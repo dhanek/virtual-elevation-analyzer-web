@@ -3,14 +3,15 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { initSync } from '@wasm/virtual_elevation_analyzer.js';
 
-import { getNormalizedActivityArrays } from './ActivityArrayCache';
 // NOTE: `resolveWindSeries`, `buildSegmentSupplementarySeries`,
 // `extractSegmentData` and `applyAirSpeedOffset` used to be imported here so
 // this harness could RE-IMPLEMENT the segment spine and Standard's inline wind
 // composition. All four are gone: every mode runner now calls the real
 // `updateModeVEPlots`, and the one branch that still composes by hand (compare,
 // which plan 07-04 owns) takes its wind from the real production helper.
-import { prepareAnalysisPayload } from '../shell/analysis/prepareAnalysisPayload';
+// `prepareAnalysisPayload` and `getNormalizedActivityArrays` were imported here
+// for the Standard analyze-leg case that WR-4 deleted along with the calculator
+// it pinned -- see the block above `runStandardUpdate`.
 import { updateModeVEPlots } from '../shell/analysis/updateModeVEPlots';
 import { getAnalysisModeHandler } from '../modes/analysis/AnalysisModes';
 import type { ModeUpdateCallbacks, SegmentVeProfile } from '../modes/analysis/types';
@@ -279,40 +280,25 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
      * selection, wind resolved per source, offset+calibration applied outside
      * the calculator.
      */
-    /**
-     * The Standard ANALYZE leg's own result — the calculator built INSIDE
-     * `prepareAnalysisPayload` at :112-134, which is where `rhoArray` reaches
-     * WASM on that path (:121).
+    /*
+     * THE STANDARD ANALYZE-LEG CASE IS GONE (WR-4), with the calculator it
+     * pinned.
      *
-     * This exists because D-10 mutation (b) — deleting that `rhoArray` argument
-     * — did NOT fail the 14 cases. `runStandard` consumes `payload.filteredData`
-     * and `payload.rhoArray` but builds its own calculator for the UPDATE
-     * composition, so the analyze-leg calculator was never asserted and the
-     * mutation was invisible. The mutation found a hole in the harness, which is
-     * precisely what it is for; this closes it.
+     * `runStandardAnalyzeLeg` existed for one reason, recorded when it was
+     * added: D-10 mutation (b) -- deleting the `rhoArray` argument from
+     * `prepareAnalysisPayload`'s calculator -- did not fail the 14 cases,
+     * because nothing else asserted that calculator. That hole is now closed by
+     * construction instead of by a literal: `prepareAnalysisPayload` runs no
+     * calculator at all, takes no `cda`/`crr`, and no longer resolves rho. It
+     * filters the selection and returns arrays.
+     *
+     * The mutation has no target left. Rho reaches WASM only through
+     * `updateModeVEPlots`, which every mode uses for both its analyze-time paint
+     * and its updates, and which the 14 cases below pin in all three modes on
+     * both sides of the rho axis. Re-adding a second analyze-time calculator
+     * would need its own golden case again -- and would be reintroducing the
+     * defect this deletion closed.
      */
-    function runStandardAnalyzeLeg(withRho: boolean): GoldenCase {
-        const ride = loadGoldenRide();
-        const payload = prepareAnalysisPayload({
-            appState: makeAppState(),
-            fitData: ride.fitData,
-            selection: {
-                mode: 'standard',
-                selectedItems: [],
-                selectedEntries: [],
-                indexRanges: null,
-                timeRanges: ride.laps.map(lap => ({ start: lap.start_time, end: lap.end_time })),
-                outAndBackSections: null,
-                emptySelectionMessage: '',
-            },
-            params: ride.params,
-            cda: GOLDEN_CDA,
-            crr: GOLDEN_CRR,
-            getNormalizedActivityArrays,
-            calculateRhoArray: withRho ? () => ride.rhoArray : undefined,
-        });
-        return summarise(payload.initialResult);
-    }
 
     /**
      * RE-POINTED at the real `updateModeVEPlots` (plan 07-02 Task 4).
@@ -765,22 +751,6 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
         },
     };
 
-    const ANALYZE_LEG: Record<string, GoldenCase> = {
-        'rho present': {
-            r2: 0.3409142470926482, rmse: 53.03262090234332,
-            veElevationDiff: 91.91350458652892, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.1494676973283636,
-            veMid: 49.47813311925598, veLast: 92.06297228385738,
-            veChecksum: 67076.78628283592,
-        },
-        'rho absent': {
-            r2: 0.3407910199483517, rmse: 54.92825535110805,
-            veElevationDiff: 94.97854270576909, actualElevationDiff: -1,
-            veLength: 1436, veFirst: 0.1514272589472916,
-            veMid: 51.21412767834871, veLast: 95.12996996471627,
-            veChecksum: 69506.78545986385,
-        },
-    };
 
     test('standard / fit / rho present', async () => {
         expectGolden(await runStandard('fit', true), GOLDEN['standard / fit / rho present']);
@@ -939,19 +909,6 @@ describe.skipIf(!built || !fixturePresent)('golden VE values (real WASM)', () =>
      * pass — D-10 mutation (b) proves it reaches WASM, this proves the AXIS is
      * not degenerate in the fixture itself.
      */
-    /**
-     * Two ADDITIONAL guards beyond the specified 14, covering the Standard
-     * analyze leg. Not part of the 14-case D-09 baseline; they exist solely so
-     * that deleting the `rhoArray` argument at `prepareAnalysisPayload.ts:121`
-     * is observable. See `runStandardAnalyzeLeg`.
-     */
-    test('standard analyze leg (prepareAnalysisPayload) / rho present', () => {
-        expectGolden(runStandardAnalyzeLeg(true), ANALYZE_LEG['rho present']);
-    });
-    test('standard analyze leg (prepareAnalysisPayload) / rho absent', () => {
-        expectGolden(runStandardAnalyzeLeg(false), ANALYZE_LEG['rho absent']);
-    });
-
     test('the rho axis is not vacuous', () => {
         for (const mode of ['standard', 'gpsLap', 'outAndBack'] as const) {
             const withRho = GOLDEN[`${mode} / fit / rho present`];

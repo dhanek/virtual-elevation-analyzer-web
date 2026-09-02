@@ -19,13 +19,13 @@ import {
 	handleSaveScreenshot,
 	handleStoreResult,
 	handleExportAllResults,
+	handleShowAllResults,
 	saveCurrentLapSettings,
 } from "./storageHandlers";
 import {
 	isGpsLapSelectionMode,
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
-import { resolveRhoArray } from "./rhoArrayResolver";
 import { waitForPlotly } from "./plotlyLoader";
 import { requestModeUpdate } from "./requestModeUpdate";
 import { configureParameterMerge } from "./parametersSync";
@@ -314,6 +314,22 @@ export async function handleAnalyze(): Promise<void> {
 	// Note: Auto-rho will be triggered AFTER VE analysis when trim sliders are created
 	// (trim sliders don't exist yet at this point)
 	try {
+		// CLEARED AT THE START OF EVERY ANALYZE (WR-4).
+		//
+		// `currentVEResult` has exactly two readers, both in `storageHandlers`:
+		// the guard that lets Store Result run (`:105`) and the value it
+		// persists (`:314`). So a result left over from the PREVIOUS ride would
+		// be stored under THIS one's name the moment an analyze failed --
+		// `selectedFile` has already moved on by the time we get here.
+		//
+		// The only writer that fills it again is `handler.summarize`, reached
+		// through the update primitive, which every mode now runs at analyze
+		// time: Standard via its post-bind kick (`renderStandardVe.ts:562`) and
+		// the GPS modes via theirs. An analyze that never reaches that seam has
+		// nothing on screen to describe, and must therefore leave nothing
+		// behind.
+		deps.appState.currentVEResult = null;
+
 		deps.showLoading("Preparing data for Virtual Elevation analysis...");
 
 		if (selection.mode === "outAndBack") {
@@ -391,27 +407,16 @@ export async function handleAnalyze(): Promise<void> {
 
 		deps.showLoading("Running Virtual Elevation calculation...");
 
-		const hasEnvironmentalData = !!(
-			fitData.temperature &&
-			fitData.humidity &&
-			fitData.pressure
-		);
+		// NO rho, NO cda/crr, NO calculator (WR-4). This call filters the
+		// selection and nothing else; the physics belongs to the update
+		// primitive, which resolves rho itself per update (D-06) and is now
+		// reached at analyze time by every mode's post-bind kick.
 		const payload = prepareAnalysisPayload({
 			appState: deps.appState,
 			fitData,
 			selection,
 			params: deps.appState.currentParameters,
-			cda: deps.appState.currentParameters.cda,
-			crr: deps.appState.currentParameters.crr,
 			getNormalizedActivityArrays,
-			// One shared resolver, so the analyze path and the update path can
-			// never diverge on how rho is obtained (D-06).
-			calculateRhoArray: (fd) =>
-				resolveRhoArray(
-					fd,
-					getNormalizedActivityArrays(fd),
-					hasEnvironmentalData,
-				),
 		});
 
 		const powerDataPoints = payload.filteredData.power.filter(
@@ -425,7 +430,18 @@ export async function handleAnalyze(): Promise<void> {
 
 		deps.hideLoading();
 
-		deps.appState.currentVEResult = payload.initialResult;
+		// NO `currentVEResult = payload.initialResult` HERE (WR-4).
+		//
+		// `initialResult` is ONE stitched fit over the concatenated selection.
+		// Its only consumer is `standardMode.ts:155` -> Standard's header spans;
+		// `gpsLapMode.render` and `outAndBackMode.render` never forward it. So
+		// in the GPS modes this assignment stored an r2/RMSE that no panel had
+		// ever displayed -- N per-lap fits are on screen, and the first control
+		// nudge replaced the stored number with theirs.
+		//
+		// The field is written in ONE place now, `handler.summarize`, off the
+		// same primitive the update path uses. That is what makes "the stored
+		// result is what the screen showed" structural rather than remembered.
 		deps.appState.filteredVEData = {
 			positionLat: payload.filteredData.positionLat,
 			positionLong: payload.filteredData.positionLong,
@@ -458,6 +474,9 @@ export async function handleAnalyze(): Promise<void> {
 							onStoreResult: () => {
 								void handleStoreResult(deps.appState, deps.resultsStorage);
 							},
+							onShowAllResults: () => {
+								void handleShowAllResults(deps.resultsStorage);
+							},
 							onExportAll: () => {
 								void handleExportAllResults(deps.resultsStorage);
 							},
@@ -468,7 +487,6 @@ export async function handleAnalyze(): Promise<void> {
 								);
 							},
 						},
-						args.initialResult,
 						args.analyzedLaps,
 						args.selectedIndices,
 						args.timestamps,
@@ -554,7 +572,6 @@ export async function handleAnalyze(): Promise<void> {
 			fitData,
 			params: deps.appState.currentParameters,
 			defaultAirSpeedOffset: payload.defaultAirSpeedOffset,
-			initialResult: payload.initialResult,
 			filteredData: payload.filteredData,
 			selectedIndices: payload.selectedIndices,
 			callbacks,

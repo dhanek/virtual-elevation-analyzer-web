@@ -3,7 +3,11 @@ import { log } from "../../utils/log";
 import { MapVisualization } from "../../components/MapVisualization";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
 import { calculateAutoAirSpeedCalibrationPercent } from "../../analysis/AirSpeedCalibration";
-import { createPlotContext } from "../../plots/PlotContext";
+import {
+	createDistancePlotContext,
+	createPlotContext,
+} from "../../plots/PlotContext";
+import { getPlotXAxis, syncPlotXAxisAvailability } from "./plotXAxisToggle";
 import {
 	buildVirtualElevationFigures,
 	buildVirtualElevationComparisonFigures,
@@ -23,6 +27,7 @@ import { bindModeControls } from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
 import { setupTabSwitching } from "../dom/tabs";
 import {
+	hasUsableDistance,
 	stitchStandardProfiles,
 	type StitchedStandardSeries,
 } from "./standardSegments";
@@ -60,7 +65,16 @@ export function formatCoveredLapCount(
 		: `${covered} of ${selected}`;
 }
 
-function updateMetricsDisplay(
+/**
+ * THE one writer of Standard's four metric spans.
+ *
+ * Exported for `initializeVEAnalysis`, which fills them at first paint from the
+ * SAME integration that drew the curve beneath them. Before that the template
+ * painted them from `prepareAnalysisPayload`'s stitched fit -- a different trim
+ * window and a different wind source from the plot underneath -- so the header
+ * and the curve disagreed until the post-bind kick replaced both.
+ */
+export function updateMetricsDisplay(
 	r2: number,
 	rmse: number,
 	veGain: number,
@@ -121,8 +135,31 @@ function createStandardUpdateCallbacks(
 		return memoStitched;
 	}
 
+	/**
+	 * The plot context for the CURRENTLY SELECTED x-axis.
+	 *
+	 * The whole time/distance switch lands here: all four Standard figures take
+	 * their x from `context.xPoints{Before,Main,After}` and their range from
+	 * `context.xMin/xMax`, so swapping the context swaps the axis for every plot
+	 * at once. No figure builder knows which axis it is drawing.
+	 *
+	 * Availability is synced from the same call, because this is the first place
+	 * the stitched series -- and therefore the cumulative distance -- exists.
+	 * `syncPlotXAxisAvailability` falls the setting back to time when distance
+	 * is unusable, and `getPlotXAxis` is read AFTER it, so a FIT file with no
+	 * distance channel cannot reach `createDistancePlotContext`.
+	 */
 	function contextFor(profiles: SegmentVeProfile[]) {
 		const series = stitched(profiles);
+		syncPlotXAxisAvailability(hasUsableDistance(series));
+
+		if (getPlotXAxis() === "distance") {
+			return createDistancePlotContext(
+				series.cumulativeDistanceKm,
+				series.trimStart,
+				series.trimEnd,
+			);
+		}
 		return createPlotContext(series.length, series.trimStart, series.trimEnd);
 	}
 
@@ -132,6 +169,64 @@ function createStandardUpdateCallbacks(
 
 	function drawPower(profiles: SegmentVeProfile[]): void {
 		drawStandardPowerPlot(contextFor(profiles), stitched(profiles));
+	}
+
+	function drawVe(profiles: SegmentVeProfile[]): void {
+		const series = stitched(profiles);
+		const context = contextFor(profiles);
+		// The SAME dispatch the two GPS modes get: which figure is drawn is a
+		// property of the profiles the primitive produced, not of a separate
+		// update path. Before 07-04 this was a whole second entry point in this
+		// file that composed its own two calculators and never reached the
+		// primitive. (Its name is deliberately not written down: the acceptance
+		// criterion for its removal is a mechanical grep, and naming it in prose
+		// would defeat that — plan 07-01 deviation 2.)
+		const figures = series.virtualElevationCompare
+			? buildVirtualElevationComparisonFigures({
+					context,
+					virtualElevationFit: series.virtualElevation,
+					virtualElevationConstant: series.virtualElevationCompare,
+					actualElevation: series.actualElevation,
+				})
+			: buildVirtualElevationFigures({
+					context,
+					virtualElevation: series.virtualElevation,
+					actualElevation: series.actualElevation,
+					cdaLabel: cda.toFixed(3),
+					crrLabel: appliedCrr.toFixed(4),
+				});
+		Plotly.react(
+			"vePlot",
+			figures.elevation.data,
+			figures.elevation.layout,
+			figures.elevation.config,
+		);
+		Plotly.react(
+			"veResidualsPlot",
+			figures.residuals.data,
+			figures.residuals.layout,
+			figures.residuals.config,
+		);
+
+		// Register the tab render map, exactly as the GPS-lap adapter does.
+		// Standard used to call setupTabSwitching() with an EMPTY map, so a
+		// tab activated after a slider drag painted whatever it held at
+		// analyze time. The primitive skips inactive tabs (D-14); this is
+		// what makes them catch up on activation instead of going stale.
+		//
+		// `ve` IS IN THE MAP NOW (bundle D). It was not, because the recompute
+		// path was the only thing that redrew the VE pair -- which was enough
+		// while every redraw came from a control the primitive already funnels.
+		// The x-axis toggle is not such a control: it changes no parameter and
+		// runs no fit, it repaints the ACTIVE tab through `activateTab`. Without
+		// an entry here, flipping the axis on the VE tab would move the other
+		// three and leave the one the user was looking at on the old axis.
+		setupTabSwitching({
+			ve: () => drawVe(profiles),
+			wind: () => drawWind(profiles),
+			power: () => drawPower(profiles),
+			vd: () => drawVd(profiles),
+		});
 	}
 
 	function drawVd(profiles: SegmentVeProfile[]): void {
@@ -196,54 +291,7 @@ function createStandardUpdateCallbacks(
 			};
 		},
 
-		renderVe(profiles) {
-			const series = stitched(profiles);
-			const context = contextFor(profiles);
-			// The SAME dispatch the two GPS modes get: which figure is drawn is a
-			// property of the profiles the primitive produced, not of a separate
-			// update path. Before 07-04 this was a whole second entry point in this
-			// file that composed its own two calculators and never reached the
-			// primitive. (Its name is deliberately not written down: the acceptance
-			// criterion for its removal is a mechanical grep, and naming it in prose
-			// would defeat that — plan 07-01 deviation 2.)
-			const figures = series.virtualElevationCompare
-				? buildVirtualElevationComparisonFigures({
-						context,
-						virtualElevationFit: series.virtualElevation,
-						virtualElevationConstant: series.virtualElevationCompare,
-						actualElevation: series.actualElevation,
-					})
-				: buildVirtualElevationFigures({
-						context,
-						virtualElevation: series.virtualElevation,
-						actualElevation: series.actualElevation,
-						cdaLabel: cda.toFixed(3),
-						crrLabel: appliedCrr.toFixed(4),
-					});
-			Plotly.react(
-				"vePlot",
-				figures.elevation.data,
-				figures.elevation.layout,
-				figures.elevation.config,
-			);
-			Plotly.react(
-				"veResidualsPlot",
-				figures.residuals.data,
-				figures.residuals.layout,
-				figures.residuals.config,
-			);
-
-			// Register the tab render map, exactly as the GPS-lap adapter does.
-			// Standard used to call setupTabSwitching() with an EMPTY map, so a
-			// tab activated after a slider drag painted whatever it held at
-			// analyze time. The primitive skips inactive tabs (D-14); this is
-			// what makes them catch up on activation instead of going stale.
-			setupTabSwitching({
-				wind: () => drawWind(profiles),
-				power: () => drawPower(profiles),
-				vd: () => drawVd(profiles),
-			});
-		},
+		renderVe: drawVe,
 
 		renderWind: drawWind,
 		renderPower: drawPower,
