@@ -20,6 +20,15 @@
   // 3. The `@wasm/*` `paths` mapping DOES resolve through `extends` on the
   //    TypeScript in this repo. An earlier attempt recorded that it did not;
   //    re-measured 2026-09-02 and it does, so `paths` is not restated here.
+  //
+  // WHY `@types/jsdom` IS `^30` AGAINST `jsdom@29`. This program is what made
+  // those types necessary, so the reason lives here rather than in
+  // `package.json`, which cannot carry a comment. The runtime dependency is
+  // jsdom 29. No `@types/jsdom@29` was EVER published — the majors on npm are
+  // 2, 11, 12, 16, 20, 21, 27, 28 and 30 — so there is no exact pairing to
+  // reach for, and 30 is the nearest maintained major. The mismatch is
+  // deliberate, not a stale bump: do not "fix" it by pinning to `^28`, and do
+  // not repeat the `npm view` investigation that established this.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["node", "vite/client"]
