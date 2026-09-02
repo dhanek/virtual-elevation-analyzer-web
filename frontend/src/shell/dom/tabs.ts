@@ -1,4 +1,5 @@
 import { log } from '../../utils/log'
+import { resizePlotlyGraphsIn } from './plotlyResize'
 
 /**
  * Callbacks for rendering tab-specific content.
@@ -9,6 +10,7 @@ export interface TabRenderMap {
     power?: () => void
     vd?: () => void
     ve?: () => void
+    convergence?: () => void
 }
 
 // Latest render callbacks. Kept in a module ref so repeated setupTabSwitching
@@ -41,10 +43,12 @@ export function activateTab(tabName: string): void {
     document.querySelectorAll('.ve-tab-content').forEach(content => {
         content.classList.remove('ve-tab-content--active')
     })
-    document.getElementById(`${tabName}-tab`)?.classList.add('ve-tab-content--active')
+    const pane = document.getElementById(`${tabName}-tab`)
+    pane?.classList.add('ve-tab-content--active')
 
     const showWindTab = !!document.getElementById('wind-tab')
     const showVdTab = !!document.getElementById('vd-tab')
+    const showConvergenceTab = !!document.getElementById('convergence-tab')
 
     // Invoke tab-specific render callback from the latest renderMap if available
     if (tabName === 'wind' && showWindTab && currentRenderMap.wind) {
@@ -59,7 +63,33 @@ export function activateTab(tabName: string): void {
     } else if (tabName === 've' && currentRenderMap.ve) {
         log.debug('Tab switching: rendering VE tab')
         currentRenderMap.ve()
+    } else if (tabName === 'convergence' && showConvergenceTab && currentRenderMap.convergence) {
+        log.debug('Tab switching: rendering convergence tab')
+        currentRenderMap.convergence()
     }
+
+    // The pane is visible now and its plots have been redrawn, so this is the
+    // first moment any of them can be measured against a real container width.
+    // Every plot outside the VE tab is drawn while its pane is `display: none`,
+    // where Plotly measures zero and pins its 700 px default; see
+    // `resizePlotlyGraphsIn`.
+    if (pane) resizePlotlyGraphsIn(pane)
+}
+
+/**
+ * The tab that is currently active, or null when no panel is rendered.
+ *
+ * Exported for the x-axis toggle, which repaints the tab the user is looking at
+ * and leaves the other three to the render map. Reads the DOM rather than a
+ * module variable on purpose: `activateTab` is not the only thing that moves
+ * the active class (the wind-source guard does too), and a second copy of that
+ * state is a second thing to get out of step.
+ */
+export function getActiveTabName(): string | null {
+    const pane = document.querySelector('.ve-tab-content--active')
+    const id = pane?.id
+    if (!id || !id.endsWith('-tab')) return null
+    return id.slice(0, -'-tab'.length)
 }
 
 function handleTabClick(e: Event): void {

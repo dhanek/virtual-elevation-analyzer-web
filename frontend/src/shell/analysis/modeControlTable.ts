@@ -28,6 +28,18 @@ import type { AnalysisModeId } from "../../modes/analysis/types";
  *
  * `parameters` has no row in the table — it is the AnalysisParameters FORM, not a
  * VE control, and it reaches the funnel from `handleParametersChange`.
+ * `convergence` has none either: it is the Convergence tab's ACTIVATION, which
+ * reaches the funnel from the tab render map (`requestConvergenceRedraw`)
+ * because an inactive tab has no cached surface to draw from (D-14).
+ */
+/**
+ * Why the funnel was asked to recompute.
+ *
+ * Two members are deliberately NOT rows in `MODE_CONTROL_TABLE`, because they
+ * do not come from a control inside the mode panel: `parameters`, raised by
+ * `handleParametersChange`, and `segmentSelection`, raised by Section 3 when
+ * the user ticks a detected GPS lap or out-and-back section. `modeControls.
+ * callshape.test.ts` names both as exceptions.
  */
 export type ModeUpdateReason =
 	| "cda"
@@ -39,9 +51,13 @@ export type ModeUpdateReason =
 	| "airSpeedOffset"
 	| "windSource"
 	| "elevationSmoothing"
+	| "elevationDiffSource"
 	| "crrTemp"
 	| "windHeight"
-	| "parameters";
+	| "autoConverge"
+	| "parameters"
+	| "convergence"
+	| "segmentSelection";
 
 /** The DOM identity of one row. Absent ids mean the row is not element-driven. */
 export interface ModeControlElements {
@@ -98,6 +114,22 @@ export const MODE_CONTROL_TABLE: readonly ModeControlSpec[] = [
 		triggersAutoRho: false,
 		refreshesOffsetMetric: false,
 		decimals: 4,
+	},
+	{
+		// The auto-converge LOCK PAIR — one row for both checkboxes, because
+		// `bindAutoConvergeLocks` binds and reports them as a unit. The block
+		// is present-and-hidden until the Section-3 checkbox enables it; a
+		// locked slider is `disabled`, so the cda/crr rows above stay bound
+		// and simply never fire.
+		reason: "autoConverge",
+		kind: "toggle",
+		elements: {},
+		modes: ALL_MODES,
+		writes: "none",
+		persistsSettings: false,
+		movesMap: false,
+		triggersAutoRho: false,
+		refreshesOffsetMetric: false,
 	},
 	{
 		reason: "trim",
@@ -236,6 +268,23 @@ export const MODE_CONTROL_TABLE: readonly ModeControlSpec[] = [
 		modes: ALL_MODES,
 		writes: "none",
 		persistsSettings: true,
+		movesMap: false,
+		triggersAutoRho: false,
+		refreshesOffsetMetric: false,
+	},
+	{
+		// Phase 2 of the Convergence plan: where the closure target comes from
+		// (DEM | Barometer | Manual, plus the manual Δh input — bound as one
+		// unit by `bindElevationDiffControls`, like the lock pair above).
+		// Writes `elevation_diff_source` / `manual_elevation_diff_m` through
+		// `mergeAnalysisParameters`; the parameter store persists them, so the
+		// row itself does not save settings.
+		reason: "elevationDiffSource",
+		kind: "radioGroup",
+		elements: {},
+		modes: ALL_MODES,
+		writes: "parameterFields",
+		persistsSettings: false,
 		movesMap: false,
 		triggersAutoRho: false,
 		refreshesOffsetMetric: false,

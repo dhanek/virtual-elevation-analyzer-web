@@ -21,6 +21,11 @@ import {
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import {
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "../analysis/elevationProfileResolver";
+import { resolveRhoArray } from "../analysis/rhoArrayResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -39,16 +44,25 @@ import {
 	type BindModeControlsResult,
 } from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
-import { getSelectedWindSource } from "../dom/windSource";
+import {
+	getCheckedWindSource,
+	getSelectedWindSource,
+} from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
+import {
+	handleExportBundle,
+	handleExportSettings,
+} from "../analysis/settingsExportHandlers";
 import {
 	handleStoreResult,
 	handleExportAllResults,
+	handleShowAllResults,
 } from "../analysis/storageHandlers";
 import { log } from "../../utils/log";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import {
 	calculateOutAndBackMeanElevation,
+	calculateOutAndBackMeanReference,
 	calculateOutAndBackStats,
 	renderOutAndBackPlots,
 	renderOutAndBackWindPlot,
@@ -58,13 +72,19 @@ import {
 import { createOutAndBackUpdateCallbacks } from "./updateOutAndBack";
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
+import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
-import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
+import { seedSegmentModeAnalyzeState } from "../../modes/analysis/segmentSummary";
+import { requestModeUpdate } from "../analysis/requestModeUpdate";
+import { sectionVirtualDistances } from "../../modes/analysis/segmentVirtualDistance";
+import { requestConvergenceRedraw } from "../analysis/convergenceView";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -102,8 +122,73 @@ export async function showOutAndBackVEAnalysis(
 	const allVelocity = normalizedArrays.velocity;
 	const allPositionLat = normalizedArrays.positionLat;
 	const allPositionLong = normalizedArrays.positionLong;
-	const allAltitude = normalizedArrays.altitude;
+	// WR-1: the analyze leg resolves the elevation profile exactly as the update
+	// path does (`updateGpsLap.ts`, `updateModeVEPlots.ts`). Reading
+	// `normalizedArrays.altitude` straight through meant that, with a DEM
+	// applied, the smoothing toggle rendered ON while this first paint was
+	// computed from the raw FIT channel -- and the numbers then moved on the
+	// first control nudge, when the primitive took over.
+	const resolvedProfile = resolveElevationProfile(
+		appState,
+		fitData,
+		normalizedArrays.altitude,
+	);
+	const allAltitude = resolvedProfile.altitude;
+	// The NON-master channel, resolved once like the primitive does — sliced
+	// per leg below so the first paint already shows both channels.
+	const allReferenceElevation = resolveReferenceElevation(
+		appState,
+		resolvedProfile.profile,
+		normalizedArrays.altitude.length,
+	);
 	const allDistance = normalizedArrays.distance;
+
+	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT (WR-4 follow-up).
+	//
+	// This calculator used to be built with NO `rhoArray` at all, while
+	// `updateModeVEPlots` passes a per-segment slice (`:251`). On any ride
+	// carrying usable air density the two passes therefore integrated different
+	// physics -- constant `params.rho` here, the real per-point series there --
+	// and the panel visibly changed by itself when the post-bind kick landed.
+	// Measured on the golden ride: mean RMSE 7.809 m at the analyze paint
+	// against 7.555 m one macrotask later, and the analyze number was the wrong
+	// one.
+	//
+	// `resolveRhoArray` is the one resolver both paths share (D-06), so this is
+	// the same call the primitive makes, not a second opinion.
+	const allRho = resolveRhoArray(fitData, normalizedArrays);
+
+	/**
+	 * The rho slice for one leg, on `extractSegmentData`'s own bounds
+	 * (`SegmentExtractor.ts:26`) so the series cannot end up a different length
+	 * from the ones beside it.
+	 *
+	 * BOUNDED BY THE DENSITY SERIES AS WELL. `hasAirDensityData` is a
+	 * `.some(...)`, so a channel the device stopped emitting mid-ride is still
+	 * accepted, and indexing on `allTimestamps` alone put `undefined` into a
+	 * `number[]` — NaN rho across the WASM boundary for that leg. Same rule as
+	 * `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a leg the series
+	 * does not span falls back to the constant `params.rho` rather than to a
+	 * short one.
+	 *
+	 * A LENGTH CHECK, AND ONLY THAT — an interior NaN in a full-length channel
+	 * still reaches the calculator, since `hasAirDensityData` accepts the series
+	 * on a `.some(...)`. Pre-existing, and not what this guard covers.
+	 */
+	const legRho = (startIdx: number, endIdx: number): number[] | null => {
+		if (!allRho) return null;
+		const slice: number[] = [];
+		for (let i = startIdx; i <= endIdx && i < allTimestamps.length; i++) {
+			if (i >= allRho.length) {
+				log.warn(
+					`Air density series (${allRho.length}) does not span leg ${startIdx}-${endIdx}; using constant rho`,
+				);
+				return null;
+			}
+			slice.push(allRho[i]);
+		}
+		return slice;
+	};
 
 	// Handle wind/air speed via typed locals.
 	const outAndBackWindResolution = resolveWindSeries({
@@ -148,12 +233,14 @@ export async function showOutAndBackVEAnalysis(
 			outboundVE: [],
 			outboundVECompare: null,
 			outboundActualElevation: [],
+			outboundReferenceElevation: null,
 			outboundSeries: null,
 			outboundRange: null,
 			inboundDistances: [],
 			inboundVE: [],
 			inboundVECompare: null,
 			inboundActualElevation: [],
+			inboundReferenceElevation: null,
 			inboundSeries: null,
 			inboundRange: null,
 			outboundDuration: section.outboundDuration,
@@ -186,6 +273,7 @@ export async function showOutAndBackVEAnalysis(
 					altitude: outboundData.altitude,
 					distance: outboundData.distance,
 					windSpeed: outboundData.windSpeed,
+					rhoArray: legRho(section.outboundStartIdx, section.outboundEndIdx),
 					params: resolvedParams,
 					cda,
 					crr: appliedCrr,
@@ -219,6 +307,15 @@ export async function showOutAndBackVEAnalysis(
 				profile.outboundActualElevation = resolvedParams.velodrome
 					? new Array(outboundData.altitude.length).fill(0)
 					: [...outboundData.altitude];
+				profile.outboundReferenceElevation = allReferenceElevation
+					? {
+							label: allReferenceElevation.label,
+							series: allReferenceElevation.series.slice(
+								section.outboundStartIdx,
+								section.outboundEndIdx + 1,
+							),
+						}
+					: null;
 			}
 		} catch (err) {
 			log.error(
@@ -252,6 +349,7 @@ export async function showOutAndBackVEAnalysis(
 					altitude: inboundData.altitude,
 					distance: inboundData.distance,
 					windSpeed: inboundData.windSpeed,
+					rhoArray: legRho(section.inboundStartIdx, section.inboundEndIdx),
 					params: resolvedParams,
 					cda,
 					crr: appliedCrr,
@@ -285,6 +383,15 @@ export async function showOutAndBackVEAnalysis(
 				profile.inboundActualElevation = resolvedParams.velodrome
 					? new Array(inboundData.altitude.length).fill(0)
 					: [...inboundData.altitude];
+				profile.inboundReferenceElevation = allReferenceElevation
+					? {
+							label: allReferenceElevation.label,
+							series: allReferenceElevation.series.slice(
+								section.inboundStartIdx,
+								section.inboundEndIdx + 1,
+							),
+						}
+					: null;
 			}
 		} catch (err) {
 			log.error(
@@ -314,8 +421,13 @@ export async function showOutAndBackVEAnalysis(
 		resolvedParams.wind_speed !== 0 &&
 		resolvedParams.wind_direction !== undefined;
 
-	// Preserve current wind source selection if UI exists (for recalculations)
-	const preservedWindSource = getSelectedWindSource();
+	// Preserve the CHECKED wind source across the re-render — null when no
+	// radio is checked (first render, or a sensor-less ride), so the
+	// `preservedWindSource || (hasWindSpeed ? "fit" : "constant")` default below
+	// actually fires. `getSelectedWindSource`'s 'fit' fallback here made that
+	// default dead code: a ride with no wind channel opened stuck on 'fit',
+	// its lone constant radio unchecked and the wind-height control hidden.
+	const preservedWindSource = getCheckedWindSource();
 
 	// Show the Out and Back VE analysis interface with wind data info
 	await showOutAndBackVEPlot(
@@ -355,7 +467,7 @@ export function outAndBackVdTabMarkup(
 	return `
                         <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(windSource)}>
                             ${virtualDistanceHeaderMarkup()}
-                            <div id="oabVdPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="oabVdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                         </div>
                         `;
 }
@@ -433,6 +545,8 @@ export function buildOutAndBackVeAnalysisTemplate(
                                     <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(params, "outAndBack")}
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>
@@ -481,7 +595,10 @@ export function buildOutAndBackVeAnalysisTemplate(
                     <div class="ve-sidebar-footer">
                         <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
 
@@ -505,6 +622,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                             `
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -543,7 +661,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 													showWindTab
 														? `
                         <div class="ve-tab-content" id="wind-tab">
-                            <div id="oabWindPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="oabWindPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                             ${
 															// PRESENCE on hasWindSpeed, VISIBILITY on the source.
 															// Gated on showFitWindControls this block was absent
@@ -569,10 +687,11 @@ export function buildOutAndBackVeAnalysisTemplate(
 												}
 
                         <div class="ve-tab-content" id="power-tab">
-                            <div id="oabPowerPlot" class="ve-plot ve-plot--tall"></div>
+                            <div class="ve-plot-container"><div id="oabPowerPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                         </div>
 
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>
@@ -617,18 +736,35 @@ export async function showOutAndBackVEPlot(
 	// as long as ONE leg survived. Ranging over the sections would therefore seed
 	// samples no plotted leg describes, which is why the filter below is on the
 	// per-leg ranges rather than on `resolveActiveOutAndBackSections`.
-	seedSegmentModeFilteredData(
-		appState,
-		profiles.flatMap((profile) =>
+	// Computed BEFORE the seed: WR-3 records it, and the panel below renders from
+	// the same value, so the two cannot describe different sources.
+	const selectedWindSource =
+		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
+
+	seedSegmentModeAnalyzeState(appState, {
+		ranges: profiles.flatMap((profile) =>
 			[profile.outboundRange, profile.inboundRange].filter(
 				(range): range is { startIdx: number; endIdx: number } =>
 					range !== null,
 			),
 		),
-	);
-
-	const selectedWindSource =
-		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
+		// Both arguments, as in renderGpsLap: `selectedWindSource` is already the
+		// resolved panel source, and `resolveRecordedWindSource` preserves
+		// "compare" while passing the other two straight through.
+		requestedWindSource: selectedWindSource as never,
+		resolvedWindSource: selectedWindSource as never,
+		// ONE entry per SECTION, not per leg — the maintainer's ruling that
+		// `outAndBackMode.summarize` already follows. Reusing the same builder is
+		// what keeps an analyze-time export identical to a post-update one, 2N
+		// lines being exactly what it exists to prevent.
+		virtualDistances: sectionVirtualDistances(
+			profiles.map((profile) => ({
+				label: `Section ${profile.sectionNumber}`,
+				outbound: profile.outboundSeries ?? null,
+				inbound: profile.inboundSeries ?? null,
+			})),
+		),
+	});
 	const showWindTab = hasWindSpeed || hasConstantWind;
 	// PRESENCE, not visibility — see the identical note in renderGpsLap.ts.
 	const showVirtualDistanceTab = hasWindSpeed;
@@ -699,6 +835,7 @@ export async function showOutAndBackVEPlot(
 		wind: () => renderOutAndBackWindPlot(profiles),
 		power: () => renderOutAndBackPowerPlot(profiles),
 		vd: () => renderOutAndBackVdPlot(profiles),
+		convergence: requestConvergenceRedraw,
 	});
 
 	// Setup action footer buttons
@@ -709,13 +846,52 @@ export async function showOutAndBackVEPlot(
 		onStoreResult: () => {
 			void handleStoreResult(appState, resultsStorage);
 		},
+		onShowAllResults: () => {
+			void handleShowAllResults(resultsStorage);
+		},
 		onExportAll: () => {
 			void handleExportAllResults(resultsStorage);
 		},
+		onExportSettings: () => {
+			void handleExportSettings(appState, parameterStorage);
+		},
+		onExportBundle: () => {
+			void handleExportBundle(appState, parameterStorage);
+		},
 	});
 
-	// Initial plot render
-	renderOutAndBackPlots(Plotly, profiles, meanElevation);
+	// Initial plot render. The non-master channel's mean rides on the section
+	// profiles themselves, so it is derived here rather than threaded through
+	// the long signature above.
+	renderOutAndBackPlots(
+		Plotly,
+		profiles,
+		meanElevation,
+		calculateOutAndBackMeanReference(profiles),
+	);
+
+	// THE POST-BIND KICK (WR-4). Standard has had this since before the phase
+	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never
+	// carried this bug.
+	//
+	// Everything the analyze leg above computed is a FIRST PAINT, not a
+	// RESULT: it keeps `virtual_elevation` from each per-lap fit and discards
+	// r2, RMSE and the elevation gains. So without this line the only writer
+	// of `appState.currentVEResult` on an analyze was the stitched fit
+	// `prepareAnalysisPayload` runs over the concatenated selection, which
+	// this panel never displays -- and the first control nudge replaced it.
+	//
+	// Scheduled, not called: `requestModeUpdate` funnels into
+	// `scheduleRecompute`, so the pass lands on the next macrotask and the
+	// value it writes is produced by the SAME code path a control gesture
+	// uses. That identity is the point. Hand-rolling the aggregation here
+	// would give the field a second writer with its own idea of trim, wind
+	// source and segmentation, which is the CR-02 shape.
+	//
+	// AFTER the binder, never before: `bindModeControls` is what calls
+	// `configureModeUpdateRequests` (`bindModeControls.ts:154`), and
+	// `requestModeUpdate` no-ops while that is unset.
+	requestModeUpdate("parameters");
 
 	// Scroll to the VE analysis section
 	veSection?.scrollIntoView({ behavior: "smooth", block: "start" });

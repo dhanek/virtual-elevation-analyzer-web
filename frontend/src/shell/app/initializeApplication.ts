@@ -11,6 +11,7 @@ import { MultiDEMManager } from "../../utils/MultiDEMManager";
 import { WeatherCache } from "../../utils/WeatherCache";
 import { log } from "../../utils/log";
 import { AppState } from "../../state/AppState";
+import { bindShowAllResultsButton } from "../analysis/storageHandlers";
 import {
 	configureFileLoadOrchestration,
 	handleFileSelection,
@@ -33,6 +34,11 @@ import {
 	configureSection3Orchestration,
 	initializeSection3,
 } from "../section3/section3Orchestration";
+import {
+	restoreDevSession,
+	startDevSessionSnapshots,
+} from "../dev/devSessionRestore";
+import { clearDevSession } from "../dev/devSessionStore";
 
 interface ShellDomElements {
 	fitFileInput: HTMLInputElement;
@@ -46,6 +52,7 @@ interface ShellDomElements {
 	results: HTMLDivElement;
 	statisticsContent: HTMLDivElement;
 	clearStorageButton: HTMLButtonElement;
+	showAllResultsFooter: HTMLButtonElement;
 	demFileInput: HTMLInputElement;
 	demFileDropZone: HTMLDivElement;
 	demFileInfo: HTMLDivElement;
@@ -309,6 +316,18 @@ export async function initializeApplicationShell(
 	}
 	updateDEMSourceSelection(dom.remoteDEMSelector.value);
 
+	// THE RESULTS VIEW, REACHABLE WITH NO FILE LOADED.
+	//
+	// The stored results are one global store spanning every ride ever analysed;
+	// nothing about them depends on what is currently open. The sidebar's own
+	// button stays as the convenient path right after Store Result, and both go
+	// through `handleShowAllResults`, so the two entry points cannot drift.
+	//
+	// Placed before the clear button below, in the markup and here: being able to
+	// see what is stored — and now to delete single rows — is what makes "Clear
+	// Results" an informed decision rather than a leap.
+	bindShowAllResultsButton(dom.showAllResultsFooter, resultsStorage);
+
 	// Clear saved parameters and results button
 	dom.clearStorageButton.addEventListener("click", async () => {
 		if (
@@ -319,6 +338,10 @@ export async function initializeApplicationShell(
 			try {
 				await parameterStorage.clearAll();
 				await resultsStorage.clearAllResults();
+
+				// The dev warm-reload cache is saved parameters too, as far as
+				// the person clicking this is concerned. No-op in production.
+				await clearDevSession();
 
 				// Also clear weather cache
 				const weatherCacheInstance = new WeatherCache();
@@ -360,4 +383,11 @@ export async function initializeApplicationShell(
 
 	// Initialize FIT processor
 	await initializeFitProcessor();
+
+	// DEV ONLY: come back to the ride that was loaded before the last reload.
+	// After `initializeFitProcessor`, because the replay parses the file and
+	// reads ParameterStorage, both of which it just set up. No-op in a
+	// production build; `?fresh` skips it. See shell/dev/devSessionRestore.
+	startDevSessionSnapshots(appState);
+	await restoreDevSession(appState);
 }

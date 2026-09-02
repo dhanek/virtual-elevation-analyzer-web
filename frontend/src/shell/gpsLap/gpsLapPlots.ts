@@ -3,8 +3,11 @@
  *
  * Verbatim lift from main.ts -- rendering logic for GPS-lap mode plots.
  */
+import type { MeanReferenceProfile } from '../../analysis/elevationProfiles';
+export type { MeanReferenceProfile };
 import type { LapVEProfile } from './types';
 import { anchorSeriesTo, residualsAgainst } from '../../plots/comparisonTraces';
+import { BELOW_AXIS_LEGEND_MARGIN_B, belowAxisLegend } from '../../plots/StandardPlotBuilders';
 import { log } from '../../utils/log';
 import {
     buildMultiSegmentWindFigure,
@@ -183,6 +186,28 @@ export function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): { di
     }
 
     return { distances: referenceDistances, elevation: meanElevation };
+}
+
+/**
+ * The mean profile of the NON-master elevation channel — the second reference
+ * line ("both channels shown; the import only picks the master"). Reuses
+ * `calculateMeanElevationProfile` verbatim by substituting each lap's
+ * reference series for its actual one, so the two means cannot drift in how
+ * they grid, bracket or interpolate. Null when no lap carries a reference
+ * (single-channel rides, velodrome), which is what keeps every existing
+ * figure byte-identical there.
+ */
+export function calculateMeanReferenceProfile(lapProfiles: LapVEProfile[]): MeanReferenceProfile | null {
+    // Truthy, not `!== null`: profiles cast from plain objects in tests
+    // (and any future loose producer) leave the field undefined.
+    const withReference = lapProfiles.filter(lap => lap.referenceElevation);
+    if (withReference.length === 0) {
+        return null;
+    }
+    const mean = calculateMeanElevationProfile(
+        withReference.map(lap => ({ ...lap, actualElevation: lap.referenceElevation!.series })),
+    );
+    return { label: withReference[0].referenceElevation!.label, ...mean };
 }
 
 /**
@@ -410,11 +435,8 @@ function buildStackedLayouts(maxDist: number) {
             yaxis: {
                 title: 'Elevation (m)'
             },
-            legend: {
-                orientation: 'h',
-                y: -0.2
-            },
-            margin: { t: 40, b: 80, l: 60, r: 20 },
+            legend: belowAxisLegend(),
+            margin: { t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B, l: 60, r: 20 },
             hovermode: 'closest'
         },
         // Residual plot layout
@@ -462,6 +484,30 @@ function meanElevationTrace(meanElevation: { distances: number[]; elevation: num
 }
 
 /**
+ * The NON-master channel's mean profile, aligned to the master mean at the
+ * grid origin. Aligned for the same reason the Standard figure aligns it: the
+ * barometer's datum is calibration-dependent and can sit tens of metres from
+ * the DEM's, which would double the y-range of a stacked overlay whose whole
+ * point is per-lap shape.
+ */
+function meanReferenceTrace(
+    meanReference: MeanReferenceProfile,
+    meanElevation: { distances: number[]; elevation: number[] },
+) {
+    const offset =
+        meanElevation.elevation.length > 0 && meanReference.elevation.length > 0
+            ? meanElevation.elevation[0] - meanReference.elevation[0]
+            : 0;
+    return {
+        x: meanReference.distances,
+        y: meanReference.elevation.map(value => value + offset),
+        mode: 'lines',
+        name: `Mean ${meanReference.label} (aligned)`,
+        line: { color: '#8a8a8a', dash: 'dash', width: 1.5 }
+    };
+}
+
+/**
  * The GPS-lap comparison figure (D-07/D-20, plan 07-04 Task 2).
  *
  * COLOUR STAYS LAP IDENTITY; DASH CARRIES THE WIND MODEL.
@@ -477,12 +523,14 @@ function meanElevationTrace(meanElevation: { distances: number[]; elevation: num
  * prevent. `gpsLapCompareFigures.test.ts` watches exactly that, and the D-10
  * mutation row for this task is the removal of `dash: 'dash'`.
  *
- * Trace counts: `1 + 2N` on the VE plot, `2N` on the residual plot (its zero
- * line is a layout shape, not a trace).
+ * Trace counts: `1 + 2N` on the VE plot (`2 + 2N` when the laps carry a
+ * reference channel), `2N` on the residual plot (its zero line is a layout
+ * shape, not a trace).
  */
 export function buildStackedComparisonFigures(
     lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+    meanElevation: { distances: number[]; elevation: number[] },
+    meanReference: MeanReferenceProfile | null = null,
 ): {
     ve: { data: any[]; layout: any };
     residuals: { data: any[]; layout: any };
@@ -494,6 +542,9 @@ export function buildStackedComparisonFigures(
 
     if (meanElevation.distances.length > 0) {
         veTraces.push(meanElevationTrace(meanElevation));
+        if (meanReference) {
+            veTraces.push(meanReferenceTrace(meanReference, meanElevation));
+        }
     }
 
     for (let i = 0; i < lapProfiles.length; i++) {
@@ -556,7 +607,8 @@ export function buildStackedComparisonFigures(
 /** The single-source stacked figure — one solid trace per lap, as before. */
 function buildStackedSingleSourceFigures(
     lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+    meanElevation: { distances: number[]; elevation: number[] },
+    meanReference: MeanReferenceProfile | null = null,
 ): {
     ve: { data: any[]; layout: any };
     residuals: { data: any[]; layout: any };
@@ -569,6 +621,9 @@ function buildStackedSingleSourceFigures(
     // Add mean elevation trace (dashed black line)
     if (meanElevation.distances.length > 0) {
         veTraces.push(meanElevationTrace(meanElevation));
+        if (meanReference) {
+            veTraces.push(meanReferenceTrace(meanReference, meanElevation));
+        }
     }
 
     // Add VE traces for each lap
@@ -630,7 +685,8 @@ function buildStackedSingleSourceFigures(
 export function renderGpsLapVEPlots(
     lapProfiles: LapVEProfile[],
     meanElevation: { distances: number[]; elevation: number[] },
-    stats: GpsLapHeaderStats
+    stats: GpsLapHeaderStats,
+    meanReference: MeanReferenceProfile | null = null,
 ) {
     const PlotlyGlobal = (window as any).Plotly;
     if (!PlotlyGlobal) return;
@@ -647,8 +703,8 @@ export function renderGpsLapVEPlots(
     }
 
     const figures = isCompare
-        ? buildStackedComparisonFigures(lapProfiles, meanElevation)
-        : buildStackedSingleSourceFigures(lapProfiles, meanElevation);
+        ? buildStackedComparisonFigures(lapProfiles, meanElevation, meanReference)
+        : buildStackedSingleSourceFigures(lapProfiles, meanElevation, meanReference);
 
     // Render plots in-place. Plotly.react initializes the div on first call and
     // diffs on subsequent calls, so slider-driven recomputes update smoothly

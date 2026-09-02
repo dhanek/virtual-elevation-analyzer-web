@@ -31,12 +31,12 @@
                 <h2><span class="section-number" id="section1Number">1</span>File Selection</h2>
                 <div class="file-section">
                     <div class="file-input-wrapper">
-                        <input type="file" id="fitFileInput" accept=".fit,.csv" class="hidden">
+                        <input type="file" id="fitFileInput" accept=".fit,.csv,.json,.zip" class="hidden">
                         <div class="file-input" id="fileDropZone">
                             <div>
                                 Click to select a FIT or CSV file or drag and drop
                             </div>
-                            <small>Supports .fit and .csv files up to 50MB</small>
+                            <small>Supports .fit and .csv files up to 50MB — or an exported settings .json / .zip bundle</small>
                         </div>
                     </div>
 
@@ -139,7 +139,10 @@
         <!-- Footer -->
         <footer class="app-footer">
             <p class="app-footer-note">All data is processed locally in your browser. No files are uploaded to any server.</p>
-            <button id="clearStorageButton" class="clear-storage-btn">
+            <button id="showAllResultsFooter" class="clear-storage-btn app-footer__btn">
+                Show All Results
+            </button>
+            <button id="clearStorageButton" class="clear-storage-btn app-footer__btn">
                 Clear Results & Saved Parameters
             </button>
         </footer>

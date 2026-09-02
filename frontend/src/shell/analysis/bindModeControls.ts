@@ -45,7 +45,9 @@ import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
 import { syncRangeAndNumber } from "../dom/rangeNumberPair";
 import { bindWindSourceRadios } from "../dom/windSource";
+import { bindAutoConvergeLocks } from "../ve/autoConvergeLocks";
 import { bindCrrTempControls } from "../ve/crrTempControls";
+import { bindElevationDiffControls } from "../ve/elevationDiffControls";
 import { bindWindHeightControls } from "../ve/windHeightControls";
 import { bindElevationSmoothingToggle } from "./elevationProfileCycle";
 import {
@@ -151,7 +153,7 @@ export function bindModeControls(
 	// step, because they were two for exactly one commit and both GPS modes
 	// spent it completely inert — every row bound, every interaction dropped by
 	// `if (!deps) return`. See the file header.
-	configureModeUpdateRequests({ appState });
+	configureModeUpdateRequests({ appState, saveSettings });
 
 	/**
 	 * Steps 2 and 3 of every handler. `trimWindow` is supplied only by the rows
@@ -438,11 +440,26 @@ export function bindModeControls(
 				// mode owns one at all. `compare` was the last, and it is now
 				// resolved inside the primitive like every other source, so this row
 				// binds the radios and nothing else.
-				attached = bindWindSourceRadios(() => finish(spec));
+				attached =
+					spec.reason === "elevationDiffSource"
+						? bindElevationDiffControls(
+								{
+									getParams: () => appState.currentParameters,
+									setParams: (fields) => {
+										mergeAnalysisParameters(fields);
+									},
+									onChange: () => finish(spec),
+								},
+								appState.demProfilesAvailable,
+							)
+						: bindWindSourceRadios(() => finish(spec));
 				break;
 
 			case "toggle":
-				attached = bindElevationSmoothingToggle(appState, () => finish(spec));
+				attached =
+					spec.reason === "autoConverge"
+						? bindAutoConvergeLocks(appState, () => finish(spec))
+						: bindElevationSmoothingToggle(appState, () => finish(spec));
 				break;
 
 			case "delegated": {

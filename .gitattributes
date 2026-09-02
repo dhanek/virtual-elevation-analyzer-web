@@ -1,0 +1,6 @@
+# The repo stores LF, and every checkout gets LF — including on Windows.
+# Without this, a Windows-side clone with core.autocrlf=true rewrites the
+# whole tree to CRLF, and every file then reads as modified with an
+# identical insertion and deletion count: a diff of thousands of lines that
+# changes nothing. `text=auto` still leaves detected binaries untouched.
+* text=auto eol=lf

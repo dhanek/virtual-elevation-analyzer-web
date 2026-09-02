@@ -1,3 +1,5 @@
+import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
+import type { ElevationDiffSource } from "../../analysis/ClosureTarget";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
@@ -51,7 +53,6 @@ export interface FilteredAnalysisPayload {
 }
 
 export interface StandardRenderArgs extends FilteredAnalysisPayload {
-	initialResult: any;
 	analyzedLaps: number[];
 	selectedIndices: number[];
 	defaultAirSpeedOffset: number;
@@ -79,7 +80,6 @@ export interface ModeRenderArgs {
 	fitData: ActivityDataLike;
 	params: AnalysisParameters;
 	defaultAirSpeedOffset: number;
-	initialResult: any;
 	filteredData: FilteredAnalysisPayload;
 	selectedIndices: number[];
 	callbacks: ModeRenderCallbacks;
@@ -128,6 +128,22 @@ export interface ModeSegment {
 	 * trim mapping.
 	 */
 	itemNumber?: number;
+	/**
+	 * Which leg of an out-and-back section this segment is. Undefined in every
+	 * other mode — a lap has no direction.
+	 *
+	 * Read by the closure target: a MANUAL elevation difference describes the
+	 * OUTBOUND leg, so the inbound leg — which retraces the same ground
+	 * backwards — takes its negation (`resolveClosureTarget`). The channel-backed
+	 * sources need nothing here; they already come out with opposite signs
+	 * because each leg's target is measured over its own window.
+	 *
+	 * Carried on the segment for `itemNumber`'s reason: the fact is certain in
+	 * `getUpdateSegments` and nowhere else. The keys happen to end in `-out` /
+	 * `-in`, but a parse of those would be a derived identity of exactly the
+	 * kind `itemNumber` exists to avoid.
+	 */
+	legDirection?: "outbound" | "inbound";
 	trim?: { start: number; end: number };
 }
 
@@ -186,6 +202,17 @@ export interface SegmentVeProfile {
 	 */
 	virtualElevationCompare: number[] | null;
 	actualElevation: number[];
+	/**
+	 * The NON-master elevation channel over the SAME samples as
+	 * `actualElevation` (the barometer under a DEM master, the DEM under a
+	 * fit-raw master), for drawing beside it — both channels are shown by
+	 * default; the import only decides the master.
+	 *
+	 * Null when the ride has only one channel, or under velodrome, where
+	 * `actualElevation` is zeroed. Display-only: no metric, closure target or
+	 * physics reads it, so it cannot move a stored result or golden literal.
+	 */
+	referenceElevation: ReferenceElevationSeries | null;
 	supplementarySeries: SegmentSupplementarySeries;
 	result: VEAnalysisResult;
 	/**
@@ -244,6 +271,79 @@ export interface ModeAggregateStats {
  * Every member takes data and returns nothing meaningful — no figure objects
  * cross this boundary in either direction.
  */
+/**
+ * One prepared segment's contribution to the Convergence tab, wrapped so the
+ * mode layer stays ignorant of calculators: `veGainGrid` closes over the
+ * segment's WASM calculator and trim window (`buildConvergenceUpdateInput`).
+ */
+export interface ConvergenceSegmentInput {
+	key: string;
+	/** `ve_gain_grid` over this segment's trim window, row-major over CdA. */
+	veGainGrid(
+		cdaMin: number,
+		cdaMax: number,
+		cdaSteps: number,
+		crrMin: number,
+		crrMax: number,
+		crrSteps: number,
+	): Float64Array;
+	/** Trim-window sample count, for the grid-resolution rule. */
+	windowSamples: number;
+	/** Reference elevation difference over the trim window. */
+	closureTarget: number;
+	/**
+	 * The window's VE profile at one (CdA, applied-space Crr), rebased to 0
+	 * at the window start — the probe the profile-spread surface linearises
+	 * around. Like `veGainGrid`, Crr arrives in APPLIED space (the caller
+	 * folds `crrScale` in). Optional: absent means the segment cannot join
+	 * the profile surface.
+	 */
+	veProfile?(cda: number, crrApplied: number): Float64Array;
+	/** Window travelled distance, rebased to 0; pairs with `veProfile`. */
+	profileDistance?: Float64Array;
+	/** Profile comparison group (out-and-back leg direction). */
+	profileGroup?: string;
+}
+
+/**
+ * Everything `renderConvergence` needs: the segments to pool, the current
+ * slider position for the marker, the grid bounds, and a `signature` that
+ * changes exactly when the surface must be recomputed — every physics input,
+ * and deliberately NOT CdA/Crr, so a drag redraws the marker from the cached
+ * surface instead of recomputing the grid.
+ */
+export interface ConvergenceUpdateInput {
+	segments: ConvergenceSegmentInput[];
+	/** Current slider values, for the marker. */
+	cda: number;
+	crr: number;
+	/** Grid bounds — the slider bounds. */
+	cdaMin: number;
+	cdaMax: number;
+	crrMin: number;
+	crrMax: number;
+	/** appliedCrr / crr — the temperature-correction scaling of the Crr axis. */
+	crrScale: number;
+	/** Pooled-surface cache key (gains + closure targets); see above. */
+	signature: string;
+	/**
+	 * Raw-gains cache key — the physics WITHOUT the closure targets, so an
+	 * elevation-difference source switch re-pools the cached grids instead of
+	 * recomputing them (`buildConvergenceUpdateInput`).
+	 */
+	gainsSignature: string;
+	/**
+	 * The Convergence tab draws the profile-spread surface instead of the
+	 * closure-error surface (the auto-converge profile-consistency toggle).
+	 * Optional: absent means closure.
+	 */
+	profileMode?: boolean;
+	/** The elevation-difference source the targets came from (phase 2). */
+	targetSource: ElevationDiffSource;
+	/** Honest display name for the source (marks the no-DEM fallback). */
+	targetLabel: string;
+}
+
 export interface ModeUpdateCallbacks {
 	aggregate(profiles: SegmentVeProfile[]): ModeAggregateStats;
 	renderVe(
@@ -254,6 +354,14 @@ export interface ModeUpdateCallbacks {
 	renderPower(profiles: SegmentVeProfile[]): Promise<void> | void;
 	renderVd(profiles: SegmentVeProfile[]): Promise<void> | void;
 	renderMetrics(aggregate: ModeAggregateStats): Promise<void> | void;
+	/**
+	 * The Convergence tab (closure-error contour). Gated by the primitive on
+	 * `isTabActive("convergence-tab")` — the grid behind it is the most
+	 * expensive thing the app computes, so the D-14 lazy gate matters more
+	 * here than for any other tab. All three modes delegate to the one shared
+	 * renderer (`shell/analysis/convergenceView.ts`).
+	 */
+	renderConvergence(input: ConvergenceUpdateInput): Promise<void> | void;
 }
 
 export interface AnalysisModeHandler {

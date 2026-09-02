@@ -11,7 +11,7 @@
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-	max-height: 680px;
+	max-height: 1360px;
 }
 
 .ve-controls-scrollable {
@@ -67,9 +67,10 @@
 		flex: 1 1 auto;
 	}
 
-	.ve-plot {
-		height: 300px; /* Shorter plots on mobile */
-	}
+	/* No plot-height override here any more: the `clamp()` heights in
+	   ve-results.css are viewport-relative, so they shrink on a short screen
+	   without a breakpoint. This rule targeted `.ve-plot`, a class no template
+	   uses since every plot moved onto the one container shape. */
 
 	.ve-plot-header {
 		flex-direction: column;

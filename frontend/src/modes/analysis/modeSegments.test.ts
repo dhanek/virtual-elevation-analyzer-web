@@ -64,6 +64,7 @@ function makeProfile(indices: number[]): SegmentVeProfile {
         virtualElevationCompare: null,
         resultCompare: null,
         actualElevation: indices.map(() => 100),
+        referenceElevation: null,
         supplementarySeries: {
             distancesKm: [],
             powerWatts: [],
@@ -263,6 +264,17 @@ describe('outAndBackMode.getUpdateSegments', () => {
             { startIdx: 5, endIdx: 9 },
             { startIdx: 20, endIdx: 24 },
             { startIdx: 25, endIdx: 29 },
+        ]);
+    });
+
+    it('labels each leg with its direction, for the manual closure target', () => {
+        // `resolveClosureTarget` negates a manual difference on the inbound
+        // leg, and it reads this field -- never the ordinal or the key suffix.
+        const handler = getAnalysisModeHandler('GPS based out and back');
+        const segments = handler.getUpdateSegments(oabState());
+
+        expect(segments.map(s => s.legDirection)).toEqual([
+            'outbound', 'inbound', 'outbound', 'inbound',
         ]);
     });
 

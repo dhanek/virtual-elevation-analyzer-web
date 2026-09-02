@@ -46,6 +46,7 @@ function makeLap(index: number, withCompare: boolean): LapVEProfile {
             ? Array.from({ length: SAMPLES }, (_, i) => -i * (0.25 + index))
             : null,
         actualElevation,
+        referenceElevation: null,
         supplementarySeries: {} as LapVEProfile['supplementarySeries'],
         duration: 300,
         totalDistance: 2,

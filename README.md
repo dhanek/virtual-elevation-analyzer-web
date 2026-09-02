@@ -51,6 +51,29 @@ npm run dev
 
 Then open the local Vite URL shown in the terminal.
 
+### Watch mode
+
+`npm run dev:all` (from the repo root) runs the Vite dev server *and*
+`cargo watch`, so a change to the Rust crate rebuilds into `frontend/pkg` and
+reloads the page. It needs `cargo install cargo-watch`; without it the script
+still serves the frontend and tells you Rust changes will not rebuild.
+
+Two things make that loop usable:
+
+- **The page comes back to the ride you were on.** In a dev build the last
+  activity file and the Section-3 selection are cached, and replayed on boot —
+  a reload does not send you back to an empty drop zone. Load with `?fresh` to
+  skip the replay, or use "Clear Saved Data" to drop the cache. Production
+  builds never write it.
+- **Watching works on WSL.** File events never fire for a checkout on a
+  Windows drive (`/mnt/c/...`), which silently breaks every kind of reload.
+  Vite is configured to poll there, detected automatically; `VITE_POLL=1` or
+  `VITE_POLL=0` forces the choice.
+
+Note that TypeScript changes trigger a full page reload rather than a hot
+module swap — the shell has no teardown path, so nothing can accept an update
+in place.
+
 ### Full local validation
 
 ```bash

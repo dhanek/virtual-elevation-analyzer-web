@@ -152,7 +152,6 @@ export const standardMode: AnalysisModeHandler = {
 
 	render(args: ModeRenderArgs) {
 		return args.callbacks.standard({
-			initialResult: args.initialResult,
 			analyzedLaps: args.selection.selectedItems,
 			selectedIndices: args.selectedIndices,
 			...args.filteredData,

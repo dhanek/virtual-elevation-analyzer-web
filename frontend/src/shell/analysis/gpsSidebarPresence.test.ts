@@ -116,6 +116,8 @@ const ALWAYS_PRESENT = [
 	"#saveScreenshot",
 	"#storeResult",
 	"#exportAllResults",
+	"#exportSettingsJson",
+	"#exportBundleZip",
 	"#ve-tab",
 	"#wind-tab",
 	"#power-tab",

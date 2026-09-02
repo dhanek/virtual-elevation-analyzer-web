@@ -123,6 +123,7 @@ import {
 	type OutAndBackRide,
 } from "../../analysis/__fixtures__/loadOutAndBackRide";
 import { clearModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
+import { resetRecomputeThrottle } from "../analysis/recomputeRunner";
 import { resetModeUpdateRequests } from "../analysis/requestModeUpdate";
 import { showOutAndBackVEPlot } from "./renderOutAndBack";
 import type { OutAndBackVEProfile } from "./types";
@@ -251,11 +252,13 @@ function initialProfiles(): OutAndBackVEProfile[] {
 			outboundVE: outbound.elevation.slice(),
 			outboundVECompare: null,
 			outboundActualElevation: outbound.elevation,
+			outboundReferenceElevation: null,
 			outboundSeries: null,
 			inboundDistances: inbound.distances,
 			inboundVE: inbound.elevation.slice(),
 			inboundVECompare: null,
 			inboundActualElevation: inbound.elevation,
+			inboundReferenceElevation: null,
 			inboundSeries: null,
 			outboundDuration: section.outboundEndIdx - section.outboundStartIdx,
 			inboundDuration: section.inboundEndIdx - section.inboundStartIdx,
@@ -392,6 +395,9 @@ describe("out-and-back on the synthetic fixture: the real compare render chain",
 	});
 
 	afterEach(() => {
+		// Cross-test state, and it must run while the fake timers are still
+		// installed -- see the note in `gpsModeRealChain.test.ts`.
+		resetRecomputeThrottle();
 		vi.useRealTimers();
 		clearModeUpdateCallbacks();
 		resetModeUpdateRequests();
@@ -579,6 +585,7 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 	});
 
 	afterEach(() => {
+		resetRecomputeThrottle();
 		consoleError.mockRestore();
 		vi.useRealTimers();
 		clearModeUpdateCallbacks();

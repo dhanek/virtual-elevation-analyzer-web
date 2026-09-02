@@ -22,17 +22,28 @@ import type {
 import type { LapVEProfile } from "./types";
 import type { GpsLapHeaderStats } from "./gpsLapPlots";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { gpsLapNumberForProfile } from "../../modes/analysis/gpsLapMode";
+import {
+	computeGpsLapAggregate,
+	toGpsLapProfiles,
+} from "./gpsLapAggregate";
 import {
 	renderGpsLapVEPlots,
 	renderGpsLapWindPlot,
 	renderGpsLapPowerPlot,
 	renderGpsLapVdPlot,
 	calculateMeanElevationProfile,
-	calculateGpsLapStats,
+	calculateMeanReferenceProfile,
+	type MeanReferenceProfile,
 } from "./gpsLapPlots";
 import { setupTabSwitching } from "../dom/tabs";
-import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
+import {
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "../analysis/elevationProfileResolver";
+import {
+	renderConvergenceView,
+	requestConvergenceRedraw,
+} from "../analysis/convergenceView";
 
 /**
  * D2 — the mean elevation profile, cached ACROSS updates.
@@ -58,18 +69,31 @@ import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
  *   - `actualElevation` <- `params.velodrome ? zeros : slice.altitude`, a
  *     function of the RESOLVED elevation array and the segment range.
  *
- * Hence: activity identity, resolved-elevation array identity, the velodrome
- * flag, and the segment ranges. `resolveElevationProfile` returns the array
- * cached on AppState, so its identity is stable while the displayed profile is —
- * and changes the moment the elevation-smoothing toggle selects another one,
- * which is the invalidation `gpsLapMeanElevationCache.test.ts` watches fail.
+ * Hence: activity identity, resolved-elevation array identity, the reference
+ * channel's array identity (both channels are drawn; the mean of the
+ * non-master one is cached here too), the velodrome flag, and the segment
+ * ranges. `resolveElevationProfile` returns the array cached on AppState, so
+ * its identity is stable while the displayed profile is — and changes the
+ * moment the elevation-smoothing toggle selects another one, which is the
+ * invalidation `gpsLapMeanElevationCache.test.ts` watches fail.
  */
 interface MeanElevationCache {
 	fitData: unknown;
 	elevation: number[];
+	/**
+	 * Identity of the FULL-LENGTH non-master channel the per-lap
+	 * `referenceElevation` slices were cut from — `resolveReferenceElevation`
+	 * hands back identity-stable arrays (the DEM arrays live on AppState, the
+	 * lag-corrected barometer comes from a WeakMap memo), so `===` here means
+	 * the slices' content cannot have changed either. Null when no reference
+	 * exists, which must also match for a hit: a reference appearing or
+	 * vanishing (DEM load, velodrome toggle) changes `referenceValue`.
+	 */
+	reference: number[] | null;
 	velodrome: boolean;
 	shape: string;
 	value: { distances: number[]; elevation: number[] };
+	referenceValue: MeanReferenceProfile | null;
 }
 
 let meanElevationCache: MeanElevationCache | null = null;
@@ -147,6 +171,7 @@ export function createGpsLapUpdateCallbacks(
 		distances: [],
 		elevation: [],
 	};
+	let memoMeanReference: MeanReferenceProfile | null = null;
 
 	/**
 	 * The cross-update half of the memo (D2). The per-instance memo above stops
@@ -156,13 +181,19 @@ export function createGpsLapUpdateCallbacks(
 	function meanElevationFor(
 		profiles: SegmentVeProfile[],
 		lapProfiles: LapVEProfile[],
-	): { distances: number[]; elevation: number[] } {
+	): { mean: { distances: number[]; elevation: number[] }; reference: MeanReferenceProfile | null } {
 		const fitData = appState.currentFitData;
-		const elevation = resolveElevationProfile(
+		const resolved = resolveElevationProfile(
 			appState,
 			fitData!,
 			normalized.altitude,
-		).altitude;
+		);
+		const elevation = resolved.altitude;
+		const reference = resolveReferenceElevation(
+			appState,
+			resolved.profile,
+			normalized.altitude.length,
+		)?.series ?? null;
 		const velodrome = appState.currentParameters?.velodrome === true;
 		const shape = segmentShape(profiles);
 
@@ -170,60 +201,38 @@ export function createGpsLapUpdateCallbacks(
 			meanElevationCache !== null &&
 			meanElevationCache.fitData === fitData &&
 			meanElevationCache.elevation === elevation &&
+			meanElevationCache.reference === reference &&
 			meanElevationCache.velodrome === velodrome &&
 			meanElevationCache.shape === shape;
 
 		if (hit) {
-			return meanElevationCache!.value;
+			return {
+				mean: meanElevationCache!.value,
+				reference: meanElevationCache!.referenceValue,
+			};
 		}
 
 		const value = calculateMeanElevationProfile(lapProfiles);
-		meanElevationCache = { fitData, elevation, velodrome, shape, value };
-		return value;
+		const referenceValue = calculateMeanReferenceProfile(lapProfiles);
+		meanElevationCache = {
+			fitData,
+			elevation,
+			reference,
+			velodrome,
+			shape,
+			value,
+			referenceValue,
+		};
+		return { mean: value, reference: referenceValue };
 	}
 
 	function laps(profiles: SegmentVeProfile[]): LapVEProfile[] {
 		if (profiles !== memoKey) {
 			memoKey = profiles;
-			memoLaps = profiles.map((profile, i) => {
-				const first = profile.indices[0];
-				const last = profile.indices[profile.indices.length - 1];
-				return {
-					// NOT COMPUTED ON THIS PATH (WR-04). `range` exists for the
-					// analyze-time seed of `currentFilteredData`
-					// (`renderGpsLap.ts:327`) and has no reader here — the update
-					// path's own seed comes from `summarize`, off the profiles
-					// themselves. The derivation that used to sit here was the same
-					// dead surface this phase deleted for `RecomputeMode`,
-					// `AppState.recomputeStatus` and `cancelActiveRecompute`'s
-					// parameter, and it was unguarded where `duration` below is
-					// guarded.
-					range: null,
-					// The handler labels from the same lookup; relabelling here
-					// keeps the summary table and the stored result agreeing.
-					//
-					// `i` is the PROFILE ordinal, and the profile list is thinned
-					// (short segments, throwing calculators, trimmed-out
-					// segments), so indexing `currentOverlayLapNumbers` by it
-					// labelled every lap after the first drop with the previous
-					// lap's number. The number resolved against the RANGE ordinal
-					// rides on the segment instead.
-					lapNumber: gpsLapNumberForProfile(appState, profile, i),
-					distances: profile.distancesKm,
-					virtualElevation: profile.virtualElevation,
-					// Carried straight through from the primitive: non-null iff
-					// the requested source is `compare` (D-07/D-20).
-					virtualElevationCompare: profile.virtualElevationCompare,
-					actualElevation: profile.actualElevation,
-					supplementarySeries: profile.supplementarySeries,
-					duration:
-						profile.indices.length > 0
-							? normalized.timestamps[last] - normalized.timestamps[first]
-							: 0,
-					totalDistance: profile.distancesKm[profile.distancesKm.length - 1] ?? 0,
-				};
-			});
-			memoMean = meanElevationFor(profiles, memoLaps);
+			memoLaps = toGpsLapProfiles(appState, normalized, profiles);
+			const means = meanElevationFor(profiles, memoLaps);
+			memoMean = means.mean;
+			memoMeanReference = means.reference;
 		}
 		return memoLaps;
 	}
@@ -235,28 +244,9 @@ export function createGpsLapUpdateCallbacks(
 
 	return {
 		aggregate(profiles) {
-			const lapProfiles = laps(profiles);
-			const stats = calculateGpsLapStats(lapProfiles, meanElevation(profiles));
-			return {
-				r2: stats.meanR2,
-				rmse: stats.meanRMSE,
-				veGain: stats.avgVeGain,
-				actualGain: stats.avgActualGain,
-				segmentCount: lapProfiles.length,
-				extra: { closingError: stats.closingError },
-				// GPS-lap's own second set of numbers, computed by the SAME helper
-				// over the constant leg. The primitive never learns this shape
-				// (D-02): it hands over profiles and takes back an aggregate.
-				compare: stats.compare
-					? {
-							r2: stats.compare.meanR2,
-							rmse: stats.compare.meanRMSE,
-							veGain: stats.compare.avgVeGain,
-							actualGain: stats.compare.avgActualGain,
-							extra: { closingError: stats.compare.closingError },
-						}
-					: undefined,
-			};
+			// Extracted to `gpsLapAggregate.ts` (C4) so the headless API and
+			// this screen compute the aggregate through one function.
+			return computeGpsLapAggregate(laps(profiles), meanElevation(profiles));
 		},
 
 		renderVe(profiles, aggregate) {
@@ -265,11 +255,13 @@ export function createGpsLapUpdateCallbacks(
 				lapProfiles,
 				meanElevation(profiles),
 				headerStats(aggregate),
+				memoMeanReference,
 			);
 			setupTabSwitching({
 				wind: () => renderGpsLapWindPlot(lapProfiles),
 				power: () => renderGpsLapPowerPlot(lapProfiles),
 				vd: () => renderGpsLapVdPlot(lapProfiles),
+				convergence: requestConvergenceRedraw,
 			});
 		},
 
@@ -284,6 +276,8 @@ export function createGpsLapUpdateCallbacks(
 		renderVd(profiles) {
 			renderGpsLapVdPlot(laps(profiles));
 		},
+
+		renderConvergence: renderConvergenceView,
 
 		renderMetrics() {
 			// GPS-lap's metric spans and summary table are painted inside

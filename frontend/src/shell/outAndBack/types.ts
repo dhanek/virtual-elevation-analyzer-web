@@ -1,4 +1,5 @@
 import type { SegmentSupplementarySeries } from '../../analysis/SegmentSupplementarySeries';
+import type { ReferenceElevationSeries } from '../../analysis/elevationProfiles';
 
 export interface OutAndBackVEProfile {
     sectionNumber: number;
@@ -22,12 +23,20 @@ export interface OutAndBackVEProfile {
      */
     outboundVECompare: number[] | null;
     outboundActualElevation: number[];
+    /**
+     * The NON-master elevation channel over this leg's samples (see
+     * `SegmentVeProfile.referenceElevation`). Null on single-channel rides and
+     * under velodrome. Per LEG for the same reason the compare series is.
+     */
+    outboundReferenceElevation: ReferenceElevationSeries | null;
     outboundSeries: SegmentSupplementarySeries | null;
     inboundDistances: number[];       // km, relative to gate B (will be mirrored)
     inboundVE: number[];
     /** The second wind model's inbound VE. Same condition as `outboundVECompare`. */
     inboundVECompare: number[] | null;
     inboundActualElevation: number[];
+    /** The non-master channel over the inbound leg. Same condition as outbound. */
+    inboundReferenceElevation: ReferenceElevationSeries | null;
     inboundSeries: SegmentSupplementarySeries | null;
     outboundDuration: number;
     inboundDuration: number;

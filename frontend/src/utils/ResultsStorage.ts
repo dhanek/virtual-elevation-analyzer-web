@@ -2,6 +2,7 @@ import { fileSave } from 'browser-fs-access';
 import { AnalysisParameters } from '../components/AnalysisParameters';
 import type { SegmentVirtualDistance } from '../analysis/VirtualDistance';
 import { log } from './log';
+import { RESULT_COLUMNS, toCsvCell } from './resultColumns';
 
 // Shape of a VE analysis result kept in IndexedDB.
 //
@@ -81,6 +82,14 @@ export interface SaveResultData {
     avgSpeed: number;
     avgTemperature?: number;
     notes: string;
+    /**
+     * Which panel shape the store ran under. DIAGNOSTIC, not persisted:
+     * `toStoredVEResult` maps no column from it, but the out-and-back fixture
+     * chain asserts on it (N-1: the store fix must not work by pretending to
+     * be gps-lap), so it is part of the SaveResultData contract. Optional:
+     * callers that never had it (older fixtures) stay valid.
+     */
+    isGpsLapMode?: boolean;
 }
 
 export interface StoredVEResult {
@@ -103,6 +112,17 @@ export interface StoredVEResult {
     windSource: string;
     windSpeed: number | string;
     windDirection: number | string;
+    /**
+     * The 0-1 height factor the analysis was fitted at (WR-02). ABSENT on every
+     * record written before this column, exactly like `crrApplied` above, so
+     * every read of it is guarded — an old record must still load and export,
+     * with the cell empty rather than a fabricated 1.0 claiming "no transfer".
+     *
+     * Stored as the FACTOR and exported as a percent, matching the control.
+     * `windSpeed` beside it is the raw 10 m value; the wind that reached the
+     * physics is `windSpeed * windHeightFactor`.
+     */
+    windHeightFactor?: number;
     systemMass: number;
     rho: number;
     eta: number;
@@ -124,20 +144,18 @@ export interface StoredVEResult {
     timestamp: string; // ISO timestamp when entry was added to DB
 }
 
-export const CSV_HEADERS = [
-    // `Laps` is what was SELECTED; `LapsCovered` is which of them the numbers in
-    // this row actually describe (WR-02). Empty when no segment was dropped is
-    // NOT the convention — empty means "unknown", i.e. a pre-WR-02 record or one
-    // stored before any recompute ran.
-    'RecordingDate', 'FileName', 'Laps', 'LapsCovered', 'TrimStart', 'TrimEnd', 'CdA', 'Crr',
-    'CrrApplied', 'AmbientTemp', 'TireSensitivity', 'AirSpeedCal',
-    'WindSource', 'WindSpeed', 'WindDir', 'SystemMass', 'Rho', 'Eta',
-    'R2', 'RMSE', 'VEGain', 'ActualGain',
-    // Entry (h). One value per independently-integrated segment, ';'-separated
-    // in analysis order, aligned position-for-position with VDSegments.
-    'VDSegments', 'VDAirKm', 'VDGroundKm', 'VDDiffPercent',
-    'AvgPower', 'AvgSpeed', 'AvgTemp', 'Notes', 'Timestamp'
-];
+/**
+ * The header line, derived from the one column table rather than restated.
+ *
+ * This used to be a hand-maintained array of 32 strings sitting beside a
+ * hand-maintained array of 32 value expressions in `generateCSVFromResults`,
+ * related only by position. See `resultColumns.ts` for why that is now one
+ * table; `resultColumns.test.ts` pins the output byte for byte across the
+ * change.
+ */
+export const CSV_HEADERS: readonly string[] = RESULT_COLUMNS.map(
+    column => column.header
+);
 
 /**
  * How N virtual distances fit a format shaped for one value per analysis.
@@ -195,48 +213,79 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
         return a.lapKey.localeCompare(b.lapKey);
     });
 
-    // Rows
     for (const result of results) {
-        const values = [
-            result.recordingDate,
-            result.fileName,
-            result.lapKey,
-            result.lapsCoveredKey ?? '',
-            result.trimStart,
-            result.trimEnd,
-            result.cda.toFixed(3),
-            result.crr.toFixed(4),
-            result.crrApplied !== undefined ? result.crrApplied.toFixed(4) : '',
-            result.ambientTemp !== undefined ? result.ambientTemp.toFixed(1) : '',
-            result.tireSensitivity ?? '',
-            result.airSpeedCalibration !== undefined ? result.airSpeedCalibration.toFixed(1) : '',
-            result.windSource,
-            result.windSpeed,
-            result.windDirection,
-            result.systemMass,
-            result.rho.toFixed(3),
-            result.eta.toFixed(3),
-            result.r2.toFixed(4),
-            result.rmse.toFixed(2),
-            result.veGain.toFixed(2),
-            result.actualGain.toFixed(2),
-            ...virtualDistanceCsvCells(result.virtualDistances),
-            result.avgPower.toFixed(1),
-            result.avgSpeed.toFixed(2),
-            result.avgTemperature !== undefined ? result.avgTemperature.toFixed(1) : '',
-            `"${result.notes.replace(/"/g, '""')}"`, // Escape quotes in notes
-            result.timestamp
-        ];
-        csv += values.join(',') + '\n';
+        // ONCE per row: the four VD cells come from one helper call and are
+        // handed to the four columns that read them, rather than each column
+        // recomputing the group.
+        const vd = virtualDistanceCsvCells(result.virtualDistances);
+        csv += RESULT_COLUMNS
+            .map(column => toCsvCell(column, column.cell(result, vd)))
+            .join(',') + '\n';
     }
 
     return csv;
+}
+
+/**
+ * ONE mapping from a `SaveResultData` to the stored/exported row shape
+ * (Convergence plan, C5). `saveResult` uses it for the IndexedDB write and
+ * the headless API uses it for its `csvRow`, so the batch CSV and the app's
+ * Export CSV are the same table by construction.
+ */
+export function toStoredVEResult(data: SaveResultData): StoredVEResult {
+    const lapKey = data.laps.length === 0 ? 'all' : data.laps.join('-');
+
+    return {
+        fileName: data.fileName,
+        lapKey: lapKey,
+        // UNDEFINED, not the full selection, when the caller supplies none:
+        // "coverage unknown" and "covered everything" are different claims,
+        // and only one of them is true of a record stored before a recompute.
+        lapsCoveredKey: data.lapsCovered ? data.lapsCovered.join('-') : undefined,
+        trimStart: data.trimStart,
+        trimEnd: data.trimEnd,
+        cda: data.cda,
+        crr: data.crr,
+        crrApplied: data.crrApplied,
+        ambientTemp: data.ambientTemp,
+        tireSensitivity: data.tireSensitivity,
+        airSpeedCalibration: data.airSpeedCalibration,
+        windSource: data.windSource,
+        windSpeed: data.parameters.wind_speed ?? '',
+        windDirection: data.parameters.wind_direction ?? '',
+        // WR-02: carried across explicitly, like every other named column.
+        // `?? undefined` so a record whose params never held a factor stores
+        // no field at all and exports an empty cell.
+        windHeightFactor: data.parameters.wind_height_factor ?? undefined,
+        systemMass: data.parameters.system_mass,
+        rho: data.parameters.rho,
+        eta: data.parameters.eta,
+        r2: data.result.r2,
+        rmse: data.result.rmse,
+        veGain: data.result.ve_elevation_diff,
+        actualGain: data.result.actual_elevation_diff,
+        // Entry (h): the per-segment figures as shown, NOT a flattened
+        // total. `?? []` rather than a fabricated single value, so a caller
+        // that supplies none stores none.
+        virtualDistances: data.virtualDistances ?? [],
+        avgPower: data.avgPower,
+        avgSpeed: data.avgSpeed,
+        avgTemperature: data.avgTemperature,
+        notes: data.notes,
+        recordingDate: data.recordingDate,
+        timestamp: data.timestamp.toISOString()
+    };
 }
 
 export class ResultsStorage {
     private dbName = 'VirtualElevationResults'; // Separate database for results
     private storeName = 'veResults';
     private db: IDBDatabase | null = null;
+    /**
+     * The in-flight (or settled) `initialize()`, so that the open happens once
+     * however many callers ask for it. See `initialize` below.
+     */
+    private initPromise: Promise<void> | null = null;
 
     /**
      * Delete the database completely (for testing/debugging)
@@ -246,6 +295,11 @@ export class ResultsStorage {
             const request = indexedDB.deleteDatabase(this.dbName);
 
             request.onsuccess = () => {
+                // Forget the memoised open too: without this a later
+                // `initialize()` resolves instantly against a database that is
+                // no longer there.
+                this.db = null;
+                this.initPromise = null;
                 resolve();
             };
 
@@ -260,7 +314,34 @@ export class ResultsStorage {
         });
     }
 
+    /**
+     * Open the database if it is not open yet, and never twice.
+     *
+     * The store is GLOBAL — every ride ever analysed — but `initialize()` had
+     * exactly one production caller, on the file-load path
+     * (`fileLoadOrchestration.ts:91`). The footer's "Show All Results" is
+     * reachable with no file loaded, which is precisely when that call has not
+     * run, and `getAllResults` answers `[]` rather than throwing when `db` is
+     * null: the user got "Stored results (0)" over a populated database.
+     *
+     * Memoised rather than re-entrant-guarded with a boolean, so that the
+     * startup call and a reader arriving during the open both await the SAME
+     * open instead of racing two `indexedDB.open` sequences — the migration in
+     * `openDatabase` is not safe to run twice concurrently. A failed open is
+     * forgotten so the next caller can retry.
+     */
     async initialize(): Promise<void> {
+        if (this.db) return;
+        if (!this.initPromise) {
+            this.initPromise = this.openDatabase().catch((error) => {
+                this.initPromise = null;
+                throw error;
+            });
+        }
+        await this.initPromise;
+    }
+
+    private async openDatabase(): Promise<void> {
         return new Promise((resolve, reject) => {
             // First check current version
             const checkRequest = indexedDB.open(this.dbName);
@@ -520,44 +601,7 @@ export class ResultsStorage {
             throw new Error('Database not initialized');
         }
 
-        const lapKey = data.laps.length === 0 ? 'all' : data.laps.join('-');
-
-        const storedResult: StoredVEResult = {
-            fileName: data.fileName,
-            lapKey: lapKey,
-            // UNDEFINED, not the full selection, when the caller supplies none:
-            // "coverage unknown" and "covered everything" are different claims,
-            // and only one of them is true of a record stored before a recompute.
-            lapsCoveredKey: data.lapsCovered ? data.lapsCovered.join('-') : undefined,
-            trimStart: data.trimStart,
-            trimEnd: data.trimEnd,
-            cda: data.cda,
-            crr: data.crr,
-            crrApplied: data.crrApplied,
-            ambientTemp: data.ambientTemp,
-            tireSensitivity: data.tireSensitivity,
-            airSpeedCalibration: data.airSpeedCalibration,
-            windSource: data.windSource,
-            windSpeed: data.parameters.wind_speed ?? '',
-            windDirection: data.parameters.wind_direction ?? '',
-            systemMass: data.parameters.system_mass,
-            rho: data.parameters.rho,
-            eta: data.parameters.eta,
-            r2: data.result.r2,
-            rmse: data.result.rmse,
-            veGain: data.result.ve_elevation_diff,
-            actualGain: data.result.actual_elevation_diff,
-            // Entry (h): the per-segment figures as shown, NOT a flattened
-            // total. `?? []` rather than a fabricated single value, so a caller
-            // that supplies none stores none.
-            virtualDistances: data.virtualDistances ?? [],
-            avgPower: data.avgPower,
-            avgSpeed: data.avgSpeed,
-            avgTemperature: data.avgTemperature,
-            notes: data.notes,
-            recordingDate: data.recordingDate,
-            timestamp: data.timestamp.toISOString()
-        };
+        const storedResult: StoredVEResult = toStoredVEResult(data);
 
         return new Promise((resolve, reject) => {
             const transaction = this.db!.transaction([this.storeName], 'readwrite');
@@ -639,6 +683,15 @@ export class ResultsStorage {
      * Get all stored results
      */
     async getAllResults(): Promise<StoredVEResult[]> {
+        // Opens the store on demand: this is reachable from the footer button
+        // before any file has been loaded. Kept as a `[]` fallback rather than
+        // a throw if the open itself fails — an unreadable store is an empty
+        // table, not a broken page.
+        try {
+            await this.initialize();
+        } catch (error) {
+            log.error('Could not open the results database:', error);
+        }
         if (!this.db) {
             return [];
         }
@@ -661,9 +714,88 @@ export class ResultsStorage {
     }
 
     /**
+     * Delete ONE stored result.
+     *
+     * The store's `keyPath` is the composite `['fileName', 'lapKey', 'notes']`
+     * (`createDatabase`), so a row is already uniquely addressable and this
+     * needs no new index, no schema version and no migration. The key is passed
+     * as an object rather than three positional strings precisely because the
+     * components are all strings: a transposed pair would delete a different
+     * row, silently, and positional arguments make that a typo rather than a
+     * type error.
+     *
+     * Deleting a key that is not present RESOLVES rather than throwing, which is
+     * IndexedDB's own behaviour and the right one here — a second click on a
+     * table another tab has already pruned should not raise.
+     *
+     * RESOLVING IS A CLAIM, and the only caller acts on it: the results view
+     * removes the row and decrements its count as soon as this settles. So the
+     * two ways of resolving without having deleted anything are both errors:
+     *
+     *   - NO DATABASE. `saveResult` already throws here rather than returning
+     *     quietly; a delete that reported success while storage was never
+     *     opened would take the row off the table and leave it on disk.
+     *   - REQUEST SUCCESS. An IndexedDB write can succeed at request level and
+     *     still be rolled back when its transaction aborts (quota, an explicit
+     *     abort, the connection closing). The row would then reappear the next
+     *     time the view is opened, with nothing having reported a failure.
+     *     `oncomplete`/`onabort` is the honest pair for a mutating request.
+     */
+    async deleteResult(key: {
+        fileName: string;
+        lapKey: string;
+        notes: string;
+    }): Promise<void> {
+        if (!this.db) {
+            log.warn('IndexedDB not initialized, cannot delete result');
+            throw new Error('Database not initialized');
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db!.transaction([this.storeName], 'readwrite');
+            const objectStore = transaction.objectStore(this.storeName);
+            const request = objectStore.delete([key.fileName, key.lapKey, key.notes]);
+
+            // An explicit `abort()` leaves both `error` fields null, so the
+            // reason has to be synthesised rather than passed through — a
+            // rejection with `null` in it tells the caller nothing.
+            const failure = (what: string) =>
+                transaction.error ?? request.error ?? new Error(what);
+
+            request.onerror = () => {
+                log.error('Failed to delete result:', request.error);
+            };
+
+            transaction.oncomplete = () => {
+                resolve();
+            };
+
+            transaction.onabort = () => {
+                const error = failure('Delete transaction aborted');
+                log.error('Delete transaction aborted:', error);
+                reject(error);
+            };
+
+            transaction.onerror = () => {
+                const error = failure('Delete transaction failed');
+                log.error('Delete transaction failed:', error);
+                reject(error);
+            };
+        });
+    }
+
+    /**
      * Clear all stored results
      */
     async clearAllResults(): Promise<void> {
+        // On demand, like `getAllResults`: the footer's "Clear Results" sits
+        // next to "Show All Results" and is just as reachable with no file
+        // loaded, where this used to return having cleared nothing.
+        try {
+            await this.initialize();
+        } catch (error) {
+            log.error('Could not open the results database:', error);
+        }
         if (!this.db) return;
 
         return new Promise((resolve, reject) => {

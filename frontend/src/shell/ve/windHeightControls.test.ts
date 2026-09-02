@@ -63,7 +63,9 @@ describe("formatWindHeightReadout", () => {
 			}),
 		);
 		expect(text).toContain("1.75");
-		expect(text).toContain("0.50");
+		// D-b: the control and its readout speak percent; storage stays 0-1.
+		expect(text).toContain("50%");
+		expect(text).not.toContain("×0.50");
 		expect(text).toContain("3.50");
 		expect(text).not.toMatch(ANY_PROMPT);
 	});
@@ -175,17 +177,18 @@ describe("formatWindHeightReadout", () => {
 });
 
 describe("windHeightControlsMarkup", () => {
-	test("renders the slider with the D-02 bounds and the persisted factor", () => {
+	test("renders the slider on the percent scale at the persisted factor", () => {
+		// D-b: bounds are 0-100% now; the stored factor is still 0-1.
 		document.body.innerHTML = windHeightControlsMarkup(
 			makeParams({ wind_speed: 3.5, wind_height_factor: 0.65 }),
 		);
 		const slider = document.getElementById(
 			"windHeightSlider",
 		) as HTMLInputElement;
-		expect(parseFloat(slider.min)).toBe(0.3);
-		expect(parseFloat(slider.max)).toBe(1.0);
-		expect(parseFloat(slider.step)).toBe(0.05);
-		expect(parseFloat(slider.value)).toBe(0.65);
+		expect(parseFloat(slider.min)).toBe(0);
+		expect(parseFloat(slider.max)).toBe(100);
+		expect(parseFloat(slider.step)).toBe(1);
+		expect(parseFloat(slider.value)).toBe(65);
 	});
 
 	test("the number input mirrors the slider's bounds and value", () => {
@@ -195,9 +198,9 @@ describe("windHeightControlsMarkup", () => {
 		const valueInput = document.getElementById(
 			"windHeightValue",
 		) as HTMLInputElement;
-		expect(parseFloat(valueInput.min)).toBe(0.3);
-		expect(parseFloat(valueInput.max)).toBe(1.0);
-		expect(parseFloat(valueInput.value)).toBe(0.5);
+		expect(parseFloat(valueInput.min)).toBe(0);
+		expect(parseFloat(valueInput.max)).toBe(100);
+		expect(parseFloat(valueInput.value)).toBe(50);
 	});
 
 	test("keeps the label short and moves the caveats into an info tooltip", () => {
@@ -207,8 +210,7 @@ describe("windHeightControlsMarkup", () => {
 		const info = document.getElementById("windHeightInfo") as HTMLElement;
 		expect(info).not.toBeNull();
 		expect(info.title).toContain("CdA");
-		expect(info.title).toContain("0.40");
-		expect(info.title).toContain("0.65");
+		expect(info.title).toContain("40–65%");
 		// R-01/R-02 belong in the tooltip, not in visible text.
 		const visibleText = document.body.textContent ?? "";
 		expect(visibleText).not.toContain("shear layer");
@@ -275,7 +277,8 @@ describe("bindWindHeightControls", () => {
 			"windHeightSlider",
 		) as HTMLInputElement;
 
-		for (const position of ["0.7", "0.8"]) {
+		// D-b: the thumb is on the percent scale; the model still receives 0-1.
+		for (const position of ["70", "80"]) {
 			slider.value = position;
 			slider.dispatchEvent(new Event("input"));
 		}
@@ -382,11 +385,26 @@ describe("bindWindHeightControls", () => {
 		const valueInput = document.getElementById(
 			"windHeightValue",
 		) as HTMLInputElement;
-		valueInput.value = "2.5";
+		// 250% is out of range on the percent scale; it clamps to 100%, which is
+		// the factor 1.0 the model stores.
+		valueInput.value = "250";
 		valueInput.dispatchEvent(new Event("change"));
 
 		expect(setParams).toHaveBeenCalledWith({ wind_height_factor: 1.0 });
-		expect(valueInput.value).toBe("1.00");
+		expect(valueInput.value).toBe("100");
+	});
+
+	test("a below-range number entry clamps to 0%, not to a hidden floor", () => {
+		// D-b removed the 0.3 floor. -20% must land on 0, and 0 must survive as
+		// 0 rather than being read back as "no transfer".
+		const valueInput = document.getElementById(
+			"windHeightValue",
+		) as HTMLInputElement;
+		valueInput.value = "-20";
+		valueInput.dispatchEvent(new Event("change"));
+
+		expect(setParams).toHaveBeenCalledWith({ wind_height_factor: 0 });
+		expect(valueInput.value).toBe("0");
 	});
 
 	test("a NaN number entry commits nothing and restores the model value", () => {
@@ -398,7 +416,7 @@ describe("bindWindHeightControls", () => {
 
 		expect(setParams).not.toHaveBeenCalled();
 		expect(onChange).not.toHaveBeenCalled();
-		expect(valueInput.value).toBe("0.50");
+		expect(valueInput.value).toBe("50");
 	});
 
 	test("typing a wind speed refreshes the readout and its prompt", () => {
@@ -525,27 +543,27 @@ describe("refreshWindHeightReadout keeps the inputs in step with the model", () 
 	});
 
 	test("a model-only flip to manual/1.0 moves the slider, not just the text", () => {
-		expect(inputs().slider.value).toBe("0.50");
+		expect(inputs().slider.value).toBe("50");
 
 		// What markManualWindEntry does: writes the model, re-emits, and leaves
 		// the wind field's own DOM alone. It never touches the k control.
 		params = { ...params, wind_entry: "manual", wind_height_factor: 1.0 };
 		refreshWindHeightReadout(params);
 
-		expect(inputs().slider.value).toBe("1.00");
-		expect(inputs().value.value).toBe("1.00");
+		expect(inputs().slider.value).toBe("100");
+		expect(inputs().value.value).toBe("100");
 		expect(inputs().readout.textContent).toMatch(/by hand/i);
 	});
 
 	test("a weather sync down to 0.5 moves the slider back", () => {
 		params = { ...params, wind_entry: "manual", wind_height_factor: 1.0 };
 		refreshWindHeightReadout(params);
-		expect(inputs().slider.value).toBe("1.00");
+		expect(inputs().slider.value).toBe("100");
 
 		params = { ...params, wind_entry: "weather", wind_height_factor: 0.5 };
 		refreshWindHeightReadout(params);
-		expect(inputs().slider.value).toBe("0.50");
-		expect(inputs().value.value).toBe("0.50");
+		expect(inputs().slider.value).toBe("50");
+		expect(inputs().value.value).toBe("50");
 	});
 
 	test("a live drag is not fought — the readout tracks but the inputs are left to the user", () => {
@@ -553,11 +571,178 @@ describe("refreshWindHeightReadout keeps the inputs in step with the model", () 
 		// Mid-drag the model still holds 0.5; the handler passes a shallow copy
 		// carrying the dragged value. If the refresh wrote the inputs from the
 		// MODEL here it would snap the slider back to 0.50 under the cursor.
-		slider.value = "0.85";
+		slider.value = "85";
 		slider.dispatchEvent(new Event("input"));
 
-		expect(slider.value).toBe("0.85");
-		expect(value.value).toBe("0.85");
+		expect(slider.value).toBe("85");
+		expect(value.value).toBe("85");
 		expect(inputs().readout.textContent).toContain("2.98");
+	});
+});
+
+describe("the k control on the 0-100% scale (D-b)", () => {
+	function render(params = makeParams({ wind_speed: 3.5 })) {
+		const host = document.createElement("div");
+		host.innerHTML = windHeightControlsMarkup(params);
+		return {
+			slider: host.querySelector("#windHeightSlider") as HTMLInputElement,
+			number: host.querySelector("#windHeightValue") as HTMLInputElement,
+		};
+	}
+
+	test("both inputs span 0-100 in integer steps", () => {
+		const { slider, number } = render();
+
+		for (const input of [slider, number]) {
+			expect(input.min).toBe("0");
+			expect(input.max).toBe("100");
+			expect(input.step).toBe("1");
+		}
+	});
+
+	test("a stored factor renders as its percent", () => {
+		const { slider, number } = render(
+			makeParams({ wind_speed: 3.5, wind_height_factor: 0.65 }),
+		);
+
+		expect(slider.value).toBe("65");
+		expect(number.value).toBe("65");
+	});
+
+	test("the readout states the percent, the applied wind and the 10 m wind", () => {
+		const text = formatWindHeightReadout(
+			makeParams({
+				wind_speed: 4,
+				wind_entry: "weather",
+				wind_height_factor: 0.25,
+			}),
+		);
+
+		expect(text).toContain("1.00");
+		expect(text).toContain("25%");
+		expect(text).toContain("4.00");
+	});
+
+	test("the fitted-range caveat is stated in percent", () => {
+		const text = formatWindHeightReadout(
+			makeParams({
+				wind_speed: 3.5,
+				wind_entry: "weather",
+				wind_height_factor: 0.9,
+			}),
+		);
+
+		expect(text).toContain("40–65%");
+		expect(text).not.toContain("0.40");
+	});
+
+	test("0% reads as no wind reaching the rider, not as full wind", () => {
+		// The guard in resolveWindHeightFactor used to map 0 onto 1.0, so this is
+		// the user-visible half of that change: the readout must agree with the
+		// slider rather than silently reporting the untransferred wind.
+		const text = formatWindHeightReadout(
+			makeParams({
+				wind_speed: 3.5,
+				wind_entry: "weather",
+				wind_height_factor: 0,
+			}),
+		);
+
+		expect(text).toContain("0.00 m/s");
+		expect(text).toContain("0%");
+	});
+});
+
+describe("the wind fields follow the CURRENT binding (WR-06)", () => {
+	test("a re-bind on the same nodes reads the new getParams, not the first", () => {
+		// windFieldsBound was membership-only: it skipped re-binding a node it had
+		// seen, which is right, but the listener already attached still closed
+		// over the FIRST binding's getParams. Harmless only while every mode
+		// passes an identical closure -- a latent trap, not a live bug. The node
+		// must resolve to whichever binding is current.
+		document.body.innerHTML =
+			`<div id="paramForm">` +
+			`<input type="number" id="wind_speed" value="3.5">` +
+			`<input type="number" id="wind_direction" value="180">` +
+			`</div>` +
+			windHeightControlsMarkup(makeParams({ wind_speed: 3.5 }));
+
+		const first = makeParams({
+			wind_speed: 3.5,
+			wind_entry: "weather",
+			wind_height_factor: 0.5,
+		});
+		bindWindHeightControls({
+			getParams: () => first,
+			setParams: () => {},
+			onChange: () => {},
+		});
+
+		// A second mode binds the very same wind fields with its own closure.
+		const second = makeParams({
+			wind_speed: 8,
+			wind_entry: "weather",
+			wind_height_factor: 0.25,
+		});
+		bindWindHeightControls({
+			getParams: () => second,
+			setParams: () => {},
+			onChange: () => {},
+		});
+
+		const windSpeedField = document.getElementById(
+			"wind_speed",
+		) as HTMLInputElement;
+		windSpeedField.dispatchEvent(new Event("input"));
+
+		const readout = document.getElementById("windHeightReadout") as HTMLElement;
+		// 25% of 8 = 2.00, from the SECOND binding.
+		expect(readout.textContent).toContain("2.00");
+		expect(readout.textContent).toContain("25%");
+	});
+});
+
+describe("a persisted factor outside the control's range (WR-07)", () => {
+	// Storage must never rewrite a persisted value (D-03), so a stored 1.5
+	// survives — but the CONTROL cannot show 150%: the range element pins its
+	// thumb at 100. The old behaviour left three views disagreeing (slider 100,
+	// number 150, readout 150%) with nothing saying why, and the first touch of
+	// the thumb silently committed the narrowing. The fix is not to clamp
+	// storage; it is to say so, before the user destroys the value.
+	const stored = () =>
+		makeParams({
+			wind_speed: 3.5,
+			wind_entry: "weather",
+			wind_height_factor: 1.5,
+		});
+
+	test("the readout names the stored value and warns it cannot be shown", () => {
+		const text = formatWindHeightReadout(stored());
+
+		expect(text).toContain("150%");
+		expect(text).toMatch(/outside the 0–100% the slider covers/i);
+		expect(text).toMatch(/moving the slider will replace it/i);
+	});
+
+	test("that warning is styled as a warning", () => {
+		expect(windHeightReadoutIsWarning(stored())).toBe(true);
+	});
+
+	test("the physics still uses the stored value, unnarrowed", () => {
+		// The whole point: 1.5 x 3.5 = 5.25 reaches the calculator regardless of
+		// what the slider can render.
+		expect(formatWindHeightReadout(stored())).toContain("5.25");
+	});
+
+	test("an in-range factor carries none of that", () => {
+		const text = formatWindHeightReadout(
+			makeParams({
+				wind_speed: 3.5,
+				wind_entry: "weather",
+				wind_height_factor: 0.5,
+			}),
+		);
+
+		expect(text).not.toMatch(/the slider covers/i);
 	});
 });

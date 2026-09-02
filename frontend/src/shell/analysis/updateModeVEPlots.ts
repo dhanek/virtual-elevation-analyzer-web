@@ -29,12 +29,18 @@
  * the way `createModeRenderCallbacks` is injected at `analyzeOrchestrator.ts`.
  * Nothing here reads a slider, constructs a figure, or knows which mode it is
  * serving; the differences stay named at the handler seam (D-02).
+ *
+ * TWO CALLERS, ONE PER SURFACE: `requestModeUpdate` (browser) and
+ * `src/api/runAnalysis.ts` (headless). `entryPoints.test.ts` pins the pair —
+ * a third importer is a review conversation, not a convenience.
  */
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import {
+	AUTO_CONVERGE_DEFAULT,
+	resolveAutoConvergedControls,
+	type AutoConvergeResolution,
+} from "../../analysis/AutoConverge";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
-import { extractSegmentData } from "../../analysis/SegmentExtractor";
-import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import type {
 	AnalysisModeHandler,
@@ -48,16 +54,35 @@ import type { ActivityDataLike, AppState, WindSource } from "../../state/AppStat
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
 import { log } from "../../utils/log";
-import { resolveElevationProfile } from "./elevationProfileResolver";
+import {
+	isClosureTargetPinned,
+	resolveClosureSelection,
+} from "../../analysis/ClosureTarget";
+import {
+	resolveClosureBaroAltitude,
+	resolveClosureDemAltitude,
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "./elevationProfileResolver";
+import type { ModeUpdateContext } from "./modeUpdateCallbacks";
 import { resolveRhoArray } from "./rhoArrayResolver";
-
-/** Segments shorter than this are skipped, matching both reference paths. */
-const MIN_SEGMENT_SAMPLES = 10;
+import {
+	buildAutoConvergeSegments,
+	buildConvergenceUpdateInput,
+	prepareSegments,
+} from "./segmentPreparation";
 
 export interface UpdateModeVEPlotsArgs {
 	appState: AppState;
 	handler: AnalysisModeHandler;
-	callbacks: ModeUpdateCallbacks;
+	/**
+	 * Builds the callbacks AT PASS TIME from the resolved control values (D4).
+	 * A plain callbacks object captured at request time cannot work under
+	 * auto-converge — the driven CdA/Crr are only known inside the pass, after
+	 * the segments are prepared — and it outlived panel teardown, pointing at
+	 * renderers whose panel was gone. Returning null aborts the pass cleanly.
+	 */
+	makeCallbacks: (context: ModeUpdateContext) => ModeUpdateCallbacks | null;
 	windSource: WindSource;
 	cda: number;
 	/** The raw 22 °C-referenced slider value. */
@@ -81,6 +106,12 @@ export interface ModeUpdateOutcome {
 	inputs: ResolvedUpdateInputs;
 	profiles: SegmentVeProfile[];
 	aggregate: ModeAggregateStats;
+	/**
+	 * What auto-converge did to this pass's CdA/Crr ('idle' when off). The
+	 * funnel reads it to write driven values back into the sliders
+	 * (`drivenControls.ts`); the primitive itself never touches the DOM.
+	 */
+	autoConverge: AutoConvergeResolution;
 }
 
 /**
@@ -114,7 +145,7 @@ function isVeTabActive(tabId: string): boolean {
 export async function updateModeVEPlots(
 	args: UpdateModeVEPlotsArgs,
 ): Promise<ModeUpdateOutcome | null> {
-	const { appState, handler, callbacks } = args;
+	const { appState, handler } = args;
 	const fitData = appState.currentFitData;
 	const params = appState.currentParameters;
 
@@ -164,14 +195,108 @@ export async function updateModeVEPlots(
 		normalized.altitude,
 	);
 
+	// (2b) The NON-master channel, ONCE per pass, full length — sliced per
+	//      segment below exactly as `actualElevation` is. Null on single-channel
+	//      rides and under velodrome; nothing downstream but the plots reads it.
+	const referenceElevation = resolveReferenceElevation(
+		appState,
+		elevation.profile,
+		normalized.altitude.length,
+	);
+
 	// (3) Rho, ONCE per update, full length. Sliced per segment below, at the
 	//     `segmentRho` line inside the segment loop.
 	const resolveRho = args.resolveRho ?? resolveRhoArray;
 	const rhoArray = resolveRho(fitData, normalized);
 
-	// (4) The slider Crr is 22 °C-referenced; the physics uses the corrected
+	const segments = args.segments ?? handler.getUpdateSegments(appState);
+
+	// The CdA/Crr-independent front half of the loop lives in
+	// `segmentPreparation.ts` so the Convergence grid and the auto-converge
+	// solve can reuse one preparation. Skips and preparation failures are
+	// logged there with the messages this loop used to emit.
+	// (3b) The closure target's source (phase 2), ONCE per pass. GPS-lap mode
+	//      pins it to manual 0 — every lap starts and ends at the gate — and
+	//      the other modes read the persisted choice, validated rather than
+	//      cast (`resolveClosureSelection`). The default 'dem' with no DEM
+	//      loaded falls back to the resolved profile and reproduces phase 1
+	//      byte for byte.
+	const closureSelection = resolveClosureSelection(handler.id, params);
+	const closureSource = closureSelection.source;
+	const closureDemAltitude =
+		closureSource === "dem"
+			? resolveClosureDemAltitude(appState, normalized.altitude.length)
+			: null;
+	const closure = {
+		source: closureSource,
+		demAltitude: closureDemAltitude,
+		baroAltitude:
+			closureSource === "barometer"
+				? resolveClosureBaroAltitude(appState, normalized.altitude)
+				: null,
+		manualDiffMetres: closureSelection.manualDiffMetres,
+	};
+
+	const prepared = prepareSegments({
+		segments,
+		normalized,
+		altitude: elevation.altitude,
+		wind,
+		compareWind,
+		rhoArray,
+		params,
+		cda: args.cda,
+		appliedCrr: resolveAppliedCrr(params, args.crr),
+		closure,
+	});
+
+	// (4) AUTO-CONVERGE (confirmed semantics: a locked slider is DRIVEN along
+	//     the closure ridge, not frozen). Resolved HERE, not in the funnel,
+	//     because the per-segment calculators only exist after preparation.
+	//     Idle — off, or nothing locked — passes the slider values through
+	//     byte for byte. The funnel writes any driven value back to the DOM
+	//     from the outcome (`drivenControls.ts`); this function still never
+	//     touches an element.
+	//
+	//     AND IT IS FALLIBLE IN A WAY THE PER-SEGMENT LOOP IS NOT. The solver
+	//     calls `ve_gain` on EVERY prepared calculator, ahead of the loop below
+	//     whose try/catch has always let one unusable segment be logged and
+	//     skipped. Without this guard a single throwing calculator escapes the
+	//     whole pass: no plots, no metrics, no `summarize` write — the panel
+	//     keeps the previous render's numbers with no indication they are stale.
+	//     A solver that cannot run leaves the sliders where the user put them,
+	//     which is exactly the idle resolution.
+	let autoConverge: AutoConvergeResolution;
+	try {
+		autoConverge = resolveAutoConvergedControls({
+			state: appState.autoConverge ?? AUTO_CONVERGE_DEFAULT,
+			cda: args.cda,
+			crr: args.crr,
+			segments: buildAutoConvergeSegments(prepared, params),
+			bounds: {
+				cdaMin: params.cda_min ?? 0.15,
+				cdaMax: params.cda_max ?? 0.5,
+				crrMin: params.crr_min ?? 0.0015,
+				crrMax: params.crr_max ?? 0.03,
+			},
+		});
+	} catch (err) {
+		log.error("Auto-converge failed; using the slider values as they are:", err);
+		autoConverge = {
+			cda: args.cda,
+			crr: args.crr,
+			drivenCda: false,
+			drivenCrr: false,
+			status: "idle",
+			reason: null,
+		};
+	}
+	const cda = autoConverge.cda;
+	const crr = autoConverge.crr;
+
+	// (5) The slider Crr is 22 °C-referenced; the physics uses the corrected
 	//     value when the correction is enabled.
-	const appliedCrr = resolveAppliedCrr(params, args.crr);
+	const appliedCrr = resolveAppliedCrr(params, crr);
 
 	const inputs: ResolvedUpdateInputs = {
 		normalized,
@@ -180,119 +305,34 @@ export async function updateModeVEPlots(
 		altitude: elevation.altitude,
 		rhoArray,
 		params,
-		cda: args.cda,
-		crr: args.crr,
+		cda,
+		crr,
 		appliedCrr,
 		windSource: args.windSource,
 	};
 
-	const segments = args.segments ?? handler.getUpdateSegments(appState);
 	const profiles: SegmentVeProfile[] = [];
 
-	for (const segment of segments) {
-		const slice = extractSegmentData({
-			startIdx: segment.range.startIdx,
-			endIdx: segment.range.endIdx,
-			allTimestamps: normalized.timestamps,
-			allPower: normalized.power,
-			allVelocity: normalized.velocity,
-			allPositionLat: normalized.positionLat,
-			allPositionLong: normalized.positionLong,
-			// Altitude comes from the RESOLVED profile, not the raw arrays --
-			// this is what makes the smoothing toggle real in the GPS modes.
-			allAltitude: elevation.altitude,
-			allDistance: normalized.distance,
-			// Wind comes from the RESOLVED series, already offset and calibrated
-			// on the full activity.
-			allWindSpeed: wind.windSpeed,
-		});
-
-		if (slice.timestamps.length < MIN_SEGMENT_SAMPLES) {
-			log.warn(
-				`Lap ${segment.label} has too few data points (${slice.timestamps.length}), skipping`,
-			);
-			continue;
-		}
-
-		// Full-activity indices this segment consumed, in order.
-		const indices: number[] = [];
-		for (
-			let i = segment.range.startIdx;
-			i <= segment.range.endIdx && i < normalized.timestamps.length;
-			i++
-		) {
-			indices.push(i);
-		}
-
-		const segmentRho = rhoArray ? indices.map((i) => rhoArray[i]) : null;
-
+	for (const prep of prepared) {
+		const { segment, slice, indices, supplementarySeries } = prep;
 		try {
-			const supplementarySeries = buildSegmentSupplementarySeries({
-				timestamps: slice.timestamps,
-				power: slice.power,
-				velocity: slice.velocity,
-				positionLat: slice.positionLat,
-				positionLong: slice.positionLong,
-				distance: slice.distance,
-				windSpeed: slice.windSpeed,
-				params,
-				selectedWindSource: wind.selectedWindSource,
-			});
-
-			const calculator = createVeCalculator({
-				timestamps: slice.timestamps,
-				power: slice.power,
-				velocity: slice.velocity,
-				positionLat: slice.positionLat,
-				positionLong: slice.positionLong,
-				altitude: slice.altitude,
-				distance: slice.distance,
-				windSpeed: slice.windSpeed,
-				rhoArray: segmentRho,
-				params,
-				cda: args.cda,
-				crr: appliedCrr,
-			});
-
-			const trimStart = segment.trim?.start ?? 0;
-			const trimEnd = segment.trim?.end ?? slice.timestamps.length - 1;
-
-			const result = calculator.calculate_virtual_elevation(
-				args.cda,
+			const result = prep.calculator.calculate_virtual_elevation(
+				cda,
 				appliedCrr,
-				trimStart,
-				trimEnd,
+				prep.trimStart,
+				prep.trimEnd,
 			) as VEAnalysisResult;
 
-			// THE SECOND CALCULATOR (D-07/D-20). Identical inputs — same rho
-			// slice, same resolved altitude, same cda/crr, same trim — except the
-			// wind series, which is exactly the one difference Standard's
-			// pre-refactor compare branch made between its two calculators. Built
-			// through `createVeCalculator` like every other calculator in the app,
-			// so two per segment does not cost a second WASM entry point
-			// (Phase 8 D-04).
+			// The compare calculator is the SECOND calculator of D-07/D-20 —
+			// see `prepareSegments` for why it exists and how it differs.
 			let virtualElevationCompare: number[] | null = null;
 			let resultCompare: VEAnalysisResult | null = null;
-			if (compareWind) {
-				const compareCalculator = createVeCalculator({
-					timestamps: slice.timestamps,
-					power: slice.power,
-					velocity: slice.velocity,
-					positionLat: slice.positionLat,
-					positionLong: slice.positionLong,
-					altitude: slice.altitude,
-					distance: slice.distance,
-					windSpeed: indices.map((i) => compareWind.windSpeed[i]),
-					rhoArray: segmentRho,
-					params,
-					cda: args.cda,
-					crr: appliedCrr,
-				});
-				resultCompare = compareCalculator.calculate_virtual_elevation(
-					args.cda,
+			if (prep.compareCalculator) {
+				resultCompare = prep.compareCalculator.calculate_virtual_elevation(
+					cda,
 					appliedCrr,
-					trimStart,
-					trimEnd,
+					prep.trimStart,
+					prep.trimEnd,
 				) as VEAnalysisResult;
 				virtualElevationCompare = Array.from(
 					resultCompare.virtual_elevation as Float64Array,
@@ -312,6 +352,12 @@ export async function updateModeVEPlots(
 				actualElevation: params.velodrome
 					? new Array(slice.altitude.length).fill(0)
 					: slice.altitude,
+				referenceElevation: referenceElevation
+					? {
+							label: referenceElevation.label,
+							series: indices.map((i) => referenceElevation.series[i]),
+						}
+					: null,
 				supplementarySeries,
 				result,
 			});
@@ -322,6 +368,20 @@ export async function updateModeVEPlots(
 
 	if (profiles.length === 0) {
 		log.error("No valid segments to display");
+		return null;
+	}
+
+	// Resolved AT PASS TIME from the registry (D4): a panel torn down between
+	// arming and firing yields null here instead of a live callbacks object
+	// aimed at renderers whose panel is gone.
+	const callbacks = args.makeCallbacks({
+		windSource: args.windSource,
+		cda,
+		crr,
+		appliedCrr,
+	});
+	if (!callbacks) {
+		log.error("No update callbacks available for this mode");
 		return null;
 	}
 
@@ -345,10 +405,49 @@ export async function updateModeVEPlots(
 	if (isTabActive("vd-tab")) {
 		await callbacks.renderVd(profiles);
 	}
+	if (isTabActive("convergence-tab")) {
+		// The closure-error grid is the most expensive thing the app computes,
+		// so this gate matters more than any of the three above it. The surface
+		// cache in convergenceView keeps a pass with unchanged physics to
+		// pooling + drawing; the signature is built here from the resolved
+		// inputs because only this function has all of them in one place.
+		await callbacks.renderConvergence(
+			buildConvergenceUpdateInput({
+				prepared,
+				params,
+				windSource: args.windSource,
+				airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
+				activeDisplayProfile: appState.activeDisplayProfile,
+				rhoArray,
+				cda,
+				crr,
+				appliedCrr,
+				// The map follows the checkbox whenever auto-converge is on —
+				// locks or not — so the surface can be inspected before
+				// handing both sliders to the solver.
+				profileMode:
+					(appState.autoConverge?.enabled &&
+						appState.autoConverge.profileSolve) ??
+					false,
+				targetSource: closureSource,
+				// 'dem' with no DEM channel loaded fell back to the resolved
+				// profile — say so rather than let the title claim DEM.
+				targetLabel: isClosureTargetPinned(handler.id)
+					? "lap closure (0 m)"
+					: closureSource === "manual"
+						? "manual Δh"
+						: closureSource === "barometer"
+							? "barometer"
+							: closureDemAltitude
+								? "DEM"
+								: "analysis profile (no DEM loaded)",
+			}),
+		);
+	}
 
 	log.debug(
-		`VE plots updated with ${profiles.length} segments, CdA=${args.cda.toFixed(3)}, Crr=${args.crr.toFixed(4)}`,
+		`VE plots updated with ${profiles.length} segments, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`,
 	);
 
-	return { inputs, profiles, aggregate };
+	return { inputs, profiles, aggregate, autoConverge };
 }

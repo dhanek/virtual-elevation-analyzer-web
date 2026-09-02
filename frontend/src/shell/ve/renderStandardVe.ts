@@ -13,14 +13,24 @@ import { bindActionFooter } from "../dom/actionFooter";
 import { getSelectedWindSource } from "../dom/windSource";
 import { createPlotContext } from "../../plots/PlotContext";
 import {
+	bindPlotXAxisToggle,
+	plotXAxisToggleMarkup,
+	resetPlotXAxisForNewPanel,
+} from "./plotXAxisToggle";
+import {
 	buildVirtualElevationFigures,
 	buildWindSpeedFigure,
 	buildSpeedPowerFigure,
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
-import { setupVESliders } from "./bindStandardSliders";
+import {
+	setupVESliders,
+	updateMetricsDisplay,
+} from "./bindStandardSliders";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { autoConvergeLockControlsMarkup } from "./autoConvergeLocks";
 import { crrTempControlsMarkup } from "./crrTempControls";
+import { elevationDiffControlsMarkup } from "./elevationDiffControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
@@ -28,6 +38,12 @@ import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
+import { resolveSelectionRhoArray } from "../analysis/rhoArrayResolver";
+import {
+	resolveElevationProfile,
+	resolveReferenceElevation,
+} from "../analysis/elevationProfileResolver";
+import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import {
 	resolvePlaceholderWindSpeed,
 	resolveSelectionWindSeries,
@@ -39,6 +55,7 @@ import {
 	updateCombinedVirtualDistanceHeader,
 	virtualDistanceHeaderMarkup,
 } from "./vdHeader";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 import {
@@ -55,6 +72,9 @@ export interface StandardVeCallbacks {
 	onSaveScreenshot: () => void;
 	onStoreResult: () => void;
 	onExportAll: () => void;
+	onExportSettings: () => void;
+	onExportBundle: () => void;
+	onShowAllResults: () => void;
 	saveCurrentLapSettings: () => void;
 }
 
@@ -97,6 +117,25 @@ export async function initializeVEAnalysis(
 		initialWindSource === "fit" ? "fit" : "constant",
 	);
 
+	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT — the third and last
+	// analyze leg. `renderGpsLap` and `renderOutAndBack` were corrected first;
+	// this one was left building its calculator with no `rhoArray` while
+	// `updateModeVEPlots:251` passes a per-segment slice, so on any ride with
+	// usable air density the two passes integrated different physics. That was
+	// filed as unobservable while this paint only drew plots. It is observable
+	// now: `updateMetricsDisplay` below writes R²/RMSE/VE/Actual from THIS fit,
+	// so the header showed the constant-rho numbers until the post-bind kick
+	// landed — and kept showing them on any path where the scheduled pass never
+	// reaches `renderVe` (every segment under the trim floor, a calculator
+	// throwing, a saved trim already at its clamp).
+	const selectionRho = appState.currentFitData
+		? resolveSelectionRhoArray(
+				appState.currentFitData,
+				selectedIndices,
+				analysisInput.timestamps.length,
+			)
+		: null;
+
 	const calculator = createVeCalculator({
 		timestamps: analysisInput.timestamps,
 		power: analysisInput.power,
@@ -110,6 +149,7 @@ export async function initializeVEAnalysis(
 			analysisInput.windSpeed,
 			resolvedWindSpeed,
 		),
+		rhoArray: selectionRho,
 		params: appState.currentParameters!,
 		cda: initialCdA,
 		crr: appliedInitialCrr,
@@ -122,11 +162,33 @@ export async function initializeVEAnalysis(
 		trimEnd,
 	);
 
+	// The NON-master channel, resolved and sliced EXACTLY as the update path
+	// does (WR-1): the resolver call is idempotent against the cached arrays,
+	// so this is the same object identity the primitive's pass will use, and
+	// the initial paint cannot disagree with the first slider move.
+	const referenceElevation = appState.currentFitData
+		? resolveReferenceElevation(
+				appState,
+				resolveElevationProfile(
+					appState,
+					appState.currentFitData,
+					getNormalizedActivityArrays(appState.currentFitData).altitude,
+				).profile,
+				getNormalizedActivityArrays(appState.currentFitData).altitude.length,
+			)
+		: null;
+
 	// Create plots
 	const figures = buildVirtualElevationFigures({
 		context,
 		virtualElevation: Array.from(result.virtual_elevation),
 		actualElevation: analysisInput.altitude,
+		referenceElevation: referenceElevation
+			? {
+					label: referenceElevation.label,
+					series: selectedIndices.map((i) => referenceElevation.series[i]),
+				}
+			: null,
 		cdaLabel: initialCdA.toFixed(3),
 		crrLabel: appliedInitialCrr.toFixed(4),
 	});
@@ -168,31 +230,37 @@ export async function initializeVEAnalysis(
 		virtualDistanceInput,
 	);
 
-	Plotly.newPlot(
+	// `react`, not `newPlot`, for all five (bundle D). Every one of these ids is
+	// redrawn on every slider update -- `bindStandardSliders` already reaches
+	// four of them through `react` -- so `newPlot` here only bought a teardown
+	// and rebuild on the FIRST draw, and left the pattern for the next plot to
+	// be copied from. `react` on a div Plotly has never touched initialises it
+	// exactly as `newPlot` would, so there is no first-draw special case.
+	Plotly.react(
 		"vePlot",
 		figures.elevation.data,
 		figures.elevation.layout,
 		figures.elevation.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"veResidualsPlot",
 		figures.residuals.data,
 		figures.residuals.layout,
 		figures.residuals.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"windSpeedPlot",
 		windSpeedFigure.data,
 		windSpeedFigure.layout,
 		windSpeedFigure.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"speedPowerPlot",
 		speedPowerFigure.data,
 		speedPowerFigure.layout,
 		speedPowerFigure.config,
 	);
-	Plotly.newPlot(
+	Plotly.react(
 		"vdPlot",
 		virtualDistanceFigure.data,
 		virtualDistanceFigure.layout,
@@ -212,6 +280,28 @@ export async function initializeVEAnalysis(
 		selectedLapCount(appState),
 	);
 
+	// The R2/RMSE/VE/Actual spans, on the same rule as the VD header above and
+	// for the same reason: fill them from the integration that just drew the
+	// curve, never from a fit computed somewhere else.
+	//
+	// The template used to interpolate `prepareAnalysisPayload`'s
+	// `initialResult`, which integrates the CONCATENATED selection with NO trim
+	// and the wind source forced to `"fit"` with the offset off. The plot
+	// directly below the header came from `result` above -- trimmed, and on the
+	// selected source. Two fits of one ride, side by side, until the kick
+	// overwrote both a macrotask later.
+	//
+	// `null` for the lap count: the template already wrote it from
+	// `analyzedLaps.length`, and this pass has no per-segment decomposition to
+	// improve on it with.
+	updateMetricsDisplay(
+		result.r2,
+		result.rmse,
+		result.ve_elevation_diff,
+		result.actual_elevation_diff,
+		null,
+	);
+
 	appState.filteredVEData = {
 		positionLat: analysisInput.positionLat,
 		positionLong: analysisInput.positionLong,
@@ -228,7 +318,6 @@ export async function showVirtualElevationAnalysisInline(
 	services: ShellServices,
 	mapVisualization: MapVisualization | null,
 	callbacks: StandardVeCallbacks,
-	initialResult: any,
 	analyzedLaps: number[],
 	selectedIndices: number[],
 	timestamps: number[],
@@ -348,6 +437,11 @@ export async function showVirtualElevationAnalysisInline(
 	// Without this, any first pass that does not reach `renderVe` leaves
 	// Wind/Power/VD rendering the PREVIOUS selection into this panel.
 	resetTabRenderMapForNewPanel();
+	// Same lifecycle boundary, same reason: the first paint below builds a TIME
+	// context (the cumulative distance series is a property of the stitched
+	// profiles, which do not exist yet), so a distance setting carried over from
+	// the previous analysis would light the wrong button over a time axis.
+	resetPlotXAxisForNewPanel();
 	veAnalysisContent.innerHTML = `
         <div class="ve-inline-container">
             <div class="ve-layout">
@@ -377,6 +471,8 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="range" id="crrSlider" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" value="${appState.currentParameters!.crr || 0.008}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(appState.currentParameters!, "standard")}
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
                                 ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}
                             </div>
@@ -423,7 +519,10 @@ export async function showVirtualElevationAnalysisInline(
                     <div class="ve-sidebar-footer">
                         <button id="saveScreenshot" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Save Screenshot</button>
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
+                        <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
                 <div class="ve-plots-main">
@@ -454,31 +553,40 @@ export async function showVirtualElevationAnalysisInline(
 																? `<button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(initialWindSource)}>VD</button>`
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
                             <div class="ve-metrics-compact">
-                                R²:<span id="r2Value">${initialResult.r2.toFixed(4)}</span> |
-                                RMSE:<span id="rmseValue">${initialResult.rmse.toFixed(2)}m</span> |
-                                VE:<span id="veGainValue">${initialResult.ve_elevation_diff.toFixed(2)}m</span> |
-                                Actual:<span id="actualGainValue">${initialResult.actual_elevation_diff.toFixed(2)}m</span> |
+                                R²:<span id="r2Value"></span> |
+                                RMSE:<span id="rmseValue"></span> |
+                                VE:<span id="veGainValue"></span> |
+                                Actual:<span id="actualGainValue"></span> |
                                 Laps:<span id="lapsCoveredValue">${analyzedLaps.length}</span>
                             </div>
-                            <div id="vePlot" class="ve-plot-container"></div>
-                            <div id="veResidualsPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="vePlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div></div>
+                            <div class="ve-plot-container"><div id="veResidualsPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div></div>
+                            <!--
+                                Under the RESIDUALS plot, not the VE plot: the VE
+                                plot hides its own tick labels and the residuals
+                                plot below it carries the shared x-axis title, so
+                                this is the control's own axis.
+                            -->
+                            ${plotXAxisToggleMarkup()}
                         </div>
                         ${
 													cdaReference
 														? `
                         <div class="ve-tab-content" id="cda-validation-tab">
-                            <div id="cdaValidationPlot" class="ve-plot-container"></div>
-                            <div id="cdaValidationResidualsPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="cdaValidationPlot" class="ve-plot-container__plot ve-plot-container__plot--ve"></div></div>
+                            <div class="ve-plot-container"><div id="cdaValidationResidualsPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div></div>
                         </div>
                         `
 														: ""
 												}
                         <div class="ve-tab-content" id="wind-tab">
-                            <div id="windSpeedPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="windSpeedPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
+                            ${plotXAxisToggleMarkup()}
                             ${
 															/*
 															 * N-3 (maintainer ruling, plan 07-03): Standard gains
@@ -500,7 +608,8 @@ export async function showVirtualElevationAnalysisInline(
 														}
                         </div>
                         <div class="ve-tab-content" id="power-tab">
-                            <div id="speedPowerPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="speedPowerPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
+                            ${plotXAxisToggleMarkup()}
                         </div>
                         <div class="ve-tab-content" id="vd-tab"${fitWindVisibilityAttrs(initialWindSource)}>
                              <!--
@@ -514,8 +623,10 @@ export async function showVirtualElevationAnalysisInline(
                                 multi-lap selection, one line per lap.
                              -->
                             ${virtualDistanceHeaderMarkup()}
-                            <div id="vdPlot" class="ve-plot-container"></div>
+                            <div class="ve-plot-container"><div id="vdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
+                            ${plotXAxisToggleMarkup()}
                         </div>
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>
@@ -582,10 +693,20 @@ export async function showVirtualElevationAnalysisInline(
 
 	bindLapViewToggle();
 
+	// Bound here, next to the other panel controls, for exactly the reason the
+	// comment above `bindTabButtons` gives: this is the half that is always safe
+	// to run, so the control responds even on the paths where the first
+	// scheduled pass never reaches `renderVe`. It stays hidden until a draw
+	// reports a usable distance channel.
+	bindPlotXAxisToggle();
+
 	bindActionFooter({
 		onSaveScreenshot: callbacks.onSaveScreenshot,
 		onStoreResult: callbacks.onStoreResult,
 		onExportAll: callbacks.onExportAll,
+		onExportSettings: callbacks.onExportSettings,
+		onExportBundle: callbacks.onExportBundle,
+		onShowAllResults: callbacks.onShowAllResults,
 	});
 
 	setTimeout(() => {

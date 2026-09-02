@@ -3,6 +3,7 @@ import {
 	LEGACY_WIND_HEIGHT_FACTOR,
 	type WindEntry,
 } from "../analysis/WindHeightTransfer";
+import type { ElevationDiffSource } from "../analysis/ClosureTarget";
 
 export interface AnalysisParameters {
 	system_mass: number;
@@ -18,6 +19,14 @@ export interface AnalysisParameters {
 	wind_direction: number | null;
 	wind_speed_unit: "m/s" | "km/h";
 	air_speed_offset: number; // seconds - time offset for air speed data synchronization
+	// Barometric-altitude latency (seconds), same sign convention as
+	// air_speed_offset: positive means the recorded altitude channel is LATE
+	// (Edge 520 measures ~2 s) and is corrected by reading it that much later
+	// (analysis/BaroLag.ts). Applied to the fit-raw elevation profile and the
+	// Barometer closure target only - DEM profiles are position-derived and
+	// never shifted. Optional so records saved before the feature load
+	// untouched; reads default to 0 (a correction is opt-in, never silent).
+	baro_lag_seconds?: number;
 	velodrome: boolean;
 	// Note: auto_lap_detection removed - GPS mode is now controlled via Section 3 UI
 	auto_calculate_rho: boolean;
@@ -44,6 +53,12 @@ export interface AnalysisParameters {
 	// first fill and re-seed a factor onto an analysis already read.
 	wind_height_factor?: number;
 	wind_entry?: WindEntry;
+	// Phase 2 of the Convergence plan: where the closure target (the reference
+	// elevation difference on the Convergence tab / in auto-converge) comes
+	// from, plus the manual value when the source is 'manual'. Optional so
+	// records saved before the feature load untouched; reads default to 'dem'.
+	elevation_diff_source?: ElevationDiffSource;
+	manual_elevation_diff_m?: number | null;
 	weather_metadata?: {
 		temperature: number;
 		dewPoint: number;
@@ -73,6 +88,7 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	wind_direction: null, // degrees - null = no wind
 	wind_speed_unit: "m/s", // unit for wind speed display
 	air_speed_offset: 2, // seconds - default: shift air speed 2s later for better sync
+	baro_lag_seconds: 0, // opt-in altitude latency correction (Edge 520 needs ~2)
 	velodrome: false, // zero altitude for track cycling
 	// Note: auto_lap_detection removed - GPS mode is now controlled via Section 3 UI
 	auto_calculate_rho: false, // auto-calculate rho from weather data
@@ -89,6 +105,8 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	// nothing has written one yet and "manual" is correct: the first weather
 	// fill then legitimately counts as a first fill and seeds the default.
 	wind_entry: "manual",
+	elevation_diff_source: "dem", // closure target follows the DEM/analysis profile
+	manual_elevation_diff_m: null,
 };
 
 export class AnalysisParametersComponent {
@@ -207,6 +225,12 @@ export class AnalysisParametersComponent {
                                placeholder="Optional" title="Direction wind is coming FROM (0°=N, 90°=E, 180°=S, 270°=W)">
                     </div>
 
+                    <div class="param-item">
+                        <label for="baro_lag_seconds">Baro Lag (s):</label>
+                        <input type="number" id="baro_lag_seconds" min="-10" max="10" step="0.5"
+                               title="Altitude channel latency: positive when the barometer records late (an Edge 520 is ~2 s late). Shifts the FIT elevation trace, metrics and Barometer closure target; DEM elevation is never shifted.">
+                    </div>
+
                     <div class="param-item param-item--checkbox">
                         <label for="velodrome">
                             <input type="checkbox" id="velodrome" ${this.parameters.velodrome ? "checked" : ""}>
@@ -322,9 +346,18 @@ export class AnalysisParametersComponent {
 			wind_speed: windSpeedValue,
 			wind_direction: getNumberValue("wind_direction"),
 			wind_speed_unit: windSpeedUnit,
+			// air_speed_offset has NO input in this form - the sidebar slider
+			// owns it (mode-control row "airSpeedOffset"). This used to read the
+			// missing input (NaN || default), so one keystroke in the mass field
+			// silently reset a slider-set offset to 2. Carry it over like the
+			// other sidebar-owned fields below.
 			air_speed_offset:
-				getNumberValue("air_speed_offset") ||
+				this.parameters.air_speed_offset ??
 				DEFAULT_PARAMETERS.air_speed_offset,
+			// ?? rather than ||: 0 is both the default and a legitimate entry.
+			baro_lag_seconds:
+				getNumberValue("baro_lag_seconds") ??
+				DEFAULT_PARAMETERS.baro_lag_seconds,
 			velodrome: getBooleanValue("velodrome"),
 			// Note: auto_lap_detection removed - GPS mode is now controlled via Section 3 UI
 			auto_calculate_rho: getBooleanValue("auto_calculate_rho"),
@@ -335,6 +368,10 @@ export class AnalysisParametersComponent {
 			crr_temp_correction: this.parameters.crr_temp_correction,
 			ambient_temp_c: this.parameters.ambient_temp_c,
 			tire_sensitivity: this.parameters.tire_sensitivity,
+			// So do the closure-target fields (phase 2) - one keystroke in the
+			// mass field must not silently reset the elevation-difference radio.
+			elevation_diff_source: this.parameters.elevation_diff_source,
+			manual_elevation_diff_m: this.parameters.manual_elevation_diff_m,
 			// The height factor lives in the VE sidebar and wind_entry is written
 			// by the dedicated wind listeners below - neither is rebuilt from this
 			// form, so carry them over or every keystroke in the mass field
@@ -446,7 +483,7 @@ export class AnalysisParametersComponent {
 		setValue("wind_speed", displayWindSpeed);
 		setValue("wind_direction", this.parameters.wind_direction);
 		setValue("wind_speed_unit", this.parameters.wind_speed_unit);
-		setValue("air_speed_offset", this.parameters.air_speed_offset);
+		setValue("baro_lag_seconds", this.parameters.baro_lag_seconds ?? 0);
 		setValue("velodrome", this.parameters.velodrome);
 		setValue("auto_calculate_rho", this.parameters.auto_calculate_rho);
 

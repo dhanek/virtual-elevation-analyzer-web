@@ -3,6 +3,7 @@
  *
  * Verbatim lift from main.ts -- rendering logic for out-and-back mode plots.
  */
+import type { MeanReferenceProfile } from '../../analysis/elevationProfiles';
 import type { OutAndBackVEProfile } from './types';
 import type { SegmentSupplementarySeries } from '../../analysis/SegmentSupplementarySeries';
 import { getMultiSegmentColor, interpolateElevation } from '../multiSegment/shared';
@@ -13,7 +14,9 @@ import {
 } from '../../plots/MultiSegmentPlotBuilders';
 import { renderVirtualDistanceHeader, sectionVirtualDistanceRows } from '../ve/vdHeader';
 import { anchorSeriesTo } from '../../plots/comparisonTraces';
+import { BELOW_AXIS_LEGEND_MARGIN_B, belowAxisLegend } from '../../plots/StandardPlotBuilders';
 import { log } from '../../utils/log';
+import { resizePlotlyGraphsIn } from '../dom/plotlyResize';
 
 /**
  * Calculate mean actual elevation profile for Out and Back (with inbound mirrored)
@@ -93,6 +96,36 @@ export function calculateOutAndBackMeanElevation(profiles: OutAndBackVEProfile[]
 }
 
 /**
+ * The mean profile of the NON-master elevation channel — the second reference
+ * line ("both channels shown; the import only picks the master"). Reuses
+ * `calculateOutAndBackMeanElevation` verbatim by substituting each section's
+ * reference legs for its actual ones, so the two means cannot drift in how
+ * they grid, mirror or interpolate. Null when no leg carries a reference
+ * (single-channel rides, velodrome), keeping every existing figure
+ * byte-identical there.
+ */
+export function calculateOutAndBackMeanReference(profiles: OutAndBackVEProfile[]): MeanReferenceProfile | null {
+    // Truthy, not `!== null`: profiles cast from plain objects in tests
+    // (and any future loose producer) leave the fields undefined.
+    const withReference = profiles.filter(
+        profile => profile.outboundReferenceElevation || profile.inboundReferenceElevation,
+    );
+    if (withReference.length === 0) {
+        return null;
+    }
+    const mean = calculateOutAndBackMeanElevation(
+        withReference.map(profile => ({
+            ...profile,
+            outboundActualElevation: profile.outboundReferenceElevation?.series ?? [],
+            inboundActualElevation: profile.inboundReferenceElevation?.series ?? [],
+        })),
+    );
+    const label = (withReference[0].outboundReferenceElevation ??
+        withReference[0].inboundReferenceElevation)!.label;
+    return { label, ...mean };
+}
+
+/**
  * Build multi-segment series for out-and-back plots (wind/power/VD).
  */
 export function buildOutAndBackMultiSegmentSeries(profiles: OutAndBackVEProfile[]) {
@@ -141,7 +174,7 @@ export function renderOutAndBackWindPlot(profiles: OutAndBackVEProfile[]) {
         series: buildOutAndBackMultiSegmentSeries(profiles),
     });
 
-    Plotly.newPlot('oabWindPlot', figure.data, figure.layout, figure.config);
+    Plotly.react('oabWindPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -159,7 +192,7 @@ export function renderOutAndBackPowerPlot(profiles: OutAndBackVEProfile[]) {
         series: buildOutAndBackMultiSegmentSeries(profiles),
     });
 
-    Plotly.newPlot('oabPowerPlot', figure.data, figure.layout, figure.config);
+    Plotly.react('oabPowerPlot', figure.data, figure.layout, figure.config);
 }
 
 /**
@@ -191,7 +224,7 @@ export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
         series: buildOutAndBackMultiSegmentSeries(profiles),
     });
 
-    Plotly.newPlot('oabVdPlot', figure.data, figure.layout, figure.config);
+    Plotly.react('oabVdPlot', figure.data, figure.layout, figure.config);
     renderVirtualDistanceHeader(
         sectionVirtualDistanceRows(
             profiles.map(profile => ({
@@ -409,6 +442,29 @@ function meanElevationTrace(meanElevation: { distances: number[]; elevation: num
 }
 
 /**
+ * The NON-master channel's mean profile, aligned to the master mean at the
+ * grid origin — the barometer's datum is calibration-dependent and can sit
+ * tens of metres from the DEM's, which would double the y-range of a figure
+ * whose point is leg-shape agreement.
+ */
+function meanReferenceTrace(
+    meanReference: MeanReferenceProfile,
+    meanElevation: { distances: number[]; elevation: number[] },
+) {
+    const offset =
+        meanElevation.elevation.length > 0 && meanReference.elevation.length > 0
+            ? meanElevation.elevation[0] - meanReference.elevation[0]
+            : 0;
+    return {
+        x: meanReference.distances,
+        y: meanReference.elevation.map(value => value + offset),
+        mode: 'lines',
+        name: `Mean ${meanReference.label} (aligned)`,
+        line: { color: '#8a8a8a', dash: 'dash', width: 1.5 }
+    };
+}
+
+/**
  * Residuals at the sampled distances, dropping points the mean profile does not
  * cover. The drop is why this is not `residualsAgainst`: an uncovered point has
  * no reference, and today's figure omits it rather than drawing a gap.
@@ -437,8 +493,8 @@ function outAndBackLayouts(maxDist: number, titleSuffix: string) {
             title: `Out & Back Virtual Elevation${titleSuffix}`,
             xaxis: { title: 'Distance (km)', range: [0, maxDist * 1.02] },
             yaxis: { title: 'Elevation (m)' },
-            legend: { orientation: 'h', y: -0.15 },
-            margin: { t: 40, b: 80, l: 60, r: 20 },
+            legend: belowAxisLegend(),
+            margin: { t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B, l: 60, r: 20 },
             hovermode: 'closest'
         },
         residualLayout: {
@@ -474,7 +530,8 @@ function outAndBackLayouts(maxDist: number, titleSuffix: string) {
 function buildOutAndBackModelTraces(
     profiles: OutAndBackVEProfile[],
     meanElevation: { distances: number[]; elevation: number[] },
-    pick: OutAndBackLegPick
+    pick: OutAndBackLegPick,
+    meanReference: MeanReferenceProfile | null = null,
 ): {
     veTraces: any[];
     residualTraces: any[];
@@ -486,6 +543,9 @@ function buildOutAndBackModelTraces(
 
     if (meanElevation.distances.length > 0) {
         veTraces.push(meanElevationTrace(meanElevation));
+        if (meanReference) {
+            veTraces.push(meanReferenceTrace(meanReference, meanElevation));
+        }
     }
 
     const startElev = meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
@@ -577,10 +637,11 @@ export interface OutAndBackFigures {
 /** The single-source figures — one pair of plots, exactly as before. */
 function buildOutAndBackSingleSourceFigures(
     profiles: OutAndBackVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+    meanElevation: { distances: number[]; elevation: number[] },
+    meanReference: MeanReferenceProfile | null = null,
 ): OutAndBackFigures {
     const { veLayout, residualLayout } = outAndBackLayouts(maxOutAndBackDistance(profiles), '');
-    const traces = buildOutAndBackModelTraces(profiles, meanElevation, FIT_LEGS);
+    const traces = buildOutAndBackModelTraces(profiles, meanElevation, FIT_LEGS, meanReference);
 
     return {
         ve: { data: traces.veTraces, layout: veLayout },
@@ -607,7 +668,8 @@ function buildOutAndBackSingleSourceFigures(
  */
 export function buildOutAndBackComparisonFigures(
     profiles: OutAndBackVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+    meanElevation: { distances: number[]; elevation: number[] },
+    meanReference: MeanReferenceProfile | null = null,
 ): OutAndBackFigures {
     const maxDist = maxOutAndBackDistance(profiles);
     // Under compare the primary figure is titled, because an untitled plot above
@@ -616,8 +678,8 @@ export function buildOutAndBackComparisonFigures(
     const primary = outAndBackLayouts(maxDist, ' (FIT Wind)');
     const secondary = outAndBackLayouts(maxDist, ' (Constant Wind)');
 
-    const fit = buildOutAndBackModelTraces(profiles, meanElevation, FIT_LEGS);
-    const constant = buildOutAndBackModelTraces(profiles, meanElevation, COMPARE_LEGS);
+    const fit = buildOutAndBackModelTraces(profiles, meanElevation, FIT_LEGS, meanReference);
+    const constant = buildOutAndBackModelTraces(profiles, meanElevation, COMPARE_LEGS, meanReference);
 
     return {
         ve: { data: fit.veTraces, layout: primary.veLayout },
@@ -653,7 +715,8 @@ function renderOutAndBackClosingErrors(closingErrors: { sectionNumber: number; e
 export function renderOutAndBackPlots(
     Plotly: any,
     profiles: OutAndBackVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+    meanElevation: { distances: number[]; elevation: number[] },
+    meanReference: MeanReferenceProfile | null = null,
 ) {
     const withCompare = sectionsCarryingCompare(profiles);
     const isCompare = everySectionHasCompareSeries(profiles);
@@ -666,8 +729,8 @@ export function renderOutAndBackPlots(
     }
 
     const figures = isCompare
-        ? buildOutAndBackComparisonFigures(profiles, meanElevation)
-        : buildOutAndBackSingleSourceFigures(profiles, meanElevation);
+        ? buildOutAndBackComparisonFigures(profiles, meanElevation, meanReference)
+        : buildOutAndBackSingleSourceFigures(profiles, meanElevation, meanReference);
 
     renderOutAndBackClosingErrors(figures.closingErrors);
 
@@ -678,16 +741,27 @@ export function renderOutAndBackPlots(
         compareView.classList.toggle('hidden', !isCompare);
     }
 
-    Plotly.newPlot('oabVePlot', figures.ve.data, figures.ve.layout, { responsive: true });
-    Plotly.newPlot('oabVeResidualsPlot', figures.residuals.data, figures.residuals.layout, { responsive: true });
+    Plotly.react('oabVePlot', figures.ve.data, figures.ve.layout, { responsive: true });
+    Plotly.react('oabVeResidualsPlot', figures.residuals.data, figures.residuals.layout, { responsive: true });
 
     if (figures.compareVe && figures.compareResiduals) {
-        Plotly.newPlot('oabVeComparePlot', figures.compareVe.data, figures.compareVe.layout, { responsive: true });
-        Plotly.newPlot(
+        Plotly.react('oabVeComparePlot', figures.compareVe.data, figures.compareVe.layout, { responsive: true });
+        Plotly.react(
             'oabVeCompareResidualsPlot',
             figures.compareResiduals.data,
             figures.compareResiduals.layout,
             { responsive: true },
         );
+
+        // The unhide above is no longer enough on its own. `newPlot` measured
+        // the container on every call, so unhiding first was the whole fix;
+        // `react` reuses the width the graph already carries, and the compare
+        // view spends time hidden whenever the selection drops out of compare.
+        // A window resize during that stretch resizes a zero-width div, and
+        // without this the stale width would survive the next unhide.
+        // Scoped to the compare view deliberately: resizing every graph on the
+        // page would hand `Plots.resize` the hidden tab panes too, and a
+        // zero-width measurement is exactly the state this is here to undo.
+        if (compareView) resizePlotlyGraphsIn(compareView);
     }
 }

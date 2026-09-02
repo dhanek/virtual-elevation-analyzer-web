@@ -1,7 +1,11 @@
 /**
  * THE funnel (D-04, ROADMAP SC#2).
  *
- * THIS FILE IS THE ONLY PRODUCTION MODULE ALLOWED TO CALL `updateModeVEPlots`.
+ * THIS FILE IS THE ONLY MODULE IN THE BROWSER UPDATE PATH ALLOWED TO CALL
+ * `updateModeVEPlots`. (The headless API's `src/api/runAnalysis.ts` is the one
+ * sanctioned second importer — it cannot come through this funnel, which reads
+ * the CdA/Crr and trim sliders from the DOM and gates on `isVeSectionVisible`.
+ * One funnel per surface; `src/api/entryPoints.test.ts` checks the pair.)
  * Plan 07-02 gave the phase one compute path; that closed half of the
  * 2026-04-19 omission class. The other half was a control that reached the
  * update by a private route (or by no route at all). With one funnel above one
@@ -33,6 +37,7 @@ import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
 import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
+import { syncDrivenControls } from "./drivenControls";
 import { scheduleRecompute } from "./recomputeRunner";
 import { updateModeVEPlots } from "./updateModeVEPlots";
 
@@ -42,6 +47,12 @@ const FALLBACK_CRR = 0.008;
 
 export interface ModeUpdateRequestDeps {
 	appState: AppState;
+	/**
+	 * The live mode's settings saver, re-run when auto-converge writes a
+	 * driven slider value: the interaction-time save fires before the async
+	 * pass resolves it, and would otherwise persist a stale value.
+	 */
+	saveSettings?: () => void;
 }
 
 let deps: ModeUpdateRequestDeps | null = null;
@@ -198,7 +209,7 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 		return;
 	}
 
-	const { appState } = deps;
+	const { appState, saveSettings } = deps;
 	if (!appState.currentFitData || !appState.currentParameters) {
 		log.debug(`requestModeUpdate(${reason}): no activity or parameters loaded`);
 		return;
@@ -223,13 +234,18 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	// included — takes the same road: one funnel, one primitive, one set of
 	// injected renderers. The sentence at the top of this file finally holds with
 	// no exception clause attached to it.
-	const callbacks = getModeUpdateCallbacks(handler.id, {
+	// Registration probe only: the callbacks the pass ACTUALLY uses are built
+	// inside the primitive via `makeCallbacks`, from values resolved at pass
+	// time (D4 — under auto-converge the driven CdA/Crr are only known there).
+	// The probe keeps today's behaviour of not scheduling a pass for a mode
+	// with no registered renderer.
+	const probe = getModeUpdateCallbacks(handler.id, {
 		windSource,
 		cda,
 		crr,
 		appliedCrr: resolveAppliedCrr(appState.currentParameters, crr),
 	});
-	if (!callbacks) {
+	if (!probe) {
 		log.error(
 			`requestModeUpdate(${reason}): no update callbacks registered for mode ${handler.id}`,
 		);
@@ -248,12 +264,11 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 		run: async () => {
 			// RE-CHECKED HERE, not only at the top of this function (NEW-1).
 			//
-			// Everything this closure needs — `handler`, `callbacks`, `segments` —
-			// was resolved BEFORE `scheduleRecompute`, so the panel can be torn
-			// down between arming and firing and this pass would still hold a live
-			// callbacks object pointing at renderers whose panel is gone. Clearing
-			// FACTORIES cannot reach it and neither can the `hidden` class, because
-			// the gate above already ran.
+			// Everything this closure needs — `handler`, `segments` — was resolved
+			// BEFORE `scheduleRecompute`, so the panel can be torn down between
+			// arming and firing. The callbacks themselves are now resolved at
+			// pass time inside the primitive (D4), so clearing FACTORIES aborts
+			// the pass; this guard still covers the rest of the torn-down DOM.
 			//
 			// `setGpsAnalysisMode`'s teardown also calls `resetRecomputeThrottle()`,
 			// which cancels a pass still sitting in the throttle. This second guard
@@ -265,15 +280,26 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 				);
 				return;
 			}
-			await updateModeVEPlots({
+			const outcome = await updateModeVEPlots({
 				appState,
 				handler,
-				callbacks,
+				makeCallbacks: (context) =>
+					getModeUpdateCallbacks(handler.id, context),
 				windSource,
 				cda,
 				crr,
 				segments,
 			});
+
+			// Auto-converge write-back, AFTER the await — inside the serialised
+			// pass, so two passes can never interleave their writes. The
+			// assignment is programmatic and fires no events
+			// (`drivenControls.ts`), so it cannot re-arm the recompute. When a
+			// driven value actually changed, persist again: the mode's save ran
+			// at interaction time, before this pass resolved it.
+			if (outcome && syncDrivenControls(outcome)) {
+				saveSettings?.();
+			}
 		},
 	});
 }

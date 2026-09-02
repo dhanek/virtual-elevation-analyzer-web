@@ -393,7 +393,22 @@
 	font-style: italic;
 }
 
-/* Section 3 footer action row (formerly inline margin on the template div) */
+/* Section 3 footer action row (formerly inline margin on the template div).
+   Flex so the auto-converge checkbox sits to the right of Analyze. */
 .analysis-actions {
 	margin-top: var(--space-2xl);
+	display: flex;
+	align-items: center;
+	gap: var(--space-lg);
+}
+
+.analysis-actions__toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
+	font-size: 0.9rem;
+	color: var(--color-text-heading);
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
 }

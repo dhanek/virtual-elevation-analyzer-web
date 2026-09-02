@@ -32,6 +32,7 @@
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { ModeSegment, SegmentVeProfile } from "../../modes/analysis/types";
+import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
 import type { AppState, WindSource } from "../../state/AppState";
 
 /**
@@ -185,10 +186,43 @@ export interface StitchedStandardSeries {
 	 */
 	virtualElevationCompare: number[] | null;
 	actualElevation: number[];
+	/**
+	 * The stitched NON-master elevation channel (see `SegmentVeProfile`),
+	 * non-null iff the profiles carry one. Same length as `actualElevation`.
+	 */
+	referenceElevation: ReferenceElevationSeries | null;
 	timestamps: number[];
 	velocity: number[];
 	power: number[];
 	apparentWindSpeedMps: number[];
+	/**
+	 * Ground distance in km, accumulated across the WHOLE selection.
+	 *
+	 * The x-axis of every Standard plot under the distance setting. Each
+	 * segment's `distancesKm` is relative to its own first sample
+	 * (`buildRelativeDistanceSeries`), so a bare concatenation would restart at
+	 * zero on every lap boundary; the running total carried between segments is
+	 * what makes this monotonic and what makes the before/main/after regions
+	 * line up. Maintainer ruling 2026-08-31, over the alternative of plotting
+	 * the raw FIT odometer — which jumps backwards whenever the selected laps
+	 * are not contiguous.
+	 */
+	cumulativeDistanceKm: number[];
+}
+
+/**
+ * Is a distance axis meaningful for this selection?
+ *
+ * False when the FIT file carries no usable distance channel: the series is
+ * then flat at zero, and an axis whose every tick reads 0.00 km is worse than
+ * no switch at all. Checked on the total rather than per sample, because a
+ * stationary stretch inside a ride is legitimate and repeats a value honestly.
+ */
+export function hasUsableDistance(series: Pick<StitchedStandardSeries, 'cumulativeDistanceKm'>): boolean {
+	const km = series.cumulativeDistanceKm;
+	if (km.length < 2) return false;
+	const last = km[km.length - 1];
+	return Number.isFinite(last) && last > 0;
 }
 
 /**
@@ -213,11 +247,22 @@ export function stitchStandardProfiles(
 	);
 	const virtualElevationCompare: number[] | null = isCompare ? [] : null;
 	const actualElevation: number[] = [];
+	// Same all-or-nothing shape as the compare leg: built only when at least
+	// one profile carries a reference, padded with NaN over any that does not,
+	// so the series never shortens and slides later samples off their x.
+	const referenceLabel =
+		profiles.find((profile) => profile.referenceElevation)?.referenceElevation
+			?.label ?? null;
+	const referenceSeries: number[] | null = referenceLabel ? [] : null;
 	const timestamps: number[] = [];
 	const velocity: number[] = [];
 	const power: number[] = [];
 	const apparentWindSpeedMps: number[] = [];
+	const cumulativeDistanceKm: number[] = [];
 
+	// Carried ACROSS segments: each segment's `distancesKm` restarts at zero, so
+	// without this the axis would reset on every lap boundary.
+	let distanceOffsetKm = 0;
 	let offset = 0;
 	let trimStart = 0;
 	let trimEnd = 0;
@@ -245,7 +290,46 @@ export function stitchStandardProfiles(
 			);
 		}
 		actualElevation.push(...profile.actualElevation);
+		if (referenceSeries) {
+			referenceSeries.push(
+				...(profile.referenceElevation?.series ??
+					new Array<number>(length).fill(Number.NaN)),
+			);
+		}
 		power.push(...profile.supplementarySeries.powerWatts);
+
+		// Same padding rule as the compare leg above — a segment contributes its
+		// own EXTENT rather than shortening the series, which would slide every
+		// later sample onto the wrong x position — but padded with THE LAST
+		// KNOWN DISTANCE rather than with zero, and the running total advances
+		// by that same value.
+		//
+		// The loop walks `length` (the VE series) while `segmentKm` is whatever
+		// the distance channel supplied, and the two are only assumed equal.
+		// Zero is the wrong pad the moment they are not: it puts the tail back at
+		// the SEGMENT'S OWN ORIGIN, a jump backwards mid-segment, and the offset
+		// read off the end of the ARRAY (`segmentKm[segmentKm.length - 1]`) then
+		// advanced by a distance no sample had been placed at, pushing every
+		// later segment past a tail that had already fallen behind. Both halves
+		// of a non-monotonic axis, right where the trim lines are drawn. Holding
+		// the last finite value keeps the axis flat across the gap instead, and
+		// covers a hole in the middle of the channel as well as a short one at
+		// the end.
+		//
+		// Unchanged in the two cases that already worked: a full channel ends at
+		// `segmentKm[length - 1]` exactly as before, and a channel that is absent
+		// entirely still contributes a flat run at the current offset and leaves
+		// the running total where it was, so the segments after it stay where
+		// they belong.
+		const segmentKm = profile.supplementarySeries.distancesKm;
+		let lastLocal = 0;
+		for (let i = 0; i < length; i += 1) {
+			const local = segmentKm[i];
+			if (Number.isFinite(local)) lastLocal = local;
+			cumulativeDistanceKm.push(distanceOffsetKm + lastLocal);
+		}
+		distanceOffsetKm += lastLocal;
+
 		apparentWindSpeedMps.push(
 			...profile.supplementarySeries.apparentWindSpeedMps,
 		);
@@ -264,10 +348,15 @@ export function stitchStandardProfiles(
 		virtualElevation,
 		virtualElevationCompare,
 		actualElevation,
+		referenceElevation:
+			referenceLabel && referenceSeries
+				? { label: referenceLabel, series: referenceSeries }
+				: null,
 		timestamps,
 		velocity,
 		power,
 		apparentWindSpeedMps,
+		cumulativeDistanceKm,
 	};
 }
 

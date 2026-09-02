@@ -129,7 +129,7 @@ async function update(appState: AppState, cda: number): Promise<void> {
 	const outcome = await updateModeVEPlots({
 		appState,
 		handler: getAnalysisModeHandlerById("gpsLap"),
-		callbacks: createGpsLapUpdateCallbacks(appState),
+		makeCallbacks: () => createGpsLapUpdateCallbacks(appState),
 		windSource: "fit",
 		cda,
 		crr: 0.004,

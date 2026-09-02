@@ -5,6 +5,8 @@
   "scripts": {
     "build": "./build.sh",
     "dev": "cd frontend && npm run dev",
+    "dev:all": "./scripts/dev.sh",
+    "dev:wasm": "cd backend && cargo watch --watch src --watch Cargo.toml --shell 'wasm-pack build --target web --out-dir ../frontend/pkg'",
     "preview": "cd frontend && npm run preview",
     "install:deps": "cd frontend && npm install",
     "build:wasm": "cd backend && wasm-pack build --target web --out-dir ../frontend/pkg",
