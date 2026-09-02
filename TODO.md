@@ -34,7 +34,7 @@ dependency column below says what actually has to wait.
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
-| **G** | Test infrastructure | M | — |
+| ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
 
@@ -46,7 +46,8 @@ what was measured. **A**, **C** and **E** have never been opened in the app — 
 *Done*, was run on 2026-09-02 at `d586961` and passed on all five steps; it covers Section 3's
 selection and map behaviour and nothing else, so **A**, **C** and **E** still keep theirs.
 
-Suggested order from here: **G**. A, B, C, D, E and H are done. The one piece of B
+Suggested order from here: the standalone items. A, B, C, D, E, G and H are done, and **F**
+remains blocked on its own two conditions. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -104,21 +105,21 @@ early.*
 
 ## Bundle G · Test infrastructure
 
-*Effort: M. Why together: both are gaps in what the test and check commands actually cover, and both
-are best judged against the same question — what does `npm run check` currently let through.*
+**Done 2026-09-02.** See *Bundle G · Test infrastructure* under **Done**.
 
-- [ ] **[M] `frontend/scripts/**` is neither typechecked nor linted.** `tsconfig.json` includes only
-      `src/**/*` and `npm run lint` runs `eslint src`, so `npm run check` and `npm run lint` both
-      pass on a scripts file that cannot run. It has already shipped two runtime defects.
-      `build-golden-fixture.ts` decides what becomes permanently public in a public repo.
-      *Attempted and backed out:* a `tsconfig.scripts.json` extending the base fails two ways — the
-      `@wasm/*` `paths` mapping does not resolve through `extends`, and it pulls all of `src/**`
-      into a second check with different `types` resolution. Doing it properly means `baseUrl` +
-      explicit `paths`, or project references.
+Criteria (concretised 2026-09-02, PR #9 review round 7 — the item was prose, these were derived
+from it and confirmed by the maintainer, so a later round reads this as tier A rather than
+re-deriving it):
 
-- [ ] **[S] GPS-01 has no direct test.** GPS-02 is now closed and covered; GPS-01 (the mode selector
-      reaching `setGpsAnalysisMode`) still has none.
-      *origin: `2026-08-15-gps-state-sync-coverage-gap` todo, partially closed*
+- [x] `npm run check` typechecks `frontend/scripts/**` — all five scripts confirmed in the
+      program with `tsc --listFiles`, `build-golden-fixture.ts` among them
+- [x] `npm run lint` lints `frontend/scripts/**`
+- [x] Everything those two newly expose is fixed, so both commands pass — 7 errors, and the
+      guard is non-vacuous (restoring the originals exits 2 on all 7)
+- [x] A test directly covers the mode selector reaching `setGpsAnalysisMode` — four cases,
+      each with a mutation that kills it
+- [x] The scripts RUN, not merely typecheck — `profile:slider` and `profile:gps-lap-render`
+      both exit 0
 
 ## Standalone work
 
@@ -196,6 +197,14 @@ are best judged against the same question — what does `npm run check` currentl
       `frontend/src/shell/ve/renderStandardVe.ts:318-345` · *origin: in-app check of the PR #7
       review fixes, 2026-08-31*
 
+- [ ] **[S] `vite.config.ts` and `vitest.config.ts` are in neither tsc program, and neither is
+      linted.** Bundle G closed this hole for `frontend/scripts/**`; the root config files still
+      sit outside both `tsconfig.json` and `tsconfig.scripts.json` (verified with
+      `tsc --listFiles`) and outside `eslint src scripts`. Same failure shape as the bundle's own
+      item: a config file that cannot run still passes `npm run check`. Smaller stakes than the
+      scripts — a broken vite config fails loudly at `dev`/`build` — which is why it was not
+      folded in. *origin: PR #9 review round 7, F7-04*
+
 - [ ] **[M] Out-and-back's aggregation helpers have never been profiled.** GPS-lap's two
       equivalents each hid an O(targets × samples) rescan worth ~10 ms of a ~22 ms update.
       Out-and-back's `calculateOutAndBackStats` has the same shape and twice the segments. Not
@@ -209,6 +218,90 @@ are best judged against the same question — what does `npm run check` currentl
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle G · Test infrastructure — 2026-09-02
+
+Implemented in the working tree on `bundle-g-test-infrastructure`, branched from `origin/main` at
+`1cc89e6`; **not committed**. 1052 tests pass (up 4 on the 1048 of the entry below),
+`npm run check` and `npm run lint` clean. Every guard was mutation-verified — applied, observed
+failing, reverted — because the origin note for the GPS-01 item names this as the area that
+produced six vacuous guards, and one of the four cases here WAS vacuous on the first draft.
+
+- [x] **[M] `frontend/scripts/**` is neither typechecked nor linted.** Both halves closed, and the
+      backed-out attempt's diagnosis was half wrong.
+
+      **`tsconfig.scripts.json`**, extending the base — no `baseUrl`, no project references, no
+      restated `paths`. Three things had to be right, each measured rather than assumed:
+      `types` must carry BOTH `node` and `vite/client`, because the scripts are Node programs that
+      import `src` modules directly and those still need `import.meta.env` and the CSS side-effect
+      import to resolve; the ambient declarations must be named in `include` explicitly, since a
+      `.d.ts` nothing imports is reached through `include` rather than the import graph, and
+      `plotlyLoader.ts` arrives via the graph without `src/types/plotly-basic-dist.d.ts`; and
+      **the `@wasm/*` `paths` mapping DOES resolve through `extends`** on the TypeScript in this
+      repo. The earlier note recorded that it does not — re-measured 2026-09-02, and it does.
+
+      `npm run check` is now `tsc --noEmit && tsc -p tsconfig.scripts.json --noEmit`, and
+      `npm run lint` is `eslint src scripts`. A new `scripts/**/*.ts` ESLint block carries the node
+      globals and `no-console: error`, matched to `src` — none of the five scripts contains a single
+      `console.` call, they all write results through `process.stdout.write`, and the rule keeps it
+      that way so log lines cannot interleave with output a consumer parses.
+
+      **The check caught 7 real errors, and it is not vacuous:** restoring the original files makes
+      `npm run check` exit 2 on all 7, and a stray `console.log` in a script makes `npm run lint`
+      exit 1.
+        - `profile-slider-recompute.ts` (5) passed `params.cda` / `params.crr` — `number | null`,
+          where `null` means "optimize" — straight into `calculate_virtual_elevation`, which takes
+          numbers. Production never reaches that boundary unresolved
+          (`renderStandardVe.ts:148`, `updateModeVEPlots.ts` resolve first). A `FixedParameters`
+          type now names the precondition the script always had; no runtime behaviour changed.
+        - `profile-gps-lap-render.ts` (2) rebuilt a `LapVEProfile` shape predating the three
+          nullable fields `range`, `virtualElevationCompare` and `referenceElevation`. The update
+          path leaves all three empty by design, so they are `null` here.
+        - `@types/jsdom` added — the one genuinely missing dependency.
+      `tsconfig.scripts.json`, `eslint.config.js`, `package.json`
+
+- [x] **[S] `profile-gps-lap-render.ts` launched `main()` fire-and-forget, and that is a race.**
+      *Not in the bundle, and NOT a defect on this branch — recorded because the fix is here.*
+
+      Every `src` module in that script is imported DYNAMICALLY (the jsdom globals must exist before
+      those modules evaluate), but `main()` was launched as `void main().then(...)`. The entry
+      module's evaluation therefore completes with nine module requests in flight, and under
+      `vite-node` that is the moment the dev server is torn down. Whether the requests land first is
+      a race.
+
+      **On `main` the script wins it** — the unmodified script runs to completion, exit 0. On
+      `JB/week36-solve-plots`, where the same nine imports pull in the solver modules, it loses
+      every time: `Error: The server is being restarted or closed. Request is outdated` before a
+      single measurement. Swapping `void main()` for a top-level `await` was the single variable
+      that fixed it there; four other hypotheses (jsdom itself, import concurrency, the dep cache,
+      the `new URL(..., import.meta.url)` wasm asset) were each tested and refuted. So this is
+      HARDENING on this branch and a fix on that one. `scripts/profile-gps-lap-render.ts:518`
+
+- [x] **[S] GPS-01 has no direct test.** `bindGpsModeSelector` was imported by **zero** test files.
+      Every existing test of this area calls `setGpsAnalysisMode(...)` directly — the pipeline half.
+      Nothing asserted the half in front of it: that the `<select>` the user operates is wired to
+      that function at all. A dropdown bound to nothing left every one of them green.
+
+      **The re-render is the substance of it.** `bindGpsModeSelector` runs from
+      `restoreSection3Controls`, which runs from `rerenderSection3`, which `setGpsAnalysisMode`
+      calls on every invocation — so using the dropdown destroys and replaces the dropdown along
+      with its listener. The binding has to be re-established by the very render its own change
+      triggered, or the control works exactly once and then goes quietly inert. Same defect family
+      as the map-trim item under *Standalone work*.
+
+      Four cases, each with the mutation that kills it, all re-run on this base:
+        - *selector rendered into Section 3, seeded* — dies when the template drops the `id`.
+        - *the mode moves when the user picks one* — dies when `handleChange` stops calling
+          `setGpsAnalysisMode`, and when the `change` listener is not attached.
+        - *stays live after the re-render its own change triggers* — **the only case that dies**
+          when `restoreSection3Controls` binds on the first render but not afterwards, so it is
+          load-bearing rather than a restatement of the case above it.
+        - *re-renders showing the mode the app is now in* — asserts `data-gps-mode`, which only a
+          render can write, plus node identity. **The first draft asserted `.value` and was
+          vacuous**: the helper assigns that itself, so it survived a mutation that stopped the mode
+          moving at all. The mutation pass caught it and it was rewritten.
+      `src/shell/section3/gpsModeSelector.test.ts` (new) · `bindLapSelection.ts:90-116`
+      *origin: `2026-08-15-gps-state-sync-coverage-gap` todo, now closed for GPS-01*
 
 ### Section 3's invalidation rule, and the four review rounds on top of it — 2026-08-31 … 2026-09-02
 

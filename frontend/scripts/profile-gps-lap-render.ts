@@ -233,7 +233,6 @@ async function main(): Promise<void> {
             await updateModeVEPlots({
                 appState,
                 handler,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 callbacks: timed as any,
                 windSource: 'fit',
                 // A drag moves CdA, so vary it the way a drag does; an identical
@@ -313,7 +312,6 @@ async function main(): Promise<void> {
                 renderWind: () => {},
                 renderPower: () => {},
                 renderVd: () => {},
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
             } as any,
             windSource: 'fit',
             cda: 0.23,
@@ -332,8 +330,14 @@ async function main(): Promise<void> {
                     distances: p.distancesKm,
                     virtualElevation: p.virtualElevation,
                     actualElevation: p.actualElevation,
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     supplementarySeries: p.supplementarySeries as any,
+                    // The three nullable fields the UPDATE path leaves empty:
+                    // it drops the index range by design (`types.ts:23`), and
+                    // this pass runs without compare, so there is no second leg
+                    // and no non-master elevation channel to carry.
+                    range: null,
+                    virtualElevationCompare: null,
+                    referenceElevation: null,
                     duration: 600,
                     totalDistance: p.distancesKm[p.distancesKm.length - 1] ?? 0,
                 }))
@@ -496,14 +500,28 @@ async function reportDebounce(
     )
 }
 
-void main()
-    .then(() => {
-        // jsdom installs timers and a live `window`, which keep the node event
-        // loop alive forever once the measurements are done. Exit explicitly so
-        // the script terminates instead of hanging after printing its report.
-        process.exit(0)
-    })
-    .catch(error => {
-        process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
-        process.exit(1)
-    })
+// TOP-LEVEL AWAIT, not `void main()`. Every `src` module here is imported
+// DYNAMICALLY, because the DOM globals must exist before those modules
+// evaluate — so the imports are still in flight when the entry module finishes
+// evaluating, and under `vite-node` that is the exact moment the dev server is
+// torn down. Whether the pending requests land first is a RACE.
+//
+// On this branch the script wins it and `void main()` runs fine, so this is
+// hardening rather than a fix. It is here because the race is already lost on a
+// branch with a larger module graph (`JB/week36-solve-plots`, where the same
+// nine imports pull in the solver modules): every run there died with "The
+// server is being restarted or closed. Request is outdated" before a single
+// measurement, and swapping `void main()` for this await was the single
+// variable that fixed it. Awaiting keeps the entry module, and so the server,
+// alive until the imports land. The sibling profilers never hit this at all:
+// they import statically, so nothing is outstanding when their module ends.
+try {
+    await main()
+    // jsdom installs timers and a live `window`, which keep the node event
+    // loop alive forever once the measurements are done. Exit explicitly so
+    // the script terminates instead of hanging after printing its report.
+    process.exit(0)
+} catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
+    process.exit(1)
+}

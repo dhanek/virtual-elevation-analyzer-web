@@ -6,8 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit",
-    "lint": "eslint src --max-warnings=0",
+    "check": "tsc --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "lint": "eslint src scripts --max-warnings=0",
     "test": "vitest run",
     "profile:slider": "vite-node scripts/profile-slider-recompute.ts",
     "profile:gps-lap-render": "vite-node scripts/profile-gps-lap-render.ts"
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^25.5.2",
     "eslint": "^9.39.1",
     "fake-indexeddb": "^6.2.5",
