@@ -1455,6 +1455,50 @@ export function updateSelectedLaps(): void {
 	deps.updateAnalyzeButton();
 }
 
+/**
+ * Draw the saved-or-default trim region and its two markers on the map.
+ *
+ * Extracted from `initializeMapTrimControlsForSelectedLaps` so `initializeSection3`
+ * can run it AT THE MOMENT THE MAP IS PUBLISHED. On a first load the trim init
+ * runs before the map exists (`restoreSection3Controls` ends in
+ * `updateSelectedLaps`, and that is sequenced ahead of the map by design), so the
+ * guard below saw `null` and nothing ever redrew it -- every other
+ * `fitBoundsToTrimRegion` call site is a slider handler.
+ *
+ * Always refresh markers when switching laps so stale markers from a previously
+ * selected lap don't remain when the new lap has no saved config.
+ */
+function drawTrimRegionOnMap(fromSavedSettings = false): void {
+	const deps = getDependencies();
+	const mapVisualization = deps.getMapVisualization();
+	const filtered = deps.appState.filteredLapData;
+	if (
+		!mapVisualization ||
+		!filtered ||
+		deps.appState.presetTrimStart === null ||
+		deps.appState.presetTrimEnd === null
+	) {
+		return;
+	}
+	log.debug("Setting map trim markers:", {
+		trimStart: deps.appState.presetTrimStart,
+		trimEnd: deps.appState.presetTrimEnd,
+		fromSavedSettings,
+	});
+	const trimStartVal = deps.appState.presetTrimStart;
+	const trimEndVal = deps.appState.presetTrimEnd;
+	setTimeout(() => {
+		deps
+			.getMapVisualization()
+			?.fitBoundsToTrimRegion(
+				trimStartVal,
+				trimEndVal,
+				filtered.position_lat,
+				filtered.position_long,
+			);
+	}, 100);
+}
+
 export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
 	const deps = getDependencies();
 
@@ -1623,32 +1667,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		newMapTrimEndValue.value = deps.appState.presetTrimEnd.toString();
 
 		// Set map markers with loaded/default trim values.
-		// Always refresh markers when switching laps so stale markers from a
-		// previously selected lap don't remain when the new lap has no saved config.
-		const mapVisualization = deps.getMapVisualization();
-		if (
-			mapVisualization &&
-			deps.appState.presetTrimStart !== null &&
-			deps.appState.presetTrimEnd !== null
-		) {
-			log.debug("Setting map trim markers:", {
-				trimStart: deps.appState.presetTrimStart,
-				trimEnd: deps.appState.presetTrimEnd,
-				fromSavedSettings: !!savedSettings,
-			});
-			const trimStartVal = deps.appState.presetTrimStart;
-			const trimEndVal = deps.appState.presetTrimEnd;
-			setTimeout(() => {
-				deps
-					.getMapVisualization()
-					?.fitBoundsToTrimRegion(
-						trimStartVal,
-						trimEndVal,
-						filteredLapPositionLat,
-						filteredLapPositionLong,
-					);
-			}, 100);
-		}
+		drawTrimRegionOnMap(!!savedSettings);
 
 		// Add new listeners
 		newMapTrimStartSlider.addEventListener("input", () => {
@@ -1841,7 +1860,9 @@ export function initializeSection3(): void {
 				const mapVisualization = new MapVisualization("mapView");
 				await mapVisualization.initialize();
 				mapVisualization.setData(fitData, laps);
+				mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 				deps.setMapVisualization(mapVisualization);
+				drawTrimRegionOnMap();
 				log.debug("Map initialized with GPS data");
 
 				// Setup GPS lap detection if enabled
