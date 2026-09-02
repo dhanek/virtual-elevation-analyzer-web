@@ -1475,9 +1475,10 @@ export function updateSelectedLaps(): void {
  * runs before the map exists (`restoreSection3Controls` ends in
  * `updateSelectedLaps`, and that is sequenced ahead of the map by design), so the
  * guard below saw `null` and nothing ever redrew it -- every other
- * `fitBoundsToTrimRegion` call site in this module is a slider handler. The one
- * outside it, `renderStandardVe.ts:674`, fires on a 500 ms timer at the end of a
- * VE panel render, and no VE panel exists at Section 3's first paint.
+ * `fitBoundsToTrimRegion` call site in this module is a slider handler. Two sit
+ * outside it: `bindStandardSliders.ts:631`, itself a slider handler, and
+ * `renderStandardVe.ts:674`, which fires on a 500 ms timer at the end of a VE
+ * panel render -- and no VE panel exists at Section 3's first paint.
  *
  * Always refresh markers when switching laps so stale markers from a previously
  * selected lap don't remain when the new lap has no saved config.
