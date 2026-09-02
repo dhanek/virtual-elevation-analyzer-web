@@ -1666,6 +1666,94 @@ describe("loading a new activity resets the analysis", () => {
 		expect(fits[0].latCount).toBeGreaterThan(0);
 	});
 
+	/**
+	 * F4-01. The provenance in `drawTrimRegionOnMap`'s debug line has to describe
+	 * THE PRESETS, not the call site. `initializeSection3` draws at the moment
+	 * the map is published and has no `savedSettings` in scope, so on the
+	 * ordering below -- the one that occurs for any file the user has previously
+	 * adjusted -- the ONLY draw is the one that could never report anything but
+	 * the default, and the line said `fromSavedSettings: false` over a region
+	 * restored from saved settings.
+	 *
+	 * Four load-bearing fixture pieces, none of them optional:
+	 *
+	 *  - the log level. Under vitest `VITE_LOG_LEVEL` is unset and
+	 *    `import.meta.env.DEV` is true, so `resolveLogLevel()` returns `info` and
+	 *    `log.debug` writes NOTHING. `resolveLogLevel()` runs at write time, so
+	 *    stubbing the env inside the test is enough;
+	 *  - a real published-map pair rather than the shared `configure()` helper.
+	 *    That helper reads the map out of `mapInstances`, which `FakeMap` joins
+	 *    IN ITS CONSTRUCTOR -- so under it the map is live before
+	 *    `setMapVisualization`, the trim init's own draw succeeds, and this test
+	 *    would be reading the wrong call site's log line;
+	 *  - saved settings that differ from the defaults (`0` and `dataLength - 1`),
+	 *    with a non-null `currentFileHash` so the trim init takes the
+	 *    `loadLapSettings` path at all;
+	 *  - a map construction that finishes STRICTLY AFTER the presets are
+	 *    assigned. Pinned with a 10 ms timer rather than left to microtask depth;
+	 *    `settle()` advances past it and past the draw's own 100 ms timer.
+	 */
+	it("reports the trim region's provenance from the presets, not from the call site", async () => {
+		vi.stubEnv("VITE_LOG_LEVEL", "debug");
+		const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+		try {
+			const appState = makeSingleLapAppState();
+			appState.currentFileHash = "hash-for-a-file-the-user-has-adjusted";
+			const saved = { trimStart: 17, trimEnd: 143, cda: null, crr: null };
+
+			// The production publish contract: only `setMapVisualization` makes the
+			// map readable. Deliberately NOT the shared `configure()` helper.
+			let published: FakeMap | null = null;
+			configureSection3Orchestration({
+				appState,
+				parameterStorage: {
+					loadLapSettings: () => Promise.resolve(saved),
+					saveLapSettings: () => Promise.resolve(),
+				} as never,
+				getMapVisualization: () => published as never,
+				setMapVisualization: (map: unknown) => {
+					published = map as FakeMap;
+				},
+				getParametersComponent: () => null,
+				updateAnalyzeButton: makeUpdateAnalyzeButton(appState),
+				setupAnalyzeButton: vi.fn(),
+				showLoading: () => {},
+				hideLoading: () => {},
+				showError: () => {},
+			} as never);
+
+			// The map lands after the presets, which is the F4-01 ordering.
+			mapInitializeBehaviour = () =>
+				new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+			resetAnalysisForNewActivity();
+			initializeSection3();
+			await settle();
+
+			// Exactly one draw, and it is `initializeSection3`'s: the trim init ran
+			// while `published` was still null and bailed at the guard. Without this
+			// the provenance assertion could be reading the trim init's own -- and
+			// correct -- line.
+			const map = published as FakeMap | null;
+			if (!map) throw new Error("the map was never published");
+			expect(map.trimRegionFits).toHaveLength(1);
+
+			// And what got drawn is the SAVED region, which is what makes a
+			// `fromSavedSettings: false` a lie rather than a harmless default.
+			expect(map.trimRegionFits[0].start).toBe(saved.trimStart);
+			expect(map.trimRegionFits[0].end).toBe(saved.trimEnd);
+
+			const markerLog = debugSpy.mock.calls.find(
+				(call) => call[0] === "Setting map trim markers:",
+			);
+			if (!markerLog) throw new Error("the trim marker line was never logged");
+			expect(markerLog[1]).toMatchObject({ fromSavedSettings: true });
+		} finally {
+			debugSpy.mockRestore();
+			vi.unstubAllEnvs();
+		}
+	});
+
 	it("tears the panel down even though the mode is already None", async () => {
 		const appState = await analyzedStandardPanel();
 		appState.selectedLaps = [2, 4, 6];
