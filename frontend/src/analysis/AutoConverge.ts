@@ -37,9 +37,14 @@ import {
 } from "./ClosureRidge";
 import {
 	commonDistanceGrid,
+	PROFILE_FLAT_REASON,
+	PROFILE_FLATNESS_FLOOR_M,
 	resampleProfile,
 	spreadRmse,
 } from "./ProfileSpread";
+
+/** Re-exported like `RIDGE_FLATNESS_FLOOR_M`: solver and surface share it. */
+export { PROFILE_FLATNESS_FLOOR_M };
 
 /** Re-exported so the solver's own floor stays one constant with the surface's. */
 export { RIDGE_FLATNESS_FLOOR_M };
@@ -290,15 +295,6 @@ function refineRidgeArgmin(
 	return cda;
 }
 
-/**
- * Below this change in profile-spread RMSE (metres) between the best and
- * worst on-ridge column, the spread is treated as flat and no optimum is
- * reported. The spread's noise floor — barometric drift and wind differences
- * between runs — moves slowly along the ridge; a minimum separated from the
- * rest by less than a decimetre of RMSE is that noise, not a CdA signal.
- */
-export const PROFILE_FLATNESS_FLOOR_M = 0.1;
-
 /** Distance-grid resolution the profiles are compared on. */
 const PROFILE_GRID_POINTS = 200;
 
@@ -404,6 +400,7 @@ export function solveBothProfile(
 	const verdict = judgeRidge(ridge, {
 		ridgeFlatnessFloorM:
 			options?.profileFlatnessFloorM ?? PROFILE_FLATNESS_FLOOR_M,
+		flatReason: PROFILE_FLAT_REASON,
 	});
 	if (verdict.status === "underdetermined") {
 		return refused(verdict.reason);

@@ -39,10 +39,20 @@ import {
 	closureBand,
 	gridAxis,
 	poolClosureSurface,
+	surfaceFromZ,
 	type ClosureBand,
 	type ClosureSurfaceResult,
 	type SegmentGain,
 } from "../../analysis/ClosureSurface";
+import {
+	anchoredSpreadEvaluator,
+	commonDistanceGrid,
+	PROFILE_FLAT_REASON,
+	PROFILE_FLATNESS_FLOOR_M,
+	resampleProfile,
+	type ProfileBasisSegment,
+} from "../../analysis/ProfileSpread";
+import type { ConvergenceMetric } from "../../plots/ConvergencePlotBuilders";
 import type { ConvergenceUpdateInput } from "../../modes/analysis/types";
 import { buildClosureContourFigure } from "../../plots/ConvergencePlotBuilders";
 import { log } from "../../utils/log";
@@ -66,15 +76,116 @@ interface CachedPool {
 	/** The tolerance band around `surface.best`; derived, so cached with it. */
 	band: ClosureBand | null;
 	segmentCount: number;
+	/** What `surface.z` measures — drives the figure's labels. */
+	metric: ConvergenceMetric;
+}
+
+/**
+ * THE PROFILE BASIS — the third cache level, keyed like the raw gains.
+ *
+ * Profile mode draws the anchored spread surface (`anchoredSpreadEvaluator`),
+ * which needs three exact WASM profiles per segment (probe + one secant step
+ * per axis) resampled onto a common distance grid. Those depend on exactly
+ * what the raw gain grids depend on — the physics, never CdA/Crr or the
+ * targets — so they share `gainsSignature`, are built lazily on the first
+ * profile-mode pool, and survive target/source switches the way the gains
+ * do. `basis: null` records that this selection cannot support a profile
+ * surface (no usable distance channel), so the fallback is not re-probed
+ * every pass.
+ */
+interface CachedProfileBasis {
+	gainsSignature: string;
+	basis: {
+		grid: Float64Array;
+		/** Probe point, slider space. */
+		cda0: number;
+		crr0: number;
+		segments: Array<{
+			key: string;
+			group: string;
+			p0: Float64Array;
+			jc: Float64Array;
+			jr: Float64Array;
+		}>;
+	} | null;
 }
 
 let cachedGains: CachedGains | null = null;
 let cachedPool: CachedPool | null = null;
+let cachedProfileBasis: CachedProfileBasis | null = null;
 
 /** Test seam. */
 export function resetConvergenceSurfaceCache(): void {
 	cachedGains = null;
 	cachedPool = null;
+	cachedProfileBasis = null;
+}
+
+/** Distance-grid resolution of the profile basis, the solver's number. */
+const PROFILE_SURFACE_GRID_POINTS = 200;
+
+function buildProfileBasis(
+	input: ConvergenceUpdateInput,
+): CachedProfileBasis["basis"] {
+	const eligible = input.segments.filter(
+		(segment) =>
+			segment.veProfile &&
+			segment.profileDistance &&
+			segment.profileDistance.length >= 2,
+	);
+	if (eligible.length === 0) {
+		return null;
+	}
+	const grid = commonDistanceGrid(
+		eligible.map((segment) => segment.profileDistance as Float64Array),
+		PROFILE_SURFACE_GRID_POINTS,
+	);
+	if (!grid) {
+		return null;
+	}
+
+	// Probe at the bounds centre, secant steps of a quarter-range: wide
+	// enough to average the sin∘atan flattening over the plotted plane
+	// instead of measuring its slope at one point.
+	const cda0 = 0.5 * (input.cdaMin + input.cdaMax);
+	const crr0 = 0.5 * (input.crrMin + input.crrMax);
+	const cdaStep = 0.25 * (input.cdaMax - input.cdaMin);
+	const crrStep = 0.25 * (input.crrMax - input.crrMin);
+
+	const segments: NonNullable<CachedProfileBasis["basis"]>["segments"] = [];
+	for (const segment of eligible) {
+		const distance = segment.profileDistance as Float64Array;
+		const veProfile = segment.veProfile as (
+			cda: number,
+			crrApplied: number,
+		) => Float64Array;
+		const p0 = veProfile(cda0, crr0 * input.crrScale);
+		if (p0.length !== distance.length) {
+			log.warn(
+				`Convergence: segment ${segment.key} profile/distance length mismatch, skipping`,
+			);
+			continue;
+		}
+		const pc = veProfile(cda0 + cdaStep, crr0 * input.crrScale);
+		const pr = veProfile(cda0, (crr0 + crrStep) * input.crrScale);
+		const jc = new Float64Array(p0.length);
+		const jr = new Float64Array(p0.length);
+		for (let i = 0; i < p0.length; i++) {
+			jc[i] = (pc[i] - p0[i]) / cdaStep;
+			jr[i] = (pr[i] - p0[i]) / crrStep;
+		}
+		segments.push({
+			key: segment.key,
+			group: segment.profileGroup ?? "",
+			p0: resampleProfile(distance, p0, grid),
+			jc: resampleProfile(distance, jc, grid),
+			jr: resampleProfile(distance, jr, grid),
+		});
+	}
+	if (segments.length === 0) {
+		return null;
+	}
+	return { grid, cda0, crr0, segments };
 }
 
 /**
@@ -139,6 +250,25 @@ export async function renderConvergenceView(
 		cachedPool = null;
 	}
 
+	// Profile mode's basis rides the gains signature (see CachedProfileBasis)
+	// and is probed lazily — a session that never ticks the box never pays.
+	if (
+		input.profileMode &&
+		(!cachedProfileBasis ||
+			cachedProfileBasis.gainsSignature !== input.gainsSignature)
+	) {
+		cachedProfileBasis = {
+			gainsSignature: input.gainsSignature,
+			basis: buildProfileBasis(input),
+		};
+		if (!cachedProfileBasis.basis) {
+			log.warn(
+				"Convergence: no segment can support the profile-spread surface " +
+					"(missing distance data) — falling back to the closure surface",
+			);
+		}
+	}
+
 	if (!cachedPool || cachedPool.signature !== input.signature) {
 		// Matching by key rather than by position: `gainsSignature` includes
 		// the segment identities, so an equal signature means the same
@@ -147,16 +277,53 @@ export async function renderConvergenceView(
 		const targetByKey = new Map(
 			input.segments.map((segment) => [segment.key, segment.closureTarget]),
 		);
-		const segmentGains: SegmentGain[] = cachedGains.kept.map((entry) => ({
-			gains: entry.gains,
-			target: targetByKey.get(entry.key) ?? 0,
-		}));
 
-		const surface = poolClosureSurface(
-			segmentGains,
-			cachedGains.cdaValues,
-			cachedGains.crrValues,
-		);
+		let surface: ClosureSurfaceResult;
+		let segmentCount: number;
+		let metric: ConvergenceMetric;
+		const basis = input.profileMode ? cachedProfileBasis?.basis : null;
+		if (basis) {
+			// The anchored spread surface: one quadratic form, evaluated at
+			// every cell — resolution costs microseconds here, the WASM cost
+			// was paid once in the basis.
+			const targeted: ProfileBasisSegment[] = basis.segments.map(
+				(entry) => ({
+					p0: entry.p0,
+					jc: entry.jc,
+					jr: entry.jr,
+					group: entry.group,
+					target: targetByKey.get(entry.key) ?? 0,
+				}),
+			);
+			const spreadAt = anchoredSpreadEvaluator(
+				targeted,
+				basis.grid,
+				basis.cda0,
+				basis.crr0,
+			);
+			const z = cachedGains.crrValues.map((crr) =>
+				cachedGains!.cdaValues.map((cda) => spreadAt(cda, crr)),
+			);
+			surface = surfaceFromZ(z, cachedGains.cdaValues, cachedGains.crrValues, {
+				ridgeFlatnessFloorM: PROFILE_FLATNESS_FLOOR_M,
+				flatReason: PROFILE_FLAT_REASON,
+			});
+			segmentCount = targeted.length;
+			metric = "profileSpread";
+		} else {
+			const segmentGains: SegmentGain[] = cachedGains.kept.map((entry) => ({
+				gains: entry.gains,
+				target: targetByKey.get(entry.key) ?? 0,
+			}));
+			surface = poolClosureSurface(
+				segmentGains,
+				cachedGains.cdaValues,
+				cachedGains.crrValues,
+			);
+			segmentCount = segmentGains.length;
+			metric = "closure";
+		}
+
 		cachedPool = {
 			signature: input.signature,
 			surface,
@@ -166,7 +333,8 @@ export async function renderConvergenceView(
 				cachedGains.crrValues,
 				DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 			),
-			segmentCount: segmentGains.length,
+			segmentCount,
+			metric,
 		};
 	}
 
@@ -179,6 +347,7 @@ export async function renderConvergenceView(
 		gridSteps: cachedGains.gridSteps,
 		targetLabel: input.targetLabel,
 		band: cachedPool.band,
+		metric: cachedPool.metric,
 	});
 
 	// Written from the same pooled surface the map is drawn from, before the
@@ -186,6 +355,7 @@ export async function renderConvergenceView(
 	renderConvergenceBandReadout({
 		band: cachedPool.band,
 		toleranceM: DEFAULT_CLOSURE_BAND_TOLERANCE_M,
+		metric: cachedPool.metric,
 	});
 
 	const Plotly = (await waitForPlotly()) as {

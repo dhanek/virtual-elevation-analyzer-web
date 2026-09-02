@@ -422,6 +422,13 @@ export async function updateModeVEPlots(
 				cda,
 				crr,
 				appliedCrr,
+				// The map follows the checkbox whenever auto-converge is on —
+				// locks or not — so the surface can be inspected before
+				// handing both sliders to the solver.
+				profileMode:
+					(appState.autoConverge?.enabled &&
+						appState.autoConverge.profileSolve) ??
+					false,
 				targetSource: closureSource,
 				// 'dem' with no DEM channel loaded fell back to the resolved
 				// profile — say so rather than let the title claim DEM.

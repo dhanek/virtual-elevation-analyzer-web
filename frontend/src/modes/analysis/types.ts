@@ -291,6 +291,18 @@ export interface ConvergenceSegmentInput {
 	windowSamples: number;
 	/** Reference elevation difference over the trim window. */
 	closureTarget: number;
+	/**
+	 * The window's VE profile at one (CdA, applied-space Crr), rebased to 0
+	 * at the window start — the probe the profile-spread surface linearises
+	 * around. Like `veGainGrid`, Crr arrives in APPLIED space (the caller
+	 * folds `crrScale` in). Optional: absent means the segment cannot join
+	 * the profile surface.
+	 */
+	veProfile?(cda: number, crrApplied: number): Float64Array;
+	/** Window travelled distance, rebased to 0; pairs with `veProfile`. */
+	profileDistance?: Float64Array;
+	/** Profile comparison group (out-and-back leg direction). */
+	profileGroup?: string;
 }
 
 /**
@@ -320,6 +332,12 @@ export interface ConvergenceUpdateInput {
 	 * recomputing them (`buildConvergenceUpdateInput`).
 	 */
 	gainsSignature: string;
+	/**
+	 * The Convergence tab draws the profile-spread surface instead of the
+	 * closure-error surface (the auto-converge profile-consistency toggle).
+	 * Optional: absent means closure.
+	 */
+	profileMode?: boolean;
 	/** The elevation-difference source the targets came from (phase 2). */
 	targetSource: ElevationDiffSource;
 	/** Honest display name for the source (marks the no-DEM fallback). */

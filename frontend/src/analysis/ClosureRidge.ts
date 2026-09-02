@@ -65,6 +65,11 @@ export type RidgeVerdict =
 export interface JudgeRidgeOptions {
 	/** Override `RIDGE_FLATNESS_FLOOR_M` (tests, and the caller's own option). */
 	ridgeFlatnessFloorM?: number;
+	/**
+	 * Override `RIDGE_FLAT_REASON` — the profile-spread callers judge a
+	 * different metric and owe the sidebar words that name it.
+	 */
+	flatReason?: string;
 }
 
 /**
@@ -108,7 +113,7 @@ export function judgeRidge(
 	const floor = options?.ridgeFlatnessFloorM ?? RIDGE_FLATNESS_FLOOR_M;
 	const spread = columns[highest].error - columns[lowest].error;
 	if (!(spread >= floor)) {
-		return refused(RIDGE_FLAT_REASON);
+		return refused(options?.flatReason ?? RIDGE_FLAT_REASON);
 	}
 
 	return { status: "ok", bestIndex: lowest, reason: null };

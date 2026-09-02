@@ -38,19 +38,40 @@ export function ensureAutoConvergeState(appState: AppState): AutoConvergeState {
 	return appState.autoConverge;
 }
 
+/**
+ * The two info-badge tooltips, exported so tests can assert the wording stays
+ * honest about what each solve actually minimises.
+ */
+export const AUTO_CONVERGE_INFO_TOOLTIP =
+	"Each lap's virtual elevation is reduced to a single number: its " +
+	"end-to-end VE gain minus the applied elevation target. An automatic " +
+	"slider is driven so the laps' pooled difference is exactly zero; with " +
+	"both sliders automatic, the optimum is where the per-lap numbers " +
+	"disagree least with each other (lowest RMS spread). Needs laps with " +
+	"different average speeds to separate CdA from Crr.";
+
+export const PROFILE_SOLVE_INFO_TOOLTIP =
+	"Each lap's VE curve is compared to the plain average of all the laps' " +
+	"curves at 200 distance points along the lap. For every candidate CdA, " +
+	"Crr is first set so the laps' pooled end-to-end gain hits the target " +
+	"exactly; the solution is the candidate with the lowest RMSE across the " +
+	"lap. Ticking also switches the Convergence map to this metric. Needs " +
+	"two or more laps over the same course, with pacing differences between " +
+	"them.";
+
 /** Rendered under the Crr slider in all three sidebars; hidden until enabled. */
 export function autoConvergeLockControlsMarkup(): string {
 	return `
         <div class="ve-control-group auto-converge-locks" id="autoConvergeLocks" hidden>
-            <label class="auto-converge-locks__label">Auto-converge:</label>
+            <label class="auto-converge-locks__label">Auto-converge: <span class="crr-temp-controls__info" title="${AUTO_CONVERGE_INFO_TOOLTIP}">i</span></label>
             <label class="auto-converge-locks__toggle" title="Automatic CdA: the solver drives CdA along the closure ridge while you tune Crr.">
                 <input type="checkbox" id="cdaLockToggle"> Automatic CdA
             </label>
             <label class="auto-converge-locks__toggle" title="Automatic Crr: the solver drives Crr along the closure ridge while you tune CdA.">
                 <input type="checkbox" id="crrLockToggle"> Automatic Crr
             </label>
-            <label class="auto-converge-locks__toggle" title="Both automatic: pick the CdA/Crr that makes the runs' virtual-elevation profiles overlap along the whole lap, instead of the endpoint-closure optimum. Needs two or more runs over the same course; the closure target is still enforced.">
-                <input type="checkbox" id="profileSolveToggle"> Profile-consistency solve
+            <label class="auto-converge-locks__toggle">
+                <input type="checkbox" id="profileSolveToggle"> Intra-lap RMSE optimisation <span id="profileSolveInfo" class="crr-temp-controls__info" title="${PROFILE_SOLVE_INFO_TOOLTIP}">i</span>
             </label>
             <div id="autoConvergeStatus" class="auto-converge-locks__status" hidden></div>
         </div>`;
@@ -79,12 +100,12 @@ export function syncAutoConvergeControlState(appState: AppState): void {
 	if (cdaLock) cdaLock.checked = state.cdaLocked;
 	const crrLock = checkbox("crrLockToggle");
 	if (crrLock) crrLock.checked = state.crrLocked;
-	// The profile solve only replaces the BOTH-locked solve, so the toggle is
-	// disabled (but keeps its checked state) until both locks are on.
+	// Never disabled: besides replacing the both-locked solve, the toggle
+	// switches the Convergence tab's surface, which is worth inspecting
+	// before handing the sliders to the solver.
 	const profileSolve = checkbox("profileSolveToggle");
 	if (profileSolve) {
 		profileSolve.checked = state.profileSolve ?? false;
-		profileSolve.disabled = !(state.cdaLocked && state.crrLocked);
 	}
 
 	const setDisabled = (ids: string[], disabled: boolean) => {
@@ -145,6 +166,12 @@ export function bindAutoConvergeLocks(
 		syncAutoConvergeControlState(appState);
 		onChange();
 	});
+
+	// The info badge lives inside the toggle's <label>; without this, reading
+	// the tooltip by clicking would also flip the checkbox.
+	document
+		.getElementById("profileSolveInfo")
+		?.addEventListener("click", (event) => event.preventDefault());
 
 	syncAutoConvergeControlState(appState);
 	return true;

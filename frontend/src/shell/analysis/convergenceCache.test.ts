@@ -80,6 +80,49 @@ function makeInput(overrides: Partial<ConvergenceUpdateInput> = {}): {
 	return { input, gridCalls: () => gridCalls };
 }
 
+/**
+ * Attach a linear-model VE profile to every segment: the same planted point
+ * as the gains, expressed as a curve over a 0..1000 m window so the profile
+ * surface has something to anchor and spread. Counts probe calls.
+ */
+function withProfiles(input: ConvergenceUpdateInput): {
+	input: ConvergenceUpdateInput;
+	profileCalls: () => number;
+} {
+	let profileCalls = 0;
+	const n = 101;
+	const distance = new Float64Array(n);
+	for (let i = 0; i < n; i++) {
+		distance[i] = i * 10;
+	}
+	input.segments = input.segments.map((segment, index) => ({
+		...segment,
+		// Mirrored pacing per segment index, the identifiable case.
+		veProfile: (cda: number, crrApplied: number) => {
+			profileCalls++;
+			const profile = new Float64Array(n);
+			for (let i = 1; i < n; i++) {
+				const fastHalf = index === 0 ? i <= 50 : i > 50;
+				const aero = fastHalf ? 0.11 : 0.04;
+				profile[i] =
+					profile[i - 1] +
+					(-(cda - 0.3) * aero - (crrApplied - 0.005)) * 10;
+			}
+			return profile;
+		},
+		profileDistance: distance,
+	}));
+	return { input, profileCalls: () => profileCalls };
+}
+
+/** The layout title of the `call`-th Plotly draw. */
+function titleOf(call: number): string {
+	const layout = (plotlySpy.react.mock.calls[call] as unknown[])[2] as {
+		title?: { text?: string };
+	};
+	return layout.title?.text ?? "";
+}
+
 beforeEach(() => {
 	resetConvergenceSurfaceCache();
 	plotlySpy.react.mockClear();
@@ -192,5 +235,70 @@ describe("the convergence surface cache", () => {
 		await renderConvergenceView(input);
 		expect(gridCalls()).toBe(0);
 		expect(plotlySpy.react).not.toHaveBeenCalled();
+	});
+});
+
+describe("the profile-spread surface", () => {
+	it("draws the spread surface with its own labels and a clear optimum", async () => {
+		const { input } = makeInput({
+			profileMode: true,
+			signature: "sig-A-profile",
+		});
+		const { profileCalls } = withProfiles(input);
+		await renderConvergenceView(input);
+
+		expect(titleOf(0)).toContain("profile spread");
+		const traces = (plotlySpy.react.mock.calls[0] as unknown[])[1] as Array<{
+			type?: string;
+			name?: string;
+			x?: number[];
+			y?: number[];
+			colorbar?: { title?: { text?: string } };
+		}>;
+		const contour = traces.find((trace) => trace.type === "contour");
+		expect(contour?.colorbar?.title?.text).toBe("Profile spread RMSE (m)");
+		// Three probes per segment, two segments — and mirrored pacing plus
+		// the anchor give the surface a genuine optimum at the planted point.
+		expect(profileCalls()).toBe(6);
+		const best = traces.find((trace) => trace.name === "Best fit");
+		expect(best?.x?.[0]).toBeCloseTo(0.3, 2);
+		expect(best?.y?.[0]).toBeCloseTo(0.005, 3);
+	});
+
+	it("re-pools from the cached basis on a drag and on a mode switch", async () => {
+		const first = makeInput({ profileMode: true, signature: "sig-A-profile" });
+		const profiled = withProfiles(first.input);
+		await renderConvergenceView(first.input);
+		expect(profiled.profileCalls()).toBe(6);
+
+		// A drag: same signatures — no new probes, no new grids.
+		const drag = makeInput({
+			profileMode: true,
+			signature: "sig-A-profile",
+			cda: 0.35,
+		});
+		const dragProfiled = withProfiles(drag.input);
+		await renderConvergenceView(drag.input);
+		expect(dragProfiled.profileCalls()).toBe(0);
+		expect(drag.gridCalls()).toBe(0);
+
+		// Ticking the box off re-pools the closure surface from the cached
+		// gains; ticking it back on re-pools from the cached basis.
+		const off = makeInput({ profileMode: false, signature: "sig-A" });
+		const offProfiled = withProfiles(off.input);
+		await renderConvergenceView(off.input);
+		expect(titleOf(2)).toContain("Closure error");
+		expect(off.gridCalls()).toBe(0);
+		expect(offProfiled.profileCalls()).toBe(0);
+	});
+
+	it("falls back to the closure surface when no segment has a profile", async () => {
+		const { input, gridCalls } = makeInput({
+			profileMode: true,
+			signature: "sig-A-profile",
+		});
+		await renderConvergenceView(input);
+		expect(titleOf(0)).toContain("Closure error");
+		expect(gridCalls()).toBe(2);
 	});
 });

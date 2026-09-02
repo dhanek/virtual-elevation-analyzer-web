@@ -258,6 +258,8 @@ export interface BuildConvergenceUpdateInputArgs {
 	cda: number;
 	crr: number;
 	appliedCrr: number;
+	/** Whether the Convergence tab should draw the profile-spread surface. */
+	profileMode: boolean;
 	/** The elevation-difference source the targets were resolved from. */
 	targetSource: ElevationDiffSource;
 	/**
@@ -332,6 +334,9 @@ export function buildConvergenceUpdateInput(
 	const signature = JSON.stringify({
 		gains: gainsSignature,
 		targets: prepared.map((p) => p.closureTarget),
+		// The pooled surface is a different metric per mode; the raw gain
+		// grids and the profile basis are both mode-independent.
+		profileMode: args.profileMode,
 	});
 
 	return {
@@ -350,6 +355,15 @@ export function buildConvergenceUpdateInput(
 					p.trimStart,
 					p.trimEnd,
 				),
+			// Applied-space Crr like veGainGrid — the view folds crrScale in.
+			veProfile: (cda, crrApplied) =>
+				veProfileWindow(p, cda, crrApplied),
+			profileDistance: profileDistanceWindow(
+				p.slice.distance,
+				p.trimStart,
+				p.trimEnd,
+			),
+			profileGroup: p.segment.legDirection,
 		})),
 		cda: args.cda,
 		crr: args.crr,
@@ -360,6 +374,7 @@ export function buildConvergenceUpdateInput(
 		crrScale,
 		signature,
 		gainsSignature,
+		profileMode: args.profileMode,
 		targetSource: args.targetSource,
 		targetLabel: args.targetLabel,
 	};
@@ -394,34 +409,43 @@ export function buildAutoConvergeSegments(
 				Number.isFinite(travelled) && travelled > 0
 					? travelled
 					: Math.max(1, p.trimEnd - p.trimStart),
-			veProfile: (cda, crr) => {
-				// `calculate_virtual_elevation` returns the FULL segment's
-				// cumulative profile; the window slice is rebased to 0 at the
-				// window start so runs compare from a common origin. The
-				// VEResult is freed eagerly — the profile solve evaluates
-				// dozens per solve, too many to leave to GC finalizers.
-				const result = p.calculator.calculate_virtual_elevation(
-					cda,
-					resolveAppliedCrr(params, crr),
-					p.trimStart,
-					p.trimEnd,
-				);
-				const full = result.virtual_elevation;
-				result.free();
-				const end = Math.min(p.trimEnd, full.length - 1);
-				const start = Math.min(p.trimStart, Math.max(0, end));
-				const out = new Float64Array(Math.max(0, end - start + 1));
-				for (let i = 0; i < out.length; i++) {
-					out[i] = full[start + i] - full[start];
-				}
-				return out;
-			},
+			veProfile: (cda, crr) =>
+				veProfileWindow(p, cda, resolveAppliedCrr(params, crr)),
 			profileDistance: profileDistanceWindow(distance, p.trimStart, p.trimEnd),
 			// Out-and-back legs are only comparable within a direction
 			// (`ProfileSpread` header); every other mode shares one group.
 			profileGroup: p.segment.legDirection,
 		};
 	});
+}
+
+/**
+ * The window's VE profile at one (CdA, APPLIED-space Crr), rebased to 0 at
+ * the window start so runs compare from a common origin.
+ * `calculate_virtual_elevation` returns the FULL segment's cumulative
+ * profile; the VEResult is freed eagerly — the profile solve and the spread
+ * surface evaluate many per pass, too many to leave to GC finalizers.
+ */
+function veProfileWindow(
+	p: PreparedSegment,
+	cda: number,
+	appliedCrr: number,
+): Float64Array {
+	const result = p.calculator.calculate_virtual_elevation(
+		cda,
+		appliedCrr,
+		p.trimStart,
+		p.trimEnd,
+	);
+	const full = result.virtual_elevation;
+	result.free();
+	const end = Math.min(p.trimEnd, full.length - 1);
+	const start = Math.min(p.trimStart, Math.max(0, end));
+	const out = new Float64Array(Math.max(0, end - start + 1));
+	for (let i = 0; i < out.length; i++) {
+		out[i] = full[start + i] - full[start];
+	}
+	return out;
 }
 
 /**

@@ -23,6 +23,7 @@ vi.mock("./updateModeVEPlots", () => ({
 import type { AutoConvergeResolution } from "../../analysis/AutoConverge";
 import type { AppState } from "../../state/AppState";
 import {
+	autoConvergeLockControlsMarkup,
 	bindAutoConvergeLocks,
 	ensureAutoConvergeState,
 	syncAutoConvergeControlState,
@@ -262,18 +263,16 @@ describe("the lock controls", () => {
 		expect(el("cdaSlider").disabled).toBe(true);
 	});
 
-	it("the profile-solve toggle is gated on both locks and writes the state", () => {
+	it("the profile-solve toggle reflects and writes the state", () => {
 		const appState = makeAppState();
-		appState.autoConverge.cdaLocked = false;
+		appState.autoConverge.profileSolve = true;
 		syncAutoConvergeControlState(appState);
-		// Only Crr is locked: the profile solve cannot apply, so the toggle
-		// is disabled but keeps whatever the user last chose.
-		expect(el("profileSolveToggle").disabled).toBe(true);
-
-		appState.autoConverge.cdaLocked = true;
-		syncAutoConvergeControlState(appState);
+		expect(el("profileSolveToggle").checked).toBe(true);
+		// Never disabled: it also switches the Convergence tab's surface,
+		// which is inspectable without locking either slider.
 		expect(el("profileSolveToggle").disabled).toBe(false);
 
+		appState.autoConverge.profileSolve = false;
 		const changes: number[] = [];
 		bindAutoConvergeLocks(appState, () => changes.push(1));
 		const toggle = el("profileSolveToggle");
@@ -281,6 +280,27 @@ describe("the lock controls", () => {
 		toggle.dispatchEvent(new Event("change"));
 		expect(appState.autoConverge.profileSolve).toBe(true);
 		expect(changes).toHaveLength(1);
+	});
+
+	it("clicking the info badge does not flip the profile-solve toggle", () => {
+		// The real markup, not the fixture: the badge lives INSIDE the
+		// toggle's <label>, so without the bound preventDefault a click on it
+		// would activate the checkbox.
+		document.body.innerHTML = autoConvergeLockControlsMarkup();
+		const appState = makeAppState();
+		bindAutoConvergeLocks(appState, () => {});
+
+		const badge = document.getElementById("profileSolveInfo") as HTMLElement;
+		expect(badge.title.length).toBeGreaterThan(0);
+		badge.dispatchEvent(
+			new MouseEvent("click", { bubbles: true, cancelable: true }),
+		);
+		expect(el("profileSolveToggle").checked).toBe(false);
+		expect(appState.autoConverge.profileSolve ?? false).toBe(false);
+
+		// The label text itself still toggles — only the badge is inert.
+		el("profileSolveToggle").click();
+		expect(appState.autoConverge.profileSolve).toBe(true);
 	});
 
 	it("ensureAutoConvergeState creates the state on bare test doubles", () => {

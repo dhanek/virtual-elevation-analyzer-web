@@ -71,6 +71,8 @@ export const DEFAULT_RIDGE_FLATNESS_FLOOR_M = RIDGE_FLATNESS_FLOOR_M;
 
 export interface PoolClosureSurfaceOptions {
 	ridgeFlatnessFloorM?: number;
+	/** Flat-verdict wording override, for a non-closure metric's surface. */
+	flatReason?: string;
 }
 
 export function poolClosureSurface(
@@ -110,6 +112,43 @@ export function poolClosureSurface(
 		z.push(row);
 	}
 
+	const surface = surfaceFromZ(z, cdaValues, crrValues, options);
+	if (segments.length === 0) {
+		return {
+			...surface,
+			best: null,
+			clipped: false,
+			underdetermined: "No segments to pool — analyse a selection first.",
+		};
+	}
+	if (segments.length < 2) {
+		return {
+			...surface,
+			best: null,
+			clipped: false,
+			underdetermined:
+				"One run cannot separate CdA from Crr — closure error trades them " +
+				"off along the ridge. Analyse two or more runs at different speeds.",
+		};
+	}
+	return surface;
+}
+
+/**
+ * The z-independent back half of `poolClosureSurface`, shared with the
+ * Convergence tab's profile-spread surface: trace the per-column ridge,
+ * judge it (`judgeRidge`), and report the refined argmin or the refusal.
+ * The metric behind `z` only chooses the flatness floor.
+ */
+export function surfaceFromZ(
+	z: number[][],
+	cdaValues: readonly number[],
+	crrValues: readonly number[],
+	options?: PoolClosureSurfaceOptions,
+): ClosureSurfaceResult {
+	const cdaCount = cdaValues.length;
+	const crrCount = crrValues.length;
+
 	// The ridge: per CdA column, the Crr minimising pooled error.
 	const ridgeCda: number[] = [];
 	const ridgeCrr: number[] = [];
@@ -142,16 +181,6 @@ export function poolClosureSurface(
 		underdetermined: reason,
 	});
 
-	if (segments.length === 0) {
-		return refused("No segments to pool — analyse a selection first.");
-	}
-	if (segments.length < 2) {
-		return refused(
-			"One run cannot separate CdA from Crr — closure error trades them " +
-				"off along the ridge. Analyse two or more runs at different speeds.",
-		);
-	}
-
 	// Shared with the both-locked solver (`AutoConverge.solveBoth`), which
 	// traces the same ridge by bisection: the two must not disagree about
 	// whether a selection is determined. Only the verdict is taken from it —
@@ -159,6 +188,7 @@ export function poolClosureSurface(
 	// anything a per-column ridge can offer.
 	const verdict = judgeRidge(ridge, {
 		ridgeFlatnessFloorM: options?.ridgeFlatnessFloorM,
+		flatReason: options?.flatReason,
 	});
 	if (verdict.status === "underdetermined") {
 		return refused(verdict.reason);

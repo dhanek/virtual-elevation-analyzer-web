@@ -48,13 +48,23 @@ export interface ConvergencePlotInput {
      * around.
      */
     band: ClosureBand | null;
+    /**
+     * What `surface.z` measures: pooled endpoint closure error, or the
+     * profile-consistency mode's anchored run-to-run spread. Same units
+     * (metres), same drawing — only the words change. Defaults to closure.
+     */
+    metric?: ConvergenceMetric;
 }
+
+export type ConvergenceMetric = 'closure' | 'profileSpread';
 
 /** Colour shared by the band's iso-line and its label. */
 const BAND_COLOR = '#ff7f0e';
 
 export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefinition {
     const { surface, cdaValues, crrValues, marker, segmentCount, gridSteps, targetLabel, band } = input;
+    const profile = input.metric === 'profileSpread';
+    const zName = profile ? 'profile spread' : 'closure error';
 
     const data: PlotTrace[] = [
         {
@@ -65,9 +75,13 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
             contours: { coloring: 'heatmap' },
             colorscale: 'Viridis',
             reversescale: true,
-            colorbar: { title: { text: 'Closure error (m)', side: 'right' } },
-            hovertemplate:
-                'CdA %{x:.3f} m²<br>Crr %{y:.4f}<br>closure error %{z:.2f} m<extra></extra>',
+            colorbar: {
+                title: {
+                    text: profile ? 'Profile spread RMSE (m)' : 'Closure error (m)',
+                    side: 'right',
+                },
+            },
+            hovertemplate: `CdA %{x:.3f} m²<br>Crr %{y:.4f}<br>${zName} %{z:.2f} m<extra></extra>`,
         },
         {
             type: 'scatter',
@@ -113,7 +127,7 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
             marker: { symbol: 'diamond', size: 11, color: '#d62728', line: { color: 'white', width: 1 } },
             hovertemplate:
                 `Best fit: CdA %{x:.3f} m², Crr %{y:.4f}` +
-                `<br>closure error ${surface.best.error.toFixed(2)} m<extra></extra>`,
+                `<br>${zName} ${surface.best.error.toFixed(2)} m<extra></extra>`,
         });
     }
 
@@ -181,7 +195,9 @@ export function buildClosureContourFigure(input: ConvergencePlotInput): PlotDefi
         data,
         layout: {
             title: {
-                text: `Closure error vs ${targetLabel} — ${segmentCount} ${segmentNoun}, ${gridSteps}×${gridSteps} grid`,
+                text: profile
+                    ? `Run-to-run profile spread, anchored to ${targetLabel} — ${segmentCount} ${segmentNoun}, ${gridSteps}×${gridSteps} grid`
+                    : `Closure error vs ${targetLabel} — ${segmentCount} ${segmentNoun}, ${gridSteps}×${gridSteps} grid`,
                 font: { size: 13 },
             },
             xaxis: { title: { text: 'CdA (m²)' } },

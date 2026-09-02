@@ -127,6 +127,20 @@ describe("bindCrrTempControls", () => {
 		bind();
 	});
 
+	test("clicking the info badge does not flip the toggle", () => {
+		// The badge lives inside the toggle's <label>; the bound
+		// preventDefault keeps a tooltip-read from activating the checkbox.
+		const badge = document.getElementById("crrTempInfo") as HTMLElement;
+		badge.dispatchEvent(
+			new MouseEvent("click", { bubbles: true, cancelable: true }),
+		);
+		expect(setParams).not.toHaveBeenCalled();
+		expect(
+			(document.getElementById("crrTempToggle") as HTMLInputElement)
+				.checked,
+		).toBe(false);
+	});
+
 	test("enabling the toggle sets the parameter and triggers a recompute", () => {
 		const toggle = document.getElementById(
 			"crrTempToggle",

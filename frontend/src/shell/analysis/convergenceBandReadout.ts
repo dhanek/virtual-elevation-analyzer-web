@@ -30,6 +30,8 @@ export interface ConvergenceBandReadoutInput {
 	band: ClosureBand | null;
 	/** The tolerance the band was (or would have been) cut at, metres. */
 	toleranceM: number;
+	/** What the surface measures; names the metric honestly. */
+	metric?: "closure" | "profileSpread";
 }
 
 /** "0.312 (−0.008 / +0.011)" — value, then the offsets below and above it. */
@@ -66,8 +68,10 @@ export function renderConvergenceBandReadout(
 
 	const line = document.createElement("div");
 	line.className = "ve-metrics-compact__line";
+	const metricNoun =
+		input.metric === "profileSpread" ? "best profile agreement" : "best closure";
 	line.append(
-		`Within ${formatBandLabel(input.toleranceM)} of best closure: `,
+		`Within ${formatBandLabel(input.toleranceM)} of ${metricNoun}: `,
 		"CdA ",
 		span("convergenceBandCda", cdaText),
 		"Crr ",
