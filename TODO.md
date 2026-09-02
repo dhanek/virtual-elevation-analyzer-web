@@ -33,7 +33,7 @@ dependency column below says what actually has to wait.
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
-| **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order — (a) done 2026-09-02 |
+| **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done 2026-09-02; (b) split by the spike, GO now in question |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
@@ -47,8 +47,10 @@ what was measured. **A**, **C** and **E** have never been opened in the app — 
 selection and map behaviour and nothing else, so **A**, **C** and **E** still keep theirs.
 
 Suggested order from here: the standalone items. A, B, C, D, E, G and H are done. **F** has had
-its condition (a) closed (2026-09-02) and now waits on condition (b) alone — a re-measurement, and
-the long pole of that bundle. The one piece of B
+its condition (a) closed (2026-09-02). What was condition (b) was probed on 2026-09-02 and split
+in two: adding the `historical-forecast` endpoint is now **[S]** and gated, while the long pole is
+**establishing a ground-truth reference** — WEATH-01's GO rested on an accuracy claim the probe put
+in question. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -99,23 +101,65 @@ itself. Nothing below (b) starts early.*
       - [x] The removal policy is a deliberate choice with its reasoning recorded — FIFO-not-LRU
             and no-TTL, argued in the `evictOverflow` docstring and the Done entry
 
-- [ ] **[L] Condition (b): the spike's headline accuracy figure was measured on an endpoint
-      production never calls.** Axis 3's "100% of windows resolved" was measured against
-      `historical-forecast-api.open-meteo.com`. That host appears nowhere in this repo;
-      `WeatherAPI.ts` calls only `api.open-meteo.com/v1/forecast` and
-      `archive-api.open-meteo.com/v1/archive`, and the CSP allows exactly those two. Production
-      routes rides older than `forecastMaxDays = 82` to **Archive at hourly**, whose head/tail MAE
-      is **0.342 m/s — past axis 2's 0.3 bar**.
-      So this is a re-measurement, not a config edit. Either add the endpoint (code *and* CSP) and
-      re-measure, or restrict the feature to rides inside the 82-day forecast window.
-      **This is the long pole of the whole bundle.**
-      *Note: an earlier audit framed this as "a CSP gap to close". That framing was wrong and is
-      corrected here.*
+### Condition (b), as the spike of 2026-09-02 left it
+
+**The original item's diagnosis was wrong about the CAUSE, and the correction splits it in two.**
+It read: production routes rides older than `forecastMaxDays = 82` to Archive at hourly, whose
+head/tail MAE is 0.342 m/s, past axis 2's 0.3 bar — attributing the gap to hourly RESOLUTION, and
+offering "add the endpoint and re-measure, or restrict the feature to the 82-day window".
+
+Measured directly, 15 ride-days across 3 locations, n=1410 samples per column:
+
+| | MAE | median | p95 |
+|---|---|---|---|
+| Resolution alone — same model, hourly-nearest vs 15-min | **0.253** | 0.080 | 1.170 |
+| What production incurs — archive hourly vs operational-archive 15-min | **0.816** | 0.600 | 2.370 |
+
+So resolution costs a median of **0.08 m/s**. The gap production carries is **0.816** — **2.4×**
+the recorded 0.342 — and the **model** accounts for the bulk of it rather than the sampling rate:
+resolution alone is 0.253 of an 0.816 total, so roughly a third at most. *These are MAEs of two
+different comparisons and do not decompose additively, so treat that as an upper bound on the
+resolution share, not a variance split.* The consequence lands on WEATH-01 itself: per-quarter-hour
+sampling, the whole feature, buys ~0.25 m/s at the mean and 0.08 at the median. Which endpoint is
+queried is the larger lever, and it is independent of WEATH-01.
+
+Also confirmed, by direct query: for a 149-day-old ride `archive-api` returns **no `minutely_15`
+block at all**, while `historical-forecast-api` returns **96/96 non-null** slots. And the live
+forecast window today runs from 2026-06-01, ~93 days, so `forecastMaxDays = 82` is conservative
+but sound.
+
+*Restricting the feature to the 82-day window looks poor: the `.fit` files in `~/Downloads` carry
+file dates spanning 2025-09 to 2026-09, so most rides would fall outside it. Those are file mtimes
+rather than parsed ride dates, so that is indicative, not measured.*
+
+- [ ] **[S] Add `historical-forecast-api.open-meteo.com` as the 15-minute source for rides past
+      the forecast window.** One host in `WeatherAPI.ts` and one in the `connect-src` of
+      `index.html:13`, plus a rung between the existing Forecast and Archive rungs.
+      **Gated on the ground-truth item below, and not shippable before it.** It is NOT a free
+      coverage win, and an earlier framing of it as one was too generous: it also swaps ERA5 for
+      an operational model archive on every old ride, moving the wind by 0.816 m/s MAE **in an
+      unknown direction**. Coverage improves; accuracy is unquantified until there is a reference.
+      `WeatherAPI.ts:39-43,60-80`, `index.html:13`
+
+- [ ] **[L] Establish a ground-truth reference before WEATH-01's GO stands.**
+      **This, not the endpoint, is the long pole.** Condition (b) asks for a re-measurement
+      against a 0.3 m/s bar, and that bar **cannot be met by comparing two models to each other**
+      — which is all the 0.816 above is. Neither endpoint is truth: ERA5 (Archive) is a reanalysis
+      that assimilates observations, and `historical-forecast` is an operational model archive.
+      Nothing in the 2026-09-02 measurement says which is closer to what the rider met.
+      A reference has to come from outside Open-Meteo: the rider's own air-speed sensor, or a met
+      station near a ride. Note the p95 of the resolution column — **1.170 m/s** against a median
+      of 0.08. Sub-hourly sampling pays off in GUSTY conditions and almost nowhere else, which
+      points at the same gating lesson the vw-demo heading/air-speed work reached (gate on the
+      gust index, not on R²) rather than at the flat accuracy claim the GO rested on.
+      *So WEATH-01's GO is not merely unmet — its stated justification is now in question.*
+      *origin: condition (b) spike, 2026-09-02*
 
 - [ ] **[S–M] The cache key is ~0.1 m wide and the data behind it is kilometres wide.**
-      Ride-along with (b), and gated on it. `buildCacheKey` keys on the trim region's centroid at
-      6 decimals while both endpoints serve a model grid of ~1–11 km (forecast) or 0.25° ≈ 28 km
-      (ERA5 archive), at 15-minute slots. So the cache essentially never hits across trim windows:
+      Gated on the ground-truth item above, not on the endpoint one. `buildCacheKey` keys on the
+      trim region's centroid at 6 decimals while both endpoints serve a model grid of ~1–11 km
+      (forecast) or 0.25° ≈ 28 km (ERA5 archive), at 15-minute slots. So the cache essentially
+      never hits across trim windows:
       every slider move is a fresh Open-Meteo round-trip, and `autoRho`'s in-session
       `lastWeatherQueryKey` guard uses the same 6-decimal key, so it does not absorb it either.
       Rounding the key to ~2–3 decimals would make it hit.
@@ -126,7 +170,8 @@ itself. Nothing below (b) starts early.*
       `frontend/src/utils/WeatherCache.ts:178-188`, `autoRho.ts:150-157`
       *origin: brainstorm for condition (a), 2026-09-02 — maintainer ruled bound-only*
 
-- [ ] **[L–XL] WEATH-01 itself**, once (a) and (b) are settled: per-quarter-hour sampling with
+- [ ] **[L–XL] WEATH-01 itself**, once (a) is settled — it is — and both items above are:
+      per-quarter-hour sampling with
       interpolation, wired into the production auto-rho/VE path. Research is already done and the
       per-sample plumbing (`rho_array`, `wind_speed: Vec<f64>`) exists end-to-end, so this
       produces arrays rather than touching VE maths.
@@ -265,7 +310,8 @@ changed and why.
 
 Implemented on `bundle-f-weather-cache-bound`, branched from `origin/main` at `c985711`.
 1058 tests pass (up 6 on the 1052 of the entry below), `npm run check` and `npm run lint` clean.
-This clears the FIRST of bundle F's two conditions; (b) is untouched and remains the long pole.
+This clears the FIRST of bundle F's two conditions. (b) was untouched at the time of this entry;
+it was probed later the same day and split in two — see *Condition (b), as the spike left it*.
 
 - [x] **[M] Condition (a): the weather cache is unbounded, and it is reachable today.**
       Closed as a **size cap with oldest-first eviction, and no TTL** — a deliberate split, because
