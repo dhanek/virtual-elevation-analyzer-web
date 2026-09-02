@@ -107,6 +107,20 @@ early.*
 
 **Done 2026-09-02.** See *Bundle G · Test infrastructure* under **Done**.
 
+Criteria (concretised 2026-09-02, PR #9 review round 7 — the item was prose, these were derived
+from it and confirmed by the maintainer, so a later round reads this as tier A rather than
+re-deriving it):
+
+- [x] `npm run check` typechecks `frontend/scripts/**` — all five scripts confirmed in the
+      program with `tsc --listFiles`, `build-golden-fixture.ts` among them
+- [x] `npm run lint` lints `frontend/scripts/**`
+- [x] Everything those two newly expose is fixed, so both commands pass — 7 errors, and the
+      guard is non-vacuous (restoring the originals exits 2 on all 7)
+- [x] A test directly covers the mode selector reaching `setGpsAnalysisMode` — four cases,
+      each with a mutation that kills it
+- [x] The scripts RUN, not merely typecheck — `profile:slider` and `profile:gps-lap-render`
+      both exit 0
+
 ## Standalone work
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
@@ -182,6 +196,14 @@ early.*
       observation; reproduce it before believing that explanation.
       `frontend/src/shell/ve/renderStandardVe.ts:318-345` · *origin: in-app check of the PR #7
       review fixes, 2026-08-31*
+
+- [ ] **[S] `vite.config.ts` and `vitest.config.ts` are in neither tsc program, and neither is
+      linted.** Bundle G closed this hole for `frontend/scripts/**`; the root config files still
+      sit outside both `tsconfig.json` and `tsconfig.scripts.json` (verified with
+      `tsc --listFiles`) and outside `eslint src scripts`. Same failure shape as the bundle's own
+      item: a config file that cannot run still passes `npm run check`. Smaller stakes than the
+      scripts — a broken vite config fails loudly at `dev`/`build` — which is why it was not
+      folded in. *origin: PR #9 review round 7, F7-04*
 
 - [ ] **[M] Out-and-back's aggregation helpers have never been profiled.** GPS-lap's two
       equivalents each hid an O(targets × samples) rescan worth ~10 ms of a ~22 ms update.
