@@ -25,12 +25,17 @@
  * that is the part still being pinned: same values, same precision, same
  * escaping, different columns.
  */
-import { describe, expect, it } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	CSV_HEADERS,
 	generateCSVFromResults,
+	ResultsStorage,
+	type SaveResultData,
 	type StoredVEResult,
+	type VEAnalysisResult,
 } from "./ResultsStorage";
+import type { AnalysisParameters } from "../components/AnalysisParameters";
 
 /** Every optional field populated, plus notes needing CSV escaping. */
 function fullRecord(): StoredVEResult {
@@ -201,4 +206,109 @@ describe("the exported CSV", () => {
 		);
 	});
 
+});
+
+/**
+ * `WindHeightPct` REPORTS WHAT THE PHYSICS USED, and the pins above cannot see
+ * it.
+ *
+ * Every test above hands `generateCSVFromResults` a `StoredVEResult` it wrote
+ * itself, so it exercises the CELL and never the WRITE. The defect was on the
+ * write: `saveResult` stored `parameters.wind_height_factor` verbatim, while
+ * the analysis had asked `resolveWindHeightFactor` for the factor and been
+ * handed something else for any corrupt value -- NaN, Infinity, a negative --
+ * all of which degrade to `LEGACY_WIND_HEIGHT_FACTOR` before a single wind
+ * sample is scaled. The exported column could therefore print a number the run
+ * never applied, which is worse than printing nothing.
+ *
+ * So these go through the real store, `fake-indexeddb` and all, the way
+ * `resultsStorageDelete.test.ts` does: save -> read back -> export. A cell
+ * assertion alone would have passed against the defect.
+ *
+ * The absent case is the one that fails if `resolveWindHeightFactor` is called
+ * unconditionally, because it maps an ABSENT factor to 1.0 as well, and a
+ * record from before the column existed must stay blank rather than claim 100%.
+ */
+describe("the WindHeightPct column exports the factor the analysis applied", () => {
+	const result = {
+		r2: 0.98,
+		rmse: 1.23,
+		ve_elevation_diff: 4,
+		actual_elevation_diff: 5,
+	} as unknown as VEAnalysisResult;
+
+	/**
+	 * A saveable record whose params carry exactly the given factor, or none.
+	 *
+	 * `system_mass`, `rho` and `eta` are always present because their cells call
+	 * `.toFixed` unguarded -- they are required params, not optional ones, and
+	 * leaving them out breaks the export before it reaches the column under test.
+	 */
+	function saveable(parameters: Partial<AnalysisParameters>): SaveResultData {
+		return {
+			fileName: "ride.fit",
+			laps: [1],
+			trimStart: 0,
+			trimEnd: 100,
+			cda: 0.25,
+			crr: 0.004,
+			windSource: "fit",
+			parameters: {
+				system_mass: 80,
+				rho: 1.225,
+				eta: 0.97,
+				...parameters,
+			} as AnalysisParameters,
+			result,
+			avgPower: 250,
+			avgSpeed: 36,
+			notes: "",
+			recordingDate: "2026-08-04",
+			timestamp: new Date("2026-08-04T10:00:00.000Z"),
+		} as SaveResultData;
+	}
+
+	/** Save one record, read it back out of the store, export it, take the cell. */
+	async function exportedCell(
+		parameters: Partial<AnalysisParameters>,
+	): Promise<string> {
+		const storage = new ResultsStorage();
+		await storage.initialize();
+		await storage.saveResult(saveable(parameters));
+
+		const csv = generateCSVFromResults(await storage.getAllResults());
+		const lines = csv.trim().split("\n");
+		expect(lines).toHaveLength(2);
+
+		// No fixture cell here contains a comma, so a plain split is exact --
+		// and the length assertion is what says so rather than assuming it.
+		const cells = lines[1].split(",");
+		expect(cells).toHaveLength(CSV_HEADERS.length);
+		return cells[CSV_HEADERS.indexOf("WindHeightPct")];
+	}
+
+	beforeEach(() => {
+		globalThis.indexedDB = new IDBFactory();
+	});
+
+	it("leaves the cell EMPTY for a record whose params never held a factor", async () => {
+		expect(await exportedCell({ wind_speed: 3.5, wind_direction: 220 })).toBe(
+			"",
+		);
+	});
+
+	it("exports the resolved factor, not the raw one, for a corrupt stored value", async () => {
+		// Each of these reaches the physics as LEGACY_WIND_HEIGHT_FACTOR, so 100
+		// is the honest cell. The raw export would have read -90, NaN and
+		// Infinity.
+		expect(await exportedCell({ wind_height_factor: -0.9 })).toBe("100");
+		expect(await exportedCell({ wind_height_factor: Number.NaN })).toBe("100");
+		expect(
+			await exportedCell({ wind_height_factor: Number.POSITIVE_INFINITY }),
+		).toBe("100");
+
+		// A valid factor resolves to itself: the round trip adds nothing to a
+		// value the analysis did use, and the 0.72 pin above must not move.
+		expect(await exportedCell({ wind_height_factor: 0.72 })).toBe("72");
+	});
 });

@@ -1,6 +1,7 @@
 import { fileSave } from 'browser-fs-access';
 import { AnalysisParameters } from '../components/AnalysisParameters';
 import type { SegmentVirtualDistance } from '../analysis/VirtualDistance';
+import { resolveWindHeightFactor } from '../analysis/WindHeightTransfer';
 import { log } from './log';
 import { RESULT_COLUMNS, toCsvCell } from './resultColumns';
 
@@ -563,9 +564,23 @@ export class ResultsStorage {
             windSpeed: data.parameters.wind_speed ?? '',
             windDirection: data.parameters.wind_direction ?? '',
             // WR-02: carried across explicitly, like every other named column.
-            // `?? undefined` so a record whose params never held a factor stores
-            // no field at all and exports an empty cell.
-            windHeightFactor: data.parameters.wind_height_factor ?? undefined,
+            //
+            // What is stored is what the PHYSICS USED, not the raw parameter --
+            // the same rule `crrApplied` above follows. `resolveWindHeightFactor`
+            // is the one function the analysis asks for the factor, and it
+            // degrades a corrupt row (NaN, Infinity, negative) to
+            // LEGACY_WIND_HEIGHT_FACTOR before any wind is scaled. Exporting the
+            // raw value would print a number the analysis never applied.
+            //
+            // The presence check is load-bearing, not defensive. The resolver
+            // maps an ABSENT factor onto LEGACY_WIND_HEIGHT_FACTOR too, so a
+            // bare call would write 1.0 -- a `100` cell -- into every record
+            // saved from a params object that never held the field. Absent stays
+            // `undefined` and exports an empty cell, exactly as before.
+            windHeightFactor:
+                typeof data.parameters.wind_height_factor === 'number'
+                    ? resolveWindHeightFactor(data.parameters)
+                    : undefined,
             systemMass: data.parameters.system_mass,
             rho: data.parameters.rho,
             eta: data.parameters.eta,

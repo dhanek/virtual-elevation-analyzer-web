@@ -23,6 +23,7 @@
  * virtual-distance cells are therefore handed in as `vd` — computed once per
  * row by the caller — rather than fetched here.
  */
+import { factorToPercent } from "../analysis/WindHeightTransfer";
 import type { StoredVEResult } from "./ResultsStorage";
 
 /** `[VDSegments, VDAirKm, VDGroundKm, VDDiffPercent]`, already formatted. */
@@ -125,13 +126,19 @@ export const RESULT_COLUMNS: readonly ResultColumn[] = [
 	// Stored as the 0-1 FACTOR, shown as a percent, matching the control (WR-02).
 	// `windSpeed` beside it is the raw 10 m value; the wind that reached the
 	// physics is `windSpeed * windHeightFactor`.
+	//
+	// The percent conversion is `factorToPercent`'s, not a second copy of it:
+	// the rounding rule lives in `WindHeightTransfer` so the control's readout
+	// and this cell can never disagree about what 0.725 is. That module imports
+	// nothing, so the value import is cycle-free even though this file is
+	// imported by `ResultsStorage`.
 	{
 		id: "windHeightPct",
 		header: "WindHeightPct",
 		cell: (r) =>
 			r.windHeightFactor === undefined
 				? ""
-				: String(Math.round(r.windHeightFactor * 100)),
+				: String(factorToPercent(r.windHeightFactor)),
 	},
 	{
 		id: "airSpeedCal",

@@ -28,15 +28,22 @@ dependency column below says what actually has to wait.
 
 | Bundle | What it is | Effort | Waits on |
 |---|---|---|---|
-| ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, awaiting in-app check |
-| ~~**B**~~ | ~~Make Store Result truthful~~ | — | **Done** 2026-08-31, awaiting in-app check |
-| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, awaiting in-app check |
-| ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, awaiting in-app check |
-| ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, awaiting in-app check |
+| ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
+| ~~**B**~~ | ~~Make Store Result truthful~~ | — | **Done** 2026-08-31, checked in the app |
+| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
+| ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
+| ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
 | **G** | Test infrastructure | M | — |
-| ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, awaiting in-app check |
+| ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
+
+Every bundle above is now **committed** on `refactoring`; the per-bundle Done entries below still
+open with the "not committed" wording they were written under, and that wording is stale rather than
+a second claim. **B**, **D** and **H** were exercised in the running app and the Done entries say
+what was measured. **A**, **C** and **E** have never been opened in the app — nothing since their
+2026-08-30 entries records one — so they keep the debt. One more in-app check is owed on top of all
+of it, for C1-01 at the end of *Done*.
 
 Suggested order from here: **G**. A, B, C, D, E and H are done. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
@@ -201,6 +208,211 @@ are best judged against the same question — what does `npm run check` currentl
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Section 3's invalidation rule, and the four review rounds on top of it — 2026-08-31 … 2026-09-01
+
+Eleven commits after `943c527`, all on `refactoring`, all under PR #7. They share one through-line:
+**the VE panel on screen must describe the ride the Section 3 controls currently describe.**
+`tearDownVeAnalysisPanel` had stated that rule since bundle D, and a mode change was the only route
+that used it. Everything below is another route to it, a guard that could not fire, or the fallout
+of getting one of those wrong.
+
+1043 tests pass at `0ae92a7` (up 88 on the 955 of the previous entry), `npm run check` and
+`npm run lint` clean. Every new assertion in every commit was run against the pre-fix code and
+observed to fail; from `a4c9101` the mutation and the proof that it changed the file are recorded in
+the commit message.
+
+**Two of these DELIBERATELY REVERSE an earlier decision.** They are called out as such below,
+because a reversal that survives only as a commit message reads later as drift.
+
+- [x] **[S] The below-axis legend is pinned to the figure, not the plot area.** The out-and-back VE
+      legend sat on top of "Distance (km)". Measured in Chrome from 140 to 900 px: all three overlay
+      figures overlapped their axis title at EVERY height, by 27–34 px. Bundle D's `clamp()` heights
+      did not cause it — they removed the fixed height that had been hiding it. `legend.y` under the
+      default `yref: 'paper'` is a fraction of the PLOT AREA while the axis title below is placed at
+      a fixed pixel offset, so no single fraction reconciles the two. `yref: 'container'` measures
+      from the figure's own bottom edge, leaving only `margin.b` — also pixels — to be large enough.
+      Measured after: a constant 16 px gap at every height. `legend.x` is now explicit too; it
+      defaults to 0, which the old layouts read as centred only because five entries filled the
+      width. One helper and one margin constant replace three hand-tuned pairs.
+      `plots/belowAxisLegend.ts` · test: `belowAxisLegend.test.ts` · commit `6b498a6`
+
+- [x] **[M] The VE panel drops whenever its basis goes — not only on a mode change.** Three routes
+      replaced the panel's input and none touched it. (1) SELECTION CHANGES: ticking laps or
+      sections, or moving a gate, left the plot showing the old selection. Guarded on both halves,
+      because `updateSelectedLaps` is also Section 3's post-render hook and an unconditional
+      teardown would destroy a valid panel on an ordinary re-render. (2) A NEW ACTIVITY:
+      `setLoadedActivity` swapped the FIT data and stopped, so laps 2/4/6 picked for one ride were
+      still ticked — and still `currentAnalyzedLaps` — for the next one, which made (1)'s guard find
+      selection == analyzed and keep the previous file's panel over the new file's data.
+      Deliberately not routed through `setGpsAnalysisMode("None")`, every branch of which is gated on
+      `previousMode !== mode`. (3) THE DERIVED STATE: a surviving `filteredLapData` carried
+      `calculateAutoRho` past its own early return into trim sliders just re-rendered for the new
+      file, which is where the "Auto-rho calculation failed" toast on every file switch came from.
+      The lead test asserts the whole `selection` block equals a freshly constructed one, so a field
+      added to `SelectionState` later cannot be missed here again. Verified in Chrome with two rides.
+      `section3Orchestration.ts`, `appState` selection block · commit `2a0b6ac`
+
+- [x] **[M] Round 1 of review: seven findings, two of them guards that could not fire.** The gate
+      re-detection compared `currentCoveredItems` against `outAndBackSelectedSections`, which the
+      same function had just assigned from the detector's own sequential 1..N — [1,2,3] against
+      [1,2,3], so a gate nudge never invalidated. Now compared on the four index bounds of
+      `currentOutAndBackSections`. And `updateSelectedLaps` compared `currentAnalyzedLaps` against
+      `selectedLaps`, which are DIFFERENT NAMESPACES in the GPS modes (virtual laps or section
+      numbers against the FIT lap list, all counting 1..N), so it both skipped due invalidations and
+      tore down valid panels; it now runs only in the FIT-lap modes. The rest: the compare builder
+      was the last one hardcoding 'Time Point' and drew kilometres under it; `stitchStandardProfiles`
+      advanced its offset by the last element of `distancesKm` while placing samples over
+      `virtualElevation.length`, making the axis non-monotonic for a short channel; `initialize()`
+      is memoised so the footer's "Show All Results" no longer reads `[]` over a populated store;
+      `openResultsModal` is latched against a double-click appending two modals under one id; and
+      both GPS analyze legs sliced `allRho` on `allTimestamps.length`, pushing `undefined` into a
+      `number[]` for a channel a device stopped emitting mid-ride. `c2a9a15` was **not** verified in
+      the browser, which is what the next two commits are.
+      `bindOutAndBackDetection.ts`, `section3Orchestration.ts`, `MultiSegmentPlotBuilders.ts`,
+      `ResultsStorage.ts`, `resultsModal.ts` · commit `c2a9a15`
+
+- [x] **[S] GPS-lap mode got the two guards out-and-back already had.** `runGpsLapDetection` had no
+      invalidation at all, and neither did `handleGpsLapSelectionChange`, so a gate nudge or an
+      untick left the panel over the previous cut. The gap had been MASKED, not covered: before
+      `c2a9a15` the wrong-namespace comparison tore the panel down whenever two unrelated lap lists
+      happened to differ, and removing that left the mode with nothing. Re-detection is compared on
+      the RANGES for the same reason out-and-back is; the checkbox handler compares
+      `currentCoveredItems` against `gpsSelectedLaps`, which are the same namespace here.
+      `invalidateVePanelIfSectionCutChanged` became `invalidateVePanelIfCutChanged` over
+      caller-built keys, since a section has two legs and a GPS lap one range.
+      `bindGpsDetection.ts`, `gpsLapMode.ts:70` · commit `997b17a`
+
+- [x] **[S] The compare x axis stopped clipping, and the FIT window re-runs detection.** Both
+      reported from the running app. Dropping the title from the upper plot of the stacked pair was
+      right but incomplete — `showticklabels: false` is what keeps Plotly from drawing the numbers
+      through the `b: 5` gutter, and the compare builder now says it too. Separately: in the GPS
+      modes the FIT lap selection is the DETECTION WINDOW, not the analysis unit, and nothing re-ran
+      the detectors when it changed. With lap 8 selected the gate found 5 laps; ticking lap 10 left
+      the counter at 5 until a gate was nudged. Each binder now publishes a "re-detect where the
+      gates are now" closure — the offset re-resolved against the CURRENT selection's time range,
+      exactly as a drag does — and the slot is cleared wherever Section 3 rebinds. The teardown
+      falls out of the re-detection rather than being ordered separately; the empty selection is the
+      one case the detectors cannot answer, since they bail before detecting.
+      `bindGpsDetection.ts`, `bindOutAndBackDetection.ts` · commit `ff98c6a`
+
+- [x] **[S] The compare pair shares a horizontal band, and ANY detection change invalidates.**
+      Hiding the tick labels exposed the real misalignment underneath: the compare builder left its
+      legends at Plotly's default, outside on the right, shrinking each plot area by the width of its
+      own longest entry — "VE (FIT Air Speed)" against "Residuals (FIT Air Speed)" — so the two
+      stacked plots came out different widths, and neither axis pinned a range. Both now match
+      `buildVirtualElevationFigures`. And the re-detection guard had spared a detection that only
+      ADDED items, on the reasoning that what was on screen still described the ride: it does not,
+      because the plot's lap NUMBERS are the key Store Result and the saved CdA/Crr live under.
+      The comparison is now the detected list before against the detected list after, in order.
+      `MultiSegmentPlotBuilders.ts`, `bindGpsDetection.ts` · commit `b6c4778`
+
+- [x] **[M] REVERSAL — unticking one detected item now NARROWS the VE panel instead of killing it.**
+      The previous commit left it open, as a behaviour change wanting a decision rather than a quiet
+      fix: unticking one of six detected GPS laps tore the whole panel down and charged the user
+      another Analyze, which is more destructive than the change warrants. The detection underneath
+      is untouched — the checkbox narrows the QUESTION, it does not re-cut the ride — so both segment
+      modes rewrite the on-screen segment list to the ticked subset and ask the funnel for a
+      recompute. The other direction is unchanged: a gate move, or a FIT window that finds a
+      different set of laps, still tears down; an EMPTY selection is not a narrower question but no
+      question, so that tears down too.
+
+      **What this reverses, and why the seam it defended is intact.**
+      `activeOutAndBackSections.ts` deliberately preferred the on-screen list over the selection so
+      that a checkbox could not SILENTLY change what the next slider drag computes. It still cannot:
+      the toggle moves that list and requests the redraw in the same breath, rather than behind the
+      panel's back. The comment there records both halves. `currentAnalyzedLaps` is untouched, per
+      WR-01 — it keys the saved CdA/Crr and trim, and a narrowed VIEW must not re-key them; coverage
+      moves instead, through `summarize` rewriting `currentCoveredItems`, so Store Result and the CSV
+      stay truthful. Two details that would have been quiet bugs: `currentOverlayLapNumbers` is
+      indexed by RANGE ordinal and has to move in lockstep, and `segmentSelection` is a new
+      `ModeUpdateReason` with no `MODE_CONTROL_TABLE` row because it is not a control inside the mode
+      panel. Four tests that asserted the old teardown were rewritten rather than deleted, and two of
+      them had fixtures that no longer reached the code path at all.
+      `activeOutAndBackSections.ts`, `gpsLapMode.ts:17` · commit `c1d6808`
+
+- [x] **[M] Round 2 of review: four findings, and REVERSAL — a gate belongs to the FIT selection it
+      was placed under.** `clearGpsRedetect()` ran one line too late:
+      `restoreSection3Controls` ENDS IN `updateSelectedLaps()`, so a mode switch fired the PREVIOUS
+      mode's closure against detached sliders and persisted offsets for a mode the user had left.
+      A re-detection auto-selected every item unconditionally, silently contradicting a panel that
+      `recomputePanelForSelection` had just narrowed; it now auto-selects only when the detection
+      actually moved. The compare figures pinned `[xMin, xMax]` while drawing only `xPointsMain`,
+      adding dead margin at each end.
+
+      **The fourth finding was the smaller half of a data-loss bug, and the fix reverses how gates
+      were treated.** The finding was that the redetect closure reused the slider value against a new
+      window without re-clamping it or updating `slider.max`. True — but gates are keyed on
+      `(fileHash, selectedLaps)`, so a FIT selection change is a DIFFERENT KEY, not the same gate in
+      a resized window, and reusing the outgoing offset was wrong even when it happened to fit.
+      Worse: the save at the foot of each gate handler reads `selectedLaps` at call time, so the
+      redetect pass wrote the OUTGOING combination's offsets under the INCOMING combination's key,
+      destroying the gate the user had saved for those laps before they touched anything —
+      introduced by the re-detect wiring in `ff98c6a`. Both binders now RESOLVE the gate for the
+      current selection (new window length, the offset saved under THIS key, clamped with A strictly
+      before B) at bind time and again on every selection change, and persist only when the user
+      actually moves a gate.
+      `bindGpsDetection.ts`, `bindOutAndBackDetection.ts` · test: `gateSettingsPerSelection.test.ts`,
+      which drives both binders directly · commit `03de804`
+
+- [x] **[S] Round 3 of review: keep the placed gate, order the redetects, guard out-and-back's
+      initial detection.** All four findings were in the binder rework immediately above.
+      `resolveGateForSelection` fell back to the hard-coded 5 s default whenever the INCOMING key
+      held nothing, throwing away the gate the user had just placed — and ticking a LATER lap does
+      not move the window's start, so the carried offset still named the same point on the course.
+      The default belongs at bind time, where there is no user intent to preserve; a selection change
+      now carries the current slider position and a SAVED gate for the incoming key still wins over
+      it. The published closure had become async when it started awaiting IndexedDB, and
+      `updateSelectedLaps` fires it and forgets, so two quick clicks could resolve out of order — a
+      generation token is captured before the await and every write happens after the check. And
+      out-and-back's initial detection was unconditional where its GPS-lap twin guards on
+      `selectedLaps.length > 0`: with no FIT lap ticked it detected whole-track sections, which the
+      auto-select then wrote into `outAndBackSelectedSections`, which is what
+      `analyzeOrchestrator.ts:245` reads — so Analyze came up enabled over the entire ride before the
+      user had chosen anything. `bindGpsDetection.ts`, `bindOutAndBackDetection.ts` · commit `40bbc64`
+
+- [x] **[S] An empty FIT selection is no basis, in both GPS modes.** Review round 4, findings F1-01
+      and F1-02. `runOutAndBackDetection` fell back to the whole activity when nothing was ticked,
+      cutting sections over a window the user never asked for, while `runGpsLapDetection` had refused
+      that input since `40bbc64`; it now bails the same way, and the binder guard stays because that
+      one suppresses the initial detection at bind time while this one suppresses the four gate
+      handlers. Six existing out-and-back tests ran on a fixture that deliberately left
+      `selectedLaps` empty and would every one have gone vacuous — they now take a FIT lap spanning
+      the whole activity, which keeps the trim branch a no-op so the assertions keep their meaning.
+      Separately, emptying the selection in a GPS mode tore the panel down and stopped:
+      `updateAnalyzeButton` does not read the panel, so Analyze stayed enabled over the previous
+      window's detection while the panel said there was nothing to analyse. The branch now clears the
+      detection for both GPS mode families alongside the teardown; the A/B gate markers are
+      deliberately kept, because a gate is the user's placement and survives a window change by
+      design. `runOutAndBackDetection`, `section3Orchestration.ts` · commit `a4c9101`
+
+- [x] **[S] A FIT file with exactly one lap ticks that lap by default, in all three modes.**
+      `resetAnalysisForNewActivity` cleared `selectedLaps` unconditionally, charging the user a click
+      for a choice that does not exist — and that click is what made the empty selection an
+      attractive state to sit in, which is what made the "no basis" branches above reachable in
+      ordinary use. Fixed at the source, with no second writer of `selectedLaps` added: the render
+      sites end in `restoreSection3Controls`, which ends in `updateSelectedLaps()`, and that
+      re-derives the selection from the checked boxes and fires every downstream effect.
+      `resetAnalysisForNewActivity` · test: three cases in `section3ModeSwitch.test.ts` ·
+      commit `0ae92a7` · *origin: PR #7 review round 1, C1-01 — a criterion from the maintainer
+      directly, not from any item above*
+
+      - [x] `resetAnalysisForNewActivity` ticks lap 1 when, and only when, `currentLaps.length === 1`
+      - [x] the render round-trips it: `#lap-1` comes back checked and `updateSelectedLaps()`
+            re-derives `[1]`
+      - [x] the persistence key moves from "all" to "1" on such files — intended, no migration
+      - [x] the analysis window moves from `timestamps[0]..timestamps[last]` to
+            `min(start_time)..max(end_time)` — intended
+      - [ ] **MANUAL, STILL OWED:** confirmed in the running app on a single-lap FIT file. The
+            fixture exists — `~/Downloads/13.07-lap10-single.fit`, one lap, 5928 records with 274
+            inside the lap and 5654 outside, which is what makes the window change observable rather
+            than a no-op — and it has never been opened. With `VITE_LOG_LEVEL=debug`: **(a)** lap 1
+            ticked, trim controls visible and Analyze reading "Analyze 1 Lap" with no click, and in
+            that SAME first paint whether the map zooms to the lap and draws the trim markers;
+            **(b)** switching to "GPS based out and back" runs detection off that selection without
+            waiting for a tick; **(c)** unticking lap 1 disables Analyze and empties the detected
+            list; **(d)** loading `~/Downloads/13.07.fit` ticks nothing and runs no detection until a
+            lap is ticked. Only the maintainer can mark this, by running it.
 
 ### Review follow-ups on PR #7 — 2026-08-31
 
