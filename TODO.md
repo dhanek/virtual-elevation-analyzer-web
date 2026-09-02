@@ -33,7 +33,7 @@ dependency column below says what actually has to wait.
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
-| **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order |
+| **F** | Weather — the deferred WEATH-01 feature | L–XL | Strictly internal order — (a) done 2026-09-02 |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
@@ -46,8 +46,9 @@ what was measured. **A**, **C** and **E** have never been opened in the app — 
 *Done*, was run on 2026-09-02 at `d586961` and passed on all five steps; it covers Section 3's
 selection and map behaviour and nothing else, so **A**, **C** and **E** still keep theirs.
 
-Suggested order from here: the standalone items. A, B, C, D, E, G and H are done, and **F**
-remains blocked on its own two conditions. The one piece of B
+Suggested order from here: the standalone items. A, B, C, D, E, G and H are done. **F** has had
+its condition (a) closed (2026-09-02) and now waits on condition (b) alone — a re-measurement, and
+the long pole of that bundle. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -75,15 +76,28 @@ These block work below. None of them is a coding question.
 
 *Effort: L–XL. Why together, and why strictly in this order: Phase 6 spiked the feature and returned
 a **GO**, scoped to riders **without** an air-speed sensor and **conditional on the two items
-below**. Neither condition is met, so the GO does not yet authorise the work. Nothing here starts
-early.*
+below**. (a) is met as of 2026-09-02; (b) is not, so the GO still does not authorise WEATH-01
+itself. Nothing below (b) starts early.*
 
-- [ ] **[M] Condition (a): the weather cache is unbounded, and it is reachable today.**
-      No TTL, no size cap, no eviction; `clearCache()` is the only removal path and its sole caller
-      is a manual button. This is not gated behind the deferred feature — `autoRho` uses the cache
-      now, keyed on the mean lat/lon of the **trim region**, so every distinct trim window mints a
-      fresh permanent IndexedDB row.
-      `frontend/src/utils/WeatherCache.ts:3,205,326`, `autoRho.ts:170-175`
+- [x] **[M] Condition (a): the weather cache is unbounded, and it is reachable today.**
+      **Done 2026-09-02.** See *Bundle F · Condition (a)* under **Done**.
+
+      Criteria (concretised 2026-09-02, PR #10 review round 9 — the item was prose, these were
+      derived from it and confirmed by the maintainer, so a later round reads this as tier A
+      rather than re-deriving it):
+
+      - [x] The store has a removal path besides the manual `clearCache()` button —
+            `evictOverflow`, `WeatherCache.ts:290-330`
+      - [x] The bound is enforced on the path `autoRho` actually reaches, i.e. on write rather
+            than on a manual action — eviction runs inside `store()` (`WeatherCache.ts:245`),
+            which both `getWeatherData` and `updateCachedEntry` call
+      - [x] Existing cached data survives: no migration, no `dbVersion` bump — the `cachedAt`
+            index the cursor walks was in the original `onupgradeneeded`; verified in Chrome
+            against a real 5-row store written by earlier sessions
+      - [x] A guard covers the bound and is non-vacuous — six cases, nine mutations, each case
+            killed by at least one and three by a mutation nothing else catches
+      - [x] The removal policy is a deliberate choice with its reasoning recorded — FIFO-not-LRU
+            and no-TTL, argued in the `evictOverflow` docstring and the Done entry
 
 - [ ] **[L] Condition (b): the spike's headline accuracy figure was measured on an endpoint
       production never calls.** Axis 3's "100% of windows resolved" was measured against
@@ -97,6 +111,20 @@ early.*
       **This is the long pole of the whole bundle.**
       *Note: an earlier audit framed this as "a CSP gap to close". That framing was wrong and is
       corrected here.*
+
+- [ ] **[S–M] The cache key is ~0.1 m wide and the data behind it is kilometres wide.**
+      Ride-along with (b), and gated on it. `buildCacheKey` keys on the trim region's centroid at
+      6 decimals while both endpoints serve a model grid of ~1–11 km (forecast) or 0.25° ≈ 28 km
+      (ERA5 archive), at 15-minute slots. So the cache essentially never hits across trim windows:
+      every slider move is a fresh Open-Meteo round-trip, and `autoRho`'s in-session
+      `lastWeatherQueryKey` guard uses the same 6-decimal key, so it does not absorb it either.
+      Rounding the key to ~2–3 decimals would make it hit.
+      **Deliberately NOT done in condition (a):** coarsening rounds the location the wind is read
+      at, which injects spatial error into exactly the budget (b) has to re-measure against its
+      0.3 m/s bar. Doing it first would contaminate that measurement — so the radius is chosen and
+      measured as part of (b), not before it. The cap shipped in (a) bounds the growth meanwhile.
+      `frontend/src/utils/WeatherCache.ts:178-188`, `autoRho.ts:150-157`
+      *origin: brainstorm for condition (a), 2026-09-02 — maintainer ruled bound-only*
 
 - [ ] **[L–XL] WEATH-01 itself**, once (a) and (b) are settled: per-quarter-hour sampling with
       interpolation, wired into the production auto-rho/VE path. Research is already done and the
@@ -144,6 +172,20 @@ re-deriving it):
       what is fitted and how the fit is gated before any code — the vw-demo heading/air-speed
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
+
+- [ ] **[S–M] `WeatherCache` never closes its IndexedDB connection, and `autoRho` builds a new
+      one per weather query.** `initialize()` assigns `this.db` and nothing ever calls
+      `db.close()`; `autoRho.ts:170` does `new WeatherCache()` inside the query path, so a long
+      session accumulates one open connection per distinct trim window. `ResultsStorage` in the
+      same directory DOES close its connections (`ResultsStorage.ts:319,338`), so this is below
+      the repo's own standard rather than a general style opinion.
+      Not folded into the cap work: the fix is a service-lifecycle change that `autoRho` owns —
+      a shared instance, or a close after each use — and the cap bounds rows, which is a
+      different resource. No user-visible failure has been reproduced; browsers hold idle
+      connections cheaply and reclaim them on unload, which is why this is sized S–M and not
+      urgent.
+      `frontend/src/utils/WeatherCache.ts:60-85`, `autoRho.ts:170`
+      *origin: PR #10 review round 9, F9-01*
 
 - [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
       deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
@@ -218,6 +260,85 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle F · Condition (a) — the weather cache is bounded — 2026-09-02
+
+Implemented on `bundle-f-weather-cache-bound`, branched from `origin/main` at `c985711`.
+1058 tests pass (up 6 on the 1052 of the entry below), `npm run check` and `npm run lint` clean.
+This clears the FIRST of bundle F's two conditions; (b) is untouched and remains the long pole.
+
+- [x] **[M] Condition (a): the weather cache is unbounded, and it is reachable today.**
+      Closed as a **size cap with oldest-first eviction, and no TTL** — a deliberate split, because
+      the two halves of "unbounded" have different answers.
+
+      **No TTL, and that is not an omission.** An entry is the weather at a fixed instant at a fixed
+      place. Rides past `forecastMaxDays = 82` come from the ERA5 archive, which does not change, so
+      an expiry would re-fetch immutable data forever to serve only the recent-ride case — and
+      `autoRho.ts:178-190` already re-fetches the one case that matters, a cached row that came back
+      without wind data.
+
+      **The eviction is FIFO by insertion, and it is named that rather than LRU.** `cachedAt` is
+      written once and never touched on a read, so evicting by it is oldest-INSERTED. True LRU would
+      need a write on every cache hit, turning each read into a readwrite transaction, and it buys
+      nothing here: re-reading a ride hits the same key, and a moved trim window is a new key either
+      way. **No schema change and no `dbVersion` bump** — the `cachedAt` index the cursor walks has
+      been in `onupgradeneeded` since the store was created.
+
+      Cap is 5000 rows ≈ 1.5 MB; an entry is six numbers plus its key, ~300 bytes of JSON. The cap
+      is a constructor parameter defaulting to the exported constant, so the tests can drive a cap
+      of 3 instead of writing 5001 rows through `fake-indexeddb`.
+
+      Eviction runs inside the put's own transaction, so the entry and its evictions commit
+      together, and `store()` now resolves on `transaction.oncomplete` rather than on the put.
+      Failures are logged and swallowed — each handler calls `preventDefault()` so a failed delete
+      cannot abort the transaction and take the weather entry down with it. **A ride's analysis must
+      not fail over a row the cache could not tidy up.**
+
+      **What this does NOT do: coarsen the key.** Maintainer ruling, and the reasoning is filed as
+      its own item under condition (b) above. The cache is not only unbounded but ineffective —
+      6-decimal centroid against kilometre-scale data — and fixing that would round the wind value,
+      contaminating the accuracy budget (b) exists to re-measure.
+
+      **Six guards, every one mutation-verified** — applied, observed failing, reverted. Nine
+      mutations were run, and three cases have a killer no other case catches:
+        - *under the cap, nothing is evicted* — dies when the cap is read as "evict once the store
+          REACHES it" rather than exceeds it.
+        - *the count settles at exactly the cap* — dies on no eviction at all, on a cap+1
+          off-by-one, and on a count taken before the put.
+        - *the OLDEST-inserted row is the one taken* — the case that stops the one above it from
+          being vacuous, since a settled count says nothing about which rows went. Insertion order
+          and key order deliberately disagree, so an eviction walking the primary key or the index
+          descending fails it.
+        - *re-storing an existing key evicts nothing* — **uniquely** killed by evicting off a
+          running put-counter instead of the store's size. Guards `updateCachedEntry`.
+        - *a surviving row is still SERVED from cache after an eviction* — **uniquely** killed by a
+          cache hit reporting `source: 'api'`, the field `autoRho.ts:178` branches on. **The first
+          draft of this case asserted the newest row survived and was a restatement** of the case
+          above it — the mutation pass killed both with the same cursor direction and nothing else
+          touched it, so it was rewritten onto the read path.
+        - *the shipped default is a real cap* — **uniquely** killed by a default of 1. Asserting the
+          constant against itself would have been a tautology.
+
+      One test-harness trap worth recording: `vi.useFakeTimers()` with vitest's default `toFake` set
+      freezes the `setImmediate` that `fake-indexeddb` schedules every transaction on, so the whole
+      file hangs and fails as 5-second timeouts rather than as assertions. Only `Date` may be faked
+      here.
+
+      **Checked in the app, 2026-09-02 — this entry carries no in-app debt.** `13.07.fit`, Standard
+      mode, against Chrome's own IndexedDB rather than `fake-indexeddb`.
+        - The store already held 5 rows written by earlier sessions and read back fine, so the cap
+          needs no migration for a cache that predates it.
+        - Lap 10 alone with auto-rho on: ρ 1.1285, RMSE 7.62 m — the same 7.62 m the *narrower lap
+          selection* item below records for a fresh load of lap 10, so auto-rho is unregressed. The
+          fetch was a cache HIT on a row from a previous session.
+        - Eviction was then exercised for real: 5010 rows seeded at `cachedAt` far older than any
+          real row, taking the store to 5015, then lap 3 analysed to force a genuine Open-Meteo
+          fetch on a new key (ρ 1.1354). The store settled at **exactly 5000**, the log line read
+          `🧹 Weather cache over cap, evicting 16 oldest entries` (5015 + 1 new = 5016), and the 16
+          taken were `seed_00000`–`seed_00015` — the oldest by `cachedAt`, with `seed_00016` the
+          lowest survivor. **All six real rows survived, including the one just written.** No
+          console errors. The seed rows were deleted afterwards.
+      `WeatherCache.ts` · test: `WeatherCache.test.ts` (new)
 
 ### Bundle G · Test infrastructure — 2026-09-02
 
