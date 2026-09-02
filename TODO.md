@@ -230,7 +230,7 @@ produced six vacuous guards, and one of the four cases here WAS vacuous on the f
         - `profile-slider-recompute.ts` (5) passed `params.cda` / `params.crr` — `number | null`,
           where `null` means "optimize" — straight into `calculate_virtual_elevation`, which takes
           numbers. Production never reaches that boundary unresolved
-          (`renderStandardVe.ts:158`, `updateModeVEPlots.ts` resolve first). A `FixedParameters`
+          (`renderStandardVe.ts:148`, `updateModeVEPlots.ts` resolve first). A `FixedParameters`
           type now names the precondition the script always had; no runtime behaviour changed.
         - `profile-gps-lap-render.ts` (2) rebuilt a `LapVEProfile` shape predating the three
           nullable fields `range`, `virtualElevationCompare` and `referenceElevation`. The update
@@ -253,7 +253,7 @@ produced six vacuous guards, and one of the four cases here WAS vacuous on the f
       single measurement. Swapping `void main()` for a top-level `await` was the single variable
       that fixed it there; four other hypotheses (jsdom itself, import concurrency, the dep cache,
       the `new URL(..., import.meta.url)` wasm asset) were each tested and refuted. So this is
-      HARDENING on this branch and a fix on that one. `scripts/profile-gps-lap-render.ts:507`
+      HARDENING on this branch and a fix on that one. `scripts/profile-gps-lap-render.ts:518`
 
 - [x] **[S] GPS-01 has no direct test.** `bindGpsModeSelector` was imported by **zero** test files.
       Every existing test of this area calls `setGpsAnalysisMode(...)` directly — the pipeline half.

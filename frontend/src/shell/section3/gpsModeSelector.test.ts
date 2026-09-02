@@ -163,6 +163,27 @@ function selector(): HTMLSelectElement {
 	return el;
 }
 
+/**
+ * The option the TEMPLATE marked `selected`, read through `defaultSelected`,
+ * which reflects the `selected` ATTRIBUTE rather than the live selection.
+ *
+ * Not `.value`: a `<select>` whose markup marks nothing reports its FIRST
+ * option, and `None` IS the first option — so `selector().value === "None"`
+ * holds whether or not the template seeded anything, which is what made the
+ * original form of case 1 vacuous.
+ */
+function seededOption(): HTMLOptionElement {
+	const marked = Array.from(selector().options).filter(
+		(option) => option.defaultSelected,
+	);
+	if (marked.length !== 1) {
+		throw new Error(
+			`expected exactly one option[selected], found ${marked.length}`,
+		);
+	}
+	return marked[0];
+}
+
 /** Operate the dropdown the way a user does: set the value, fire `change`. */
 async function chooseMode(mode: string): Promise<void> {
 	const el = selector();
@@ -208,7 +229,18 @@ describe("GPS-01: the Section 3 mode selector drives the analysis mode", () => {
 		// Parameters. `#results` is the subtree `rerenderSection3` replaces.
 		const results = document.getElementById("results");
 		expect(results?.querySelector("#gpsAnalysisMode")).not.toBeNull();
-		expect(selector().value).toBe("None");
+
+		// Seeding is asserted on the `selected` ATTRIBUTE, and at two modes.
+		// The attribute is what the template writes, so unlike `.value` it can
+		// be absent; and the second mode is not the first option, so a template
+		// that marked `None` unconditionally would fail here rather than pass
+		// by accident. Case 4 covers state → UI through `data-gps-mode` and node
+		// identity instead, so neither restates the other.
+		expect(seededOption().value).toBe("None");
+
+		await chooseMode("GPS based lap splitting");
+
+		expect(seededOption().value).toBe("GPS based lap splitting");
 	});
 
 	it("moves the analysis mode when the user picks one", async () => {
