@@ -210,7 +210,7 @@ are best judged against the same question — what does `npm run check` currentl
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
-### Section 3's invalidation rule, and the four review rounds on top of it — 2026-08-31 … 2026-09-01
+### Section 3's invalidation rule, and the four review rounds on top of it — 2026-08-31 … 2026-09-02
 
 Thirteen commits after `943c527`, through `d586961`, all on `refactoring`, all under PR #7. The
 count names the SHA it is counted through so it stays checkable, and the documentation batch that
@@ -432,7 +432,7 @@ because a reversal that survives only as a commit message reads later as drift.
       stay blank for a record written before the column existed. Both guards save through the real
       `ResultsStorage` on `fake-indexeddb` and read back, so neither can pass over a hand-built
       record. The third finding was the documentation pass itself — the Done section above, written
-      in one dated sitting. `resultColumns.ts`, `ResultsStorage.ts`, `WindHeightTransfer.ts` ·
+      in one dated sitting. `resultColumns.ts`, `ResultsStorage.ts` ·
       test: `resultColumns.test.ts` · commit `1a64c06`
 
 - [x] **[S] The selection reaches the map at the moment the map exists.** Review round 4, F2-01. On
