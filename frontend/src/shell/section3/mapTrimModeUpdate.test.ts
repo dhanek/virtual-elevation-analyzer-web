@@ -122,6 +122,26 @@ function setupDom() {
     `;
 }
 
+/**
+ * The PRE-ANALYZE DOM: Section 3 is rendered, the VE panel is not. All four
+ * panel trim inputs are absent, which is what makes `trimWindowForClamp` take
+ * its `appState` fallback instead of reading the panel pair.
+ *
+ * All four go, not just the two sliders: a DOM carrying `#trimStartValue`
+ * without `#trimStartSlider` never occurs, and a fixture that invents one
+ * would be guarding a shape the app cannot produce.
+ */
+function setupDomNoPanel() {
+	document.body.innerHTML = `
+        <div id="analysisSection"><div id="results"></div></div>
+        <div id="veAnalysisSection"><div id="veAnalysisContent">
+            <input id="cdaSlider" type="range" min="0.1" max="0.5" step="0.001" value="0.25" />
+            <input id="crrSlider" type="range" min="0.001" max="0.02" step="0.0001" value="0.0042" />
+        </div></div>
+        <div id="map"></div>
+    `;
+}
+
 function makeAppState(): AppState {
 	const appState = new AppState();
 	appState.currentFileHash = null;
@@ -472,5 +492,71 @@ describe("the map-trim sliders and the recompute funnel", () => {
 		const second = saveLapSettings.mock.calls[1] as unknown as unknown[];
 		expect((first[2] as { cda: number | null }).cda).toBeNull();
 		expect((second[2] as { cda: number | null }).cda).toBe(0.31);
+	});
+});
+
+/**
+ * THE FALLBACK BRANCH, WHICH EVERY CASE ABOVE MISSES.
+ *
+ * `trimWindowForClamp` returns the PANEL's pair when `#trimStartSlider` and
+ * `#trimEndSlider` both exist, and falls back to `appState.presetTrimStart` /
+ * `presetTrimEnd ?? dataLength - 1` when they do not. Both fixtures in this
+ * repo render the panel pair, so the fallback — the PRE-ANALYZE path, the one
+ * the whole no-`mapTrim`-row doctrine exists to serve — was reached by nothing:
+ * replacing its two lines with `start: 0, end: dataLength - 1` left all fifteen
+ * pre-existing cases green.
+ *
+ * The gestures run synchronously right after `renderSection3`, exactly as the
+ * two clamp cases above do, so `initializeSection3`'s deferred 100 ms restore
+ * cannot land mid-case. No fake timers here for the same reason.
+ */
+describe("the 30-sample floor with NO panel to read — the pre-Analyze fallback", () => {
+	beforeEach(() => {
+		setupDomNoPanel();
+		mapInstances.length = 0;
+		modeUpdate.request.mockClear();
+		saveLapSettings.mockClear();
+		new FakeMap("map");
+	});
+
+	/**
+	 * Three gestures, because the fallback is a two-field expression and each
+	 * field needs its own killer:
+	 *
+	 * - gesture 2 (`330`, not a mutated `200`) is the only one that kills the
+	 *   `start:` half — before gesture 1 `presetTrimStart` is still 0, and a
+	 *   `start: 0` mutation is invisible against it;
+	 * - gesture 3 (`300`, not a mutated `360`) is the only one that kills the
+	 *   `end:` half, once the end has been moved off `dataLength - 1`.
+	 *
+	 * Kills: `trimWindowForClamp`'s fallback replaced by
+	 * `{start: 0, end: dataLength - 1}` — under which the three reads are
+	 * `300 / 200 / 360` and `lastFit` is `{start: 360, end: 399}`. The fifteen
+	 * cases in the two map-trim files all pass under that same mutation, so this
+	 * killer is unique to the fallback.
+	 */
+	it("clamps against appState when there is no panel pair to read", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		const map = mapInstances.find((m) => !m.destroyed);
+
+		// The fallback is genuinely the branch under test.
+		expect(document.getElementById("trimStartSlider")).toBeNull();
+		expect(document.getElementById("trimEndSlider")).toBeNull();
+
+		dragStartTo(300); // fallback end = presetTrimEnd (399) -> min(300, 369) = 300
+		expect(value("mapTrimStartSlider")).toBe("300");
+		expect(appState.presetTrimStart).toBe(300);
+
+		dragEndTo(200); // fallback start = presetTrimStart (300) -> max(330, 200) = 330
+		expect(value("mapTrimEndSlider")).toBe("330");
+		expect(value("mapTrimEndValue")).toBe("330");
+		expect(appState.presetTrimEnd).toBe(330);
+
+		dragStartTo(360); // fallback end = presetTrimEnd (330) -> min(360, 300) = 300
+		expect(value("mapTrimStartSlider")).toBe("300");
+		expect(appState.presetTrimStart).toBe(300);
+
+		expect(lastFit(map)).toEqual({ start: 300, end: 330 });
 	});
 });

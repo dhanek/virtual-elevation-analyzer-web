@@ -300,7 +300,7 @@ changed and why.
 ### Section 3's map-trim sliders get one owner — 2026-09-03
 
 Implemented on `bundle-map-trim-single-owner`, branched from `origin/main` at `2b963d3`.
-1069 tests pass across 89 files (up 11 net on 1058: fifteen guards across
+1070 tests pass across 89 files (up 12 net on 1058: sixteen guards across
 `mapTrimModeUpdate.test.ts` and `mapTrimPanelHandoff.test.ts`, minus four per-row cases generated
 for the two table rows that no longer exist), `npm run check` and `npm run lint` clean.
 
@@ -313,7 +313,7 @@ for the two table rows that no longer exist), `npm run check` and `npm run lint`
       - [x] Nothing the double ownership provided is lost: the binder's
             `lastRequestedTrimWindow` record, the mode's `saveSettings` write, and the
             30-sample floor between the two edges
-      - [x] Guards cover it, each with a unique killer
+      - [x] Guards cover it, none of them vacuous — every guard is killed by a named mutation
       - [x] `TODO.md` records the outcome
 
       Closed, but NOT the way the item prescribed, and the item's own framing was wrong twice.
@@ -368,16 +368,25 @@ for the two table rows that no longer exist), `npm run check` and `npm run lint`
       reason without mirroring would have recomputed against the previous window — quietly wrong,
       and worse than not recomputing. A stale guard in `modeControls.callshape.test.ts` caught it.
 
-      Fifteen guards, each with a unique killer, all observed rather than predicted. From the
+      Sixteen guards, every one killed by a named mutation, all observed rather than predicted.
+      Two of them do not have a killer unique to them, and the reason is better coverage rather
+      than worse: the third commit's panel-first cases are strictly stronger over the same lines,
+      so dropping either floor now fails the map-first case AND the panel-first one. From the
       first commit: the funnel call removed kills the three funnel cases; the mirror removed, a
       `mapTrim` row put back, the map fit removed and the `presetTrim` write removed each kill
       exactly one. From the second: `noteTrimWindowRequested` removed kills the panel-handoff
       case, and moving `saveCurrentLapSettings` off the end kills `persists the tuned CdA last`;
-      dropping the floor from the map-first pair kills one clamp case each. From the third: the
-      clamp source in each of the four handlers put back to `appState.presetTrim*` kills exactly
-      one panel-first case each — `expected '300' to be '170'` for the two start handlers and
-      `expected '200' to be '330'` for the two end handlers, which are `origin/main`'s own values
-      for those gestures.
+      dropping the floor from the map START handler kills TWO — `keeps the start slider 30
+      samples clear of a moved-in end` and `clamps the map START slider against the panel's end,
+      not a stale appState` — and from the END handler likewise two, `keeps the end slider 30
+      samples clear of a moved-out start` and `clamps the map END slider against the panel's
+      start`. From the third: the clamp source in each of the four handlers put back to
+      `appState.presetTrim*` kills exactly one panel-first case each — `expected '300' to be
+      '170'` for the two start handlers and `expected '200' to be '330'` for the two end
+      handlers, which are `origin/main`'s own values for those gestures. From the fourth:
+      `trimWindowForClamp`'s pre-Analyze fallback replaced by `start: 0, end: dataLength - 1`
+      kills the no-panel case and nothing else — the fifteen guards that pre-date it all pass
+      under that mutation, which is what made the fallback branch unguarded until this commit.
 
       **Checked in the app, 2026-09-03**, `13.07.fit`, Standard:
         - post-Analyze drag: **exactly one** `requestModeUpdate(mapTrim)`, panel pair mirrored,
