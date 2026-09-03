@@ -32,11 +32,29 @@ import type { AnalysisModeId } from "../../modes/analysis/types";
 /**
  * Why the funnel was asked to recompute.
  *
- * Two members are deliberately NOT rows in `MODE_CONTROL_TABLE`, because they
+ * THREE members are deliberately NOT rows in `MODE_CONTROL_TABLE`, because they
  * do not come from a control inside the mode panel: `parameters`, raised by
- * `handleParametersChange`, and `segmentSelection`, raised by Section 3 when
- * the user ticks a detected GPS lap or out-and-back section. `modeControls.
- * callshape.test.ts` names both as exceptions.
+ * `handleParametersChange`; `segmentSelection`, raised by Section 3 when the
+ * user ticks a detected GPS lap or out-and-back section; and `mapTrim`, raised
+ * by Section 3's map-trim sliders. `modeControls.callshape.test.ts` names all
+ * three as exceptions.
+ *
+ * `mapTrim` joined them on 2026-09-03, and it is the rule being applied rather
+ * than bent. Those four sliders sit in Section 3, not in the mode panel, and
+ * they are usable BEFORE any panel exists — while `handleTrim` reads its window
+ * from `trimStartSlider`/`trimEndSlider` and returns early when no panel has
+ * rendered them, so the binder could never have served them pre-analyze anyway.
+ *
+ * Having a row as well was actively harmful: `initializeMapTrimControlsForSelected
+ * Laps` CLONES all four nodes on every Section 3 render to shed stale listeners,
+ * which stripped the binder's with them. Measured in the app 2026-09-02 — the
+ * table's binding was live right after Analyze and gone after one lap-checkbox
+ * click. Section 3 now raises the reason itself (`section3Orchestration.ts`,
+ * `commitMapTrim`), so the clone can only ever strip listeners it re-adds.
+ *
+ * The panel-to-map MIRRORING is unaffected and stays: `writeTrim`
+ * (`bindModeControls.ts:226-244`) reaches the map inputs by hard-coded id, not
+ * through these rows.
  */
 export type ModeUpdateReason =
 	| "cda"
@@ -131,38 +149,6 @@ export const MODE_CONTROL_TABLE: readonly ModeControlSpec[] = [
 		elements: {
 			rangeId: "trimEndSlider",
 			numberId: "trimEndValue",
-			role: "end",
-		},
-		modes: STANDARD_ONLY,
-		writes: "none",
-		persistsSettings: true,
-		movesMap: true,
-		triggersAutoRho: true,
-		refreshesOffsetMetric: false,
-		decimals: 0,
-	},
-	{
-		reason: "mapTrim",
-		kind: "rangeNumber",
-		elements: {
-			rangeId: "mapTrimStartSlider",
-			numberId: "mapTrimStartValue",
-			role: "start",
-		},
-		modes: STANDARD_ONLY,
-		writes: "none",
-		persistsSettings: true,
-		movesMap: true,
-		triggersAutoRho: true,
-		refreshesOffsetMetric: false,
-		decimals: 0,
-	},
-	{
-		reason: "mapTrim",
-		kind: "rangeNumber",
-		elements: {
-			rangeId: "mapTrimEndSlider",
-			numberId: "mapTrimEndValue",
 			role: "end",
 		},
 		modes: STANDARD_ONLY,

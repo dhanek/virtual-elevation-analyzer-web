@@ -68,6 +68,29 @@ import {
  */
 const MIN_TRIM_WINDOW_SAMPLES = 30;
 
+/**
+ * The trim window the pipeline has actually been told about, for this panel.
+ *
+ * Module-level, and reset on every `bindModeControls` call — i.e. once per
+ * rendered panel, which is the lifetime `currentFilteredData` and the plots
+ * belong to. It is module-level rather than a closure variable because Section 3
+ * writes it too, through `noteTrimWindowRequested`: the map's four trim nodes
+ * are a second face of the same trim window, and Section 3 owns that face.
+ */
+let lastRequestedTrimWindow: { start: number; end: number } | null = null;
+
+/**
+ * Record that the pipeline has been told about this window, without running it.
+ *
+ * For Section 3's map-trim handlers, which raise `mapTrim` themselves. Without
+ * this the record would name a window the pipeline no longer has, and
+ * `requestTrim`'s skip-if-unchanged would silently swallow the next panel
+ * gesture back to it.
+ */
+export function noteTrimWindowRequested(start: number, end: number): void {
+	lastRequestedTrimWindow = { start, end };
+}
+
 const AIR_SPEED_OFFSET_MIN_SECONDS = -10;
 const AIR_SPEED_OFFSET_MAX_SECONDS = 10;
 
@@ -243,14 +266,10 @@ export function bindModeControls(
 		if (mapNumber) mapNumber.value = value.toString();
 	}
 
-	/**
-	 * The trim window the pipeline has actually been told about, for this panel.
-	 *
-	 * A closure variable, so it resets with every `bindModeControls` call — i.e.
-	 * once per rendered panel, which is the lifetime `currentFilteredData` and the
-	 * plots belong to.
-	 */
-	let lastRequestedTrimWindow: { start: number; end: number } | null = null;
+	// The record above is module-level so Section 3 can write it too; the
+	// LIFETIME stays exactly what it was as a closure variable — one rendered
+	// panel — because every `bindModeControls` call resets it here.
+	lastRequestedTrimWindow = null;
 
 	/**
 	 * Run the pipeline for a trim window unless it is the one the pipeline
@@ -288,8 +307,13 @@ export function bindModeControls(
 	}
 
 	/**
-	 * Shared by the `trim` rows and their `mapTrim` twins — the map sliders were
-	 * always a second face of the same control and delegated to these handlers.
+	 * The `trim` rows only. The map's four twin nodes had a `mapTrim` row that
+	 * delegated here; Section 3 owns that face now and clamps it itself (the
+	 * map-trim slider and number handlers in `section3Orchestration.ts`), so no
+	 * row reaches this function with `reason === "mapTrim"`.
+	 *
+	 * `writeTrim`'s mirror onto the map inputs (`:236-243`) is the other
+	 * direction — panel to map — and stays.
 	 */
 	function handleTrim(spec: ModeControlSpec, rawValue: number): void {
 		const role = spec.elements.role === "end" ? "end" : "start";
@@ -333,7 +357,6 @@ export function bindModeControls(
 
 		switch (spec.reason) {
 			case "trim":
-			case "mapTrim":
 				handleTrim(spec, rawValue);
 				return;
 
