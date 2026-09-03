@@ -115,6 +115,8 @@ function setupDom() {
             <input id="trimStartValue" type="number" value="0" />
             <input id="trimEndSlider" type="range" min="0" max="399" value="399" />
             <input id="trimEndValue" type="number" value="399" />
+            <input id="cdaSlider" type="range" min="0.1" max="0.5" step="0.001" value="0.25" />
+            <input id="crrSlider" type="range" min="0.001" max="0.02" step="0.0001" value="0.0042" />
         </div></div>
         <div id="map"></div>
     `;
@@ -160,12 +162,18 @@ function makeAppState(): AppState {
 	return appState;
 }
 
+/**
+ * Every persistence write this path makes, in order. A map-trim gesture has to
+ * make TWO — see the settings case below.
+ */
+const saveLapSettings = vi.fn(() => Promise.resolve());
+
 function configure(appState: AppState) {
 	configureSection3Orchestration({
 		appState,
 		parameterStorage: {
 			loadLapSettings: () => Promise.resolve(null),
-			saveLapSettings: () => Promise.resolve(),
+			saveLapSettings,
 		} as never,
 		getMapVisualization: () =>
 			(mapInstances.find((m) => !m.destroyed) ?? null) as never,
@@ -185,11 +193,34 @@ function startSlider(): HTMLInputElement {
 	return el as HTMLInputElement;
 }
 
+function endSlider(): HTMLInputElement {
+	const el = document.getElementById("mapTrimEndSlider");
+	if (!el) throw new Error("mapTrimEndSlider missing — Section 3 did not render");
+	return el as HTMLInputElement;
+}
+
 /** One drag step on the start slider, as the browser delivers it. */
 function dragStartTo(value: number): void {
 	const slider = startSlider();
 	slider.value = String(value);
 	slider.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** The same, on the end slider. */
+function dragEndTo(value: number): void {
+	const slider = endSlider();
+	slider.value = String(value);
+	slider.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** The window the map was last fitted to. */
+function lastFit(map: FakeMap | undefined) {
+	const fits = map?.trimRegionFits ?? [];
+	return fits[fits.length - 1];
+}
+
+function value(id: string): string {
+	return (document.getElementById(id) as HTMLInputElement).value;
 }
 
 function mapTrimRequests(): number {
@@ -208,6 +239,7 @@ describe("the map-trim sliders and the recompute funnel", () => {
 		setupDom();
 		mapInstances.length = 0;
 		modeUpdate.request.mockClear();
+		saveLapSettings.mockClear();
 		// `initializeSection3` constructs no map in this harness, so one is made
 		// here. Without it the map case asserts against an empty `mapInstances`
 		// and fails for a harness reason rather than a code one.
@@ -344,5 +376,101 @@ describe("the map-trim sliders and the recompute funnel", () => {
 		dragStartTo(45);
 
 		expect(appState.presetTrimStart).toBe(45);
+	});
+
+	/**
+	 * THE 30-SAMPLE FLOOR, WHICH THE MAP SLIDERS LOST WITH THEIR ROW.
+	 *
+	 * `initializeMapTrimControls` gives the two sliders INDEPENDENT ranges —
+	 * start `0..dataLength-30`, end `30..dataLength-1` — so the floor is enforced
+	 * only against the extremes. `handleTrim` was what enforced it BETWEEN the
+	 * two edges, and with no `mapTrim` row it no longer runs; on `fdaa8ab` the
+	 * start could be dragged straight past a moved-in end, and `mapTrimToSegments`
+	 * then normalised the inverted pair with `Math.min`/`Math.max` so the panel
+	 * silently recomputed over the INVERSE of the window the user asked for.
+	 *
+	 * The numbers below are `origin/main`'s observed values (`review-log.md`,
+	 * "F12-03, in full"): `panel trimStart=170 panel trimEnd=200 map
+	 * trimStart=170`.
+	 *
+	 * Kills: the start handler's `clamped` replaced by the raw `value`.
+	 */
+	it("keeps the start slider 30 samples clear of a moved-in end", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		const map = mapInstances.find((m) => !m.destroyed);
+
+		dragEndTo(200);
+		dragStartTo(300);
+
+		expect(value("mapTrimStartSlider")).toBe("170");
+		expect(value("mapTrimStartValue")).toBe("170");
+		// Mirrored onto the panel's pair, so all four faces agree.
+		expect(value("trimStartSlider")).toBe("170");
+		expect(value("trimEndSlider")).toBe("200");
+		expect(appState.presetTrimStart).toBe(170);
+		// The clamp runs BEFORE the map fit, so the map follows the corrected
+		// window. A clamp applied afterwards would leave this at 300.
+		expect(lastFit(map)).toEqual({ start: 170, end: 200 });
+	});
+
+	/**
+	 * The same floor from the other edge.
+	 *
+	 * Kills: the end handler's `clamped` replaced by the raw `value`.
+	 */
+	it("keeps the end slider 30 samples clear of a moved-out start", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		const map = mapInstances.find((m) => !m.destroyed);
+
+		dragStartTo(300);
+		dragEndTo(200);
+
+		expect(value("mapTrimEndSlider")).toBe("330");
+		expect(value("mapTrimEndValue")).toBe("330");
+		expect(value("trimStartSlider")).toBe("300");
+		expect(value("trimEndSlider")).toBe("330");
+		expect(appState.presetTrimEnd).toBe(330);
+		expect(lastFit(map)).toEqual({ start: 300, end: 330 });
+	});
+
+	/**
+	 * A MAP-TRIM GESTURE MUST NOT NULL THE ANALYZED LAP'S TUNED VALUES.
+	 *
+	 * `saveMapTrimSettings` writes `{cda: null, crr: null}` and no
+	 * `airSpeedCalibration`, and `ParameterStorage.saveLapSettings` REPLACES the
+	 * whole entry. The removed `mapTrim` row carried `persistsSettings: true`, so
+	 * the binder's `finish()` also ran Standard's `saveCurrentLapSettings` — with
+	 * the real values — and that second write was the last one. Without it, one
+	 * map drag after tuning CdA erases the tuning from storage, and the next
+	 * Analyze of the same lap loads it back blank.
+	 *
+	 * The ORDER is what carries the behaviour, so the assertions are on
+	 * `mock.calls[0]` and `mock.calls[1]` rather than `toHaveBeenCalledWith`,
+	 * which would pass on either ordering.
+	 *
+	 * Kills: the `saveCurrentLapSettings` call dropped from `commitMapTrim` (call
+	 * count), or the two calls swapped (the second call's `cda`).
+	 */
+	it("persists the tuned CdA last, so the map drag does not null it", async () => {
+		const appState = makeAppState();
+		// The post-Analyze shape: `saveCurrentLapSettings` returns early without
+		// all three of these, so pre-Analyze it stays a no-op and
+		// `saveMapTrimSettings` remains the only write.
+		appState.currentFileHash = "hash-1";
+		appState.selectedFile = { name: "ride.fit" } as never;
+		appState.currentAnalyzedLaps = [1];
+		await renderSection3(appState);
+		(document.getElementById("cdaSlider") as HTMLInputElement).value = "0.31";
+		saveLapSettings.mockClear();
+
+		dragStartTo(50);
+
+		expect(saveLapSettings).toHaveBeenCalledTimes(2);
+		const first = saveLapSettings.mock.calls[0] as unknown as unknown[];
+		const second = saveLapSettings.mock.calls[1] as unknown as unknown[];
+		expect((first[2] as { cda: number | null }).cda).toBeNull();
+		expect((second[2] as { cda: number | null }).cda).toBe(0.31);
 	});
 });

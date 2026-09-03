@@ -39,6 +39,8 @@ import {
 } from "../analysis/recomputeRunner";
 import { purgePlotlyGraphsIn } from "../dom/plotlyPurge";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
+import { noteTrimWindowRequested } from "../analysis/bindModeControls";
+import { saveCurrentLapSettings } from "../analysis/storageHandlers";
 import { sameItems } from "../ve/veSelectionGuard";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
@@ -1722,47 +1724,97 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 			if (panelSlider) panelSlider.value = value.toString();
 			if (panelNumber) panelNumber.value = value.toString();
 
+			// THE BINDER'S RECORD HAS TO SEE THE MAP'S WRITES. The map pair and the
+			// panel pair are two faces of one trim window, and `requestTrim`
+			// (`bindModeControls.ts`) skips a window identical to the last one it
+			// asked for. Only it used to write that record, so after a map drag the
+			// record named a window the pipeline no longer holds — and the next
+			// panel gesture BACK to that window was silently swallowed.
+			const startSlider = document.getElementById(
+				"trimStartSlider",
+			) as HTMLInputElement | null;
+			const endSlider = document.getElementById(
+				"trimEndSlider",
+			) as HTMLInputElement | null;
+			if (startSlider && endSlider) {
+				const start = parseInt(startSlider.value);
+				const end = parseInt(endSlider.value);
+				// Pre-Analyze there is no panel to have a window: do nothing.
+				if (!Number.isNaN(start) && !Number.isNaN(end)) {
+					noteTrimWindowRequested(start, end);
+				}
+			}
+
+			// TWO WRITES, AND THE ORDER IS LOAD-BEARING. `saveLapSettings` REPLACES
+			// the whole entry, and `saveMapTrimSettings` writes `cda: null`,
+			// `crr: null` and no `airSpeedCalibration`. The second call is what the
+			// removed `mapTrim` row's `persistsSettings: true` did — Standard's
+			// `saveCurrentLapSettings`, with the real tuned values — and it has to
+			// be last, exactly as it was on `origin/main`. It self-gates on
+			// `currentAnalyzedLaps.length === 0`, so pre-Analyze the first call is
+			// still the only write, which is the pre-Analyze behaviour that must
+			// not change.
 			saveMapTrimSettings(deps.appState, deps.parameterStorage);
+			void saveCurrentLapSettings(deps.appState, deps.parameterStorage);
 			requestModeUpdate("mapTrim");
 		};
 
 		// Add new listeners
 		newMapTrimStartSlider.addEventListener("input", () => {
 			const value = parseInt(newMapTrimStartSlider.value);
-			newMapTrimStartValue.value = value.toString();
-			deps.appState.presetTrimStart = value;
+			// THE 30-SAMPLE FLOOR, ENFORCED BETWEEN THE TWO EDGES. The sliders'
+			// own `min`/`max` (`initializeMapTrimControls`) only bound each edge
+			// against the EXTREMES, so once the end has been moved in the start
+			// can be dragged straight past it. `handleTrim` used to enforce the
+			// floor between them; with no `mapTrim` row it no longer runs, so the
+			// handler clamps here — the same expression the number-input sibling
+			// below already uses — and it has to happen BEFORE the map fit so the
+			// map follows the corrected window rather than the requested one.
+			const trimEnd = deps.appState.presetTrimEnd ?? dataLength - 1;
+			const clamped = Math.max(
+				0,
+				Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES),
+			);
+			newMapTrimStartSlider.value = clamped.toString();
+			newMapTrimStartValue.value = clamped.toString();
+			deps.appState.presetTrimStart = clamped;
 
 			// Update map markers immediately (before analyze) - use filtered lap GPS data
 			const currentMapVisualization = deps.getMapVisualization();
 			if (currentMapVisualization) {
-				const trimEnd = deps.appState.presetTrimEnd ?? dataLength - 1;
 				currentMapVisualization.fitBoundsToTrimRegion(
-					value,
+					clamped,
 					trimEnd,
 					filteredLapPositionLat,
 					filteredLapPositionLong,
 				);
 			}
 
-			commitMapTrim("start", value);
+			commitMapTrim("start", clamped);
 		});
 
 		newMapTrimEndSlider.addEventListener("input", () => {
 			const value = parseInt(newMapTrimEndSlider.value);
-			newMapTrimEndValue.value = value.toString();
-			deps.appState.presetTrimEnd = value;
+			// The same floor from the other edge — see the start handler above.
+			const clamped = Math.max(
+				deps.appState.presetTrimStart + MIN_TRIM_WINDOW_SAMPLES,
+				Math.min(value, dataLength - 1),
+			);
+			newMapTrimEndSlider.value = clamped.toString();
+			newMapTrimEndValue.value = clamped.toString();
+			deps.appState.presetTrimEnd = clamped;
 
 			// Update map markers immediately (before analyze) - use filtered lap GPS data
 			deps
 				.getMapVisualization()
 				?.fitBoundsToTrimRegion(
 					deps.appState.presetTrimStart,
-					value,
+					clamped,
 					filteredLapPositionLat,
 					filteredLapPositionLong,
 				);
 
-			commitMapTrim("end", value);
+			commitMapTrim("end", clamped);
 		});
 
 		newMapTrimStartValue.addEventListener("change", () => {
