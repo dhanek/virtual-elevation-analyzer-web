@@ -368,19 +368,23 @@ for the two table rows that no longer exist), `npm run check` and `npm run lint`
       reason without mirroring would have recomputed against the previous window — quietly wrong,
       and worse than not recomputing. A stale guard in `modeControls.callshape.test.ts` caught it.
 
-      Sixteen guards, every one killed by a named mutation, all observed rather than predicted.
-      Two of them do not have a killer unique to them, and the reason is better coverage rather
-      than worse: the third commit's panel-first cases are strictly stronger over the same lines,
-      so dropping either floor now fails the map-first case AND the panel-first one. From the
-      first commit: the funnel call removed kills the three funnel cases; the mirror removed, a
-      `mapTrim` row put back, the map fit removed and the `presetTrim` write removed each kill
-      exactly one. From the second: `noteTrimWindowRequested` removed kills the panel-handoff
-      case, and moving `saveCurrentLapSettings` off the end kills `persists the tuned CdA last`;
-      dropping the floor from the map START handler kills TWO — `keeps the start slider 30
-      samples clear of a moved-in end` and `clamps the map START slider against the panel's end,
-      not a stale appState` — and from the END handler likewise two, `keeps the end slider 30
-      samples clear of a moved-out start` and `clamps the map END slider against the panel's
-      start`. From the third: the clamp source in each of the four handlers put back to
+      Sixteen guards, every one killed by a named mutation and none of them vacuous. Not every
+      guard has a killer unique to it — the map-first clamp pair shares its killer with the
+      panel-first cases, which are strictly stronger over the same lines. That is redundancy from
+      better coverage, not a gap, and non-vacuity is the bar the criterion at `:316` states. What
+      follows names one killing mutation per guard; it is deliberately not a count of everything
+      each mutation kills, because a guard added over the same lines by a later commit kills the
+      same mutation and falsifies any count written before it. The two places below that DO claim
+      exclusivity — the four clamp sources, and the fallback — are the non-vacuity evidence for
+      the guards they belong to, and both were re-measured at this tip. From the first commit: the funnel
+      call removed kills the three funnel cases; the mirror removed kills the mirror case; a
+      `mapTrim` row put back kills the doctrine case; the map fit removed kills `still moves the
+      map when the slider moves`; the `presetTrim` write removed kills `records the new trim start
+      in app state`. From the second: `noteTrimWindowRequested` removed kills the panel-handoff
+      case; moving `saveCurrentLapSettings` off the end kills `persists the tuned CdA last`;
+      dropping the floor from the map START handler kills `keeps the start slider 30 samples clear
+      of a moved-in end`, and from the END handler `keeps the end slider 30 samples clear of a
+      moved-out start`. From the third: the clamp source in each of the four handlers put back to
       `appState.presetTrim*` kills exactly one panel-first case each — `expected '300' to be
       '170'` for the two start handlers and `expected '200' to be '330'` for the two end
       handlers, which are `origin/main`'s own values for those gestures. From the fourth:
