@@ -21,6 +21,11 @@ dependency column below says what actually has to wait.
   **XL** needs design before an estimate means anything.
 - Anything that needs a maintainer ruling before it can be implemented is listed under
   *Decisions needed* and cross-referenced from the item.
+- **The reference ride** is the maintainer's local multi-lap FIT file used for the in-app checks —
+  17 laps, carrying per-point air density; lap 10 alone is the case most entries quote. It lives
+  outside the repo and is deliberately **not named here**. No real ride data belongs in this
+  repository, and a ride filename leaks the date it was recorded, so entries say "the reference
+  ride" and give the lap and mode instead.
 
 ---
 
@@ -28,11 +33,11 @@ dependency column below says what actually has to wait.
 
 | Bundle | What it is | Effort | Waits on |
 |---|---|---|---|
-| ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
+| ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03, all five items pass |
 | ~~**B**~~ | ~~Make Store Result truthful~~ | — | **Done** 2026-08-31, checked in the app |
-| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
+| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; **one failure** (see *Standalone work*) + smoothing unchecked in the GPS modes |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
-| ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — in-app check still owed |
+| ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; **one failure**, see *Standalone work* |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done 2026-09-02; (b) split by the spike, GO now in question |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
@@ -41,10 +46,16 @@ dependency column below says what actually has to wait.
 Every bundle above is now **committed** on `refactoring`; the per-bundle Done entries below still
 open with the "not committed" wording they were written under, and that wording is stale rather than
 a second claim. **B**, **D** and **H** were exercised in the running app and the Done entries say
-what was measured. **A**, **C** and **E** have never been opened in the app — nothing since their
-2026-08-30 entries records one — so they keep the debt. C1-01's own in-app check, at the end of
-*Done*, was run on 2026-09-02 at `d586961` and passed on all five steps; it covers Section 3's
-selection and map behaviour and nothing else, so **A**, **C** and **E** still keep theirs.
+what was measured. **A**, **C** and **E** carried "never opened in the app" until **2026-09-03**,
+when all three were driven against the reference ride on `dcdcaac`; each Done entry below ends with a
+*Checked in the app* block recording the numbers. Bundle **A** passed on all five items. **C** and
+**E** each produced one failure, carried as open items under *Standalone work* with their repros;
+both are pre-existing gaps the bundles did not claim to close rather than regressions in what they
+shipped. One sub-item is **still owed**: bundle C's elevation-smoothing toggle was verified in
+Standard but not in the two GPS modes, because the Section 3 detection panel stopped binding partway
+through the session — the C entry says exactly what was and was not established. C1-01's own in-app
+check, at the end of *Done*, was run on 2026-09-02 at `d586961` and covers Section 3's selection and
+map behaviour only.
 
 Suggested order from here: the standalone items. A, B, C, D, E, G and H are done. **F** has had
 its condition (a) closed (2026-09-02). What was condition (b) was probed on 2026-09-02 and split
@@ -128,8 +139,8 @@ block at all**, while `historical-forecast-api` returns **96/96 non-null** slots
 forecast window today runs from 2026-06-01, ~93 days, so `forecastMaxDays = 82` is conservative
 but sound.
 
-*Restricting the feature to the 82-day window looks poor: the `.fit` files in `~/Downloads` carry
-file dates spanning 2025-09 to 2026-09, so most rides would fall outside it. Those are file mtimes
+*Restricting the feature to the 82-day window looks poor: the maintainer's local `.fit` files carry
+file dates spanning roughly a year, so most rides would fall outside it. Those are file mtimes
 rather than parsed ride dates, so that is indicative, not measured.*
 
 - [ ] **[S] Add `historical-forecast-api.open-meteo.com` as the 15-minute source for rides past
@@ -198,6 +209,63 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
+- [ ] **[M] Standard's first paint disagrees with the settled panel on a file with no stored
+      parameters.** *Owner: bundle **C**.* Found by bundle C's own in-app check, 2026-09-03.
+      Bundle C's claim is that the first paint already agrees with what the panel settles to. It
+      does — except on the very first Analyze of a file that has no `fileParameters` record yet,
+      where the header writes one set of numbers and replaces it with another ~90 ms later.
+
+      **Repro** (reproduced 3× on the reference ride, Standard, lap 10, `dcdcaac`): delete the file's row
+      from `VirtualElevationAnalyzer/fileParameters`, reload, upload, *Analyze FIT File*, tick
+      `#lap-10`, *Analyze*. A `MutationObserver` on `#r2Value`/`#rmseValue`/`#veGainValue`/
+      `#actualGainValue` records **two** entries:
+
+      | | R² | RMSE | VE gain | Actual gain |
+      |---|---|---|---|---|
+      | first paint, +243 ms | 0.0015 | 11.51 m | 22.39 m | −0.24 m |
+      | settles, +332 ms | 0.0060 | 7.62 m | 15.57 m | −0.24 m |
+
+      The settled row is the correct one: re-analysing the same lap once a record exists paints
+      `0.0060 / 7.62 m / 15.57 m` in a **single** entry, and the 7.62 m matches what the bundle F
+      condition (a) entry independently recorded for a fresh load of lap 10.
+
+      **What it is not.** Both snapshots were taken with identical `#cdaValue` 0.300, `#crrValue`
+      0.0080, `#rho` 1.225 and trim 0–273, so it is not CdA/Crr, not trim, and not the scalar rho
+      input. It is not the weather fill either: auto-rho did not start until +1000 ms and rho only
+      reached 1.1285 afterwards. Actual gain is stable at −0.24 m throughout, so the *actual*
+      elevation resolution is not the differing term — the VE integration is. With auto-rho off and
+      rho pinned to 1.225 the two passes agree (single entry, `0.0067 / 7.32 m / 15.27 m`), which
+      points at the rho basis the first pass integrates when no stored record has supplied one, not
+      at the elevation resolver bundle C actually changed. **Diagnosis is open**; the observation is
+      what is established. `renderStandardVe.ts:109-125` (`resolveSelectionRhoArray`) is the place
+      to start. The other two modes are clean — see the bundle C Done entry.
+
+      This is also the WR-4 observation the analyze-leg retirement below is gated on: in GPS-lap and
+      out-and-back the post-bind kick produced **no** visible jump, so that item is unblocked; in
+      Standard the kick is visible, but only on this path. *origin: bundle C in-app check, 2026-09-03*
+
+- [ ] **[S] Bundle E's widened Crr range never reaches a file that has been analysed before.**
+      *Owner: bundle **E**.* Found by bundle E's own in-app check, 2026-09-03. D-c widened the range
+      to **0.0015 – 0.030**, and `DEFAULT_PARAMETERS` carries it — a file with no stored record
+      renders `#crrSlider` and `#crrValue` at `min="0.0015" max="0.03" step="0.0001"`, correctly.
+      But every file that already has a `fileParameters` row still gets **0.002 – 0.015**, the
+      pre-D-c bounds, in both sidebar sliders and the *Crr Bounds* inputs of section 2.
+
+      **Repro**: open the reference ride (or any file analysed before 2026-08-30) and read
+      `#crrSlider.min`/`.max` — `0.002`/`0.015`. All three rows in this machine's store carry those
+      values. Step is `0.0001` and the number input still takes a precise value, so D-c's *step*
+      half is unaffected.
+
+      **Cause**, traced and confirmed: `loadParameters` returns the stored parameters through
+      `normalizeLoadedParameters`, which migrates only `wind_height_factor`/`wind_entry` and passes
+      `crr_min`/`crr_max` through untouched (`ParameterStorage.ts:84-111,256-281`). Bundle E changed
+      the default only, and its entry's "it propagates on its own" reasoning holds for fresh files
+      and not for stored ones. Independently, three "no existing data" literals still hardcode the
+      old pair — `ParameterStorage.ts:412-413`, `540-541`, `727-728` — so even a new record written
+      down those paths is born with the narrow range. A fix needs to decide whether stored bounds
+      are user data (migrate once) or defaults (stop persisting them); the three literals should
+      reference the constants either way. *origin: bundle E in-app check, 2026-09-03*
+
 - [ ] **[XL] Outdoor velodrome auto-calibration.** `velodrome: true` today does exactly one thing —
       zero the actual elevation (`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`,
       `renderOutAndBack.ts:219`). An outdoor velodrome sweeps every heading within a lap, which is
@@ -252,7 +320,7 @@ re-deriving it):
       (`renderStandardVe.ts:265`); the kick a macrotask later writes the MEAN of the per-lap fits
       (D-09 entry g). For a multi-lap selection those are different quantities, so the header
       visibly changes by itself even though both numbers are correct for what they measure.
-      Measured in the app 2026-08-31 on `13.07.fit` laps 10+12: RMSE 26.22 m → 8.10 m, R²
+      Measured in the app 2026-08-31 on the reference ride, laps 10+12: RMSE 26.22 m → 8.10 m, R²
       0.0002 → 0.0031. A single lap is exact after the rho fix, so this is the only remaining
       first-paint jump on a fresh load.
 
@@ -392,7 +460,7 @@ for the two table rows that no longer exist), `npm run check` and `npm run lint`
       kills the no-panel case and nothing else — the fifteen guards that pre-date it all pass
       under that mutation, which is what made the fallback branch unguarded until this commit.
 
-      **Checked in the app, 2026-09-03**, `13.07.fit`, Standard:
+      **Checked in the app, 2026-09-03**, the reference ride, Standard:
         - post-Analyze drag: **exactly one** `requestModeUpdate(mapTrim)`, panel pair mirrored,
           RMSE 8.69 m → 7.44 m, so the panel really recomputed;
         - after a lap tick (the clone) and a re-Analyze: still exactly one, RMSE 10.25 m → 6.36 m,
@@ -467,7 +535,7 @@ it was probed later the same day and split in two — see *Condition (b), as the
       file hangs and fails as 5-second timeouts rather than as assertions. Only `Date` may be faked
       here.
 
-      **Checked in the app, 2026-09-02 — this entry carries no in-app debt.** `13.07.fit`, Standard
+      **Checked in the app, 2026-09-02 — this entry carries no in-app debt.** The reference ride, Standard
       mode, against Chrome's own IndexedDB rather than `fake-indexeddb`.
         - The store already held 5 rows written by earlier sessions and read back fine, so the cap
           needs no migration for a cache that predates it.
@@ -765,14 +833,14 @@ because a reversal that survives only as a commit message reads later as drift.
       - [x] the analysis window moves from `timestamps[0]..timestamps[last]` to
             `min(start_time)..max(end_time)` — intended
       - [x] **MANUAL, RUN 2026-09-02 at `d586961`:** confirmed in the running app by the maintainer,
-            on `~/Downloads/13.07-lap10-single.fit` — one lap, 5928 records with 274 inside the lap
+            on a single-lap cut of the reference ride — one lap, 5928 records with 274 inside the lap
             and 5654 outside, which is what makes the window change observable rather than a no-op —
-            and on `~/Downloads/13.07.fit`. All five steps passed. **(a)** lap 1 ticked with no
+            and on the full reference ride. All five steps passed. **(a)** lap 1 ticked with no
             click, trim controls visible, Analyze reading `Analyze 1 Selected Lap` and
             `Trim Range: 0 to 273`; **(a2)** that same first paint drew the lap and its trim markers;
             **(b)** switching to "GPS based out and back" ran detection off that selection without
             waiting for a tick; **(c)** unticking lap 1 disabled Analyze and emptied the detected
-            list; **(d)** `~/Downloads/13.07.fit` came up with nothing ticked and ran no detection
+            list; **(d)** the full reference ride came up with nothing ticked and ran no detection
             until a lap was ticked.
 
 - [x] **[S] The results export carries the k the physics actually used, and one conversion for it.**
@@ -814,7 +882,7 @@ because a reversal that survives only as a commit message reads later as drift.
 A code review of the whole `refactoring` diff found five defects across the bundles above. All five
 are fixed here; 955 tests pass (up 14), `npm run check` clean. Every new assertion was checked
 against the pre-fix code and observed to fail. **Checked in the running app** (dev server + Chrome,
-`13.07.fit`, which carries per-point air density), not only under vitest.
+the reference ride, which carries per-point air density), not only under vitest.
 
 - [x] **[S] Standard's analyze leg had no `rhoArray` — and the header now reads that fit.** Bundle
       D's WR-4 pass gave `renderGpsLap` and `renderOutAndBack` the shared resolver and left the
@@ -827,7 +895,7 @@ against the pre-fix code and observed to fail. **Checked in the running app** (d
       before) when the ride has no usable density, when an index falls outside the series, or when
       the slice is not the length of the calculator's other series.
 
-      **A/B in the app, lap 10 of `13.07.fit`, MutationObserver on the header spans:** without the
+      **A/B in the app, lap 10 of the reference ride, MutationObserver on the header spans:** without the
       fix R² 0.0052 / RMSE 7.94 m / VE 16.17 m at the analyze paint, flipping to 0.0060 / 7.62 m /
       15.57 m a macrotask later; with it, 0.0060 / 7.62 m / 15.57 m written once and never changed.
       `rhoArrayResolver.ts`, `renderStandardVe.ts:110` · test: `selectionRhoArray.test.ts`, whose
@@ -1200,6 +1268,28 @@ Implemented in the working tree; **not yet committed**, pending an in-app check.
       current binding. The test re-binds the same nodes with a second closure and asserts the
       readout follows it. `windHeightControls.ts` · *origin: Phase 8 WR-06*
 
+      **Checked in the app, 2026-09-03 — this entry carries no in-app debt.** The reference ride, lap 10,
+      Standard, at `dcdcaac`. **All five items pass.**
+        - *0–100%*: `#windHeightSlider` and `#windHeightValue` both read `min=0 max=100 step=1`.
+          Typing `150` parks at **100**, `-40` parks at **0**, slider and number stay in sync, and
+          the readout adds "outside the 40–65% fitted range" at both bounds and drops it at 65%.
+        - *No silent narrowing*: analysed at k = **100**, the top of the range, then reloaded the
+          file. The control comes back `min=0 max=100 step=1` with value 100 — the range is not
+          narrowed to the stored value.
+        - *A stored wind survives a weather fill* (D-a): typed a manual **3.7 m/s** with auto-rho
+          **on** and a weather-cache row holding 1.9 m/s, set k = 100, analysed
+          (`0.1792 / 2.55 m / −0.71 m / −5.23 m`), Store Result, reloaded, re-analysed. The wind
+          comes back **3.7**, the provenance prompt still reads "this wind was entered by hand, so
+          it is used exactly as typed with no height transfer", k is still **100**, and the metrics
+          are identical to the pre-reload fit. Auto-rho did **not** replace the typed wind. Sequence
+          and reload driven in full, as the handoff asked.
+        - *Stored and exported*: the `veResults` row written by Store Result carries
+          `windHeightFactor: 1`, and *Show All Results* renders a **`WindHeightPct`** column
+          showing **100** for it. The four pre-feature rows show an empty cell, not a fabricated
+          100 — the guard the entry above describes.
+        - *Fields follow the binding*: the k block is hidden under **FIT** wind and visible under
+          **Constant** and **Compare**, tracking the selection across four switches.
+
 ### Bundle C · Elevation resolver, and the test that should have caught it — 2026-08-30
 
 Implemented in the working tree on branch `bundle-c-elevation-resolver`; **not yet committed**,
@@ -1236,6 +1326,36 @@ pending an in-app check. 824 tests pass (up 8), `npm run check` and `npm run lin
       characterization test, not a TDD one — stated plainly; its value was confirmed by stubbing
       the resolver out and watching it fail with the raw-channel values.
       `prepareAnalysisPayload.test.ts`
+
+      **Checked in the app, 2026-09-03 — one failure, carried as an open item under *Standalone
+      work*.** The reference ride at `dcdcaac`, all three modes, with a `MutationObserver` on
+      `#r2Value`/`#rmseValue`/`#veGainValue`/`#actualGainValue` installed **before** each Analyze
+      and every CHANGED snapshot recorded. One entry = the two passes agree.
+        - **Standard**, lap 10, file with its stored record: **one entry**,
+          `0.0014 / 2.80 m / −0.34 m / −5.23 m`. Pass.
+        - **Standard**, same lap, file with **no** stored record: **two entries** —
+          `0.0015 / 11.51 m / 22.39 m` replaced ~90 ms later by `0.0060 / 7.62 m / 15.57 m`.
+          **Fail.** Reproduced 3×; the attribution work (it is not CdA/Crr, trim, the scalar rho
+          input, the weather fill, or the actual-elevation resolution) and the full repro are in
+          the open item.
+        - **GPS based lap splitting**, FIT laps 10/12/16, gate 10 s → 11 virtual laps: **one
+          entry**, mean R² `0.0000`, mean RMSE `5.13 m`, closing error `73.56 m`. Pass.
+        - **GPS based out and back**, gates A 10 s / B 50 s → 4 sections: **one entry**, RMSE
+          `1.14 m`, avg closing error `−1.02 m`, VE gain `−1.02 m`, actual gain `0.00 m`. Pass.
+        - *Elevation smoothing*: **Standard passes** — ON→OFF moves
+          `0.0067 / 7.32 m / 15.27 m / −0.24 m` to `0.0119 / 7.41 m / 15.27 m / 0.00 m`, and
+          OFF→ON returns to the first set exactly. **Could not check in the two GPS modes**: after
+          roughly a dozen in-session mode switches and reloads the Section 3 detection panel
+          stopped binding (`#mapView` left with zero children, so the awaited
+          `MapVisualization.initialize()` never released `bindGpsDetection` /
+          `bindOutAndBackDetection`), and it did not recover across reloads. The GPS-mode numbers
+          above were taken before that started. Whether this is an app defect or a tile-server
+          rate-limit after repeated reloads was **not** established — it is not filed as a finding,
+          and it is the one part of bundle C's check still owed.
+        - **WR-4**, for the analyze-leg retirement below: the post-bind kick produced **no**
+          visible flicker and **no** self-changing value in GPS-lap or out-and-back — single
+          entries in both. That gate is clear. In Standard the kick is visible, but only on the
+          no-stored-record path above.
 
 ### Bundle E · Cheap sweep — 2026-08-30
 
@@ -1280,6 +1400,28 @@ throughout: 816 tests pass (up 6), `npm run check` and `npm run lint` clean.
       be a worse bug than an un-offset one.
       `renderStandardVe.ts:88-115` · tests: `standardSegments.test.ts` "resolvePlaceholderWindSpeed"
       · *origin: Phase 7 deferred-items*
+
+      **Checked in the app, 2026-09-03 — one failure, carried as an open item under *Standalone
+      work*.** The reference ride, lap 10, Standard, at `dcdcaac`. Three of the four items are checkable
+      in the app (the dead-CSS one is not); **two pass, one fails**.
+        - *Never prints `Infinity m/s`*: provoked for real rather than argued. `wind_speed` was set
+          to `Infinity` in the `fileParameters` row (IndexedDB structured-clone keeps it non-finite,
+          confirmed on read-back), auto-rho turned off so the weather fill could not replace it,
+          then the file reloaded and re-analysed. The readout renders **empty**, the wind field
+          renders blank, and the string `Infinity` appears **nowhere** in `document.body.innerText`.
+          The `Number.isFinite` guard holds. Pass.
+        - *Crr range 0.0015 – 0.030, step 0.0001*: **Fail as the app actually reaches it.** A file
+          with **no** stored record renders `min="0.0015" max="0.03" step="0.0001"` — correct. A
+          file that has been analysed before renders **`0.002` / `0.015`**, the pre-D-c bounds,
+          because stored `crr_min`/`crr_max` are passed through unmigrated. Repro and cause in the
+          open item. The *step* half of D-c is unaffected: `0.0001`, and the number input still
+          accepts a precise value, so the 285-position slider is behaving as decided.
+        - *The placeholder no longer uses un-offset FIT wind*: measured against a baseline with the
+          same MutationObserver method as bundle C, FIT wind source both times. With
+          `air_speed_offset = 0` the first paint is `0.0014 / 2.80 m / −0.34 m / −5.23 m`; with
+          `air_speed_offset = 6` it is `0.5895 / 2.14 m / −1.36 m / −5.23 m`. The first paint
+          already reflects the offset, and each run is a **single** entry — nothing corrects itself
+          afterwards. Pass.
 
 ---
 
