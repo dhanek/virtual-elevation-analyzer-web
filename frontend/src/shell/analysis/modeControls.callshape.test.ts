@@ -314,7 +314,6 @@ describe("MODE_CONTROL_TABLE is the Priority 6 control union", () => {
 				"cda",
 				"crr",
 				"trim",
-				"mapTrim",
 				"calibration",
 				"autoAdjustCalibration",
 				"airSpeedOffset",
@@ -334,7 +333,12 @@ describe("MODE_CONTROL_TABLE is the Priority 6 control union", () => {
 
 		// The GPS templates render no trim markup at all.
 		expect(new Set(modesFor("trim"))).toEqual(new Set(["standard"]));
-		expect(new Set(modesFor("mapTrim"))).toEqual(new Set(["standard"]));
+		// `mapTrim` has NO row in any mode since 2026-09-03. Those four sliders
+		// live in Section 3 rather than in a mode panel, so by this table's own
+		// doctrine (`modeControlTable.ts:34-39`) Section 3 raises the reason
+		// itself, exactly as it does for `segmentSelection`. Behaviour covered by
+		// `section3/mapTrimModeUpdate.test.ts`.
+		expect(modesFor("mapTrim")).toEqual([]);
 		// N-3 and N-5: both are all-mode rows.
 		expect(new Set(modesFor("airSpeedOffset"))).toEqual(
 			new Set(["standard", "gpsLap", "outAndBack"]),
@@ -355,7 +359,8 @@ describe("standard: every rendered row reaches the primitive exactly once", () =
 	);
 
 	it("covers every standard row of the table", () => {
-		expect(standardRows.length).toBe(13);
+		// 13 before the two `mapTrim` rows moved to Section 3 (2026-09-03).
+		expect(standardRows.length).toBe(11);
 	});
 
 	for (const spec of standardRows) {
@@ -406,17 +411,36 @@ describe("standard: the trim window reaches the primitive as segment trim", () =
 		});
 	});
 
-	it("drives the same segment trim from the map's twin slider", async () => {
+	/**
+	 * INVERTED ON 2026-09-03, and the inversion is the point.
+	 *
+	 * This case used to assert that the map's twin slider drove the primitive
+	 * through the binder, and that the main slider followed via `writeTrim`.
+	 * Both were real, and both were the SECOND owner of four nodes that
+	 * `initializeMapTrimControlsForSelectedLaps` clones on every Section 3
+	 * render — which stripped this binding and left the sliders moving the map
+	 * while the panel described the previous window.
+	 *
+	 * `mapTrim` now has no row, by this table's own doctrine: it is not a
+	 * control inside the mode panel. Section 3 raises the reason and mirrors
+	 * onto the panel's pair itself, and `section3/mapTrimModeUpdate.test.ts`
+	 * carries that behaviour, including the mirror — which is load-bearing,
+	 * since `requestModeUpdate` reads its window from `trimStartSlider`.
+	 *
+	 * What has to stay true HERE is the absence: the binder must not wire these
+	 * nodes, or the two owners come back and one drag reaches the funnel twice.
+	 */
+	it("leaves the map's twin sliders entirely to Section 3", async () => {
 		setup();
 		const slider = el("mapTrimStartSlider");
 		slider.value = "60";
 		slider.dispatchEvent(new Event("input"));
 		await settle();
 
-		const args = soleCall();
-		expect(args.segments[0].trim).toEqual({ start: 60, end: LAST_INDEX });
-		// The main slider follows, because they are two faces of one control.
-		expect(el("trimStartSlider").value).toBe("60");
+		// No row, so no listener, so nothing reaches the primitive from here.
+		expect(primitive).toHaveBeenCalledTimes(0);
+		// And the binder does not mirror it either -- Section 3 does that now.
+		expect(el("trimStartSlider").value).not.toBe("60");
 	});
 
 	it("parks the sliders at the clamp and still reaches the primitive ONCE (CR-01)", async () => {
@@ -852,11 +876,12 @@ describe("the GPS modes render no trim markup, and the matrix says so", () => {
 });
 
 describe("every ModeUpdateReason is exercised by the matrix", () => {
-	it("covers all of them except the two that are not panel controls", () => {
-		// Two reasons reach the funnel from outside the mode panel and are
+	it("covers all of them except the three that are not panel controls", () => {
+		// THREE reasons reach the funnel from outside the mode panel and are
 		// deliberately absent from the table: `parameters`, from
-		// `handleParametersChange`, and `segmentSelection`, from Section 3's
-		// detected-lap and section checkboxes. Every OTHER reason must appear in
+		// `handleParametersChange`; `segmentSelection`, from Section 3's
+		// detected-lap and section checkboxes; and `mapTrim`, from Section 3's
+		// map-trim sliders (2026-09-03). Every OTHER reason must appear in
 		// at least one executed pair -- otherwise a control added to the table
 		// without a matrix case would ship untested.
 		const exercised = new Set<string>();
@@ -873,7 +898,6 @@ describe("every ModeUpdateReason is exercised by the matrix", () => {
 				"cda",
 				"crr",
 				"trim",
-				"mapTrim",
 				"calibration",
 				"autoAdjustCalibration",
 				"airSpeedOffset",

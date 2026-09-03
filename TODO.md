@@ -198,15 +198,6 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
-- [ ] **[M–L] Section 3 destroys the map-trim slider bindings on every re-render.**
-      `initializeMapTrimControlsForSelectedLaps` clones and replaces the four `mapTrim` nodes
-      (`section3Orchestration.ts:1110-1138`), stripping the listeners `MODE_CONTROL_TABLE` bound,
-      and its replacements never call `requestModeUpdate`. Reached from any lap-checkbox change.
-      Self-heals only on the next Analyze. The clone-to-unbind idiom is what fights the mode
-      control table, so the fix is structural — bind once and read live state — which is why this
-      carries real regression risk and should **not** ride along with other work.
-      `frontend/src/shell/section3/section3Orchestration.ts:1103-1200` · *origin: audit WR-5*
-
 - [ ] **[XL] Outdoor velodrome auto-calibration.** `velodrome: true` today does exactly one thing —
       zero the actual elevation (`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`,
       `renderOutAndBack.ts:219`). An outdoor velodrome sweeps every heading within a lap, which is
@@ -305,6 +296,112 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Section 3's map-trim sliders get one owner — 2026-09-03
+
+Implemented on `bundle-map-trim-single-owner`, branched from `origin/main` at `2b963d3`.
+1070 tests pass across 89 files (up 12 net on 1058: sixteen guards across
+`mapTrimModeUpdate.test.ts` and `mapTrimPanelHandoff.test.ts`, minus four per-row cases generated
+for the two table rows that no longer exist), `npm run check` and `npm run lint` clean.
+
+- [x] **[M–L] Section 3 destroys the map-trim slider bindings on every re-render.**
+      Criteria (concretised 2026-09-03, PR #12 review round 12):
+      - [x] A map-trim gesture reaches `requestModeUpdate`
+      - [x] It keeps reaching it after the Section 3 re-render that clones the nodes
+      - [x] It reaches it exactly once per gesture, not twice
+      - [x] The four nodes have exactly ONE owner
+      - [x] Nothing the double ownership provided is lost: the binder's
+            `lastRequestedTrimWindow` record, the mode's `saveSettings` write, and the
+            30-sample floor between the two edges
+      - [x] Guards cover it, none of them vacuous — every guard is killed by a named mutation
+      - [x] `TODO.md` records the outcome
+
+      Closed, but NOT the way the item prescribed, and the item's own framing was wrong twice.
+
+      **The mechanism was confirmed by measurement**, counting `syncRangeAndNumber`'s
+      `Range [mapTrimStartSlider] changed to N` line, which only the TABLE binding emits: present
+      immediately after Analyze, ABSENT after one lap-checkbox click. The same probe **refuted a
+      double-firing hypothesis** — exactly one table listener was bound after Analyze, not two.
+
+      **It was LATENT, not user-visible.** Every path reaching the clone also hides the panel
+      first: checkbox and select-all go through `invalidateVePanelIfBasisChanged`, and the only
+      other route is `setGpsAnalysisMode`, whose sole UI caller is a `change` listener — so
+      `previousMode !== mode` always holds and `tearDownVeAnalysisPanel` runs before the
+      re-render. No flow was found leaving the panel VISIBLE with the binding dead. Fixed anyway,
+      by maintainer decision, for the duplication and for a hazard one caller away:
+      `rerenderSection3()` is unconditional inside `setGpsAnalysisMode`, so only the impossibility
+      of a no-op `change` event holds the window shut.
+
+      **The item prescribed "bind once and read live state". That is under-specified**, and a
+      first design that moved the controls INTO `MODE_CONTROL_TABLE` was abandoned after two
+      structural blockers surfaced: `handleTrim` reads its window from
+      `trimStartSlider`/`trimEndSlider` and returns early when no panel has rendered them, so the
+      binder could never serve these sliders pre-Analyze; and nothing in the binder writes
+      `appState.presetTrimStart/End`, which auto-rho and `initializeVEAnalysis` read. That
+      approach was [L–XL] and would have modified `handleTrim`, shared by all three modes.
+
+      **What shipped applies the table's OWN doctrine instead** (`modeControlTable.ts:34-39`): a
+      reason from a control that is not inside the mode panel gets no row and is raised by
+      Section 3 directly, exactly as `segmentSelection` already is. The two `mapTrim` rows are
+      gone; Section 3's handlers now end in `commitMapTrim`, which mirrors onto the panel's trim
+      pair, persists, then raises `requestModeUpdate("mapTrim")`. The clone is harmless because
+      the only listeners it can strip are the ones re-added on the next lines. `handleTrim` is
+      untouched, and the panel-to-map mirroring still works because `writeTrim` reaches the map
+      inputs by hard-coded id rather than through the rows.
+
+      **Two later commits added what that first shape still owed the removed rows.**
+      `commitMapTrim` also RECORDS the window with the binder (`noteTrimWindowRequested`), so
+      `requestTrim`'s skip-if-unchanged no longer swallows a later panel gesture back to a window
+      the map has moved off; and it persists TWICE in a load-bearing order — `saveMapTrimSettings`
+      writes `cda: null` and `saveLapSettings` replaces the whole entry, so Standard's
+      `saveCurrentLapSettings` has to be the last write, which is what the removed row's
+      `persistsSettings: true` did. The four handlers also enforce the 30-SAMPLE FLOOR themselves
+      now, measured against the PANEL's `trimStartSlider`/`trimEndSlider` exactly as `handleTrim`
+      measured it: nothing in the binder writes `appState.presetTrimStart/End` — the same fact
+      that blocked the table design above, now cutting the other way — so a panel gesture leaves
+      that state naming a window nobody is showing, and a floor measured against it lets the two
+      edges cross. `appState.presetTrim*` stays only as the PRE-ANALYZE fallback, where these
+      handlers are its only writers and it cannot be stale.
+
+      **The mirror is load-bearing, not cosmetic.** `requestModeUpdate` reads the window it
+      recomputes with from the PANEL's sliders (`requestModeUpdate.ts:116-131`), so raising the
+      reason without mirroring would have recomputed against the previous window — quietly wrong,
+      and worse than not recomputing. A stale guard in `modeControls.callshape.test.ts` caught it.
+
+      Sixteen guards, every one killed by a named mutation and none of them vacuous. Not every
+      guard has a killer unique to it — the map-first clamp pair shares its killer with the
+      panel-first cases, which are strictly stronger over the same lines. That is redundancy from
+      better coverage, not a gap, and non-vacuity is the bar the criterion at `:316` states. What
+      follows names one killing mutation per guard; it is deliberately not a count of everything
+      each mutation kills, because a guard added over the same lines by a later commit kills the
+      same mutation and falsifies any count written before it. The two places below that DO claim
+      exclusivity — the four clamp sources, and the fallback — are the non-vacuity evidence for
+      the guards they belong to, and both were re-measured at this tip. From the first commit: the funnel
+      call removed kills the three funnel cases; the mirror removed kills the mirror case; a
+      `mapTrim` row put back kills the doctrine case; the map fit removed kills `still moves the
+      map when the slider moves`; the `presetTrim` write removed kills `records the new trim start
+      in app state`. From the second: `noteTrimWindowRequested` removed kills the panel-handoff
+      case; moving `saveCurrentLapSettings` off the end kills `persists the tuned CdA last`;
+      dropping the floor from the map START handler kills `keeps the start slider 30 samples clear
+      of a moved-in end`, and from the END handler `keeps the end slider 30 samples clear of a
+      moved-out start`. From the third: the clamp source in each of the four handlers put back to
+      `appState.presetTrim*` kills exactly one panel-first case each — `expected '300' to be
+      '170'` for the two start handlers and `expected '200' to be '330'` for the two end
+      handlers, which are `origin/main`'s own values for those gestures. From the fourth:
+      `trimWindowForClamp`'s pre-Analyze fallback replaced by `start: 0, end: dataLength - 1`
+      kills the no-panel case and nothing else — the fifteen guards that pre-date it all pass
+      under that mutation, which is what made the fallback branch unguarded until this commit.
+
+      **Checked in the app, 2026-09-03**, `13.07.fit`, Standard:
+        - post-Analyze drag: **exactly one** `requestModeUpdate(mapTrim)`, panel pair mirrored,
+          RMSE 8.69 m → 7.44 m, so the panel really recomputed;
+        - after a lap tick (the clone) and a re-Analyze: still exactly one, RMSE 10.25 m → 6.36 m,
+          and `Range [mapTrim…]` count 0, confirming the binder no longer touches these nodes;
+        - pre-Analyze, no panel: the mirror is a safe no-op, the funnel bails `not configured
+          yet`, no JS errors.
+      `section3Orchestration.ts`, `modeControlTable.ts` · test:
+      `section3/mapTrimModeUpdate.test.ts` (new), `modeControls.callshape.test.ts` (one guard
+      inverted) · *origin: audit WR-5*
 
 ### Bundle F · Condition (a) — the weather cache is bounded — 2026-09-02
 

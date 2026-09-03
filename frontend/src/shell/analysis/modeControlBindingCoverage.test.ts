@@ -207,10 +207,11 @@ describe.each(MODES)(
 		});
 
 		it("binds every row, counting the paired ones separately", () => {
-			// `trim` and `mapTrim` are two rows apiece, so the reason set alone
-			// would not notice one of a pair going dark. The GPS modes have no
-			// paired rows today; asserting the count keeps that true if they grow
-			// one.
+			// `trim` is two rows, so the reason set alone would not notice one of
+			// the pair going dark. (`mapTrim` was a second pair until 2026-09-03,
+			// when Section 3 took sole ownership of those four nodes and the two
+			// rows were removed.) The GPS modes have no paired rows today;
+			// asserting the count keeps that true if they grow one.
 			expect(result.bound).toHaveLength(controlsForMode(modeId).length);
 		});
 
