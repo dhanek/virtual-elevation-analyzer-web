@@ -1691,6 +1691,43 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		drawTrimRegionOnMap();
 
 		/**
+		 * The window the 30-sample floor is measured against.
+		 *
+		 * IT IS THE PANEL'S PAIR, NOT `appState`. `handleTrim` measured it against
+		 * `trimStartSlider`/`trimEndSlider` (`bindModeControls.ts`, `trimWindowNow`)
+		 * and that pair is the only face that is right after BOTH kinds of gesture:
+		 * a panel gesture mirrors onto the map through `writeTrim`, and a map
+		 * gesture mirrors onto the panel through `commitMapTrim` below. Nothing in
+		 * the binder writes `appState.presetTrimStart/End` — only these four
+		 * handlers and the panel's own render do — so measuring the floor against
+		 * `appState` lets a PANEL gesture leave it stale, and the next map gesture
+		 * then clamps against a window nobody is showing and drags one edge
+		 * straight past the other.
+		 *
+		 * PRE-ANALYZE there is no panel, and then `appState.presetTrim*` IS the
+		 * window: these handlers are its only writers, so it cannot be stale. That
+		 * is the fallback, and it is what keeps the map-trim controls usable before
+		 * any panel exists.
+		 */
+		const trimWindowForClamp = (): { start: number; end: number } => {
+			const panelStart = document.getElementById(
+				"trimStartSlider",
+			) as HTMLInputElement | null;
+			const panelEnd = document.getElementById(
+				"trimEndSlider",
+			) as HTMLInputElement | null;
+			if (panelStart && panelEnd) {
+				const start = parseInt(panelStart.value);
+				const end = parseInt(panelEnd.value);
+				if (!Number.isNaN(start) && !Number.isNaN(end)) return { start, end };
+			}
+			return {
+				start: deps.appState.presetTrimStart,
+				end: deps.appState.presetTrimEnd ?? dataLength - 1,
+			};
+		};
+
+		/**
 		 * What every map-trim gesture ends with: persist, then ASK THE PANEL TO
 		 * RECOMPUTE.
 		 *
@@ -1765,12 +1802,11 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 			// THE 30-SAMPLE FLOOR, ENFORCED BETWEEN THE TWO EDGES. The sliders'
 			// own `min`/`max` (`initializeMapTrimControls`) only bound each edge
 			// against the EXTREMES, so once the end has been moved in the start
-			// can be dragged straight past it. `handleTrim` used to enforce the
-			// floor between them; with no `mapTrim` row it no longer runs, so the
-			// handler clamps here — the same expression the number-input sibling
-			// below already uses — and it has to happen BEFORE the map fit so the
-			// map follows the corrected window rather than the requested one.
-			const trimEnd = deps.appState.presetTrimEnd ?? dataLength - 1;
+			// can be dragged straight past it. It has to happen BEFORE the map fit
+			// so the map follows the corrected window rather than the requested
+			// one; for WHICH window the floor is measured against, and why it is
+			// not `appState`, see `trimWindowForClamp`'s docstring above.
+			const trimEnd = trimWindowForClamp().end;
 			const clamped = Math.max(
 				0,
 				Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES),
@@ -1796,8 +1832,9 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		newMapTrimEndSlider.addEventListener("input", () => {
 			const value = parseInt(newMapTrimEndSlider.value);
 			// The same floor from the other edge — see the start handler above.
+			const trimStart = trimWindowForClamp().start;
 			const clamped = Math.max(
-				deps.appState.presetTrimStart + MIN_TRIM_WINDOW_SAMPLES,
+				trimStart + MIN_TRIM_WINDOW_SAMPLES,
 				Math.min(value, dataLength - 1),
 			);
 			newMapTrimEndSlider.value = clamped.toString();
@@ -1808,7 +1845,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 			deps
 				.getMapVisualization()
 				?.fitBoundsToTrimRegion(
-					deps.appState.presetTrimStart,
+					trimStart,
 					clamped,
 					filteredLapPositionLat,
 					filteredLapPositionLong,
@@ -1820,7 +1857,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		newMapTrimStartValue.addEventListener("change", () => {
 			const value = parseInt(newMapTrimStartValue.value);
 			if (!isNaN(value)) {
-				const trimEnd = deps.appState.presetTrimEnd ?? dataLength - 1;
+				const trimEnd = trimWindowForClamp().end;
 				const clamped = Math.max(
 					0,
 					Math.min(value, trimEnd - MIN_TRIM_WINDOW_SAMPLES),
@@ -1846,8 +1883,9 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		newMapTrimEndValue.addEventListener("change", () => {
 			const value = parseInt(newMapTrimEndValue.value);
 			if (!isNaN(value)) {
+				const trimStart = trimWindowForClamp().start;
 				const clamped = Math.max(
-					deps.appState.presetTrimStart + MIN_TRIM_WINDOW_SAMPLES,
+					trimStart + MIN_TRIM_WINDOW_SAMPLES,
 					Math.min(value, dataLength - 1),
 				);
 				newMapTrimEndSlider.value = clamped.toString();
@@ -1858,7 +1896,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 				deps
 					.getMapVisualization()
 					?.fitBoundsToTrimRegion(
-						deps.appState.presetTrimStart,
+						trimStart,
 						clamped,
 						filteredLapPositionLat,
 						filteredLapPositionLong,

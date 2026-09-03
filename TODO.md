@@ -300,10 +300,22 @@ changed and why.
 ### Section 3's map-trim sliders get one owner — 2026-09-03
 
 Implemented on `bundle-map-trim-single-owner`, branched from `origin/main` at `2b963d3`.
-1061 tests pass (up 3 net on 1058: seven new guards, minus four per-row cases generated for the
-two table rows that no longer exist), `npm run check` and `npm run lint` clean.
+1069 tests pass across 89 files (up 11 net on 1058: fifteen guards across
+`mapTrimModeUpdate.test.ts` and `mapTrimPanelHandoff.test.ts`, minus four per-row cases generated
+for the two table rows that no longer exist), `npm run check` and `npm run lint` clean.
 
 - [x] **[M–L] Section 3 destroys the map-trim slider bindings on every re-render.**
+      Criteria (concretised 2026-09-03, PR #12 review round 12):
+      - [x] A map-trim gesture reaches `requestModeUpdate`
+      - [x] It keeps reaching it after the Section 3 re-render that clones the nodes
+      - [x] It reaches it exactly once per gesture, not twice
+      - [x] The four nodes have exactly ONE owner
+      - [x] Nothing the double ownership provided is lost: the binder's
+            `lastRequestedTrimWindow` record, the mode's `saveSettings` write, and the
+            30-sample floor between the two edges
+      - [x] Guards cover it, each with a unique killer
+      - [x] `TODO.md` records the outcome
+
       Closed, but NOT the way the item prescribed, and the item's own framing was wrong twice.
 
       **The mechanism was confirmed by measurement**, counting `syncRangeAndNumber`'s
@@ -337,14 +349,35 @@ two table rows that no longer exist), `npm run check` and `npm run lint` clean.
       untouched, and the panel-to-map mirroring still works because `writeTrim` reaches the map
       inputs by hard-coded id rather than through the rows.
 
+      **Two later commits added what that first shape still owed the removed rows.**
+      `commitMapTrim` also RECORDS the window with the binder (`noteTrimWindowRequested`), so
+      `requestTrim`'s skip-if-unchanged no longer swallows a later panel gesture back to a window
+      the map has moved off; and it persists TWICE in a load-bearing order — `saveMapTrimSettings`
+      writes `cda: null` and `saveLapSettings` replaces the whole entry, so Standard's
+      `saveCurrentLapSettings` has to be the last write, which is what the removed row's
+      `persistsSettings: true` did. The four handlers also enforce the 30-SAMPLE FLOOR themselves
+      now, measured against the PANEL's `trimStartSlider`/`trimEndSlider` exactly as `handleTrim`
+      measured it: nothing in the binder writes `appState.presetTrimStart/End` — the same fact
+      that blocked the table design above, now cutting the other way — so a panel gesture leaves
+      that state naming a window nobody is showing, and a floor measured against it lets the two
+      edges cross. `appState.presetTrim*` stays only as the PRE-ANALYZE fallback, where these
+      handlers are its only writers and it cannot be stale.
+
       **The mirror is load-bearing, not cosmetic.** `requestModeUpdate` reads the window it
       recomputes with from the PANEL's sliders (`requestModeUpdate.ts:116-131`), so raising the
       reason without mirroring would have recomputed against the previous window — quietly wrong,
       and worse than not recomputing. A stale guard in `modeControls.callshape.test.ts` caught it.
 
-      Seven guards, each with a unique killer: M1 the funnel call removed kills the three funnel
-      cases; M2 the mirror removed, M3 a `mapTrim` row put back, M4 the map fit removed and M5 the
-      `presetTrim` write removed each kill exactly one.
+      Fifteen guards, each with a unique killer, all observed rather than predicted. From the
+      first commit: the funnel call removed kills the three funnel cases; the mirror removed, a
+      `mapTrim` row put back, the map fit removed and the `presetTrim` write removed each kill
+      exactly one. From the second: `noteTrimWindowRequested` removed kills the panel-handoff
+      case, and moving `saveCurrentLapSettings` off the end kills `persists the tuned CdA last`;
+      dropping the floor from the map-first pair kills one clamp case each. From the third: the
+      clamp source in each of the four handlers put back to `appState.presetTrim*` kills exactly
+      one panel-first case each — `expected '300' to be '170'` for the two start handlers and
+      `expected '200' to be '330'` for the two end handlers, which are `origin/main`'s own values
+      for those gestures.
 
       **Checked in the app, 2026-09-03**, `13.07.fit`, Standard:
         - post-Analyze drag: **exactly one** `requestModeUpdate(mapTrim)`, panel pair mirrored,

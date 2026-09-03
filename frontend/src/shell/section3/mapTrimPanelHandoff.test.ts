@@ -249,11 +249,57 @@ function typePanelTrimStart(value: number): void {
 	number.dispatchEvent(new Event("change"));
 }
 
+/** A panel gesture on the other edge: type into the end number input. */
+function typePanelTrimEnd(value: number): void {
+	const number = el("trimEndValue");
+	number.value = String(value);
+	number.dispatchEvent(new Event("change"));
+}
+
 /** A map gesture: drag the map's start slider. */
 function dragMapTrimStart(value: number): void {
 	const slider = el("mapTrimStartSlider");
 	slider.value = String(value);
 	slider.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** A map gesture on the other edge: drag the map's end slider. */
+function dragMapTrimEnd(value: number): void {
+	const slider = el("mapTrimEndSlider");
+	slider.value = String(value);
+	slider.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** A map gesture through the number inputs rather than the sliders. */
+function setMapTrimNumber(id: string, value: number): void {
+	const number = el(id);
+	number.value = String(value);
+	number.dispatchEvent(new Event("change"));
+}
+
+/**
+ * DRAIN `initializeSection3`'S DEFERRED RESTORE PASS BEFORE THE FAKE CLOCK GOES IN.
+ *
+ * `initializeSection3` ends in `setTimeout(async () => { ... }, 100)`
+ * (`section3Orchestration.ts:1999-2058`), and that callback runs
+ * `restoreSection3Controls` -> `updateSelectedLaps` ->
+ * `initializeMapTrimControlsForSelectedLaps`, which REPLACES the four map-trim
+ * nodes and, with no `currentFileHash` in this harness, resets
+ * `presetTrimStart`/`presetTrimEnd` to `0`/`dataLength - 1`.
+ *
+ * It is a REAL timer, scheduled before `vi.useFakeTimers()`, so nothing in the
+ * test controls when it lands: `advanceTimersByTimeAsync` yields to the real
+ * loop, so on a quiet machine it fires inside the FIRST `settle()`, and under
+ * the load of the whole suite it can fire inside the second — after the map
+ * gesture, wiping the very values these cases assert. That is what made the
+ * first draft of this block flake roughly one full-suite run in three.
+ *
+ * Waiting it out here, while the clock is still real, makes the pass
+ * deterministic without changing any behaviour under test: it only forces the
+ * re-init that happens anyway to happen BEFORE the first gesture.
+ */
+async function drainDeferredRestore(): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
 beforeEach(() => {
@@ -304,5 +350,99 @@ describe("the map's trim face and the panel's, in one document", () => {
 		// And the panel actually shows the window it recomputed. A "fix" that
 		// recomputes while leaving the slider reading 200 is not a fix.
 		expect(el("trimStartSlider").value).toBe("150");
+	});
+});
+
+/**
+ * THE FLOOR AFTER A PANEL GESTURE.
+ *
+ * THE FIRST GESTURE BEING ON THE PANEL IS THE LOAD-BEARING PART OF EVERY CASE
+ * HERE. The four map handlers enforce the 30-sample floor themselves, and the
+ * window they measure it against has to be the PANEL's pair: nothing in the
+ * binder writes `appState.presetTrimStart/End`, so after a panel gesture that
+ * state names a window nobody is showing. The two clamp cases already in
+ * `mapTrimModeUpdate.test.ts` drive the MAP twice, which keeps `appState` in
+ * step with itself — which is why they pass even while a panel-first gesture
+ * lets the two edges cross straight through each other.
+ *
+ * `170` and `330` are `origin/main`'s observed values for these two gestures
+ * (round 13 probed main and it printed `map trimStart=170 panel trimStart=170
+ * panel trimEnd=200`), so these cases assert that the branch reproduces main.
+ */
+describe("the 30-sample floor after a PANEL gesture", () => {
+	it("clamps the map START slider against the panel's end, not a stale appState", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		vi.useFakeTimers();
+		bindPanel(appState);
+
+		typePanelTrimEnd(200);
+		await settle();
+
+		dragMapTrimStart(300);
+		await settle();
+
+		expect(el("mapTrimStartSlider").value).toBe("170");
+		expect(el("mapTrimStartValue").value).toBe("170");
+		expect(el("trimStartSlider").value).toBe("170");
+		expect(el("trimEndSlider").value).toBe("200");
+	});
+
+	it("clamps the map END slider against the panel's start", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		vi.useFakeTimers();
+		bindPanel(appState);
+
+		typePanelTrimStart(300);
+		await settle();
+
+		dragMapTrimEnd(200);
+		await settle();
+
+		expect(el("mapTrimEndSlider").value).toBe("330");
+		expect(el("mapTrimEndValue").value).toBe("330");
+		expect(el("trimEndSlider").value).toBe("330");
+		expect(el("trimStartSlider").value).toBe("300");
+	});
+
+	it("clamps the map START number input the same way", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		vi.useFakeTimers();
+		bindPanel(appState);
+
+		typePanelTrimEnd(200);
+		await settle();
+
+		setMapTrimNumber("mapTrimStartValue", 300);
+		await settle();
+
+		expect(el("mapTrimStartSlider").value).toBe("170");
+		expect(el("mapTrimStartValue").value).toBe("170");
+		expect(el("trimStartSlider").value).toBe("170");
+		expect(el("trimEndSlider").value).toBe("200");
+	});
+
+	it("clamps the map END number input the same way", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		vi.useFakeTimers();
+		bindPanel(appState);
+
+		typePanelTrimStart(300);
+		await settle();
+
+		setMapTrimNumber("mapTrimEndValue", 200);
+		await settle();
+
+		expect(el("mapTrimEndSlider").value).toBe("330");
+		expect(el("mapTrimEndValue").value).toBe("330");
+		expect(el("trimEndSlider").value).toBe("330");
+		expect(el("trimStartSlider").value).toBe("300");
 	});
 });
