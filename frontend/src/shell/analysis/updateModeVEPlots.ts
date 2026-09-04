@@ -231,7 +231,37 @@ export async function updateModeVEPlots(
 			indices.push(i);
 		}
 
-		const segmentRho = rhoArray ? indices.map((i) => rhoArray[i]) : null;
+		// COMPLETE OR ABSENT, NEVER PARTIAL.
+		//
+		// `rhoArray[i]` on an index the series does not reach yields `undefined`,
+		// which crosses the WASM boundary as NaN and poisons the whole segment's
+		// integration. Nothing upstream rules that out: `resolveRhoArray` accepts
+		// a channel on `.some(rho => rho > 0)` and `getNormalizedActivityArrays`
+		// converts it without padding, so a device that stopped emitting air
+		// density mid-ride yields a series SHORTER than the ride.
+		//
+		// The rule is `rhoArrayResolver.ts:86`'s, verbatim: a short or
+		// hole-punched array under the calculator is a worse bug than a constant
+		// one. It was enforced in the three ANALYZE legs and never here, because
+		// this pass was the second producer and the legs were the ones being
+		// audited. Retiring the legs makes this the only pass there is, so the
+		// guard belongs to it.
+		//
+		// A LENGTH/RANGE CHECK, AND ONLY THAT — the same scope the legs' version
+		// had. An interior NaN in an otherwise-full-length channel still reaches
+		// the calculator, because `resolveRhoArray` accepts the series on a
+		// `.some(...)`; that is pre-existing and out of scope here.
+		let segmentRho: number[] | null = null;
+		if (rhoArray) {
+			const spans = indices.every((i) => i >= 0 && i < rhoArray.length);
+			if (spans) {
+				segmentRho = indices.map((i) => rhoArray[i]);
+			} else {
+				log.warn(
+					`Air density series (${rhoArray.length}) does not span ${segment.label}; using constant rho`,
+				);
+			}
+		}
 
 		try {
 			const supplementarySeries = buildSegmentSupplementarySeries({
