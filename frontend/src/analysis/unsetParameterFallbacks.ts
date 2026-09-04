@@ -21,10 +21,10 @@
  * did too, until its own analyze-leg copy of the computed half (`resolveAppliedCrr`
  * over `resolveDisplayCrr`) was deleted in the 2026-09-04 retirement of its
  * per-leg fit; its computed half now runs through the shared producer's
- * `resolveAppliedCrr` call (`updateModeVEPlots.ts:181`), and its display half
- * stays at the slider markup (`renderOutAndBack.ts:403`). Standard was the
- * only mode that drifted. 0.008 is therefore the value kept, and 0.005 the
- * outlier removed.
+ * `resolveAppliedCrr` call (`updateModeVEPlots.ts`), and its display half
+ * stays at the slider markup (`renderOutAndBack.ts`'s `#crrSlider` control).
+ * Standard was the only mode that drifted. 0.008 is therefore the value kept,
+ * and 0.005 the outlier removed.
  *
  * `storageHandlers.ts` carried the same 0.005 on the path that PERSISTS a
  * result when no slider is rendered, so this was never only cosmetic.

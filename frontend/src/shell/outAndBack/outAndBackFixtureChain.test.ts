@@ -20,8 +20,9 @@
  * THE PLOTLY FAKE THROWS WHEN ITS TARGET ID IS ABSENT, exactly as Plotly does
  * ("No DOM element with id '...' exists on the page"), and it is injected through
  * the `waitForPlotly` ARGUMENT rather than installed on `globalThis.Plotly`.
- * Out-and-back never reads the global — `renderOutAndBack.ts:604` awaits the
- * injected `waitForPlotly()` and hands that handle to
+ * Out-and-back never reads the global — `showOutAndBackVEPlot` in
+ * `renderOutAndBack.ts` awaits the injected `waitForPlotly()` and hands that
+ * handle to
  * `createOutAndBackUpdateCallbacks` and `renderOutAndBackPlots` — so a global fake
  * would never be consulted and every draw assertion below would observe nothing
  * while passing.
@@ -558,8 +559,8 @@ describe("out-and-back on the synthetic fixture: the real compare render chain",
  *     and it MAY click the notes dialog's OK button to resolve
  *     `showNotesDialog()`. Neither is the behaviour under test.
  *   - It MUST NOT create `#storeResult` or `#exportAllResults`. Out-and-back's own
- *     template ships both (`renderOutAndBack.ts:453` and `:455`) and the whole
- *     point is to click the buttons production renders.
+ *     template ships both, in its sidebar footer (`renderOutAndBack.ts`) and the
+ *     whole point is to click the buttons production renders.
  *   - It MUST NOT create the two trim sliders `handleStoreResult` looks for. Their
  *     ABSENCE from the out-and-back template is precisely the thing under test.
  *     Supplying them would be this phase's anti-pattern 1 in its purest form:
