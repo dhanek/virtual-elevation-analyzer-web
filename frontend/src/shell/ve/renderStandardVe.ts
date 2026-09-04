@@ -19,16 +19,11 @@ import {
 	resetPlotXAxisForNewPanel,
 } from "./plotXAxisToggle";
 import {
-	buildVirtualElevationFigures,
 	buildWindSpeedFigure,
 	buildSpeedPowerFigure,
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
-import {
-	setupVESliders,
-	updateMetricsDisplay,
-} from "./bindStandardSliders";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { setupVESliders } from "./bindStandardSliders";
 import { crrTempControlsMarkup } from "./crrTempControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
@@ -36,14 +31,8 @@ import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
-import { resolveSelectionRhoArray } from "../analysis/rhoArrayResolver";
-import {
-	resolvePlaceholderWindSpeed,
-	resolveSelectionWindSeries,
-} from "./standardSegments";
-import { seedSegmentModeFilteredData } from "../../modes/analysis/segmentSummary";
-import { standardMode } from "../../modes/analysis/standardMode";
+import { resolveSelectionWindSeries } from "./standardSegments";
+import { applyVeStatus } from "../../state/veStatus";
 import {
 	selectedLapCount,
 	updateCombinedVirtualDistanceHeader,
@@ -84,12 +73,6 @@ export async function initializeVEAnalysis(
 	const trimStart = appState.presetTrimStart;
 	const trimEnd = appState.presetTrimEnd ?? analysisInput.timestamps.length - 1;
 
-	// Use initial CdA and Crr from parameters
-	const initialCdA = resolveDisplayCda(appState.currentParameters?.cda);
-	const initialCrr = resolveDisplayCrr(appState.currentParameters?.crr);
-	const appliedInitialCrr = appState.currentParameters
-		? resolveAppliedCrr(appState.currentParameters, initialCrr)
-		: initialCrr;
 	const initialWindSource = getSelectedWindSource();
 
 	const context = createPlotContext(
@@ -112,59 +95,35 @@ export async function initializeVEAnalysis(
 		initialWindSource === "fit" ? "fit" : "constant",
 	);
 
-	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT — the third and last
-	// analyze leg. `renderGpsLap` and `renderOutAndBack` were corrected first;
-	// this one was left building its calculator with no `rhoArray` while
-	// `updateModeVEPlots:251` passes a per-segment slice, so on any ride with
-	// usable air density the two passes integrated different physics. That was
-	// filed as unobservable while this paint only drew plots. It is observable
-	// now: `updateMetricsDisplay` below writes R²/RMSE/VE/Actual from THIS fit,
-	// so the header showed the constant-rho numbers until the post-bind kick
-	// landed — and kept showing them on any path where the scheduled pass never
-	// reaches `renderVe` (every segment under the trim floor, a calculator
-	// throwing, a saved trim already at its clamp).
-	const selectionRho = appState.currentFitData
-		? resolveSelectionRhoArray(
-				appState.currentFitData,
-				selectedIndices,
-				analysisInput.timestamps.length,
-			)
-		: null;
-
-	const calculator = createVeCalculator({
-		timestamps: analysisInput.timestamps,
-		power: analysisInput.power,
-		velocity: analysisInput.velocity,
-		positionLat: analysisInput.positionLat,
-		positionLong: analysisInput.positionLong,
-		altitude: analysisInput.altitude,
-		distance: analysisInput.distance,
-		windSpeed: resolvePlaceholderWindSpeed(
-			initialWindSource === "fit" ? "fit" : "constant",
-			analysisInput.windSpeed,
-			resolvedWindSpeed,
-		),
-		rhoArray: selectionRho,
-		params: appState.currentParameters!,
-		cda: initialCdA,
-		crr: appliedInitialCrr,
-	});
-
-	const result = calculator.calculate_virtual_elevation(
-		initialCdA,
-		appliedInitialCrr,
-		trimStart,
-		trimEnd,
-	);
-
-	// Create plots
-	const figures = buildVirtualElevationFigures({
-		context,
-		virtualElevation: Array.from(result.virtual_elevation),
-		actualElevation: analysisInput.altitude,
-		cdaLabel: initialCdA.toFixed(3),
-		crrLabel: appliedInitialCrr.toFixed(4),
-	});
+	// NO VIRTUAL ELEVATION IS COMPUTED HERE ANY MORE — the third and last
+	// analyze leg to stop.
+	//
+	// This function used to build its own calculator over the CONCATENATED
+	// selection and integrate it once, then draw `#vePlot` / `#veResidualsPlot`
+	// from that single fit and write `#r2Value` / `#rmseValue` / `#veGainValue` /
+	// `#actualGainValue` from its scalars. `updateModeVEPlots` then ran a
+	// macrotask later, fitted each selected lap SEPARATELY, and repainted the
+	// same five targets from the MEAN of those per-lap fits (D-19 Option B, see
+	// `bindStandardSliders.ts`'s `aggregate`). For a multi-lap selection those
+	// are different quantities, so the header visibly jumped: one number replaced
+	// by another with no user action in between. Deleting the fit is what retires
+	// that — with no first quantity there is nothing left to disagree.
+	//
+	// Everything the fit needed went with it: `createVeCalculator`, the trimmed
+	// `calculate_virtual_elevation` call, the elevation figure pair, the
+	// per-selection `resolveSelectionRhoArray` slice (the primitive resolves rho
+	// per segment and range-checks it, so this copy had nothing left to agree
+	// with), `resolvePlaceholderWindSpeed`, and the `resolveDisplayCda` /
+	// `resolveAppliedCrr` pair that supplied the calculator's CdA and Crr. The
+	// SLIDER markup below still resolves its own display values through
+	// `resolveDisplayCda` / `resolveDisplayCrr`; the computed half is now the
+	// producer's, which is exactly the single-source-of-truth
+	// `unsetParameterFallbacks.ts` documents.
+	//
+	// The three secondary figures below stay. None of them integrates anything —
+	// wind, speed/power and virtual distance are properties of the recorded ride
+	// — so drawing them here costs no physics and keeps the Wind / Power / VD
+	// tabs populated from the first frame.
 
 	// D-05: the last of the five inline wind copies is gone from here too. This
 	// one applied the offset but NOT the calibration, so the initial Standard
@@ -203,24 +162,17 @@ export async function initializeVEAnalysis(
 		virtualDistanceInput,
 	);
 
-	// `react`, not `newPlot`, for all five (bundle D). Every one of these ids is
-	// redrawn on every slider update -- `bindStandardSliders` already reaches
-	// four of them through `react` -- so `newPlot` here only bought a teardown
-	// and rebuild on the FIRST draw, and left the pattern for the next plot to
-	// be copied from. `react` on a div Plotly has never touched initialises it
-	// exactly as `newPlot` would, so there is no first-draw special case.
-	Plotly.react(
-		"vePlot",
-		figures.elevation.data,
-		figures.elevation.layout,
-		figures.elevation.config,
-	);
-	Plotly.react(
-		"veResidualsPlot",
-		figures.residuals.data,
-		figures.residuals.layout,
-		figures.residuals.config,
-	);
+	// `react`, not `newPlot` (bundle D). Every one of these ids is redrawn on
+	// every slider update -- `bindStandardSliders` reaches all of them through
+	// `react` -- so `newPlot` here only bought a teardown and rebuild on the
+	// FIRST draw, and left the pattern for the next plot to be copied from.
+	// `react` on a div Plotly has never touched initialises it exactly as
+	// `newPlot` would, so there is no first-draw special case.
+	//
+	// `#vePlot` and `#veResidualsPlot` are NOT among them any more: they need a
+	// virtual elevation, this pass computes none, and the post-bind kick opens
+	// both with `react` a macrotask later. Until it lands the two divs are empty
+	// rather than carrying a fit nothing else agrees with.
 	Plotly.react(
 		"windSpeedPlot",
 		windSpeedFigure.data,
@@ -253,27 +205,26 @@ export async function initializeVEAnalysis(
 		selectedLapCount(appState),
 	);
 
-	// The R2/RMSE/VE/Actual spans, on the same rule as the VD header above and
-	// for the same reason: fill them from the integration that just drew the
-	// curve, never from a fit computed somewhere else.
+	// THE R²/RMSE/VE/Actual SPANS ARE LEFT EMPTY, and that is the [S-M] header
+	// jump being retired rather than an omission.
 	//
-	// The template used to interpolate `prepareAnalysisPayload`'s
-	// `initialResult`, which integrates the CONCATENATED selection with NO trim
-	// and the wind source forced to `"fit"` with the offset off. The plot
-	// directly below the header came from `result` above -- trimmed, and on the
-	// selected source. Two fits of one ride, side by side, until the kick
-	// overwrote both a macrotask later.
+	// Their history is three writers deep. The template first interpolated
+	// `prepareAnalysisPayload`'s `initialResult` -- the concatenated selection,
+	// untrimmed, wind forced to `"fit"` with the offset off -- while the plot
+	// directly beneath came from this function's own trimmed fit on the selected
+	// source. Two fits of one ride, stacked. That was closed by having this
+	// function fill the spans from the fit it had just drawn, which made the
+	// header and the curve agree with each other but not with what came next:
+	// `updateModeVEPlots` fits each lap separately and `renderMetrics` writes the
+	// MEAN of those fits into the same four spans. One fit over N laps and the
+	// mean of N fits are different numbers, so on a multi-lap selection the
+	// header changed by itself a macrotask after the panel appeared.
 	//
-	// `null` for the lap count: the template already wrote it from
-	// `analyzedLaps.length`, and this pass has no per-segment decomposition to
-	// improve on it with.
-	updateMetricsDisplay(
-		result.r2,
-		result.rmse,
-		result.ve_elevation_diff,
-		result.actual_elevation_diff,
-		null,
-	);
+	// Empty is the honest first frame. The spans ship empty in the markup below
+	// and stay empty until the producer has something to put in them, which is
+	// also when `#storeResult` becomes clickable -- the two say the same thing to
+	// the user. `updateMetricsDisplay` in `bindStandardSliders.ts` is now their
+	// only writer.
 
 	appState.filteredVEData = {
 		positionLat: analysisInput.positionLat,
@@ -363,33 +314,27 @@ export async function showVirtualElevationAnalysisInline(
 	// Coverage is unknown until the first `summarize` (WR-01); the previous
 	// analysis's must not ride along into this one.
 	appState.currentCoveredItems = null;
-	// THE FOURTH WRITER, CONVERTED (CR-01).
+	// NO SEED OF `currentFilteredData` HERE ANY MORE, and this was the last one
+	// in the codebase.
 	//
-	// This used to be `{ power, velocity, temperature, timestamps }` — the raw
-	// analyze payload — which made `segmentSummary.ts`'s "THE ONE PLACE the
-	// analysed sample arrays are concatenated" false for Standard, and carried
-	// both defects that header's fixes closed downstream:
+	// A seed wrote the analysed sample arrays at ANALYZE time so that Analyze
+	// followed straight by Store Result described this ride rather than the
+	// previous one. It solved a real problem — the same one CR-01 named — but it
+	// solved it by adding a second writer of a field the update pass also writes,
+	// and two writers of one answer is what CR-02 was. The guarantee is now
+	// carried by the status instead: `veStatus` leaves `"ready"` the moment a new
+	// panel goes up (see the `applyVeStatus` call below), `handleStoreResult`
+	// refuses anything that is not `"ready"`, and `#storeResult` is rendered
+	// disabled to say so. Store Result therefore cannot reach a stale value at
+	// all, rather than reaching a freshly-overwritten one.
 	//
-	//   - UNTRIMMED. The payload is the whole deduplicated selection, so a lap the
-	//     user had narrowed to a 30-sample window still stored averages over the
-	//     acceleration and the roll-out.
-	//   - 0 °C FABRICATED. `prepareAnalysisPayload` pushed `… || 0` for a missing
-	//     reading, so a ride with no temperature channel produced an all-zero
-	//     array that `handleStoreResult` reported as `avgTemperature: 0`,
-	//     indistinguishable from a genuine 0 °C ride.
+	// `summarize` is consequently the ONLY writer of `currentFilteredData`, for
+	// all three modes. `segmentSummary.ts` is where it lives.
 	//
-	// It was reachable: `handleTrim` declines to run the pipeline when a saved
-	// trim already sits at its clamp, so `summarize` had never run and this was
-	// the value Store Result read. Seeding through the shared concatenation gives
-	// Standard the NaN "no reading" marker for free, and `getUpdateSegments`
-	// supplies exactly the per-lap ranges the first recompute will use.
-	//
-	// `getUpdateSegments` reads `currentAnalyzedLaps`, which is why it is assigned
-	// above this and not below it.
-	seedSegmentModeFilteredData(
-		appState,
-		standardMode.getUpdateSegments(appState).map((segment) => segment.range),
-	);
+	// The two assignments above stay: `currentAnalyzedLaps` is the settings key
+	// (`saveLapSettings` / `loadLapSettings`) and has nothing to do with the
+	// seed, and `currentCoveredItems` must be cleared so the previous analysis's
+	// coverage does not ride along into this one (WR-01).
 	appState.currentCdaReference = cdaReference;
 
 	const hasWindSpeed = windSpeed.some((val) => !isNaN(val) && val !== 0);
@@ -610,6 +555,31 @@ export async function showVirtualElevationAnalysisInline(
             </div>
         </div>
     `;
+
+	// THE BUTTON THE MARKUP ABOVE JUST CREATED IS ENABLED. DISABLE IT.
+	//
+	// The template ships `#storeResult` with no `disabled` attribute, so the
+	// innerHTML assignment above has just put a live, clickable Store Result into
+	// the document — pointing at `currentVEResult` and its three siblings, which
+	// until the first update pass lands still hold the PREVIOUS analysis.
+	// `applyVeStatus` is the one writer that both sets the status and reflects it
+	// onto whatever button is in the document, which is why this runs AFTER the
+	// assignment and not before: before it, there is no button here to disable.
+	//
+	// This does NOT open the window — `handleAnalyze` already invalidated the
+	// status on entry, and has to, because everything between there and here
+	// (storage I/O, `resolveMultiSegmentAnalysisParams`, `waitForPlotly`) runs
+	// with the previous panel still mounted and its own `#storeResult` still
+	// enabled. That line closes the window for the whole approach; this one
+	// re-closes the DOM half of it for markup that did not exist when it ran.
+	//
+	// `updateModeVEPlots` sets `computing` again on entry and `ready` after
+	// `summarize`. Also not a duplicate: the primitive covers ITS pass, which
+	// runs once per control gesture, long after this panel was built.
+	//
+	// Mirrors `renderGpsLap.ts` and `renderOutAndBack.ts`, which need the
+	// identical line for the identical reason.
+	applyVeStatus(appState, "computing");
 
 	const analysisInput = createAnalysisInput({
 		timestamps,

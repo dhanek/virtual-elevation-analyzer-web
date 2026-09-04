@@ -102,21 +102,27 @@ export function buildFilteredDataFromProfiles(
 }
 
 /**
- * THE ONE PLACE the analysed sample arrays are concatenated, for both the
- * analyze path and the update path (CR-01).
+ * THE ONE PLACE the analysed sample arrays are concatenated.
  *
  * `currentFilteredData` used to have three writers in different index spaces —
- * that divergence was CR-02 — and only ONE of them ran at analyze time, and
- * only for Standard. The two segment modes computed their profiles locally and
- * painted them directly, so this array was first written when the user touched
- * a control. Analyze then Store Result, with nothing in between, either refused
- * or averaged the previous analysis's samples.
+ * that divergence was CR-02 — and only ONE of them ran at analyze time, and only
+ * for Standard. The two segment modes computed their profiles locally and
+ * painted them directly, so this array was first written when the user touched a
+ * control. Analyze then Store Result, with nothing in between, either refused or
+ * averaged the previous analysis's samples.
  *
- * Taking index GROUPS rather than profiles is what lets both callers share the
- * implementation: the analyze path already holds `{startIdx, endIdx}` ranges for
- * its laps or legs, and the update path holds profiles. Neither has to fabricate
- * the other's shape, and there is no second concatenation to drift from this
- * one.
+ * The intermediate fix gave all three modes an analyze-time seed through this
+ * function. Those seeds are gone: they were second writers of a field the update
+ * pass also writes, which is the shape CR-02 was, and the guarantee they existed
+ * for is now carried by `veStatus` — a new panel leaves `"ready"`,
+ * `handleStoreResult` refuses anything that is not `"ready"`, and `#storeResult`
+ * is rendered disabled to say so. `writeSegmentModeResultState` below, reached
+ * only from `summarize`, is therefore the SINGLE writer of this field for every
+ * mode, and `buildFilteredDataFromProfiles` its only caller of this function.
+ *
+ * The index-GROUPS signature is kept rather than narrowed to profiles: it is the
+ * smallest thing this concatenation actually needs, and it keeps the trim
+ * decision at the one call site above that knows about trim windows.
  */
 export function buildFilteredDataFromIndexGroups(
 	appState: AppState,
@@ -180,49 +186,6 @@ export function resolveRecordedWindSource(
 	resolved: "constant" | "fit" | "none",
 ): WindSource {
 	return requested === "compare" ? "compare" : resolved;
-}
-
-/**
- * Establish `currentFilteredData` at ANALYZE time for a segment mode, from the
- * index ranges the render already resolved (CR-01).
- *
- * The invariant this exists to make true: once a segment mode's panel is on
- * screen, the analysed samples behind it are in AppState — so Store Result
- * describes what the user is looking at whether or not they have touched a
- * control yet.
- *
- * It goes through `buildFilteredDataFromIndexGroups`, the same concatenation
- * `summarize` uses, rather than assembling the arrays here. That is the point:
- * a second assembly would be a fourth writer of this field, and writers of this
- * field disagreeing with each other is exactly what CR-02 was.
- *
- * Ranges are clamped to the activity length because a range is an inclusive
- * `{startIdx, endIdx}` pair resolved from GPS geometry, and a trailing lap can
- * name an index one past the last sample.
- */
-export function seedSegmentModeFilteredData(
-	appState: AppState,
-	ranges: Array<{ startIdx: number; endIdx: number }>,
-): void {
-	const fitData = appState.currentFitData;
-	if (!fitData) {
-		return;
-	}
-
-	const sampleCount = getNormalizedActivityArrays(fitData).timestamps.length;
-	const indexGroups = ranges.map((range) => {
-		const indices: number[] = [];
-		const end = Math.min(range.endIdx, sampleCount - 1);
-		for (let i = Math.max(range.startIdx, 0); i <= end; i++) {
-			indices.push(i);
-		}
-		return indices;
-	});
-
-	appState.currentFilteredData = buildFilteredDataFromIndexGroups(
-		appState,
-		indexGroups,
-	);
 }
 
 /**
