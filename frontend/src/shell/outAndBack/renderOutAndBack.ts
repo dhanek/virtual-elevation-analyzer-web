@@ -8,6 +8,11 @@
  * AnalysisParameters and computed numeric stats (no user-provided strings).
  * This matches the prior main.ts behavior; no new XSS surface is introduced.
  */
+import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
+import {
+	resolveDisplayCda,
+	resolveDisplayCrr,
+} from "../../analysis/unsetParameterFallbacks";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
@@ -198,8 +203,8 @@ export async function showOutAndBackVEAnalysis(
 
 	// The stored Crr is 22 °C-referenced; the physics uses the
 	// temperature-corrected value when the correction is enabled.
-	const cda = resolvedParams.cda ?? 0.3;
-	const crr = resolvedParams.crr ?? 0.008;
+	const cda = resolveDisplayCda(resolvedParams.cda);
+	const crr = resolveDisplayCrr(resolvedParams.crr);
 	const appliedCrr = resolveAppliedCrr(resolvedParams, crr);
 
 	// Calculate VE for each section (outbound and inbound separately)
@@ -476,6 +481,9 @@ export function buildOutAndBackVeAnalysisTemplate(
 		defaultAirSpeedOffset,
 		elevationToggleMarkup,
 	} = opts;
+	// Slider TRAVEL is app configuration, not stored data (see sliderBounds.ts).
+	const crrBounds = displayCrrBounds(resolveDisplayCrr(params.crr));
+	const cdaBounds = displayCdaBounds(resolveDisplayCda(params.cda));
 
 	return `
         <div class="ve-inline-container">
@@ -489,13 +497,13 @@ export function buildOutAndBackVeAnalysisTemplate(
                             <div class="ve-control-grid">
                                 <div class="ve-control-group">
                                     <label>CdA (Drag Coefficient × Area):</label>
-                                    <input type="range" id="cdaSlider" min="${params.cda_min}" max="${params.cda_max}" value="${params.cda || 0.3}" step="0.001" class="ve-slider">
-                                    <input type="number" id="cdaValue" value="${(params.cda || 0.3).toFixed(3)}" min="${params.cda_min}" max="${params.cda_max}" step="0.001" class="ve-value-input">
+                                    <input type="range" id="cdaSlider" min="${cdaBounds.min}" max="${cdaBounds.max}" value="${resolveDisplayCda(params.cda)}" step="0.001" class="ve-slider">
+                                    <input type="number" id="cdaValue" value="${resolveDisplayCda(params.cda).toFixed(3)}" min="${cdaBounds.min}" max="${cdaBounds.max}" step="0.001" class="ve-value-input">
                                 </div>
                                 <div class="ve-control-group">
                                     <label>Crr (Rolling Resistance):</label>
-                                    <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
-                                    <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
+                                    <input type="range" id="crrSlider" min="${crrBounds.min}" max="${crrBounds.max}" value="${resolveDisplayCrr(params.crr)}" step="0.0001" class="ve-slider">
+                                    <input type="number" id="crrValue" value="${resolveDisplayCrr(params.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
