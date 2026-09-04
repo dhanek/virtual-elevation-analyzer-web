@@ -11,9 +11,16 @@ export interface LapVEProfile {
      * calculator throws, so the surviving profiles — not the active range list
      * — are the truth about what is on screen (WR-03).
      *
-     * NULLABLE, matching `outAndBack/types.ts` (WR-04). The single reader is the
-     * analyze-time seed in `renderGpsLap.ts`; the UPDATE producer has no reader
-     * at all and does not compute one. It was declared non-optional and derived
+     * NO READER, as of the analyze-leg retirement. The single reader WAS the
+     * analyze-time seed in `renderGpsLap.ts`, and that seed is deleted: the
+     * update path is the only producer of `currentFilteredData` now, and it
+     * seeds from the profiles themselves in `summarize`. The field is still
+     * written by the analyze leg because it is the honest answer to "which
+     * samples is this profile about", and removing it belongs with the rest of
+     * the post-retirement sweep rather than with the deletion of its caller.
+     *
+     * NULLABLE, matching `outAndBack/types.ts` (WR-04). It was declared
+     * non-optional and derived
      * unguarded from `profile.indices[0]` / `[length - 1]`, so an empty-indices
      * profile yielded `{ startIdx: undefined, endIdx: undefined }` typed as
      * `number` — while the very next field, `duration`, guarded for exactly that.

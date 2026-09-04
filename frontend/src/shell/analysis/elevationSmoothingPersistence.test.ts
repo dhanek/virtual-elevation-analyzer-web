@@ -305,7 +305,6 @@ const MODES: readonly ModeUnderTest[] = [
 				{} as unknown as ResultsStorage,
 				async () => ({}),
 				[lapProfile(1), lapProfile(2)] as any,
-				meanElevation,
 				appState.currentParameters!,
 				true,
 				true,

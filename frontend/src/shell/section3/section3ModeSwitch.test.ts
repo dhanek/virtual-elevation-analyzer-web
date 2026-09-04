@@ -598,7 +598,6 @@ async function analyzeGpsLap(appState: AppState): Promise<void> {
 		{} as unknown as ResultsStorage,
 		async () => ({}),
 		[lapProfile(1), lapProfile(2)] as never,
-		{ distances: [0, 1, 2], elevation: [0, 1, 2] },
 		appState.currentParameters!,
 		true,
 		true,

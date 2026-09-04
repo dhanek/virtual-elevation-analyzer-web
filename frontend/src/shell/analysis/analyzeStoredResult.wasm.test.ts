@@ -369,20 +369,35 @@ describe.skipIf(!ready)("the analyze paint and the kick's repaint", () => {
 		resetModeUpdateRequests();
 	});
 
-	it("paints the same numbers, so the repaint is invisible", async () => {
-		const firstPaint = painted[0];
-		expect(firstPaint).toBeDefined();
+	/**
+	 * THE SAME QUESTION, ANSWERED BY CONSTRUCTION.
+	 *
+	 * This case used to capture the analyze leg's paint and the kick's paint and
+	 * assert the two agreed to nine digits, because two producers of one number
+	 * is a defect you can only manage by testing that they never disagree. The
+	 * management is now unnecessary: the analyze leg paints NOTHING, so there is
+	 * no earlier number for the kick to contradict and the repaint is not a
+	 * repaint at all.
+	 *
+	 * The assertion follows the guarantee: exactly one paint per Analyze, and it
+	 * is the producer's. A regression that reintroduced an analyze-time fit
+	 * would show up here as a second entry in `painted` — which is what makes
+	 * this a guard and not a tautology, and the strongest form of the original
+	 * claim available: numbers that are never computed twice cannot jump.
+	 *
+	 * RHO IS STILL THE AXIS. The fixture's real per-point series is installed in
+	 * the `beforeEach` above precisely because it is the input the two passes
+	 * used to treat differently; it stays, so the single pass is exercised on it.
+	 */
+	it("paints once, so there is no repaint to be visible", async () => {
+		expect(painted).toHaveLength(0);
 
 		await settle();
 
-		const afterKick = painted[painted.length - 1];
-		expect(painted.length).toBeGreaterThan(1);
+		expect(painted).toHaveLength(1);
 
-		// Anti-vacuity: a fit that collapsed to zeros would agree trivially.
-		expect(afterKick.meanRMSE).toBeGreaterThan(1);
-
-		expect(firstPaint.meanRMSE).toBeCloseTo(afterKick.meanRMSE, 9);
-		expect(firstPaint.meanR2).toBeCloseTo(afterKick.meanR2, 9);
-		expect(firstPaint.closingError).toBeCloseTo(afterKick.closingError, 9);
+		// Anti-vacuity: this must be a real fit of the ride, not an empty pass
+		// that painted a zeroed stats object.
+		expect(painted[0].meanRMSE).toBeGreaterThan(1);
 	});
 });

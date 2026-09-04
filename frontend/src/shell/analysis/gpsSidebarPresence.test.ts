@@ -66,7 +66,6 @@ function renderGpsLap(source: WindSource): Document {
 			hasConstantWind: true,
 			...flagsFor(source),
 			currentAirSpeedCalibrationValue: "0.0",
-			initialStats: { meanR2: 0.5, meanRMSE: 1, closingError: 2 },
 			lapCount: 7,
 			defaultAirSpeedOffset: 0,
 			elevationToggleMarkup: "",
