@@ -269,11 +269,6 @@ function initialProfiles(): OutAndBackVEProfile[] {
 
 const profiles = initialProfiles();
 
-const meanElevation = {
-	distances: profiles[0].outboundDistances,
-	elevation: profiles[0].outboundActualElevation,
-};
-
 /**
  * The host page the analyze path leaves behind. `#veAnalysisSection` must not
  * carry `hidden`, because `requestModeUpdate` refuses to schedule anything while
@@ -298,7 +293,6 @@ async function renderOutAndBack(
 		resultsStorage,
 		waitForFakePlotly,
 		profiles,
-		meanElevation,
 		appState.currentParameters!,
 		true,
 		true,
@@ -310,6 +304,20 @@ async function renderOutAndBack(
 /** Drain the recompute runner's debounce so the scheduled run executes. */
 async function settle(): Promise<void> {
 	await vi.advanceTimersByTimeAsync(500);
+}
+
+/**
+ * The REAL `#storeResult` the out-and-back template rendered. Nothing in this
+ * file creates one, so a missing button is a failure rather than a null.
+ */
+function storeButton(): HTMLButtonElement {
+	const node = document.getElementById(
+		"storeResult",
+	) as HTMLButtonElement | null;
+	if (!node) {
+		throw new Error("#storeResult is not in the rendered out-and-back panel");
+	}
+	return node;
 }
 
 function el(id: string): HTMLInputElement {
@@ -399,6 +407,61 @@ describe("out-and-back on the synthetic fixture: the real compare render chain",
 		vi.useRealTimers();
 		clearModeUpdateCallbacks();
 		resetModeUpdateRequests();
+	});
+
+	/**
+	 * THE SECOND ANALYZE — the case out-and-back's retirement exists for, and the
+	 * only one in this file in which `veStatus` starts out `ready`.
+	 *
+	 * Every other case here renders once onto a fresh `makeAppState()`, whose
+	 * `veStatus` is `undefined`, so "not ready" is true of it before anything
+	 * runs and asserting that alone proves nothing. What must be true is stronger
+	 * and only observable here: a status that IS `ready`, from a completed first
+	 * analysis, stops being `ready` the moment a new panel goes up — because
+	 * `currentVEResult` and its three siblings still hold the FIRST analysis, and
+	 * the new panel is not what they describe.
+	 *
+	 * The button is asserted alongside the field for the same reason it is
+	 * asserted at all: the second panel's `#storeResult` is fresh markup with no
+	 * `disabled` attribute, so it arrives ENABLED unless something disables it,
+	 * and that is the state in which a click would persist the previous analysis
+	 * under this ride. `handleAnalyze`'s own status write cannot reach it — that
+	 * button does not exist when the orchestrator runs, and this file does not go
+	 * through the orchestrator at all, which is why the render function needs the
+	 * line of its own that this case pins.
+	 *
+	 * GPS-lap's equivalent lives in `gpsModeRealChain.test.ts`; it is GPS-lap-only
+	 * because out-and-back's leg was still seeding when it was written.
+	 */
+	it("stops claiming ready when a second analyze puts up a new panel", async () => {
+		await settle();
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+
+		// The user presses Analyze again. Same AppState, same fields, new panel.
+		await renderOutAndBack(appState, {} as unknown as ResultsStorage);
+
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		// And the second pass re-earns it, so the assertion above is about the
+		// window and not about the panel being permanently broken.
+		await settle();
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+	});
+
+	/**
+	 * The window as the USER meets it on a FIRST analyze: a Store Result button
+	 * that is visibly refused rather than one that looks clickable and silently
+	 * does nothing.
+	 */
+	it("ships the Store Result button disabled until the producer is ready", async () => {
+		expect(storeButton().disabled).toBe(true);
+
+		await settle();
+
+		expect(storeButton().disabled).toBe(false);
 	});
 
 	it("compare draws four figures into the four template ids", async () => {
@@ -644,8 +707,31 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 	 *
 	 * Every other assertion in this block opens with `await drag(...)`, which is
 	 * precisely why the phase never caught it.
+	 *
+	 * WHAT CHANGED, AND WHY THIS CASE STILL EXISTS. The invariant above was held
+	 * by `seedSegmentModeAnalyzeState`, a SECOND writer of `currentFilteredData`
+	 * running off the analyze leg's own fits. WR-03 established that what it
+	 * wrote was not what the recompute reproduces, so it was a second answer
+	 * rather than a preview, and retiring out-and-back's analyze fits retired it
+	 * with them. The GUARANTEE is unchanged and is what is asserted below: after
+	 * Analyze, with no control touched, `currentFilteredData` describes THIS
+	 * selection — written now by the post-bind kick, the one producer, rather
+	 * than by a seed. The sample count is the same number the seed produced, and
+	 * is deliberately unchanged.
+	 *
+	 * The window between the panel appearing and that pass landing is covered by
+	 * `veStatus`, not by a value: `handleStoreResult` refuses while the status is
+	 * anything but `"ready"`, which is the first assertion here. That is the
+	 * CR-01/WR-3 promise restated — Analyze then Store Result never persists a
+	 * previous analysis's data — with a refusal in place of a seed.
 	 */
-	it("seeds the analysed samples at analyze time, before any control is touched", async () => {
+	it("has the analysed samples in AppState once the producer has run, and refuses Store Result until then", async () => {
+		// BEFORE: nothing to store, and the status says so.
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		await settle();
+
 		expect(appState.currentFilteredData).not.toBeNull();
 
 		const totalSamples = ride.sections.reduce(
@@ -657,10 +743,13 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 		);
 		expect(appState.currentFilteredData!.power).toHaveLength(totalSamples);
 		expect(appState.currentFilteredData!.timestamps).toHaveLength(totalSamples);
+		// AFTER: the producer has summarized, so the button is live.
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
 	});
 
 	/**
-	 * THE ANTI-DRIFT HALF OF CR-01, and the reason the seed goes through
+	 * THE ANTI-DRIFT HALF OF CR-01, and the reason the seed went through
 	 * `buildFilteredDataFromIndexGroups` rather than assembling its own arrays.
 	 *
 	 * A seed that produced DIFFERENT samples from the ones `summarize` writes on
@@ -668,9 +757,26 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 	 * index space — which is CR-02 all over again, and would show up as Store
 	 * Result reporting one average before the user touches a control and another
 	 * one after.
+	 *
+	 * WHAT CHANGED. There is no seed left to drift: the analyze leg no longer
+	 * writes this field at all, so the two writers whose disagreement this case
+	 * existed to catch are now one. The case is kept, and made to assert the
+	 * property that survives — the samples the panel arrives with are the ones
+	 * every LATER pass reproduces, so a control gesture moves the numbers on
+	 * screen without moving the window Store Result averages over. The first
+	 * `settle()` is what used to be the seed; the `drag` is the second pass. Both
+	 * are now the same producer, and the point is that it is stable across
+	 * parameter changes.
+	 *
+	 * The companion refusal assertion lives in the case above: before that first
+	 * `settle()` there is nothing here at all, and `veStatus` is what stops Store
+	 * Result reading it.
 	 */
-	it("seeds exactly the samples the first recompute goes on to write", async () => {
-		const seeded = {
+	it("keeps exactly the samples the first recompute wrote when a control moves", async () => {
+		expect(appState.veStatus).not.toBe("ready");
+		await settle();
+
+		const settled = {
 			power: [...appState.currentFilteredData!.power],
 			velocity: [...appState.currentFilteredData!.velocity],
 			timestamps: [...appState.currentFilteredData!.timestamps],
@@ -678,9 +784,11 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 
 		await drag("cdaSlider", DRAGGED_CDA);
 
-		expect(appState.currentFilteredData!.power).toEqual(seeded.power);
-		expect(appState.currentFilteredData!.velocity).toEqual(seeded.velocity);
-		expect(appState.currentFilteredData!.timestamps).toEqual(seeded.timestamps);
+		expect(appState.currentFilteredData!.power).toEqual(settled.power);
+		expect(appState.currentFilteredData!.velocity).toEqual(settled.velocity);
+		expect(appState.currentFilteredData!.timestamps).toEqual(
+			settled.timestamps,
+		);
 	});
 
 	it("a CdA drag writes the on-screen result into AppState through the summarize seam", async () => {

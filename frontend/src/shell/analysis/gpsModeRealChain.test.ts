@@ -307,8 +307,6 @@ const lapProfile = (lapNumber: number) => ({
 	totalDistance: 2,
 });
 
-const meanElevation = { distances: [0, 1, 2], elevation: [0, 1, 2] };
-
 /** A minimal but well-formed supplementary series for one leg. */
 const legSeries = (scale: number) => ({
 	distancesKm: [0, 1, 2].map((d) => d * scale),
@@ -502,7 +500,6 @@ const MODES: readonly ModeUnderTest[] = [
 				resultsStorage,
 				async () => ({}),
 				[sectionProfile] as any,
-				meanElevation,
 				appState.currentParameters!,
 				true,
 				true,

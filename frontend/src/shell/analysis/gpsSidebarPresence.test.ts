@@ -81,7 +81,6 @@ function renderOutAndBack(source: WindSource): Document {
 			hasConstantWind: true,
 			...flagsFor(source),
 			currentAirSpeedCalibrationValue: "0.0",
-			initialStats: { rmse: 1, avgVeGain: 2, avgActualGain: 3 },
 			sectionCount: 4,
 			defaultAirSpeedOffset: 0,
 			elevationToggleMarkup: "",

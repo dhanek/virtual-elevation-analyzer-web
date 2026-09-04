@@ -158,7 +158,6 @@ const MODES: readonly ModeUnderTest[] = [
 			buildOutAndBackVeAnalysisTemplate({
 				...FLAGS,
 				params,
-				initialStats: { rmse: 1, avgVeGain: 2, avgActualGain: 3 },
 				sectionCount: 1,
 				elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
 			}),

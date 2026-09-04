@@ -3,12 +3,17 @@ import type { SegmentSupplementarySeries } from '../../analysis/SegmentSupplemen
 export interface OutAndBackVEProfile {
     sectionNumber: number;
     /**
-     * The full-activity ranges each leg was computed over, null when that leg
-     * produced nothing (under 10 samples, or its calculator threw).
+     * The full-activity ranges each leg was described over, null when that leg
+     * produced nothing (under 10 samples).
      *
-     * Per LEG rather than per section because the two fail independently, and
-     * the seed of `currentFilteredData` must cover exactly the legs that made
-     * it onto the plot (WR-03).
+     * Per LEG rather than per section because the two fail independently.
+     *
+     * NO READER LEFT. These existed for the analyze-time seed of
+     * `currentFilteredData`, which had to cover exactly the legs that made it
+     * onto the plot (WR-03); that seed is gone and the update path is now the
+     * only writer of that field, off the profiles themselves. The fields are
+     * kept for now because the update path already fills them with `null` and
+     * removing them is a type change with its own sweep.
      */
     outboundRange: { startIdx: number; endIdx: number } | null;
     inboundRange: { startIdx: number; endIdx: number } | null;
