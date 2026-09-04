@@ -244,40 +244,26 @@ re-deriving it):
       whether that is the actual goal before spending the rewrite.
       *origin: maintainer, 2026-09-04*
 
-- [ ] **[M] Standard's first paint disagrees with the settled panel on a file with no stored
-      parameters.** *Owner: bundle **C**.* Found by bundle C's own in-app check, 2026-09-03.
-      Bundle C's claim is that the first paint already agrees with what the panel settles to. It
-      does — except on the very first Analyze of a file that has no `fileParameters` record yet,
-      where the header writes one set of numbers and replaces it with another ~90 ms later.
+- [x] **[M] Standard's first paint disagrees with the settled panel on a file with no stored
+      parameters.** *Owner: bundle **C**.* Found by bundle C's in-app check 2026-09-03,
+      **root-caused and fixed 2026-09-04.** See *Standard's two Crr fallbacks* under **Done**.
 
-      **Repro** (reproduced 3× on the reference ride, Standard, lap 10, `dcdcaac`): delete the file's row
-      from `VirtualElevationAnalyzer/fileParameters`, reload, upload, *Analyze FIT File*, tick
-      `#lap-10`, *Analyze*. A `MutationObserver` on `#r2Value`/`#rmseValue`/`#veGainValue`/
-      `#actualGainValue` records **two** entries:
+      **It was not the elevation resolver, and not rho.** Instrumenting `createVeCalculator` on a
+      reproduction showed the two calls differing in **`crr` alone** — 0.005 then 0.008 — with CdA,
+      trim, rho array, wind series, altitude and sample count byte-identical. `renderStandardVe.ts`
+      computed the analyze leg at `crr ?? 0.005` while its slider markup rendered `crr || 0.008`;
+      the post-bind kick reads the slider.
 
-      | | R² | RMSE | VE gain | Actual gain |
-      |---|---|---|---|---|
-      | first paint, +243 ms | 0.0015 | 11.51 m | 22.39 m | −0.24 m |
-      | settles, +332 ms | 0.0060 | 7.62 m | 15.57 m | −0.24 m |
+      **Why the original triage excluded Crr, wrongly:** it compared `#crrValue` across the two
+      snapshots and found 0.0080 both times. It was right about the DOM — **0.005 was never in the
+      DOM.** It existed only as the argument the analyze leg passed to the calculator, so no
+      DOM-level comparison could have seen it. A good exclusion, defeated by an observable that
+      could not reach the defect.
 
-      The settled row is the correct one: re-analysing the same lap once a record exists paints
-      `0.0060 / 7.62 m / 15.57 m` in a **single** entry, and the 7.62 m matches what the bundle F
-      condition (a) entry independently recorded for a fresh load of lap 10.
-
-      **What it is not.** Both snapshots were taken with identical `#cdaValue` 0.300, `#crrValue`
-      0.0080, `#rho` 1.225 and trim 0–273, so it is not CdA/Crr, not trim, and not the scalar rho
-      input. It is not the weather fill either: auto-rho did not start until +1000 ms and rho only
-      reached 1.1285 afterwards. Actual gain is stable at −0.24 m throughout, so the *actual*
-      elevation resolution is not the differing term — the VE integration is. With auto-rho off and
-      rho pinned to 1.225 the two passes agree (single entry, `0.0067 / 7.32 m / 15.27 m`), which
-      points at the rho basis the first pass integrates when no stored record has supplied one, not
-      at the elevation resolver bundle C actually changed. **Diagnosis is open**; the observation is
-      what is established. `renderStandardVe.ts:109-125` (`resolveSelectionRhoArray`) is the place
-      to start. The other two modes are clean — see the bundle C Done entry.
-
-      This is also the WR-4 observation the analyze-leg retirement below is gated on: in GPS-lap and
-      out-and-back the post-bind kick produced **no** visible jump, so that item is unblocked; in
-      Standard the kick is visible, but only on this path. *origin: bundle C in-app check, 2026-09-03*
+      **One loose end.** The original note also recorded that with auto-rho off and rho pinned to
+      1.225 the two passes agreed. The Crr mismatch does not explain that, and the fix was verified
+      against a different ride. Re-run the original repro on the reference ride before treating this
+      entry as closing every route. *origin: bundle C in-app check, 2026-09-03*
 
 - [ ] **[S] Bundle E's widened Crr range never reaches a file that has been analysed before.**
       *Owner: bundle **E**.* Found by bundle E's own in-app check, 2026-09-03. D-c widened the range
@@ -399,6 +385,56 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Standard's two Crr fallbacks — 2026-09-04
+
+Committed on `in-app-checks-a-c-e` on top of `0dd8ecd`. 1081 tests pass (up 11 on 1070),
+`npm run check` and `npm run lint` clean.
+
+- [x] **[M] Standard painted twice on a file with no stored parameter record.**
+      `DEFAULT_PARAMETERS.crr` is `null` ("optimize"), so anything that must put a NUMBER on screen
+      or into the calculator beforehand needs a stand-in — and there were two:
+      `renderStandardVe.ts` used `crr ?? 0.005` for the analyze leg and `crr || 0.008` for the
+      slider markup. The kick reads the slider, so the panel computed at 0.005, painted, then
+      recomputed at 0.008 and replaced itself. GPS-lap and out-and-back already used 0.008 on both
+      halves, which is why only Standard drifted.
+
+      **Measured, not inferred.** `createVeCalculator` instrumented on `Airstrip4lap3.fit` lap 2:
+      `0.8264 / 3.56 m / −7.32 m` replaced 16 ms later by `0.8200 / 4.56 m / −9.07 m`, the two
+      calls differing in `crr` (0.005 → 0.008) and in nothing else. Ruled out along the way, each
+      by measurement rather than argument: the DEM race (DEM applies at 148 ms warm / 957–1194 ms
+      cold, always before Analyze), and `loadLapSettings` returning nothing (a never-analysed lap
+      combination on a file that HAS a record paints once).
+
+      **Never only cosmetic:** `storageHandlers.ts` carried the same `?? 0.005` on the path that
+      PERSISTS a result when no slider is rendered, so Store Result could write 0.005.
+
+      All ten fallback sites now route through `resolveDisplayCrr`. Guards: five cases plus a
+      source scan for any numeric crr fallback outside the shared module — the scan is the one that
+      matters, since the defect is an OMISSION no test of the module's own exports can observe.
+      **Checked in the app:** `Airstrip4lap4.fit` lap 2, no record — **one** paint, settling
+      directly on `0.8200 / 4.56 m / −9.07 m`.
+      `analysis/unsetParameterFallbacks.ts` (new) · test: `unsetParameterFallbacks.test.ts` (new)
+
+- [x] **[S] The widened Crr range only reached fresh files.** *Bundle **E** follow-up.*
+      Maintainer's objection was the design fix: *"what I would like to store is my Crr selection
+      of previous analysis, the slider range has nothing to do with it."* One pair of numbers was
+      doing two jobs — the optimizer's SEARCH bounds (a real per-file setting, edited in the
+      Section 2 "Crr Bounds" form and passed to the calculator by `VeCalculatorFactory`) and the
+      slider's TRAVEL (app configuration). Bundle E widened the second; the stored first shadowed
+      it, because `normalizeLoadedParameters` returns a post-feature record by identity.
+
+      **Migration was rejected**: it would have to guess whether 0.002/0.015 was chosen or merely
+      inherited, and the next widening would need the same guess. The slider's range now comes from
+      `DEFAULT_PARAMETERS` — so any future change reaches every file with no migration — while the
+      stored pair stays the user's own. The `crr` CLAMP in `bindModeControls.ts` moved with it;
+      leaving it behind would have offered 0.0015 and snapped back to 0.002. The three hardcoded
+      `0.002 / 0.015` literals in `ParameterStorage.ts` now reference `DEFAULT_PARAMETERS`.
+
+      **Checked in the app** on `13.07.fit`, which carries a pre-widening record: slider now
+      **0.0015–0.03**, the stored optimizer bounds still **0.002 / 0.015**, and typing `0.0018` —
+      below the old floor — is **kept**, with the slider following.
+      `analysis/sliderBounds.ts` (new) · test: `sliderBounds.test.ts` (new)
 
 ### Section 3's map-trim sliders get one owner — 2026-09-03
 

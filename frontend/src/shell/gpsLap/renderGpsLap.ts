@@ -8,6 +8,8 @@
  * AnalysisParameters and computed numeric stats (no user-provided strings).
  * This matches the prior main.ts behavior; no new XSS surface is introduced.
  */
+import { displayCrrBounds } from "../../analysis/sliderBounds";
+import { resolveDisplayCrr } from "../../analysis/unsetParameterFallbacks";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
@@ -175,7 +177,7 @@ export async function showGpsLapVEAnalysis(
 	// Get CdA and Crr values. The stored Crr is 22 °C-referenced; the physics
 	// uses the temperature-corrected value when the correction is enabled.
 	const cda = resolvedParams.cda ?? 0.3;
-	const crr = resolvedParams.crr ?? 0.008;
+	const crr = resolveDisplayCrr(resolvedParams.crr);
 	const appliedCrr = resolveAppliedCrr(resolvedParams, crr);
 
 	// Calculate VE for each lap
@@ -691,6 +693,8 @@ export interface GpsLapVeTemplateOptions {
 export function buildGpsLapVeAnalysisTemplate(
 	opts: GpsLapVeTemplateOptions,
 ): string {
+	// Slider TRAVEL is app configuration, not stored data (see sliderBounds.ts).
+	const crrBounds = displayCrrBounds();
 	const {
 		params,
 		hasWindSpeed,
@@ -722,8 +726,8 @@ export function buildGpsLapVeAnalysisTemplate(
                                 </div>
                                 <div class="ve-control-group">
                                     <label>Crr (Rolling Resistance):</label>
-                                    <input type="range" id="crrSlider" min="${params.crr_min}" max="${params.crr_max}" value="${params.crr || 0.008}" step="0.0001" class="ve-slider">
-                                    <input type="number" id="crrValue" value="${(params.crr || 0.008).toFixed(4)}" min="${params.crr_min}" max="${params.crr_max}" step="0.0001" class="ve-value-input">
+                                    <input type="range" id="crrSlider" min="${crrBounds.min}" max="${crrBounds.max}" value="${resolveDisplayCrr(params.crr)}" step="0.0001" class="ve-slider">
+                                    <input type="number" id="crrValue" value="${resolveDisplayCrr(params.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}

@@ -52,6 +52,7 @@ import {
 	controlsForMode,
 	type ModeControlSpec,
 } from "./modeControlTable";
+import { displayCrrBounds } from "../../analysis/sliderBounds";
 import { mergeAnalysisParameters } from "./parametersSync";
 import {
 	configureModeUpdateRequests,
@@ -370,9 +371,12 @@ export function bindModeControls(
 			}
 
 			case "crr": {
-				const value = params
-					? clamp(rawValue, params.crr_min, params.crr_max)
-					: rawValue;
+				// The control's TRAVEL, not the stored optimizer bounds. Clamping to
+				// the stored pair here would undo the widening the markup just
+				// applied: the slider would offer 0.0015 and snap back to 0.002 on
+				// any file analysed before bundle E. See `sliderBounds.ts`.
+				const crrBounds = displayCrrBounds();
+				const value = clamp(rawValue, crrBounds.min, crrBounds.max);
 				writeBoth(spec, value, 4);
 				finish(spec);
 				return;

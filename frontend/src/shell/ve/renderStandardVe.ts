@@ -1,3 +1,4 @@
+import { displayCrrBounds } from "../../analysis/sliderBounds";
 import { AppState } from "../../state/AppState";
 import {
 	AnalysisInput,
@@ -48,6 +49,7 @@ import {
 	updateCombinedVirtualDistanceHeader,
 	virtualDistanceHeaderMarkup,
 } from "./vdHeader";
+import { resolveDisplayCrr } from "../../analysis/unsetParameterFallbacks";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 import {
@@ -81,7 +83,7 @@ export async function initializeVEAnalysis(
 
 	// Use initial CdA and Crr from parameters
 	const initialCdA = appState.currentParameters?.cda ?? 0.3;
-	const initialCrr = appState.currentParameters?.crr ?? 0.005;
+	const initialCrr = resolveDisplayCrr(appState.currentParameters?.crr);
 	const appliedInitialCrr = appState.currentParameters
 		? resolveAppliedCrr(appState.currentParameters, initialCrr)
 		: initialCrr;
@@ -311,6 +313,8 @@ export async function showVirtualElevationAnalysisInline(
 	cdaReference: number[] | null = null,
 	defaultAirSpeedOffset: number = 0,
 ) {
+	// Slider TRAVEL is app configuration, not stored data (see sliderBounds.ts).
+	const crrBounds = displayCrrBounds();
 	if (!appState.currentParameters) {
 		appState.currentParameters = { ...DEFAULT_PARAMETERS };
 	}
@@ -436,8 +440,8 @@ export async function showVirtualElevationAnalysisInline(
                                 </div>
                                 <div class="ve-control-group">
                                     <label>Crr (Rolling Resistance):</label>
-                                    <input type="range" id="crrSlider" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" value="${appState.currentParameters!.crr || 0.008}" step="0.0001" class="ve-slider">
-                                    <input type="number" id="crrValue" value="${(appState.currentParameters!.crr || 0.008).toFixed(4)}" min="${appState.currentParameters!.crr_min}" max="${appState.currentParameters!.crr_max}" step="0.0001" class="ve-value-input">
+                                    <input type="range" id="crrSlider" min="${crrBounds.min}" max="${crrBounds.max}" value="${resolveDisplayCrr(appState.currentParameters!.crr)}" step="0.0001" class="ve-slider">
+                                    <input type="number" id="crrValue" value="${resolveDisplayCrr(appState.currentParameters!.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
                                 ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}

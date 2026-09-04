@@ -1,3 +1,4 @@
+import { resolveDisplayCrr } from '../../analysis/unsetParameterFallbacks';
 import { AppState } from '../../state/AppState';
 import { openResultsModal, type StoredResultKey } from '../dom/resultsModal';
 import { log } from '../../utils/log';
@@ -154,7 +155,7 @@ export async function handleStoreResult(
             const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
             const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
             cda = cdaSlider ? parseFloat(cdaSlider.value) : appState.currentParameters.cda ?? 0.3;
-            crr = crrSlider ? parseFloat(crrSlider.value) : appState.currentParameters.crr ?? 0.005;
+            crr = crrSlider ? parseFloat(crrSlider.value) : resolveDisplayCrr(appState.currentParameters.crr);
         } else {
             const trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
             const trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
