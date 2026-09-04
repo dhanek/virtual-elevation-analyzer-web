@@ -209,6 +209,41 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
+- [ ] **[S] Scrub the ride filename from `main`'s history — after PR #8 lands, not before.**
+      The current file no longer names the ride (see *Conventions*), but the name is still in **25
+      commits** on `main`, spanning `3b05de7` (2026-08-31) to `dcdcaac` (2026-09-03) — in `TODO.md`
+      content and in six commit messages. Only `TODO.md` is affected; no source file ever carried it.
+
+      **This was attempted on 2026-09-04 and reverted.** The rewrite itself worked — 25 commits,
+      443 commits in and out, `TODO.md` the only path touched — but it broke **PR #8**, the open
+      third-party contribution. The pre-flight check was wrong: it used GitHub's `baseRefOid`
+      (`cd4b771`, where the PR was *opened*) instead of the real merge-base. The contributor has
+      since merged `main` into their branch, so PR #8 **does** contain two of the rewritten commits
+      (`3b05de7`, `943c527`). The rewrite took PR #8 from **2** conflicting files to **16** and
+      dropped its merge-base from `40bbc64` to `15d42aa`. `main` was force-pushed back to `dcdcaac`
+      and PR #8 verified back to its original two conflicts.
+
+      **The sequencing rule this establishes:** merge PR #8 first, then rewrite. With no open
+      third-party branch left, only our own PRs need rebasing. Before any future attempt, check the
+      real merge-base of every open PR — `git merge-base refs/remotes/pr/N/head main` — never
+      `baseRefOid`.
+
+      **Recipe** (mechanical, does not depend on any local branch surviving; deliberately does
+      not restate the string it removes): a `sed -E` script matching the ride's filename — with and
+      without surrounding backticks, with and without its home-directory path prefix, plus its
+      single-lap variant — and mapping those onto "the reference ride" and "a single-lap cut of the
+      reference ride"; then the two prose lines that name the local download folder. Run it through
+      `git filter-branch --tree-filter` (on `TODO.md`, the only affected path) and `--msg-filter`
+      over `<earliest-affected>^..main`. Derive the exact pattern from the offending commits at the
+      time, not from this entry.
+
+      **Know what it does not buy.** The name also lives in `refs/pull/7|9|10|11|12/head`, which
+      GitHub keeps reachable **permanently** for merged PRs — all five were confirmed to still
+      contain it. A force-push to `main` cleans the branch, not the repository as GitHub serves it.
+      Genuine removal needs GitHub Support to purge those refs, or a fresh repository. Decide
+      whether that is the actual goal before spending the rewrite.
+      *origin: maintainer, 2026-09-04*
+
 - [ ] **[M] Standard's first paint disagrees with the settled panel on a file with no stored
       parameters.** *Owner: bundle **C**.* Found by bundle C's own in-app check, 2026-09-03.
       Bundle C's claim is that the first paint already agrees with what the panel settles to. It
