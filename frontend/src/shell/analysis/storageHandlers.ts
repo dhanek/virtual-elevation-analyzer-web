@@ -134,13 +134,18 @@ export async function handleStoreResult(
         return;
     }
 
-    // `veStatus === 'ready'` is the invariant that `currentFilteredData` is
-    // populated — TypeScript's control-flow narrowing has no way to know that
-    // from a status field, though, so pull it into a local once here rather
-    // than asserting non-null at each of the several use sites below.
+    // `veStatus === 'ready'` is SUPPOSED to be the invariant that
+    // `currentFilteredData` is populated and non-empty, but that invariant is
+    // enforced two files away, in `updateModeVEPlots.ts` — not here. Checking
+    // both nullity and emptiness locally is what actually stops the
+    // RangeError chain described above if that invariant is ever violated,
+    // rather than trusting it silently. TypeScript's control-flow narrowing
+    // has no way to know either fact from a status field, so pull the field
+    // into a local once here rather than asserting non-null at each of the
+    // several use sites below.
     const filteredData = appState.currentFilteredData;
-    if (!filteredData) {
-        log.error('Cannot store: currentFilteredData missing despite ready status');
+    if (!filteredData || filteredData.power.length === 0) {
+        log.error('Cannot store: currentFilteredData missing or empty despite ready status');
         alert('Cannot store result: no analysed samples. Please run analysis first.');
         return;
     }

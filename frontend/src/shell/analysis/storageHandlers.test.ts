@@ -356,6 +356,55 @@ describe("handleStoreResult trim window", () => {
 });
 
 /**
+ * `veStatus === 'ready'` is SUPPOSED to mean `currentFilteredData` is
+ * populated and non-empty — but that invariant is enforced two files away, in
+ * `updateModeVEPlots.ts`, not here. This guards the case where it is violated
+ * anyway: `buildFilteredDataFromProfiles` used to hand back empty arrays
+ * unconditionally when `currentFitData` was falsy (`segmentSummary.ts:77-80`),
+ * which drove `trimEnd` to `-1` and threw a RangeError surfaced only as the
+ * generic "Failed to store result". `handleStoreResult` must catch the empty
+ * case itself rather than trusting the status field.
+ */
+describe("handleStoreResult when currentFilteredData is empty despite veStatus 'ready'", () => {
+	beforeEach(() => {
+		document.body.innerHTML = '<button id="storeResult"></button>';
+	});
+
+	it("does not store and alerts, without reaching the notes dialog", async () => {
+		const appState = makeAppStateStub({
+			currentAnalyzedLaps: [1],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentFilteredData: {
+				power: [],
+				velocity: [],
+				temperature: [],
+				timestamps: [],
+			},
+		} as unknown as Partial<AppState>);
+
+		const saved: Record<string, unknown>[] = [];
+		const storage = {
+			saveResult: async (data: Record<string, unknown>) => {
+				saved.push(data);
+			},
+		} as unknown as ResultsStorage;
+
+		const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+		await handleStoreResult(appState, storage);
+
+		expect(saved).toHaveLength(0);
+		expect(alertSpy).toHaveBeenCalledTimes(1);
+		// No dialog was ever opened for an empty result.
+		expect(document.querySelector(".notes-dialog")).toBeNull();
+
+		vi.restoreAllMocks();
+	});
+});
+
+/**
  * CANCEL IS NOT "OK WITH NO NOTES".
  *
  * `showNotesDialog` resolved `''` for both, so `handleStoreResult` could not
