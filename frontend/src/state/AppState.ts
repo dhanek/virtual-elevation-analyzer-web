@@ -18,6 +18,7 @@ import type {
 	LapData,
 	ParsingStatistics,
 } from "@wasm/virtual_elevation_analyzer.js";
+import type { VeStatus } from "./veStatus";
 
 export type WindSource = "constant" | "fit" | "compare" | "none";
 export type ActivitySource = "fit" | "csv";
@@ -211,6 +212,19 @@ export interface AnalysisState {
 	 */
 	currentVirtualDistances: SegmentVirtualDistance[];
 	currentWindSource: WindSource;
+	/**
+	 * Whether `currentVEResult` and the three fields written beside it describe
+	 * the current selection yet.
+	 *
+	 * A SIBLING FIELD, not a wrapper around `currentVEResult`: that object is
+	 * sometimes the raw wasm-bindgen `VEResult`, whose properties live on a
+	 * prototype and are lost if it is spread (see `currentVirtualDistances`).
+	 *
+	 * Written ONLY by `applyVeStatus` (`state/veStatus.ts`), which also reflects
+	 * it onto `#storeResult`. Two writers is how the flag and the button drift
+	 * apart, which is the failure this whole change exists to remove.
+	 */
+	veStatus: VeStatus;
 	airSpeedCalibrationPercent: number;
 	isCalculatingAutoRho: boolean;
 	isLoadingParameters: boolean;
@@ -283,6 +297,7 @@ export class AppState {
 		currentVEResult: null,
 		currentVirtualDistances: [],
 		currentWindSource: "none",
+		veStatus: "idle",
 		airSpeedCalibrationPercent: 0,
 		isCalculatingAutoRho: false,
 		isLoadingParameters: false,
@@ -483,6 +498,14 @@ export class AppState {
 
 	set currentWindSource(windSource: WindSource) {
 		this.analysis.currentWindSource = windSource;
+	}
+
+	get veStatus(): VeStatus {
+		return this.analysis.veStatus;
+	}
+
+	set veStatus(status: VeStatus) {
+		this.analysis.veStatus = status;
 	}
 
 	get currentAnalyzedLaps(): number[] {
