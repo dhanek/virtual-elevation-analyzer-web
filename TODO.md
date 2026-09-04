@@ -35,9 +35,9 @@ dependency column below says what actually has to wait.
 |---|---|---|---|
 | ~~**A**~~ | ~~Wind height factor k, end to end~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03, all five items pass |
 | ~~**B**~~ | ~~Make Store Result truthful~~ | — | **Done** 2026-08-31, checked in the app |
-| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; **one failure** (see *Standalone work*) + smoothing unchecked in the GPS modes |
+| ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure **root-caused and fixed 2026-09-04** (it was Standard's two Crr fallbacks, not the resolver). Smoothing in the GPS modes is still unchecked and **blocked** — see the map-blanking item |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
-| ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; **one failure**, see *Standalone work* |
+| ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure (the widened Crr range not reaching existing files) **fixed 2026-09-04** by separating slider travel from the stored optimizer bounds |
 | **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done 2026-09-02; (b) split by the spike, GO now in question |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
@@ -286,6 +286,36 @@ re-deriving it):
       down those paths is born with the narrow range. A fix needs to decide whether stored bounds
       are user data (migrate once) or defaults (stop persisting them); the three literals should
       reference the constants either way. *origin: bundle E in-app check, 2026-09-03*
+
+- [ ] **[M] Switching GPS analysis mode blanks the map permanently, and that blocks GPS lap
+      detection entirely.** Measured 2026-09-04 on the reference ride, Standard first:
+
+      | step | `#mapView` children |
+      |---|---|
+      | after the initial Section 3 render | **2** — Leaflet present |
+      | switch the mode selector to a GPS mode | **0** |
+      | switch back | **0** — never re-initialised |
+
+      No `.leaflet-container` survives anywhere in the document, detached or otherwise, and the
+      console carries `Map initialized with GPS data` exactly once — the FIRST render. `#mapView`
+      is the real container (`renderSection3Template.ts:196`, `new MapVisualization("mapView")` at
+      `section3Orchestration.ts:574,611,2003`), and `rerenderSection3()` replaces `#results`
+      wholesale, so Leaflet's DOM goes with the old node and nothing rebuilds it.
+
+      **It is not cosmetic.** GPS lap detection needs a gate placed ON the map: the button stays
+      `Set GPS Gate to Detect Laps` and `disabled`, `#gpsLapCount` stays 0, and the
+      `#gpsGateSlider` does NOT substitute — moving it to 40 leaves the button disabled and
+      `#gpsGatePositionInfo` empty. So both GPS modes are unreachable after a mode switch until the
+      file is re-loaded.
+
+      **This is what blocked bundle C's smoothing check in the GPS modes**, and it is why that
+      sub-item is still owed. The earlier session saw `#mapView` with zero children and could not
+      tell an app defect from tile-server rate-limiting; it is neither ambiguous nor rate-limiting
+      — the container is 506×398 and visible, the map simply is not rebuilt.
+
+      Same family as the map-trim clone defect: `rerenderSection3` replacing DOM that something
+      else still holds a handle to. `section3ModeSwitch.test.ts` already documents a defect of this
+      shape being fixed once. *origin: bundle C smoothing check, 2026-09-04*
 
 - [ ] **[XL] Outdoor velodrome auto-calibration.** `velodrome: true` today does exactly one thing —
       zero the actual elevation (`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`,
