@@ -211,8 +211,24 @@ export async function showGpsLapVEAnalysis(
 		// laps this leg keeps are the laps whose series the tabs draw, and a
 		// two-sample lap draws nothing useful. `updateModeVEPlots.ts:217` applies
 		// the identical `MIN_SEGMENT_SAMPLES` rule to the segments it computes, so
-		// the panel and the recompute agree on which laps exist without either one
-		// filtering on the other's behalf.
+		// on THIS rule the two passes agree without either filtering on the
+		// other's behalf.
+		//
+		// THEY DO NOT AGREE ON EVERY RULE, and the header says so first. `Laps: N`
+		// is rendered once, into `#gpsLapCountValue` from `lapProfiles.length`, and
+		// no updater rewrites it. That N is the count of laps this leg SELECTED.
+		// The producer applies one further rule this leg cannot: a lap whose fit
+		// throws is dropped by the `catch` in its segment loop
+		// (`updateModeVEPlots.ts:355-357`) and is on no plot, while it is
+		// still counted here. Detecting that from this side would mean running the
+		// calculator, which is exactly the pass this leg no longer has — only the
+		// producer knows which laps survived. So in that rare case the header
+		// over-counts the plotted laps by the number that threw. Accepted.
+		//
+		// The same asymmetry retires the "No valid laps to analyze" message for
+		// throwing laps: the check below sees the laps this leg selected, so a ride
+		// where every lap's fit throws puts the panel up and the producer then
+		// leaves it empty at status `"error"`.
 		if (lapTimestamps.length < 10) {
 			log.warn(
 				`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`,
@@ -377,27 +393,28 @@ export async function showGpsLapVEPlot(
 	resetTabRenderMapForNewPanel();
 	veAnalysisContent.innerHTML = veAnalysisTemplate;
 
-	// THE WINDOW OPENS HERE, and it is what replaces the deleted seed.
+	// THE BUTTON THE MARKUP ABOVE JUST CREATED IS ENABLED. DISABLE IT.
 	//
-	// Two things need saying at exactly this moment, and `applyVeStatus` is the
-	// one writer that says both:
+	// `veAnalysisTemplate` ships `#storeResult` with no `disabled` attribute, so
+	// the innerHTML assignment on the line above has just put a live, clickable
+	// Store Result into the document — pointing at `currentVEResult` and its
+	// three siblings, which until the first update pass lands still hold the
+	// PREVIOUS analysis. `applyVeStatus` is the one writer that both sets the
+	// status and reflects it onto whatever button is in the document, which is
+	// why this runs AFTER the assignment and not before: before it, there is no
+	// button here to disable.
 	//
-	//   1. Whatever `currentVEResult` / `currentFilteredData` /
-	//      `currentWindSource` / `currentVirtualDistances` hold, they describe
-	//      the PREVIOUS analysis, not this panel. On a second Analyze the status
-	//      is still `ready` from the first one, and without this line Store
-	//      Result would happily persist those values against this ride's laps --
-	//      the CR-01/WR-3 defect the seed used to prevent, reintroduced by its
-	//      removal.
-	//   2. The `#storeResult` button the markup above just created is brand new
-	//      and therefore enabled. It has to be disabled from its first frame,
-	//      which is why this is AFTER the innerHTML assignment and not before:
-	//      `applyVeStatus` reflects the status onto whatever button is in the
-	//      document when it runs.
+	// This does NOT open the window — `handleAnalyze` already invalidated the
+	// status on entry, and has to, because everything between there and here
+	// (storage I/O, the lap loop, `waitForPlotly`) runs with the previous panel
+	// still mounted and its own `#storeResult` still enabled — including the
+	// `lapVEProfiles.length === 0` return, which never reaches this function.
+	// That line closes the window for the whole approach; this one re-closes the
+	// DOM half of it for markup that did not exist when it ran.
 	//
 	// `updateModeVEPlots` sets `computing` again on entry and `ready` after
-	// `summarize`. That is not a duplicate: the primitive covers ITS pass, and
-	// this covers the throttle window before that pass even starts.
+	// `summarize`. Also not a duplicate: the primitive covers ITS pass, which
+	// runs once per control gesture, long after this panel was built.
 	applyVeStatus(appState, "computing");
 
 	// Bind the stitched/stacked toggle when this overlay was reached from an

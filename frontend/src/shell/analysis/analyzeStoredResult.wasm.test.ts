@@ -287,26 +287,31 @@ describe.skipIf(!ready)("WR-4 on the golden ride, through real WASM", () => {
 });
 
 /**
- * DOES THE PANEL JUMP WHEN THE KICK LANDS?
+ * HOW MANY TIMES IS THE PANEL PAINTED PER ANALYZE?
  *
- * The kick repaints the panel one macrotask after Analyze. If the analyze leg
- * and the primitive compute the same numbers, that repaint is invisible and
- * costs only time. If they DISAGREE, the user watches the plot and the header
- * change by themselves right after pressing Analyze.
+ * The user presses Analyze and, one macrotask later, the post-bind kick runs the
+ * update primitive and paints. The question this block exists to answer is
+ * whether anything ELSE paints in between. It used to: the GPS-lap analyze leg
+ * ran its own per-lap fit and painted from it, so the panel was painted twice
+ * per Analyze from two independent producers, and if those two disagreed the
+ * user watched the plot and the header change by themselves right after pressing
+ * the button — over a macrotask, which is not a duration a person can resolve
+ * into cause and effect.
  *
- * This is not checkable by eye -- a macrotask is not a duration a person can
- * resolve -- so it is checked by capturing what the panel was painted with on
- * each pass and comparing the numbers. `painted[0]` is the analyze leg's own
- * paint; `painted[last]` is the kick's.
+ * That leg is retired. The panel is now painted by the producer and by nothing
+ * else, so the claim under test is a count: `painted` is empty until the kick
+ * lands and holds exactly one entry afterwards. A regression that reintroduced
+ * an analyze-time fit appears here as a second entry.
  *
  * RHO IS THE AXIS UNDER TEST. The golden fixture zero-fills `air_density_data`,
- * so `resolveRhoArray` returns null for it and BOTH passes fall back to the
- * constant `params.rho` -- which would make this comparison agree for the one
- * reason that proves nothing. The ride's real per-point series is carried
- * separately by the fixture, so it is installed here to put the two passes on
- * the axis that can actually separate them.
+ * so `resolveRhoArray` returns null for it and the pass falls back to the
+ * constant `params.rho` — the one input on which the two old producers were
+ * known to differ, and therefore the one on which a reintroduced second paint is
+ * most likely to be a *differing* second paint. The ride's real per-point series
+ * is carried separately by the fixture and is installed in the `beforeEach`
+ * below so the single pass is exercised on it.
  */
-describe.skipIf(!ready)("the analyze paint and the kick's repaint", () => {
+describe.skipIf(!ready)("how many times one Analyze paints", () => {
 	beforeAll(() => {
 		initSync({ module: readFileSync(WASM_PATH) });
 	});

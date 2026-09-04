@@ -35,6 +35,7 @@ import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
 import { configureAnalyzeOrchestrator, handleAnalyze } from "./analyzeOrchestrator";
+import { applyVeStatus } from "../../state/veStatus";
 
 const SAMPLE_COUNT = 120;
 
@@ -90,6 +91,13 @@ function makeAppState(): AppState {
 
 const errors: string[] = [];
 
+/**
+ * `veStatus` sampled at each `showLoading`, which is the analyze path's own
+ * first visible act. Reading the status THERE, rather than after `handleAnalyze`
+ * resolves, is what makes the case below about the window and not its end.
+ */
+const loadingStatuses: Array<unknown> = [];
+
 function configure(appState: AppState): void {
 	configureAnalyzeOrchestrator({
 		appState,
@@ -99,7 +107,9 @@ function configure(appState: AppState): void {
 		getParametersComponent: () => null,
 		setParametersComponent: () => {},
 		initializeSection3: () => {},
-		showLoading: () => {},
+		showLoading: () => {
+			loadingStatuses.push(appState.veStatus);
+		},
 		hideLoading: () => {},
 		showError: (message: string) => {
 			errors.push(message);
@@ -113,6 +123,7 @@ describe("currentVEResult across a failed analyze", () => {
 	beforeEach(() => {
 		modeState.gps = "None";
 		errors.length = 0;
+		loadingStatuses.length = 0;
 		document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div>`;
 		appState = makeAppState();
 		configure(appState);
@@ -124,10 +135,11 @@ describe("currentVEResult across a failed analyze", () => {
 
 	/**
 	 * `currentFitResult` absent is the orchestrator's own "No data available for
-	 * analysis" throw (`analyzeOrchestrator.ts:348`), which its `catch` turns
-	 * into a `showError`. No panel is rendered, so `summarize` never runs.
+	 * analysis" throw, which its `catch` turns into a `showError`. No panel is
+	 * rendered, so `summarize` never runs.
 	 *
-	 * Before this, `analyzeOrchestrator.ts:428` would not have been reached
+	 * Before this, the `currentVEResult = payload.initialResult` assignment that
+	 * used to sit further down `handleAnalyze` would not have been reached
 	 * either -- so the field kept the PREVIOUS ride's result while
 	 * `appState.selectedFile` had already moved on to this one, and the Store
 	 * Result guard at `storageHandlers.ts:105` saw a result it was happy to
@@ -140,5 +152,70 @@ describe("currentVEResult across a failed analyze", () => {
 
 		expect(errors.length).toBeGreaterThan(0);
 		expect(appState.currentVEResult).toBeNull();
+	});
+});
+
+/**
+ * THE STATUS AT ANALYZE ENTRY — the other half of the same claim.
+ *
+ * Nulling `currentVEResult` above withdraws one of the four analyze-derived
+ * fields. `currentFilteredData`, `currentWindSource` and
+ * `currentVirtualDistances` are not nulled, and cannot be: the panel that is
+ * still on screen is drawn from them until the new one replaces it. What has to
+ * be withdrawn instead is the CLAIM that they describe the current selection,
+ * and that claim is `veStatus === "ready"`.
+ *
+ * The window is not instantaneous. Between here and the first update pass sit
+ * `resolveMultiSegmentAnalysisParams`' storage I/O, each mode's per-segment
+ * description loop, `waitForPlotly`, and the recompute throttle — with the
+ * PREVIOUS panel still mounted, its `#storeResult` still enabled (the loading
+ * indicator is a non-modal inline element that blocks no clicks), and the four
+ * fields still holding the previous analysis. One click in that window used to
+ * store the previous ride's numbers under this one's name.
+ *
+ * The orchestrator is where this is closed because it is the one place all three
+ * modes pass through before any of that starts.
+ */
+describe("veStatus at analyze entry", () => {
+	let appState: AppState;
+
+	beforeEach(() => {
+		modeState.gps = "None";
+		errors.length = 0;
+		loadingStatuses.length = 0;
+		document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div>`;
+		appState = makeAppState();
+		configure(appState);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	/**
+	 * The precondition is the whole point and is what no other test in the repo
+	 * sets up: a status that is genuinely `ready`, left by a first, successful
+	 * analysis. Against a fresh AppState `veStatus` is `undefined`, so "not
+	 * ready" is true before anything runs and asserting it proves nothing.
+	 *
+	 * The analyze then fails (`currentFitResult` absent), so nothing downstream
+	 * can move the status on this path — no panel renders and no update pass
+	 * runs. Whatever the status is at the end, the orchestrator put it there.
+	 */
+	it("stops claiming ready before the analyze does any work", async () => {
+		applyVeStatus(appState, "computing");
+		applyVeStatus(appState, "ready");
+		expect(appState.veStatus).toBe("ready");
+
+		appState.currentFitResult = null as never;
+
+		await handleAnalyze();
+
+		// Sampled at the analyze path's first visible act, so this is the window
+		// itself: by the time the user sees "Preparing data...", the previous
+		// analysis is no longer claimed to be current.
+		expect(loadingStatuses.length).toBeGreaterThan(0);
+		expect(loadingStatuses[0]).toBe("computing");
+		expect(appState.veStatus).not.toBe("ready");
 	});
 });

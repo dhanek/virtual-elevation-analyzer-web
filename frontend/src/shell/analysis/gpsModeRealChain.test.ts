@@ -92,7 +92,7 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
  * The central property of the analyze-leg retirement is that nothing ever
  * observes `veStatus === "ready"` before `summarize` has written the fields that
  * claim describes. `updateModeVEPlots` orders those two lines itself
- * (`:340,345`), but ordering asserted from OUTSIDE the primitive can only see
+ * (`:370,375`), but ordering asserted from OUTSIDE the primitive can only see
  * the end state — `ready` after the pass — which an implementation that set
  * `ready` on entry would also satisfy.
  *
@@ -365,7 +365,7 @@ function storeButton(): HTMLButtonElement {
  * The guarantee is unchanged; the mechanism is the status. Through the whole
  * window the fields simply are not claimed to be current, and Store Result
  * refuses — `handleStoreResult` returns on `veStatus !== "ready"`
- * (`storageHandlers.ts:130`) and says so, rather than storing whatever is
+ * (`storageHandlers.ts:132`) and says so, rather than storing whatever is
  * lying in those fields. This helper is that half of every case, asserted
  * BEFORE `settle()` so it describes the window and not its end.
  *
@@ -420,10 +420,15 @@ interface ModeUnderTest {
 	/** Renders the real sidebar and does the real binding. */
 	render: (appState: AppState) => Promise<void>;
 	/**
-	 * The ANALYZE leg — the entry point that COMPUTES the per-segment profiles
-	 * and only then renders. `render` above is handed profiles already computed,
-	 * so it never reaches a calculator and cannot see which elevation series the
-	 * physics was given.
+	 * The ANALYZE leg — the entry point that DESCRIBES the selection's segments
+	 * from AppState and then renders the panel for them. `render` above is handed
+	 * profiles this file built by hand, so it cannot reach the code that decides
+	 * which samples and which elevation series a segment is made of.
+	 *
+	 * NEITHER OF THEM COMPUTES ANYMORE, for GPS-lap. The physics is the update
+	 * primitive's, reached through the post-bind kick, so a case that wants to
+	 * see what the calculator was given must `analyze()` and then `settle()`.
+	 * Out-and-back's leg still fits at analyze time until its own retirement.
 	 */
 	analyze: (appState: AppState) => Promise<unknown>;
 	drawSpy: ReturnType<typeof vi.fn>;
@@ -658,14 +663,15 @@ describe.each(MODES)(
 		});
 
 		/**
-		 * WR-03. The CR-01 seed took EVERY active range, but the analyze pass
-		 * drops any lap under 10 samples and any whose calculator throws
-		 * (`renderGpsLap.ts:178-183,251-253`), and out-and-back drops sections
-		 * with no usable leg. Those laps are on no plot and in no profile — yet
+		 * WR-03. The CR-01 seed took EVERY active range, while the pass that
+		 * produced the profiles dropped laps: at the time, any lap under 10
+		 * samples and any whose calculator threw, both rules living in the
+		 * GPS-lap analyze leg, and out-and-back dropped sections with no usable
+		 * leg. Those laps were on no plot and in no profile — yet
 		 * their samples were in the seeded averages, so Store Result before any
 		 * interaction and Store Result after one nudge could report a different
 		 * avgPower for the same analysis. Exactly the two-writers-two-answers
-		 * property the seed exists to prevent.
+		 * property the seed existed to prevent.
 		 *
 		 * The fixture chain test could not catch this: nothing is dropped there.
 		 * Here the panel is handed FEWER profiles than AppState has ranges,
@@ -722,7 +728,7 @@ describe.each(MODES)(
 		 * `veStatus === "ready"` before `handler.summarize` has run, because
 		 * `ready` IS the claim that `currentVEResult` and its three siblings
 		 * describe this selection. `updateModeVEPlots` orders the two lines
-		 * (`:340` summarize, `:345` ready) and nothing tested it — the primitive
+		 * (`:370` summarize, `:375` ready) and nothing tested it — the primitive
 		 * cannot be driven from a unit test without a populated
 		 * `currentFitData`/`currentParameters`, and every `makeAppState` helper in
 		 * this repo is module-private. This file has a real one, built through the
@@ -771,6 +777,47 @@ describe.each(MODES)(
 
 			await settle();
 
+			expect(storeButton().disabled).toBe(false);
+		});
+
+		/**
+		 * THE SECOND ANALYZE — the case the whole retirement exists for, and the
+		 * only one in which `veStatus` starts out `ready`.
+		 *
+		 * Every other case in this file builds a fresh `makeAppState()`, whose
+		 * `veStatus` is `undefined`, so "not ready" is true of it before anything
+		 * runs and an assertion of that alone proves nothing. What must be true
+		 * is stronger and only observable here: a status that IS `ready`, from a
+		 * completed first analysis, stops being `ready` the moment a new panel
+		 * goes up — because `currentVEResult` and its three siblings still hold
+		 * the FIRST analysis, and the new panel is not what they describe.
+		 *
+		 * The button is asserted alongside the field for the same reason it is
+		 * asserted at all: the second panel's `#storeResult` is fresh markup, so
+		 * it arrives enabled unless something disables it, and this is the state
+		 * in which a click would persist the previous analysis under this ride.
+		 *
+		 * GPS-lap only for now, like the case above: out-and-back's panel still
+		 * seeds from its own analyze fit and legitimately has values to store
+		 * from its first frame. It becomes a both-modes case when that leg goes.
+		 */
+		it("stops claiming ready when a second analyze puts up a new panel", async () => {
+			if (gpsAnalysisMode !== "GPS based lap splitting") return;
+
+			await settle();
+			expect(appState.veStatus).toBe("ready");
+			expect(storeButton().disabled).toBe(false);
+
+			// The user presses Analyze again. Same AppState, same fields, new panel.
+			await render(appState);
+
+			expect(appState.veStatus).not.toBe("ready");
+			expect(storeButton().disabled).toBe(true);
+
+			// And the second pass re-earns it, so the assertion above is about the
+			// window and not about the panel being permanently broken.
+			await settle();
+			expect(appState.veStatus).toBe("ready");
 			expect(storeButton().disabled).toBe(false);
 		});
 
@@ -1077,10 +1124,10 @@ describe.each(MODES)(
 /**
  * THE AIR-DENSITY SERIES AND THE SEGMENT IT IS SLICED FOR.
  *
- * Both analyze legs walked their segment on `allTimestamps.length` and indexed
- * `allRho` with the same counter — `renderGpsLap.ts:210`'s
- * `if (allRho) lapRho.push(allRho[i])` and `renderOutAndBack.ts`' `legRho`.
- * Nothing checks that the density channel is as long as the ride.
+ * Both analyze legs used to walk their segment on `allTimestamps.length` and
+ * index their resolved `allRho` with the same counter — the GPS-lap leg into a
+ * `lapRho`, `renderOutAndBack.ts` into a `legRho` — with nothing checking that
+ * the density channel was as long as the ride.
  * `resolveRhoArray` accepts it on `.some(rho => rho > 0)`, and
  * `getNormalizedActivityArrays` converts it without padding, so a device that
  * stopped emitting air density mid-ride yields a SHORT array: the tail indices
@@ -1098,7 +1145,7 @@ describe.each(MODES)(
  * rule above is not optional just because its holder moved. These cases now
  * Analyze and then `settle()`, so the series under assertion is the one
  * `updateModeVEPlots` handed the physics. That pass slices with
- * `indices.map((i) => rhoArray[i])` (`:234`), which on a short channel yields
+ * `indices.map((i) => rhoArray[i])` (`:258`), which on a short channel yields
  * `undefined` in every tail position, so this rewrite is what forced the guard
  * to be added there. The claim is unchanged and now covers the only pass there
  * is: rho reaching the calculator is complete or absent, never partial.

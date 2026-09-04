@@ -79,7 +79,7 @@ describe("resolveSelectionRhoArray", () => {
 	});
 });
 
-describe("every analyze leg builds its calculator with a rho array", () => {
+describe("no analyze leg builds a calculator without a rho array", () => {
 	/**
 	 * Source-level, deliberately. The property is "no leg was forgotten", and
 	 * the thing that makes a leg wrong is an omission — which no test of the
@@ -93,7 +93,7 @@ describe("every analyze leg builds its calculator with a rho array", () => {
 	];
 
 	for (const leg of legs) {
-		it(`${leg} passes rhoArray to createVeCalculator`, () => {
+		it(`${leg} passes rhoArray to createVeCalculator, or builds no calculator at all`, () => {
 			const source = readFileSync(
 				fileURLToPath(new URL(leg, import.meta.url)),
 				"utf8",

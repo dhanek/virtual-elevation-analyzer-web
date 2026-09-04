@@ -34,6 +34,7 @@ import {
 	configureLapViewToggle,
 } from "../ve/lapViewToggle";
 import { deriveOverlayLaps } from "../ve/deriveLapRanges";
+import { applyVeStatus } from "../../state/veStatus";
 
 interface AnalyzeOrchestratorDependencies {
 	appState: AppState;
@@ -329,6 +330,29 @@ export async function handleAnalyze(): Promise<void> {
 		// nothing on screen to describe, and must therefore leave nothing
 		// behind.
 		deps.appState.currentVEResult = null;
+
+		// AND THE STATUS IS INVALIDATED IN THE SAME BREATH, FOR EVERY MODE.
+		//
+		// Clearing `currentVEResult` alone does not close the window this Analyze
+		// opens. `currentFilteredData`, `currentWindSource` and
+		// `currentVirtualDistances` still hold the PREVIOUS analysis, and
+		// `veStatus` is still `ready` from it — the claim that those four describe
+		// what is on screen. From here to the moment the update primitive lands
+		// there is real elapsed time: `resolveMultiSegmentAnalysisParams`' storage
+		// I/O, each mode's per-segment description loop, `waitForPlotly`, and then
+		// the recompute throttle. The previous panel is still mounted throughout,
+		// and the loading indicator it sits under is a non-modal inline element
+		// (`styles/sections.css`) that blocks no clicks — so its `#storeResult` is
+		// there, enabled, and one click from persisting the previous analysis
+		// under this ride's name.
+		//
+		// This is the earliest point the analyze path reaches with the selection
+		// already validated, so one line here closes that window for all three
+		// modes at once. Each mode's own `applyVeStatus(appState, "computing")` at
+		// panel-render time is NOT a duplicate of it: that one re-disables the
+		// `#storeResult` the fresh markup ships enabled, which this line cannot do
+		// because that button does not exist yet.
+		applyVeStatus(deps.appState, "computing");
 
 		deps.showLoading("Preparing data for Virtual Elevation analysis...");
 
