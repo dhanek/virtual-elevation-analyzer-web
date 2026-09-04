@@ -431,7 +431,10 @@ Committed on `in-app-checks-a-c-e` on top of `0dd8ecd`. 1081 tests pass (up 11 o
       **Never only cosmetic:** `storageHandlers.ts` carried the same `?? 0.005` on the path that
       PERSISTS a result when no slider is rendered, so Store Result could write 0.005.
 
-      All ten fallback sites now route through `resolveDisplayCrr`. Guards: five cases plus a
+      Measured at the fix: every numeric stand-in for an unset Crr now comes from
+      `analysis/unsetParameterFallbacks.ts` — 14 `resolveDisplayCrr(` call sites across five
+      non-test files, plus `requestModeUpdate.ts:219`, which passes `UNSET_CRR_FALLBACK` straight
+      to `readNumber` as its default rather than through the resolver. Guards: four cases plus a
       source scan for any numeric crr fallback outside the shared module — the scan is the one that
       matters, since the defect is an OMISSION no test of the module's own exports can observe.
       **Checked in the app:** the reference ride, lap 2 in Standard mode, no record — **one** paint,
