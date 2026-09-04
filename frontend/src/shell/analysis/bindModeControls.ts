@@ -52,6 +52,11 @@ import {
 	controlsForMode,
 	type ModeControlSpec,
 } from "./modeControlTable";
+import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
+import {
+	resolveDisplayCda,
+	resolveDisplayCrr,
+} from "../../analysis/unsetParameterFallbacks";
 import { mergeAnalysisParameters } from "./parametersSync";
 import {
 	configureModeUpdateRequests,
@@ -361,8 +366,15 @@ export function bindModeControls(
 				return;
 
 			case "cda": {
+				// The control's TRAVEL, not the stored optimizer bounds — the same
+				// reasoning the crr case below spells out, and the CdA half of the
+				// bundle E fix. Clamping to the stored pair snaps the control back
+				// to whatever range the file was analysed under.
+				const cdaBounds = displayCdaBounds(
+					params ? resolveDisplayCda(params.cda) : undefined,
+				);
 				const value = params
-					? clamp(rawValue, params.cda_min, params.cda_max)
+					? clamp(rawValue, cdaBounds.min, cdaBounds.max)
 					: rawValue;
 				writeBoth(spec, value, 3);
 				finish(spec);
@@ -370,9 +382,14 @@ export function bindModeControls(
 			}
 
 			case "crr": {
-				const value = params
-					? clamp(rawValue, params.crr_min, params.crr_max)
-					: rawValue;
+				// The control's TRAVEL, not the stored optimizer bounds. Clamping to
+				// the stored pair here would undo the widening the markup just
+				// applied: the slider would offer 0.0015 and snap back to 0.002 on
+				// any file analysed before bundle E. See `sliderBounds.ts`.
+				const crrBounds = displayCrrBounds(
+					params ? resolveDisplayCrr(params.crr) : undefined,
+				);
+				const value = clamp(rawValue, crrBounds.min, crrBounds.max);
 				writeBoth(spec, value, 4);
 				finish(spec);
 				return;

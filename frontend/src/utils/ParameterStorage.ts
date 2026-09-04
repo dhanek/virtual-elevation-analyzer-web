@@ -2,7 +2,10 @@ import {
 	DEFAULT_WIND_HEIGHT_FACTOR,
 	LEGACY_WIND_HEIGHT_FACTOR,
 } from "../analysis/WindHeightTransfer";
-import { AnalysisParameters } from "../components/AnalysisParameters";
+import {
+	AnalysisParameters,
+	DEFAULT_PARAMETERS,
+} from "../components/AnalysisParameters";
 import { log } from "./log";
 
 interface LapSettings {
@@ -407,10 +410,10 @@ export class ParameterStorage {
 							eta: 0.97,
 							cda: null,
 							crr: null,
-							cda_min: 0.15,
-							cda_max: 0.5,
-							crr_min: 0.002,
-							crr_max: 0.015,
+							cda_min: DEFAULT_PARAMETERS.cda_min,
+							cda_max: DEFAULT_PARAMETERS.cda_max,
+							crr_min: DEFAULT_PARAMETERS.crr_min,
+							crr_max: DEFAULT_PARAMETERS.crr_max,
 							wind_speed: null,
 							wind_direction: null,
 							wind_speed_unit: "m/s",
@@ -535,10 +538,10 @@ export class ParameterStorage {
 							eta: 0.97,
 							cda: null,
 							crr: null,
-							cda_min: 0.15,
-							cda_max: 0.5,
-							crr_min: 0.002,
-							crr_max: 0.015,
+							cda_min: DEFAULT_PARAMETERS.cda_min,
+							cda_max: DEFAULT_PARAMETERS.cda_max,
+							crr_min: DEFAULT_PARAMETERS.crr_min,
+							crr_max: DEFAULT_PARAMETERS.crr_max,
 							wind_speed: null,
 							wind_direction: null,
 							wind_speed_unit: "m/s",
@@ -722,10 +725,10 @@ export class ParameterStorage {
 							eta: 0.97,
 							cda: null,
 							crr: null,
-							cda_min: 0.15,
-							cda_max: 0.5,
-							crr_min: 0.002,
-							crr_max: 0.015,
+							cda_min: DEFAULT_PARAMETERS.cda_min,
+							cda_max: DEFAULT_PARAMETERS.cda_max,
+							crr_min: DEFAULT_PARAMETERS.crr_min,
+							crr_max: DEFAULT_PARAMETERS.crr_max,
 							wind_speed: null,
 							wind_direction: null,
 							wind_speed_unit: "m/s",
