@@ -23,6 +23,14 @@ export type VeStatus = "idle" | "computing" | "ready" | "error";
 export function applyVeStatus(appState: AppState, status: VeStatus): void {
 	appState.veStatus = status;
 
+	// Guarded the same way `updateModeVEPlots.ts` and its siblings guard `document`:
+	// several node-environment suites (`updateModeVEPlots.test.ts`,
+	// `veGolden.wasm.test.ts`) drive this primitive with no DOM at all, not merely
+	// a DOM missing `#storeResult`.
+	if (typeof document === "undefined") {
+		return;
+	}
+
 	const storeButton = document.getElementById(
 		"storeResult",
 	) as HTMLButtonElement | null;

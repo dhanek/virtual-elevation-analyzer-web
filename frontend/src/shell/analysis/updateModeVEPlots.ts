@@ -47,6 +47,7 @@ import type {
 import type { ActivityDataLike, AppState, WindSource } from "../../state/AppState";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
+import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
 import { resolveElevationProfile } from "./elevationProfileResolver";
 import { resolveRhoArray } from "./rhoArrayResolver";
@@ -120,8 +121,14 @@ export async function updateModeVEPlots(
 
 	if (!fitData || !params) {
 		log.error("Missing data for VE update");
+		applyVeStatus(appState, "idle");
 		return null;
 	}
+
+	// Everything below can take a full calculator sweep. The panel is on screen
+	// throughout, so the status is what tells Store Result the numbers beside it
+	// do not describe this selection yet.
+	applyVeStatus(appState, "computing");
 
 	const normalized = getNormalizedActivityArrays(fitData);
 
@@ -322,6 +329,7 @@ export async function updateModeVEPlots(
 
 	if (profiles.length === 0) {
 		log.error("No valid segments to display");
+		applyVeStatus(appState, "error");
 		return null;
 	}
 
@@ -330,6 +338,11 @@ export async function updateModeVEPlots(
 	// The summarize seam owns the AppState result writes for every mode. This
 	// is what gives out-and-back its Store Result / Export CSV fix (D-17a, N-1).
 	handler.summarize(appState, profiles, aggregate, inputs);
+
+	// AFTER summarize, never before: summarize is what writes currentVEResult and
+	// its three siblings, and `ready` is the claim that those describe this
+	// selection. The plot renders below are presentation and do not gate it.
+	applyVeStatus(appState, "ready");
 
 	const isTabActive = args.isTabActive ?? isVeTabActive;
 

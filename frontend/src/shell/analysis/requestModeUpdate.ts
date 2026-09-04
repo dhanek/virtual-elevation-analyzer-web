@@ -31,6 +31,7 @@ import {
 	UNSET_CDA_FALLBACK,
 	UNSET_CRR_FALLBACK,
 } from "../../analysis/unsetParameterFallbacks";
+import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
 import { getSelectedWindSource, toWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
@@ -267,15 +268,23 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 				);
 				return;
 			}
-			await updateModeVEPlots({
-				appState,
-				handler,
-				callbacks,
-				windSource,
-				cda,
-				crr,
-				segments,
-			});
+			try {
+				await updateModeVEPlots({
+					appState,
+					handler,
+					callbacks,
+					windSource,
+					cda,
+					crr,
+					segments,
+				});
+			} catch (err) {
+				// The runner logs and swallows. Without this the status would stay
+				// `computing` for the panel's lifetime and Store Result would never
+				// re-enable.
+				applyVeStatus(appState, "error");
+				throw err;
+			}
 		},
 	});
 }
