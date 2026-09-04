@@ -217,15 +217,22 @@ export async function showOutAndBackVEAnalysis(
 	//
 	//   - `Sections: N` is rendered once from `profiles.length`, so between the
 	//     panel going up and the first recompute landing it can over-count. It
-	//     SELF-CORRECTS: `createOutAndBackUpdateCallbacks`' `renderMetrics`
-	//     rewrites `#oabSectionCountValue` from `aggregate.segmentCount`, which
-	//     is the producer's surviving-section count. GPS-lap has no such
-	//     rewriter, which is why its equivalent divergence is permanent and this
-	//     one is a first-frame artefact.
+	//     SELF-CORRECTS WHEN AT LEAST ONE LEG SURVIVES:
+	//     `createOutAndBackUpdateCallbacks`' `renderMetrics` rewrites
+	//     `#oabSectionCountValue` from `aggregate.segmentCount`, which is the
+	//     producer's surviving-section count. GPS-lap has no such rewriter,
+	//     which is why its equivalent divergence is permanent and this one is a
+	//     first-frame artefact.
+	//   - EXCEPT when every leg's fit throws: `updateModeVEPlots` hits
+	//     `profiles.length === 0`, calls `applyVeStatus(appState, "error")` and
+	//     returns before `renderMetrics` ever runs (`updateModeVEPlots.ts:360-363`
+	//     vs. `:380`). On that ride the over-counted `Sections: N` from this loop
+	//     is never corrected and sits next to the empty panel at status `"error"`.
 	//   - "No valid out-and-back sections to analyze" no longer fires for legs
 	//     whose fit throws: the check below sees the legs this loop selected, so
 	//     a ride where every fit throws puts the panel up and the producer then
-	//     leaves it empty at status `"error"`.
+	//     leaves it empty at status `"error"` by the path above, rather than
+	//     this leg's own showError.
 	for (const section of sections) {
 		const outbound = describeLeg(
 			section.outboundStartIdx,
@@ -324,6 +331,15 @@ export function outAndBackVdTabMarkup(
                         `;
 }
 
+/**
+ * NO `initialStats` FIELD HERE. This used to carry the three header numbers the
+ * analyze leg's own two fits produced, so the template could paint them before
+ * the first recompute. There is no analyze-time fit any more, and the spans
+ * therefore ship EMPTY — exactly what the panel showed before a value existed —
+ * until `renderMetrics` fills them from the aggregate the one producer
+ * computed. `sectionCount` below stays: it is a property of the selection, not
+ * of the physics.
+ */
 export interface OutAndBackVeTemplateOptions {
 	params: AnalysisParameters;
 	hasWindSpeed: boolean;
@@ -332,15 +348,6 @@ export interface OutAndBackVeTemplateOptions {
 	showVirtualDistanceTab: boolean;
 	selectedWindSource: string;
 	currentAirSpeedCalibrationValue: string;
-	/**
-	 * NO `initialStats`. This used to carry the three header numbers the analyze
-	 * leg's own two fits produced, so the template could paint them before the
-	 * first recompute. There is no analyze-time fit any more, and the spans
-	 * therefore ship EMPTY — exactly what the panel showed before a value
-	 * existed — until `renderMetrics` fills them from the aggregate the one
-	 * producer computed. `sectionCount` stays: it is a property of the
-	 * selection, not of the physics.
-	 */
 	sectionCount: number;
 	defaultAirSpeedOffset: number;
 	elevationToggleMarkup: string;
@@ -719,10 +726,10 @@ export async function showOutAndBackVEPlot(
 	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never
 	// carried this bug.
 	//
-	// Everything the analyze leg above computed is a FIRST PAINT, not a
-	// RESULT: it keeps `virtual_elevation` from each per-lap fit and discards
-	// r2, RMSE and the elevation gains. So without this line the only writer
-	// of `appState.currentVEResult` on an analyze was the stitched fit
+	// It is now the ONLY producer, not a corrective second pass. The analyze
+	// leg above computes no virtual elevation at all -- it slices each leg's
+	// samples and leaves the fit to this kick. So without this line the only
+	// writer of `appState.currentVEResult` on an analyze was the stitched fit
 	// `prepareAnalysisPayload` runs over the concatenated selection, which
 	// this panel never displays -- and the first control nudge replaced it.
 	//

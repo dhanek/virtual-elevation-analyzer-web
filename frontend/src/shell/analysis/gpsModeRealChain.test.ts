@@ -368,8 +368,9 @@ function storeButton(): HTMLButtonElement {
  * BEFORE `settle()` so it describes the window and not its end.
  *
  * The BUTTON half — `#storeResult` visibly disabled across the window — is
- * asserted separately, because it is GPS-lap-only until out-and-back's own
- * analyze fit is retired.
+ * asserted separately, and only for GPS-lap here; out-and-back's own version
+ * of the same assertion lives in `outAndBackFixtureChain.test.ts` rather than
+ * in this file.
  */
 function expectStoreResultRefusesForNow(appState: AppState): void {
 	expect(appState.veStatus).not.toBe("ready");
@@ -423,10 +424,10 @@ interface ModeUnderTest {
 	 * profiles this file built by hand, so it cannot reach the code that decides
 	 * which samples and which elevation series a segment is made of.
 	 *
-	 * NEITHER OF THEM COMPUTES ANYMORE, for GPS-lap. The physics is the update
-	 * primitive's, reached through the post-bind kick, so a case that wants to
-	 * see what the calculator was given must `analyze()` and then `settle()`.
-	 * Out-and-back's leg still fits at analyze time until its own retirement.
+	 * NEITHER OF THEM COMPUTES ANYMORE, for either mode. The physics is the
+	 * update primitive's, reached through the post-bind kick, so a case that
+	 * wants to see what the calculator was given must `analyze()` and then
+	 * `settle()`.
 	 */
 	analyze: (appState: AppState) => Promise<unknown>;
 	drawSpy: ReturnType<typeof vi.fn>;
@@ -763,9 +764,11 @@ describe.each(MODES)(
 		 * visibly refused rather than one that looks clickable and silently does
 		 * nothing.
 		 *
-		 * GPS-lap only for now. `showOutAndBackVEPlot` still seeds from its own
-		 * analyze fit, so its panel legitimately has values to store from the
-		 * first frame; this becomes a both-modes case when that leg is retired.
+		 * GPS-lap only here, but not because out-and-back needs different
+		 * behaviour any more — its own version of this same assertion lives in
+		 * `outAndBackFixtureChain.test.ts` ("ships the Store Result button
+		 * disabled until the producer is ready"), so the guard below is merely
+		 * conservative, not covering a gap.
 		 */
 		it("ships the Store Result button disabled until the producer is ready", async () => {
 			if (gpsAnalysisMode !== "GPS based lap splitting") return;
@@ -794,9 +797,11 @@ describe.each(MODES)(
 		 * it arrives enabled unless something disables it, and this is the state
 		 * in which a click would persist the previous analysis under this ride.
 		 *
-		 * GPS-lap only for now, like the case above: out-and-back's panel still
-		 * seeds from its own analyze fit and legitimately has values to store
-		 * from its first frame. It becomes a both-modes case when that leg goes.
+		 * GPS-lap only here, like the case above, and for the same reason: not a
+		 * gap, since out-and-back's own version of this case — "stops claiming
+		 * ready when a second analyze puts up a new panel" — already lives in
+		 * `outAndBackFixtureChain.test.ts`. The guard below is merely
+		 * conservative.
 		 */
 		it("stops claiming ready when a second analyze puts up a new panel", async () => {
 			if (gpsAnalysisMode !== "GPS based lap splitting") return;
@@ -1083,7 +1088,7 @@ describe.each(MODES)(
 
 		/**
 		 * Analyze, then let the scheduled pass run. `analyze` no longer reaches a
-		 * calculator in GPS-lap, so the series under assertion is the one the
+		 * calculator in either mode, so the series under assertion is the one the
 		 * primitive was given -- which is the only one there is.
 		 */
 		async function analyzeAndSettle(appState: AppState): Promise<void> {

@@ -3,7 +3,7 @@
  *
  * This is the out-and-back twin of `resolveActiveGpsLapRanges`, and it exists
  * for the same reason. `currentOutAndBackSections` is written once, by
- * `showOutAndBackVEAnalysis` (`shell/outAndBack/renderOutAndBack.ts:97`), and
+ * `showOutAndBackVEAnalysis` (`shell/outAndBack/renderOutAndBack.ts:101`), and
  * holds exactly the sections that were analysed and drawn. `outAndBackSections`
  * is the DETECTION list and `outAndBackSelectedSections` is the checkbox state;
  * both can change under the user's hands without the plot being recomputed.
