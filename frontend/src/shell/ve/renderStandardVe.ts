@@ -1,4 +1,4 @@
-import { displayCrrBounds } from "../../analysis/sliderBounds";
+import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
 import { AppState } from "../../state/AppState";
 import {
 	AnalysisInput,
@@ -49,7 +49,10 @@ import {
 	updateCombinedVirtualDistanceHeader,
 	virtualDistanceHeaderMarkup,
 } from "./vdHeader";
-import { resolveDisplayCrr } from "../../analysis/unsetParameterFallbacks";
+import {
+	resolveDisplayCda,
+	resolveDisplayCrr,
+} from "../../analysis/unsetParameterFallbacks";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 import {
@@ -82,7 +85,7 @@ export async function initializeVEAnalysis(
 	const trimEnd = appState.presetTrimEnd ?? analysisInput.timestamps.length - 1;
 
 	// Use initial CdA and Crr from parameters
-	const initialCdA = appState.currentParameters?.cda ?? 0.3;
+	const initialCdA = resolveDisplayCda(appState.currentParameters?.cda);
 	const initialCrr = resolveDisplayCrr(appState.currentParameters?.crr);
 	const appliedInitialCrr = appState.currentParameters
 		? resolveAppliedCrr(appState.currentParameters, initialCrr)
@@ -313,8 +316,6 @@ export async function showVirtualElevationAnalysisInline(
 	cdaReference: number[] | null = null,
 	defaultAirSpeedOffset: number = 0,
 ) {
-	// Slider TRAVEL is app configuration, not stored data (see sliderBounds.ts).
-	const crrBounds = displayCrrBounds();
 	if (!appState.currentParameters) {
 		appState.currentParameters = { ...DEFAULT_PARAMETERS };
 	}
@@ -346,6 +347,17 @@ export async function showVirtualElevationAnalysisInline(
 			log.debug("No saved settings for lap selection, using default trim range");
 		}
 	}
+
+	// Slider TRAVEL is app configuration, not stored data (see sliderBounds.ts).
+	// Declared BELOW the savedParams load because that block writes
+	// `currentParameters.crr`, and the bounds must be widened by the same value
+	// the markup below renders — not by the pre-load one.
+	const crrBounds = displayCrrBounds(
+		resolveDisplayCrr(appState.currentParameters.crr),
+	);
+	const cdaBounds = displayCdaBounds(
+		resolveDisplayCda(appState.currentParameters.cda),
+	);
 
 	appState.currentAnalyzedLaps = analyzedLaps;
 	// Coverage is unknown until the first `summarize` (WR-01); the previous
@@ -435,8 +447,8 @@ export async function showVirtualElevationAnalysisInline(
                                 </div>
                                 <div class="ve-control-group">
                                     <label>CdA (Drag Coefficient × Area):</label>
-                                    <input type="range" id="cdaSlider" min="${appState.currentParameters!.cda_min}" max="${appState.currentParameters!.cda_max}" value="${appState.currentParameters!.cda || 0.3}" step="0.001" class="ve-slider">
-                                    <input type="number" id="cdaValue" value="${(appState.currentParameters!.cda || 0.3).toFixed(3)}" min="${appState.currentParameters!.cda_min}" max="${appState.currentParameters!.cda_max}" step="0.001" class="ve-value-input">
+                                    <input type="range" id="cdaSlider" min="${cdaBounds.min}" max="${cdaBounds.max}" value="${resolveDisplayCda(appState.currentParameters!.cda)}" step="0.001" class="ve-slider">
+                                    <input type="number" id="cdaValue" value="${resolveDisplayCda(appState.currentParameters!.cda).toFixed(3)}" min="${cdaBounds.min}" max="${cdaBounds.max}" step="0.001" class="ve-value-input">
                                 </div>
                                 <div class="ve-control-group">
                                     <label>Crr (Rolling Resistance):</label>

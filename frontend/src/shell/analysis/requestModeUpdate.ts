@@ -27,6 +27,10 @@ import {
 } from "../../modes/analysis/AnalysisModes";
 import type { ModeSegment } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
+import {
+	UNSET_CDA_FALLBACK,
+	UNSET_CRR_FALLBACK,
+} from "../../analysis/unsetParameterFallbacks";
 import { log } from "../../utils/log";
 import { getSelectedWindSource, toWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
@@ -35,10 +39,6 @@ import type { ModeUpdateReason } from "./modeControlTable";
 import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
 import { scheduleRecompute } from "./recomputeRunner";
 import { updateModeVEPlots } from "./updateModeVEPlots";
-
-/** Defaults the two GPS update paths already used when a slider was missing. */
-const FALLBACK_CDA = 0.3;
-const FALLBACK_CRR = 0.008;
 
 export interface ModeUpdateRequestDeps {
 	appState: AppState;
@@ -213,8 +213,10 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	// no null branch to guard.
 	const handler = resolveActiveModeHandler(appState);
 
-	const cda = readNumber("cdaSlider", "cdaValue", FALLBACK_CDA);
-	const crr = readNumber("crrSlider", "crrValue", FALLBACK_CRR);
+	// Defaults the two GPS update paths already used when a slider was missing —
+	// now the shared constants, so there is one numeric stand-in and not two.
+	const cda = readNumber("cdaSlider", "cdaValue", UNSET_CDA_FALLBACK);
+	const crr = readNumber("crrSlider", "crrValue", UNSET_CRR_FALLBACK);
 	const windSource = toWindSource(getSelectedWindSource());
 
 	// NO SOURCE IS ROUTED ANYWHERE ELSE (07-04 Task 1). Standard used to claim

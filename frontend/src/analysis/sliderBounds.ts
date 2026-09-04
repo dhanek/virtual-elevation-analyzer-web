@@ -33,12 +33,24 @@ export interface SliderBounds {
 	max: number;
 }
 
-/** The Crr slider's travel. App configuration — never read from stored data. */
-export function displayCrrBounds(): SliderBounds {
-	return { min: DEFAULT_PARAMETERS.crr_min, max: DEFAULT_PARAMETERS.crr_max };
+/** The Crr slider's travel. App configuration — never read from stored BOUNDS.
+ *  `current` widens the range so a stored value outside it stays representable:
+ *  a range input sanitizes to its `max`, and the sanitized value is what the
+ *  save paths persist. See F17-01. */
+export function displayCrrBounds(current?: number | null): SliderBounds {
+	const { crr_min: min, crr_max: max } = DEFAULT_PARAMETERS;
+	if (typeof current !== "number" || !Number.isFinite(current)) return { min, max };
+	return { min: Math.min(min, current), max: Math.max(max, current) };
 }
 
-/** The CdA counterpart, for the same reason. */
-export function displayCdaBounds(): SliderBounds {
-	return { min: DEFAULT_PARAMETERS.cda_min, max: DEFAULT_PARAMETERS.cda_max };
+/** The CdA counterpart, for the same reason, and with the same widening:
+ *  `current` keeps a stored value outside the app range representable, because
+ *  a range input sanitizes to its `max` and the save paths persist the
+ *  sanitized value. Deliberately NOT factored into one generic helper with
+ *  `displayCrrBounds` — two named helpers is the shape this module chose, and
+ *  the two ranges are unrelated app configuration. See F17-05. */
+export function displayCdaBounds(current?: number | null): SliderBounds {
+	const { cda_min: min, cda_max: max } = DEFAULT_PARAMETERS;
+	if (typeof current !== "number" || !Number.isFinite(current)) return { min, max };
+	return { min: Math.min(min, current), max: Math.max(max, current) };
 }

@@ -2,8 +2,10 @@ import {
 	DEFAULT_WIND_HEIGHT_FACTOR,
 	LEGACY_WIND_HEIGHT_FACTOR,
 } from "../analysis/WindHeightTransfer";
-import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
-import { AnalysisParameters } from "../components/AnalysisParameters";
+import {
+	AnalysisParameters,
+	DEFAULT_PARAMETERS,
+} from "../components/AnalysisParameters";
 import { log } from "./log";
 
 interface LapSettings {

@@ -78,16 +78,32 @@ describe("no site re-introduces its own Crr fallback literal", () => {
 	 * Crr, anywhere in `src`. Matches `?? 0.005`, `|| 0.008` and their spacing
 	 * variants when they sit next to a `crr` reference on the same line.
 	 *
-	 * Mutation: restore `crr ?? 0.005` at `renderStandardVe.ts:84` and this
-	 * fails naming that file.
+	 * THE SECOND PATTERN IS F17-06, and it is the reason this test's name is now
+	 * true. `requestModeUpdate.ts` declared `const FALLBACK_CRR = 0.008;` — the
+	 * same role as `UNSET_CRR_FALLBACK`, an eleventh site, and invisible to the
+	 * operator pattern above because a declaration has no `??` or `||` on it.
+	 * That is the mechanism by which the measured 0.005/0.008 split survived a
+	 * scan written to end it.
+	 *
+	 * Deliberately a DECLARATION pattern and not a bare `=\s*0\.\d+` on any line
+	 * mentioning crr: the loose form matches `crr_min: 0.0015` and
+	 * `crr_max: 0.03` in `AnalysisParameters.ts` — real bounds, not fallbacks —
+	 * and turns the guard into noise nobody reads.
+	 *
+	 * Mutation: restore `crr ?? 0.005` at `renderStandardVe.ts:84`, or re-add
+	 * `const FALLBACK_CRR = 0.008;` to `requestModeUpdate.ts`, and this fails
+	 * naming the file and the line.
 	 */
 	it("leaves no numeric crr fallback outside the shared module", () => {
 		const offenders: string[] = [];
+		const asOperator = /(\?\?|\|\|)\s*0\.\d+/;
+		const asDeclaration =
+			/^\s*(const|let|var)\s+[A-Za-z_]*[Cc][Rr][Rr][A-Za-z_]*\s*(:\s*[A-Za-z]+\s*)?=\s*[0-9.]+/;
 		for (const file of sourceFiles(join(__dirname, ".."))) {
 			const text = readFileSync(file, "utf8");
 			text.split("\n").forEach((line, i) => {
 				if (!/crr/i.test(line)) return;
-				if (/(\?\?|\|\|)\s*0\.\d+/.test(line)) {
+				if (asOperator.test(line) || asDeclaration.test(line)) {
 					offenders.push(`${file.split("/src/")[1]}:${i + 1}  ${line.trim()}`);
 				}
 			});
