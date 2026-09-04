@@ -568,17 +568,6 @@ export function setupVESliders(
 		}, 500);
 	};
 
-	if (
-		appState.currentParameters?.auto_calculate_rho &&
-		!appState.isCalculatingAutoRho
-	) {
-		setTimeout(() => {
-			calculateAutoRho(appState, parametersComponent, services).catch((err) => {
-				log.error("Auto-rho initial calculation error:", err);
-			});
-		}, 1000);
-	}
-
 	// The map's trim twins are the same control with a second face, so the binder
 	// owns their handlers. Their RANGES are not declarative — they come from this
 	// panel's activity length — so they are set here, once.

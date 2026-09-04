@@ -227,6 +227,7 @@ export interface AnalysisState {
 	veStatus: VeStatus;
 	airSpeedCalibrationPercent: number;
 	isCalculatingAutoRho: boolean;
+	autoRhoPromise: Promise<number | null> | null;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
 }
@@ -300,6 +301,7 @@ export class AppState {
 		veStatus: "idle",
 		airSpeedCalibrationPercent: 0,
 		isCalculatingAutoRho: false,
+		autoRhoPromise: null,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
 	};
@@ -418,6 +420,14 @@ export class AppState {
 
 	set isCalculatingAutoRho(isCalculating: boolean) {
 		this.analysis.isCalculatingAutoRho = isCalculating;
+	}
+
+	get autoRhoPromise(): Promise<number | null> | null {
+		return this.analysis.autoRhoPromise;
+	}
+
+	set autoRhoPromise(promise: Promise<number | null> | null) {
+		this.analysis.autoRhoPromise = promise;
 	}
 
 	get lastWeatherQueryKey(): string | null {

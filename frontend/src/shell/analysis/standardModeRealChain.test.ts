@@ -87,6 +87,12 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 /** The overlay's far end: the functions that actually paint its figures. */
 const overlay = vi.hoisted(() => ({ ve: vi.fn(), vd: vi.fn() }));
 
+const autoRho = vi.hoisted(() => ({ calculate: vi.fn() }));
+
+vi.mock("../ve/autoRho", () => ({
+	calculateAutoRho: (...args: unknown[]) => autoRho.calculate(...args),
+}));
+
 vi.mock("../gpsLap/gpsLapPlots", async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	renderGpsLapVEPlots: (...args: unknown[]) => overlay.ve(...args),
@@ -111,7 +117,10 @@ import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
 import { showVirtualElevationAnalysisInline } from "../ve/renderStandardVe";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
 import { resetRecomputeThrottle } from "./recomputeRunner";
-import { resetModeUpdateRequests } from "./requestModeUpdate";
+import {
+	requestModeUpdate,
+	resetModeUpdateRequests,
+} from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
 const HALF = SAMPLE_COUNT / 2;
@@ -395,6 +404,8 @@ beforeEach(() => {
 	drawMethods.length = 0;
 	overlay.ve.mockClear();
 	overlay.vd.mockClear();
+	autoRho.calculate.mockReset();
+	autoRho.calculate.mockResolvedValue(null);
 	clearModeUpdateCallbacks();
 	resetModeUpdateRequests();
 	modeState.gps = "None";
@@ -608,7 +619,7 @@ describe("standard (None): the STACKED overlay's VD tab", () => {
  */
 describe("standard: currentFilteredData after the analyze render (CR-01)", () => {
 	/**
-	 * The value AFTER the post-bind kick, which is the only pass that writes it.
+	 * The value AFTER the post-bind request, which is the only pass that writes it.
 	 *
 	 * The `await settle()` is the part that changed: this used to be there the
 	 * instant `showVirtualElevationAnalysisInline` returned. The pre-settle half
@@ -818,6 +829,61 @@ describe("standard: the Store Result window", () => {
 	});
 });
 
+describe("standard: the first auto-rho result is atomic", () => {
+	it.each([
+		["success", 1.1984, true],
+		["weather failure fallback", null, false],
+	])(
+		"waits for %s and publishes one stable producer pass",
+		async (_label, autoRhoResult, parametersChanged) => {
+			let settleAutoRho!: (value: number | null) => void;
+			autoRho.calculate.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						settleAutoRho = resolve;
+					}),
+			);
+			appState.currentParameters!.auto_calculate_rho = true;
+
+			const renderPromise = renderStitched();
+			await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+			expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(0);
+			expect(appState.veStatus).not.toBe("ready");
+			expect(storeButton().disabled).toBe(true);
+
+			// A successful real auto-rho writes through setParameters, whose
+			// callback requests an update before the weather promise resolves.
+			// The renderer's explicit request must coalesce with it.
+			if (parametersChanged) requestModeUpdate("parameters");
+			settleAutoRho(autoRhoResult);
+			await renderPromise;
+			await settle();
+
+			expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+			expect(appState.veStatus).toBe("ready");
+			expect(storeButton().disabled).toBe(false);
+
+			// The retired one-second binder timer must not wake up and change the
+			// inputs (or publish another result) after this stable first pass.
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+			expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		},
+	);
+
+	it("does not wait for or fetch weather when auto-rho is disabled", async () => {
+		await renderStitched();
+
+		expect(autoRho.calculate).not.toHaveBeenCalled();
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(0);
+
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+	});
+});
+
 /**
  * EVERY STANDARD PLOT REDRAWS WITH `Plotly.react` (bundle D).
  *
@@ -839,7 +905,7 @@ describe("standard: the Store Result window", () => {
  * WHAT CHANGED. The five ids are no longer opened by one caller. `#windSpeedPlot`
  * / `#speedPowerPlot` / `#vdPlot` are drawn by the render, which needs no fit for
  * any of them; `#vePlot` / `#veResidualsPlot` need a virtual elevation and are
- * now opened by the post-bind kick. So the case settles first. Both assertions
+ * now opened by the post-bind request. So the case settles first. Both assertions
  * are the ones it always made — all five ids appear, and `newPlot` is chosen
  * nowhere — and neither depends on which pass drew what.
  */

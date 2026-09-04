@@ -19,18 +19,49 @@ import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallba
  * @param parametersComponent - UI component for parameters
  * @param services - Shell services (loading, etc.)
  */
-export async function calculateAutoRho(
+export function calculateAutoRho(
     appState: AppState,
     parametersComponent: AnalysisParametersComponent | null,
     services: ShellServices
 ): Promise<number | null> {
-    // Prevent infinite loops
+    // A caller arriving during a live calculation joins it. In particular,
+    // Standard's initial render can now wait for an operation started earlier
+    // by file loading instead of racing it or starting a second fetch.
+    if (appState.autoRhoPromise) {
+        log.debug('⏭️  Auto-rho calculation already in progress, joining\n');
+        return appState.autoRhoPromise;
+    }
+
+    // Preserve the defensive guard for legacy/test callers which may own the
+    // boolean without having registered a promise through this function.
     if (appState.isCalculatingAutoRho) {
         log.debug('⏭️  Auto-rho calculation already in progress, skipping\n');
-        return null;
+        return Promise.resolve(null);
     }
 
     appState.isCalculatingAutoRho = true;
+
+    // Start on a microtask so the promise is installed before any early return
+    // in the operation can settle it. That makes the flag and promise one
+    // atomic single-flight lifetime even on disabled/missing-input paths.
+    let operation!: Promise<number | null>;
+    operation = Promise.resolve()
+        .then(() => performAutoRho(appState, parametersComponent, services))
+        .finally(() => {
+            if (appState.autoRhoPromise === operation) {
+                appState.autoRhoPromise = null;
+                appState.isCalculatingAutoRho = false;
+            }
+        });
+    appState.autoRhoPromise = operation;
+    return operation;
+}
+
+async function performAutoRho(
+    appState: AppState,
+    parametersComponent: AnalysisParametersComponent | null,
+    services: ShellServices
+): Promise<number | null> {
 
     // `services.hideLoading()` is a global, non-refcounted toggle that also
     // re-enables the Analyze button. Auto-rho runs from detached timers
@@ -46,12 +77,12 @@ export async function calculateAutoRho(
         services.hideLoading();
     };
 
-    // WEATH-03 rung 3 guard: everything after the in-progress flag is set runs
-    // inside this try/finally, so no failure path can leave
+    // WEATH-03 rung 3 guard: the public wrapper owns the structural `finally`,
+    // so no failure path can leave
     // `isCalculatingAutoRho` stuck at true (which would permanently disable
     // auto-rho for the session) — including a throw from inside a catch
     // handler (`hideLoading` / `showNotification` both touch the DOM). The flag
-    // is cleared in exactly one place, the `finally` below, so a future early
+    // is cleared in exactly one place, that wrapper's `finally`, so a future early
     // return cannot reintroduce the leak. Callers discard the return value, so
     // returning null simply leaves the manual/prior rho in place and analysis
     // continues.
@@ -266,8 +297,8 @@ export async function calculateAutoRho(
             // The "unknown" case is decided inside the sync hook, which returns
             // {} for it — one decision site, testable with no bind() call. It
             // matters at *this* call site because auto-rho genuinely re-fires on
-            // load, from fileLoad/fileLoadOrchestration.ts:389 and
-            // ve/bindStandardSliders.ts:632; neither is suppressed by
+            // load, from fileLoad/fileLoadOrchestration.ts and Standard's
+            // awaited initial render; neither is suppressed by
             // isLoadingParameters, which only short-circuits
             // handleParametersChange (analysis/analyzeOrchestrator.ts:171). So
             // on any saved file with auto_calculate_rho: true this merge runs
@@ -353,8 +384,6 @@ export async function calculateAutoRho(
         showNotification(AUTO_RHO_FAILURE_MESSAGE, 'error');
 
         return null;
-    } finally {
-        appState.isCalculatingAutoRho = false;
     }
 }
 

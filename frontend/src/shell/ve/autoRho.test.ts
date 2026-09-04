@@ -164,6 +164,41 @@ beforeEach(() => {
 });
 
 describe("calculateAutoRho — successful fetch", () => {
+	test("concurrent callers join one live weather operation", async () => {
+		const h = setupHarness();
+		let resolveWeather!: (entry: ReturnType<typeof weatherEntry>) => void;
+		mocks.getWeatherData.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveWeather = resolve;
+				}),
+		);
+
+		const first = calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+		await vi.waitFor(() => expect(mocks.getWeatherData).toHaveBeenCalledTimes(1));
+
+		const second = calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		expect(second).toBe(first);
+		expect(h.appState.isCalculatingAutoRho).toBe(true);
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+
+		resolveWeather(weatherEntry(21.4));
+		await expect(Promise.all([first, second])).resolves.toEqual([1.2, 1.2]);
+
+		expect(h.appState.isCalculatingAutoRho).toBe(false);
+		expect(h.appState.autoRhoPromise).toBeNull();
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+	});
+
 	test("stores the rho, its weather provenance and the wind vector", async () => {
 		const h = setupHarness();
 		await succeedOnT1(h);
@@ -195,8 +230,8 @@ describe("calculateAutoRho — a stored wind is never overwritten (D-a)", () => 
 	 * restore the EXACT conditions it was analysed under — the wind, where that
 	 * wind came from, and the height factor.
 	 *
-	 * Auto-rho re-runs on load (fileLoadOrchestration.ts:389,
-	 * bindStandardSliders.ts:632, neither suppressed by isLoadingParameters) and
+	 * Auto-rho re-runs on load (fileLoadOrchestration and Standard's awaited
+	 * initial render, neither suppressed by isLoadingParameters) and
 	 * assigned `updateParams.wind_speed` from the API unconditionally. So a
 	 * saved analysis reopened with auto_calculate_rho: true had its wind
 	 * replaced, and only THEN did k follow. Preserving k alone was never enough:
@@ -686,7 +721,7 @@ describe("calculateAutoRho — the wind height factor (D-06)", () => {
 	test("a reopened pre-feature record is not re-seeded by a successful fill", async () => {
 		// T-08-16 / D-07 / R-04, end-to-end. auto-rho genuinely re-fires on load
 		// from fileLoad/fileLoadOrchestration.ts:389 and
-		// ve/bindStandardSliders.ts:632 — neither suppressed by
+		// ve/renderStandardVe.ts — neither suppressed by
 		// isLoadingParameters — so on any saved file with auto_calculate_rho: true
 		// this exact sequence runs right after normalizeLoadedParameters produced
 		// wind_entry: "unknown". The API does return a wind here; the record must

@@ -24,6 +24,7 @@ import {
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
 import { setupVESliders } from "./bindStandardSliders";
+import { calculateAutoRho } from "./autoRho";
 import { crrTempControlsMarkup } from "./crrTempControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
@@ -48,6 +49,7 @@ import {
 	bindTabButtons,
 	resetTabRenderMapForNewPanel,
 } from "../dom/tabs";
+import { requestModeUpdate } from "../analysis/requestModeUpdate";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -170,7 +172,7 @@ export async function initializeVEAnalysis(
 	// `newPlot` would, so there is no first-draw special case.
 	//
 	// `#vePlot` and `#veResidualsPlot` are NOT among them any more: they need a
-	// virtual elevation, this pass computes none, and the post-bind kick opens
+	// virtual elevation, this pass computes none, and the post-bind request opens
 	// both with `react` a macrotask later. Until it lands the two divs are empty
 	// rather than carrying a fit nothing else agrees with.
 	Plotly.react(
@@ -197,9 +199,8 @@ export async function initializeVEAnalysis(
 	//
 	// This placeholder paint has no per-segment decomposition -- it integrates
 	// the concatenated selection in one pass -- so a multi-lap selection gets the
-	// labelled combined figure here. The synthetic `input` dispatch on
-	// #trimStartSlider (below) immediately routes through the primitive and
-	// replaces it with the honest per-lap lines.
+	// labelled combined figure here. The explicit post-bind request below routes
+	// through the primitive and replaces it with the honest per-lap lines.
 	updateCombinedVirtualDistanceHeader(
 		virtualDistanceInput,
 		selectedLapCount(appState),
@@ -612,14 +613,22 @@ export async function showVirtualElevationAnalysisInline(
 		defaultAirSpeedOffset,
 	);
 
-	// After sliders are bound, trigger VE recalculation with saved parameter values
-	// This ensures the calculation uses the loaded trim/cda/crr values from sliders
-	const trimStartSlider = document.getElementById(
-		"trimStartSlider",
-	) as HTMLInputElement;
-	if (trimStartSlider) {
-		trimStartSlider.dispatchEvent(new Event("input", { bubbles: true }));
+	// Standard's first result is atomic with its automatic weather input. The
+	// panel remains in `computing` (and Store Result remains disabled) while a
+	// new or already-live auto-rho operation settles. `setParameters` may request
+	// an update when weather succeeds or invalidates stale provenance; the
+	// latest-input-wins funnel below coalesces that request with this explicit
+	// initial one into a single producer pass over the settled inputs.
+	if (appState.currentParameters.auto_calculate_rho) {
+		try {
+			await calculateAutoRho(appState, parametersComponent, services);
+		} catch (error) {
+			// The normal weather-failure contract resolves to null. This catch keeps
+			// the manual fallback usable even if a reporting/DOM failure escapes.
+			log.error("Auto-rho initial calculation error:", error);
+		}
 	}
+	requestModeUpdate("parameters");
 
 	// BIND THE BUTTONS, DO NOT TOUCH THE MAP.
 	//
@@ -627,7 +636,7 @@ export async function showVirtualElevationAnalysisInline(
 	// `currentRenderMap = renderMap` unconditionally and so WIPED the real map
 	// that `createStandardUpdateCallbacks.renderVe` installs
 	// (`bindStandardSliders.ts:241`). It only appeared to work because
-	// `scheduleRecompute` defers to `setTimeout(..., 0)`, so the dispatch above
+	// `scheduleRecompute` defers to `setTimeout(..., 0)`, so the request above
 	// lands `renderVe` on the NEXT macrotask, after this line.
 	//
 	// Deleting the call outright fixed the wipe but took the button binding with
