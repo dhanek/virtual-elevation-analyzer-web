@@ -66,13 +66,14 @@ export function formatCoveredLapCount(
 }
 
 /**
- * THE one writer of Standard's four metric spans.
+ * THE one writer of Standard's four metric spans. `renderMetrics` below is its
+ * only caller now, and nothing outside this module imports it.
  *
- * Exported for `initializeVEAnalysis`, which fills them at first paint from the
- * SAME integration that drew the curve beneath them. Before that the template
- * painted them from `prepareAnalysisPayload`'s stitched fit -- a different trim
- * window and a different wind source from the plot underneath -- so the header
- * and the curve disagreed until the post-bind kick replaced both.
+ * Two predecessors each put a number on screen that something else replaced: the
+ * template's, from `prepareAnalysisPayload`'s stitched fit, then
+ * `initializeVEAnalysis`'s own, which agreed with the curve it drew but not with
+ * `renderMetrics` -- the MEAN of the per-lap fits (D-19 Option B), which one fit
+ * over N laps is not. `[S-M]`, retired with that fit.
  */
 export function updateMetricsDisplay(
 	r2: number,

@@ -60,7 +60,7 @@ function selectionForLaps(
 	// `selectedItems` used to be the raw lap-number list while `selectedEntries`
 	// dropped the ones with no entry in `currentLaps`. `standardMode.render`
 	// hands `selectedItems` straight to `currentAnalyzedLaps`
-	// (`renderStandardVe.ts:264`), which is the key `saveLapSettings` /
+	// (`renderStandardVe.ts`'s own assignment), which is the key `saveLapSettings` /
 	// `loadLapSettings` use and the `laps` field Store Result persists — so a
 	// stale lap number, e.g. a selection left over from another file, keyed the
 	// saved trim/CdA/Crr under a lap set that did not match the segments

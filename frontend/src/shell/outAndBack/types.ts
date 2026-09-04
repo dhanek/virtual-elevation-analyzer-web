@@ -10,10 +10,19 @@ export interface OutAndBackVEProfile {
      *
      * NO READER LEFT. These existed for the analyze-time seed of
      * `currentFilteredData`, which had to cover exactly the legs that made it
-     * onto the plot (WR-03); that seed is gone and the update path is now the
-     * only writer of that field, off the profiles themselves. The fields are
-     * kept for now because the update path already fills them with `null` and
-     * removing them is a type change with its own sweep.
+     * onto the plot (WR-03); that seed is gone and `summarize` is now the only
+     * writer of that field, off the profiles themselves.
+     *
+     * KEPT DELIBERATELY, on the same reason `gpsLap/types.ts` gives for
+     * `LapVEProfile.range` — those two comments are meant to agree, and
+     * disagreeing about why a field survives is how a field survives for no
+     * reason at all. Both writers still fill these honestly, the analyze leg
+     * from the ranges it selected and the update path with `null` because it
+     * does not compute them, so what is here is true rather than merely unread.
+     * Deleting them is a type change that ripples through a dozen fixture
+     * builders and both chain suites for no behavioural gain; it belongs to a
+     * type sweep of its own, and if no reader has appeared by then, that sweep
+     * should take them.
      */
     outboundRange: { startIdx: number; endIdx: number } | null;
     inboundRange: { startIdx: number; endIdx: number } | null;

@@ -11,13 +11,20 @@ export interface LapVEProfile {
      * calculator throws, so the surviving profiles — not the active range list
      * — are the truth about what is on screen (WR-03).
      *
-     * NO READER, as of the analyze-leg retirement. The single reader WAS the
-     * analyze-time seed in `renderGpsLap.ts`, and that seed is deleted: the
-     * update path is the only producer of `currentFilteredData` now, and it
-     * seeds from the profiles themselves in `summarize`. The field is still
-     * written by the analyze leg because it is the honest answer to "which
-     * samples is this profile about", and removing it belongs with the rest of
-     * the post-retirement sweep rather than with the deletion of its caller.
+     * NO READER, as of the analyze-leg retirement. Its single reader was the
+     * analyze-time seed of `currentFilteredData`, and that seed is deleted:
+     * `summarize` is the only writer of that field now, working off the profiles
+     * themselves.
+     *
+     * KEPT DELIBERATELY, on the reason `outAndBack/types.ts` gives for its own
+     * pair — those two comments are meant to agree, and disagreeing about why a
+     * field survives is how a field survives for no reason at all. Both writers
+     * still fill it honestly, the analyze leg from the range it selected and the
+     * update path with `null` because it does not compute one, so what is here
+     * is true rather than merely unread. Deleting it is a type change that
+     * ripples through a dozen fixture builders and both chain suites for no
+     * behavioural gain; it belongs to a type sweep of its own, and if no reader
+     * has appeared by then, that sweep should take it.
      *
      * NULLABLE, matching `outAndBack/types.ts` (WR-04). It was declared
      * non-optional and derived

@@ -6,8 +6,8 @@
  * put a NUMBER on screen or into the calculator before an optimization has run
  * needs a stand-in, and until 2026-09-04 the codebase had two:
  *
- *   - `renderStandardVe.ts:84`  analyze leg   `crr ?? 0.005`
- *   - `renderStandardVe.ts:439` slider markup `crr || 0.008`
+ *   - `renderStandardVe.ts`'s `initializeVEAnalysis` — analyze leg, `crr ?? 0.005`
+ *   - `renderStandardVe.ts`'s `#crrSlider` control — slider markup, `crr || 0.008`
  *
  * So on a file with NO stored parameter record, Standard computed its first
  * paint at 0.005 while the slider displayed 0.008; the post-bind kick then read
@@ -17,14 +17,15 @@
  * `crr` (0.005 vs 0.008) and in NOTHING ELSE — same CdA, trim, rho array, wind,
  * altitude and sample count.
  *
- * GPS-lap (`renderGpsLap.ts:178`) already used 0.008 for both halves. Out-and-back
- * did too, until its own analyze-leg copy of the computed half (`resolveAppliedCrr`
- * over `resolveDisplayCrr`) was deleted in the 2026-09-04 retirement of its
- * per-leg fit; its computed half now runs through the shared producer's
- * `resolveAppliedCrr` call (`updateModeVEPlots.ts`), and its display half
- * stays at the slider markup (`renderOutAndBack.ts`'s `#crrSlider` control).
- * Standard was the only mode that drifted. 0.008 is therefore the value kept,
- * and 0.005 the outlier removed.
+ * GPS-lap already used 0.008 for both halves, and out-and-back did too, until
+ * each mode's analyze-leg copy of the computed half (`resolveAppliedCrr` over
+ * `resolveDisplayCrr`) was deleted in the 2026-09-04 retirement of its own
+ * fit. Standard's analyze-leg copy went the same way when its own fit
+ * was retired, so NEITHER of the two sites above computes any more: for all
+ * three modes the computed half now runs through the shared producer's
+ * `resolveAppliedCrr` call (`updateModeVEPlots.ts`) and the display half stays
+ * at each mode's `#crrSlider` markup. Standard was the only mode that drifted.
+ * 0.008 is therefore the value kept, and 0.005 the outlier removed.
  *
  * `storageHandlers.ts` carried the same 0.005 on the path that PERSISTS a
  * result when no slider is rendered, so this was never only cosmetic.

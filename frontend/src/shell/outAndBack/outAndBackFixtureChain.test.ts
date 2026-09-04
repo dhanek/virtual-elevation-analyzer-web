@@ -696,10 +696,11 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 	 * CR-01. THE INVARIANT IS ESTABLISHED BY ANALYZE, not by the first control
 	 * interaction.
 	 *
-	 * `currentFilteredData` had exactly one analyze-time writer
-	 * (`renderStandardVe.ts:265`) and it is Standard-only. The two segment modes
-	 * computed their profiles locally and painted them directly, so `summarize`
-	 * — the only other writer — first ran when the user touched a control.
+	 * `currentFilteredData` had exactly one analyze-time writer — the seed in
+	 * `showVirtualElevationAnalysisInline` (`renderStandardVe.ts`) — and it was
+	 * Standard-only. The two segment modes computed their profiles locally and
+	 * painted them directly, so `summarize` — the only other writer — first ran
+	 * when the user touched a control.
 	 *
 	 * Analyze then Store Result, with nothing in between, therefore either
 	 * aborted with "no analysed samples. Please run analysis first" on a fresh
@@ -803,8 +804,8 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 			expect(call.cda).toBeCloseTo(DRAGGED_CDA, 6);
 		}
 		// D-17(a)'s seam holds: `outAndBackMode.summarize` ->
-		// `writeSegmentModeResultState` (`segmentSummary.ts:131-141`) wrote all of
-		// it. This is the half of N-1 that was already true.
+		// `writeSegmentModeResultState` (in `segmentSummary.ts`) wrote all of it.
+		// This is the half of N-1 that was already true.
 		expect(appState.currentVEResult).not.toBeNull();
 		expect(appState.currentFilteredData).not.toBeNull();
 		expect(appState.currentWindSource).toBe("fit");

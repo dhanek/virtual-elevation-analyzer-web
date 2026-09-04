@@ -64,7 +64,7 @@ function toOutAndBackProfiles(
 			// `currentFilteredData`; that seed is retired, so this pass's
 			// `summarize` — working off the profiles themselves — is the field's
 			// only writer and these two carry nothing. The `profileRange` helper
-			// that used to fill them in was dead surface.
+			// that used to fill them in was dead surface. Why kept: `types.ts`.
 			outboundRange: null,
 			inboundRange: null,
 			outboundDistances: outbound?.distancesKm ?? [],
