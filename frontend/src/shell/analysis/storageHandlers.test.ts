@@ -51,6 +51,8 @@ function makeAppStateStub(overrides: Partial<AppState>): AppState {
 		selectedLaps: [],
 		currentAnalyzedLaps: [],
 		airSpeedCalibrationPercent: 0,
+		// A completed pass, unless a test overrides it to exercise the gate itself.
+		veStatus: "ready",
 		...overrides,
 	} as unknown as AppState;
 }

@@ -113,14 +113,34 @@ export async function handleStoreResult(
         return;
     }
 
-    // EMPTY counts as absent. `buildFilteredDataFromProfiles` returns empty
-    // arrays unconditionally when `currentFitData` is falsy
+    // THE STATUS, NOT THE DATA'S TRUTHINESS.
+    //
+    // `currentFilteredData` being populated used to be the proxy for "a result
+    // exists". Once the analyze legs stop seeding it, that proxy is false during
+    // the window between Analyze and the first pass landing — a window of the
+    // recompute throttle plus a full calculator sweep. Asking the status instead
+    // makes that window explicit, and `applyVeStatus` has already disabled the
+    // button through it.
+    //
+    // The empty case still matters even so: `buildFilteredDataFromProfiles`
+    // returns empty arrays unconditionally when `currentFitData` is falsy
     // (`segmentSummary.ts:77-80`), and both segment-mode branches below then
     // compute `trimEnd = 0 - 1 = -1`, slice nothing, and hand
     // `new Date(undefined * 1000)` to `.toISOString()` — a RangeError caught by
     // the outer catch and reported as the generic "Failed to store result",
     // which says nothing about the real cause.
-    if (!appState.currentFilteredData || appState.currentFilteredData.power.length === 0) {
+    if (appState.veStatus !== 'ready') {
+        alert('Cannot store result: no analysed samples. Please run analysis first.');
+        return;
+    }
+
+    // `veStatus === 'ready'` is the invariant that `currentFilteredData` is
+    // populated — TypeScript's control-flow narrowing has no way to know that
+    // from a status field, though, so pull it into a local once here rather
+    // than asserting non-null at each of the several use sites below.
+    const filteredData = appState.currentFilteredData;
+    if (!filteredData) {
+        log.error('Cannot store: currentFilteredData missing despite ready status');
         alert('Cannot store result: no analysed samples. Please run analysis first.');
         return;
     }
@@ -151,7 +171,7 @@ export async function handleStoreResult(
 
         if (appState.isGpsLapModeActive) {
             trimStart = 0;
-            trimEnd = appState.currentFilteredData.power.length - 1;
+            trimEnd = filteredData.power.length - 1;
             const cdaSlider = document.getElementById('cdaSlider') as HTMLInputElement;
             const crrSlider = document.getElementById('crrSlider') as HTMLInputElement;
             cda = cdaSlider ? parseFloat(cdaSlider.value) : resolveDisplayCda(appState.currentParameters.cda);
@@ -194,17 +214,17 @@ export async function handleStoreResult(
                 // whole update to the gpsLap handler on it; flipping it would send
                 // out-and-back's recomputes to the wrong mode.
                 trimStart = 0;
-                trimEnd = appState.currentFilteredData.power.length - 1;
+                trimEnd = filteredData.power.length - 1;
             }
 
             cda = parseFloat(cdaSlider.value);
             crr = parseFloat(crrSlider.value);
         }
 
-        const filteredPower = appState.currentFilteredData.power;
-        const filteredVelocity = appState.currentFilteredData.velocity;
-        const filteredTemperature = appState.currentFilteredData.temperature;
-        const filteredTimestamps = appState.currentFilteredData.timestamps;
+        const filteredPower = filteredData.power;
+        const filteredVelocity = filteredData.velocity;
+        const filteredTemperature = filteredData.temperature;
+        const filteredTimestamps = filteredData.timestamps;
 
         // CR-02. THE WINDOW IS THE WHOLE OF `currentFilteredData`, in every mode.
         //
