@@ -11,9 +11,9 @@
  *
  * So on a file with NO stored parameter record, Standard computed its first
  * paint at 0.005 while the slider displayed 0.008; the post-bind kick then read
- * the slider and recomputed, and the panel changed by itself. Measured on
- * `Airstrip4lap3.fit` lap 2: `0.8264 / 3.56 m / −7.32 m` replaced 16 ms later by
- * `0.8200 / 4.56 m / −9.07 m`, with the two calculator calls differing in
+ * the slider and recomputed, and the panel changed by itself. Measured on the
+ * reference ride, lap 2 in Standard mode: `0.8264 / 3.56 m / −7.32 m` replaced
+ * 16 ms later by `0.8200 / 4.56 m / −9.07 m`, with the two calls differing in
  * `crr` (0.005 vs 0.008) and in NOTHING ELSE — same CdA, trim, rho array, wind,
  * altitude and sample count.
  *

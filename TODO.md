@@ -49,13 +49,13 @@ a second claim. **B**, **D** and **H** were exercised in the running app and the
 what was measured. **A**, **C** and **E** carried "never opened in the app" until **2026-09-03**,
 when all three were driven against the reference ride on `dcdcaac`; each Done entry below ends with a
 *Checked in the app* block recording the numbers. Bundle **A** passed on all five items. **C** and
-**E** each produced one failure, carried as open items under *Standalone work* with their repros;
-both are pre-existing gaps the bundles did not claim to close rather than regressions in what they
-shipped. One sub-item is **still owed**: bundle C's elevation-smoothing toggle was verified in
-Standard but not in the two GPS modes, because the Section 3 detection panel stopped binding partway
-through the session — the C entry says exactly what was and was not established. C1-01's own in-app
-check, at the end of *Done*, was run on 2026-09-02 at `d586961` and covers Section 3's selection and
-map behaviour only.
+**E** each produced one failure, each written up under *Standalone work* with its repro; both are
+pre-existing gaps the bundles did not claim to close rather than regressions in what they shipped.
+E's is now **closed** — fixed 2026-09-04 by separating slider travel from the stored optimizer
+bounds — and C's is closed too: bundle C's elevation-smoothing toggle was confirmed working in both
+GPS modes by the maintainer on 2026-09-04, so **bundle C carries no debt** and no sub-item is owed.
+C1-01's own in-app check, at the end of *Done*, was run on 2026-09-02 at `d586961` and covers
+Section 3's selection and map behaviour only.
 
 Suggested order from here: the standalone items. A, B, C, D, E, G and H are done. **F** has had
 its condition (a) closed (2026-09-02). What was condition (b) was probed on 2026-09-02 and split
@@ -212,7 +212,10 @@ re-deriving it):
 - [ ] **[S] Scrub the ride filename from `main`'s history — after PR #8 lands, not before.**
       The current file no longer names the ride (see *Conventions*), but the name is still in **25
       commits** on `main`, spanning `3b05de7` (2026-08-31) to `dcdcaac` (2026-09-03) — in `TODO.md`
-      content and in six commit messages. Only `TODO.md` is affected; no source file ever carried it.
+      content and in six commit messages. `TODO.md` is not the only path affected: commits on branch
+      `in-app-checks-a-c-e` (`3299df0`) also put the name into
+      `frontend/src/analysis/unsetParameterFallbacks.ts`, so the scrub covers that source path too.
+      That was corrected in the working tree on 2026-09-04; the history still carries it.
 
       **This was attempted on 2026-09-04 and reverted.** The rewrite itself worked — 25 commits,
       443 commits in and out, `TODO.md` the only path touched — but it broke **PR #8**, the open
@@ -278,8 +281,9 @@ re-deriving it):
       against a different ride. Re-run the original repro on the reference ride before treating this
       entry as closing every route. *origin: bundle C in-app check, 2026-09-03*
 
-- [ ] **[S] Bundle E's widened Crr range never reaches a file that has been analysed before.**
-      *Owner: bundle **E**.* Found by bundle E's own in-app check, 2026-09-03. D-c widened the range
+- [x] **[S] Bundle E's widened Crr range never reaches a file that has been analysed before.**
+      *Owner: bundle **E**.* Found by bundle E's own in-app check, 2026-09-03, **fixed 2026-09-04.**
+      See *The widened Crr range only reached fresh files* under **Done**. D-c widened the range
       to **0.0015 – 0.030**, and `DEFAULT_PARAMETERS` carries it — a file with no stored record
       renders `#crrSlider` and `#crrValue` at `min="0.0015" max="0.03" step="0.0001"`, correctly.
       But every file that already has a `fileParameters` row still gets **0.002 – 0.015**, the
@@ -296,9 +300,13 @@ re-deriving it):
       the default only, and its entry's "it propagates on its own" reasoning holds for fresh files
       and not for stored ones. Independently, three "no existing data" literals still hardcode the
       old pair — `ParameterStorage.ts:412-413`, `540-541`, `727-728` — so even a new record written
-      down those paths is born with the narrow range. A fix needs to decide whether stored bounds
-      are user data (migrate once) or defaults (stop persisting them); the three literals should
-      reference the constants either way. *origin: bundle E in-app check, 2026-09-03*
+      down those paths is born with the narrow range.
+
+      The repro and cause above are the record of what was found and stay accurate as history. The
+      decision the entry called for has since been made: stored bounds are the OPTIMIZER's search
+      range and stay user data, the slider's travel is app configuration and is read from
+      `DEFAULT_PARAMETERS`, and the three literals now reference the constants.
+      *origin: bundle E in-app check, 2026-09-03*
 
 - [ ] **[XL] Outdoor velodrome auto-calibration.** `velodrome: true` today does exactly one thing —
       zero the actual elevation (`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`,
@@ -412,7 +420,8 @@ Committed on `in-app-checks-a-c-e` on top of `0dd8ecd`. 1081 tests pass (up 11 o
       recomputed at 0.008 and replaced itself. GPS-lap and out-and-back already used 0.008 on both
       halves, which is why only Standard drifted.
 
-      **Measured, not inferred.** `createVeCalculator` instrumented on `Airstrip4lap3.fit` lap 2:
+      **Measured, not inferred.** `createVeCalculator` instrumented on the reference ride, lap 2 in
+      Standard mode:
       `0.8264 / 3.56 m / −7.32 m` replaced 16 ms later by `0.8200 / 4.56 m / −9.07 m`, the two
       calls differing in `crr` (0.005 → 0.008) and in nothing else. Ruled out along the way, each
       by measurement rather than argument: the DEM race (DEM applies at 148 ms warm / 957–1194 ms
@@ -425,7 +434,8 @@ Committed on `in-app-checks-a-c-e` on top of `0dd8ecd`. 1081 tests pass (up 11 o
       All ten fallback sites now route through `resolveDisplayCrr`. Guards: five cases plus a
       source scan for any numeric crr fallback outside the shared module — the scan is the one that
       matters, since the defect is an OMISSION no test of the module's own exports can observe.
-      **Checked in the app:** `Airstrip4lap4.fit` lap 2, no record — **one** paint, settling
+      **Checked in the app:** the reference ride, lap 2 in Standard mode, no record — **one** paint,
+      settling
       directly on `0.8200 / 4.56 m / −9.07 m`.
       `analysis/unsetParameterFallbacks.ts` (new) · test: `unsetParameterFallbacks.test.ts` (new)
 
@@ -444,7 +454,7 @@ Committed on `in-app-checks-a-c-e` on top of `0dd8ecd`. 1081 tests pass (up 11 o
       leaving it behind would have offered 0.0015 and snapped back to 0.002. The three hardcoded
       `0.002 / 0.015` literals in `ParameterStorage.ts` now reference `DEFAULT_PARAMETERS`.
 
-      **Checked in the app** on `13.07.fit`, which carries a pre-widening record: slider now
+      **Checked in the app** on the reference ride, which carries a pre-widening record: slider now
       **0.0015–0.03**, the stored optimizer bounds still **0.002 / 0.015**, and typing `0.0018` —
       below the old floor — is **kept**, with the slider following.
       `analysis/sliderBounds.ts` (new) · test: `sliderBounds.test.ts` (new)
