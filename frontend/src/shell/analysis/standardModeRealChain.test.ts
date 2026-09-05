@@ -63,6 +63,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	createVeCalculator: (input: any) => {
+		calculatorInputs.push({
+			cda: input.cda,
+			rho: input.params.rho,
+		});
 		const n = input.timestamps.length;
 		const isConstantLeg = Array.from(input.windSpeed as number[]).every(
 			(value) => Number.isNaN(value),
@@ -83,6 +87,10 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 		};
 	},
 }));
+
+const calculatorInputs = vi.hoisted(
+	() => [] as Array<{ cda: number; rho: number }>,
+);
 
 /** The overlay's far end: the functions that actually paint its figures. */
 const overlay = vi.hoisted(() => ({ ve: vi.fn(), vd: vi.fn() }));
@@ -108,7 +116,10 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
 	getGpsAnalysisMode: () => modeState.gps,
 }));
 
-import type { AnalysisParameters } from "../../components/AnalysisParameters";
+import {
+	AnalysisParametersComponent,
+	type AnalysisParameters,
+} from "../../components/AnalysisParameters";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
@@ -229,6 +240,7 @@ function makeServices(appState: AppState): ShellServices {
  */
 function renderHostPage(): void {
 	document.body.innerHTML = `
+		<div id="paramsContainer"></div>
 		<div id="veAnalysisSection">
 			<div id="veAnalysisContent"></div>
 		</div>
@@ -238,16 +250,19 @@ function renderHostPage(): void {
 let appState: AppState;
 
 /** The STITCHED standard panel, through its real production entry point. */
-async function renderStitched(): Promise<void> {
+async function renderStitched(options: {
+	parametersComponent?: AnalysisParametersComponent | null;
+	mapVisualization?: any;
+} = {}): Promise<void> {
 	const fit = makeFitData();
 	appState.isGpsLapModeActive = false;
 	appState.currentGpsLapIndexRanges = null;
 	await showVirtualElevationAnalysisInline(
 		appState,
 		{} as unknown as ParameterStorage,
-		null,
+		options.parametersComponent ?? null,
 		makeServices(appState),
-		null,
+		options.mapVisualization ?? null,
 		{
 			onSaveScreenshot: () => {},
 			onStoreResult: () => {},
@@ -269,6 +284,21 @@ async function renderStitched(): Promise<void> {
 		null,
 		0,
 	);
+}
+
+function makeLiveParametersComponent(): AnalysisParametersComponent {
+	let initializing = true;
+	const component = new AnalysisParametersComponent(
+		"paramsContainer",
+		(parameters) => {
+			if (initializing) return;
+			appState.currentParameters = parameters;
+			requestModeUpdate("parameters");
+		},
+	);
+	component.setParameters(appState.currentParameters!);
+	initializing = false;
+	return component;
 }
 
 const lapProfile = (lapNumber: number) => ({
@@ -402,6 +432,7 @@ beforeEach(() => {
 	missingTargets.length = 0;
 	draws.length = 0;
 	drawMethods.length = 0;
+	calculatorInputs.length = 0;
 	overlay.ve.mockClear();
 	overlay.vd.mockClear();
 	autoRho.calculate.mockReset();
@@ -830,47 +861,154 @@ describe("standard: the Store Result window", () => {
 });
 
 describe("standard: the first auto-rho result is atomic", () => {
+	it("gates edits through success and produces once from the settled rho and latest CdA", async () => {
+		const weatherRho = 1.1984;
+		let settleAutoRho!: () => void;
+		autoRho.calculate.mockImplementationOnce(
+			(_state, parametersComponent: AnalysisParametersComponent) =>
+				new Promise<number>((resolve) => {
+					settleAutoRho = () => {
+						parametersComponent.setParameters({ rho: weatherRho });
+						resolve(weatherRho);
+					};
+				}),
+		);
+		appState.currentParameters!.auto_calculate_rho = true;
+		const parametersComponent = makeLiveParametersComponent();
+
+		const renderPromise = renderStitched({ parametersComponent });
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
+		cdaSlider.value = DRAGGED_CDA.toString();
+		cdaSlider.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(calculatorInputs).toEqual([]);
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(0);
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		settleAutoRho();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs).toHaveLength(2);
+		expect(calculatorInputs.every((input) => input.rho === weatherRho)).toBe(true);
+		expect(calculatorInputs.every((input) => input.cda === DRAGGED_CDA)).toBe(true);
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+	});
+
 	it.each([
-		["success", 1.1984, true],
-		["weather failure fallback", null, false],
-	])(
-		"waits for %s and publishes one stable producer pass",
-		async (_label, autoRhoResult, parametersChanged) => {
-			let settleAutoRho!: (value: number | null) => void;
-			autoRho.calculate.mockImplementationOnce(
-				() =>
-					new Promise((resolve) => {
-						settleAutoRho = resolve;
-					}),
-			);
-			appState.currentParameters!.auto_calculate_rho = true;
+		["weather failure fallback", "resolve"],
+		["rejected completion fallback", "reject"],
+	] as const)("publishes one pass after %s", async (_label, completion) => {
+		let finish!: () => void;
+		autoRho.calculate.mockImplementationOnce(
+			() =>
+				new Promise<number | null>((resolve, reject) => {
+					finish = () =>
+						completion === "resolve"
+							? resolve(null)
+							: reject(new Error("weather completion failed"));
+				}),
+		);
+		appState.currentParameters!.auto_calculate_rho = true;
+		const fallbackRho = appState.currentParameters!.rho;
 
-			const renderPromise = renderStitched();
-			await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+		const renderPromise = renderStitched();
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+		await vi.advanceTimersByTimeAsync(100);
+		expect(calculatorInputs).toEqual([]);
 
-			expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(0);
-			expect(appState.veStatus).not.toBe("ready");
-			expect(storeButton().disabled).toBe(true);
+		finish();
+		await renderPromise;
+		await settle();
 
-			// A successful real auto-rho writes through setParameters, whose
-			// callback requests an update before the weather promise resolves.
-			// The renderer's explicit request must coalesce with it.
-			if (parametersChanged) requestModeUpdate("parameters");
-			settleAutoRho(autoRhoResult);
-			await renderPromise;
-			await settle();
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs).toHaveLength(2);
+		expect(calculatorInputs.every((input) => input.rho === fallbackRho)).toBe(true);
+	});
 
-			expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
-			expect(appState.veStatus).toBe("ready");
-			expect(storeButton().disabled).toBe(false);
+	it("follows a newer trim-flight handoff before opening the producer gate", async () => {
+		let resolveInitial!: () => void;
+		let resolveCurrent!: () => void;
+		autoRho.calculate
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveInitial = () => resolve(null);
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			})
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveCurrent = () => {
+						state.currentParameters!.rho = 1.19;
+						resolve(1.19);
+					};
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			});
+		appState.currentParameters!.auto_calculate_rho = true;
 
-			// The retired one-second binder timer must not wake up and change the
-			// inputs (or publish another result) after this stable first pass.
-			await vi.advanceTimersByTimeAsync(1000);
-			expect(autoRho.calculate).toHaveBeenCalledTimes(1);
-			expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
-		},
-	);
+		const renderPromise = renderStitched();
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		const trim = document.getElementById("trimStartSlider") as HTMLInputElement;
+		trim.value = "10";
+		trim.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(500);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(2);
+
+		resolveInitial();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(calculatorInputs).toEqual([]);
+		expect(storeButton().disabled).toBe(true);
+
+		resolveCurrent();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs.every((input) => input.rho === 1.19)).toBe(true);
+	});
+
+	it("abandons a rejected continuation after a replacement panel owns the app", async () => {
+		let rejectOld!: (error: Error) => void;
+		autoRho.calculate.mockImplementationOnce(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectOld = reject;
+				}),
+		);
+		appState.currentParameters!.auto_calculate_rho = true;
+		const oldMap = { fitBoundsToTrimRegion: vi.fn() };
+		const oldRender = renderStitched({ mapVisualization: oldMap });
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		appState.currentParameters!.auto_calculate_rho = false;
+		const currentMap = { fitBoundsToTrimRegion: vi.fn() };
+		await renderStitched({ mapVisualization: currentMap });
+		await settle();
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+
+		rejectOld(new Error("old panel weather failed"));
+		await oldRender;
+		await vi.advanceTimersByTimeAsync(1000);
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(oldMap.fitBoundsToTrimRegion).not.toHaveBeenCalled();
+		expect(currentMap.fitBoundsToTrimRegion).toHaveBeenCalledTimes(1);
+	});
 
 	it("does not wait for or fetch weather when auto-rho is disabled", async () => {
 		await renderStitched();

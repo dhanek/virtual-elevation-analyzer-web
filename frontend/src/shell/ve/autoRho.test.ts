@@ -199,6 +199,63 @@ describe("calculateAutoRho — successful fetch", () => {
 		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
 	});
 
+	test("an activity/selection change rejects stale writes and serializes a fresh operation", async () => {
+		const h = setupHarness();
+		let resolveOldWeather!: (entry: ReturnType<typeof weatherEntry>) => void;
+		let resolveCurrentWeather!: (entry: ReturnType<typeof weatherEntry>) => void;
+		mocks.getWeatherData.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveOldWeather = resolve;
+				}),
+		);
+
+		const oldOperation = calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+		await vi.waitFor(() => expect(mocks.getWeatherData).toHaveBeenCalledTimes(1));
+
+		h.appState.currentFitData = makeFilteredLapData() as never;
+		h.appState.filteredLapData = makeFilteredLapData();
+		mocks.getWeatherData.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveCurrentWeather = resolve;
+				}),
+		);
+		const currentOperation = calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+		const joinedCurrentOperation = calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		expect(currentOperation).not.toBe(oldOperation);
+		expect(joinedCurrentOperation).toBe(currentOperation);
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+
+		resolveOldWeather(weatherEntry(8.5));
+		await expect(oldOperation).resolves.toBeNull();
+		await vi.waitFor(() => expect(mocks.getWeatherData).toHaveBeenCalledTimes(2));
+		expect(h.appState.isCalculatingAutoRho).toBe(true);
+		expect(h.appState.autoRhoPromise).toBe(currentOperation);
+
+		resolveCurrentWeather(weatherEntry(29.5));
+		await expect(currentOperation).resolves.toBe(1.2);
+
+		expect(mocks.getWeatherData).toHaveBeenCalledTimes(2);
+		expect(h.parametersComponent.getParameters().weather_metadata?.temperature).toBe(
+			29.5,
+		);
+		expect(mocks.showNotification).toHaveBeenCalledTimes(1);
+	});
+
 	test("stores the rho, its weather provenance and the wind vector", async () => {
 		const h = setupHarness();
 		await succeedOnT1(h);

@@ -555,10 +555,7 @@ export function setupVESliders(
 	const triggerAutoRhoOnTrimChange = () => {
 		if (autoRhoDebounceTimer) clearTimeout(autoRhoDebounceTimer);
 		autoRhoDebounceTimer = setTimeout(() => {
-			if (
-				appState.currentParameters?.auto_calculate_rho &&
-				!appState.isCalculatingAutoRho
-			) {
+			if (appState.currentParameters?.auto_calculate_rho) {
 				calculateAutoRho(appState, parametersComponent, services).catch(
 					(err) => {
 						log.error("Auto-rho calculation error on trim change:", err);

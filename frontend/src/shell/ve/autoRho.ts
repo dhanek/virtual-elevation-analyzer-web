@@ -24,12 +24,26 @@ export function calculateAutoRho(
     parametersComponent: AnalysisParametersComponent | null,
     services: ShellServices
 ): Promise<number | null> {
-    // A caller arriving during a live calculation joins it. In particular,
-    // Standard's initial render can now wait for an operation started earlier
-    // by file loading instead of racing it or starting a second fetch.
+    const flightKey = captureAutoRhoFlightKey(appState);
+
+    // Same inputs join the exact flight. Different activity/selection inputs
+    // replace the advertised flight with a serialized successor: the old
+    // request may finish its network work, but its ownership checks reject
+    // every state/UI write before the successor queries the current inputs.
     if (appState.autoRhoPromise) {
-        log.debug('⏭️  Auto-rho calculation already in progress, joining\n');
-        return appState.autoRhoPromise;
+        if (appState.autoRhoFlightKey === flightKey) {
+            log.debug('⏭️  Auto-rho calculation already in progress, joining\n');
+            return appState.autoRhoPromise;
+        }
+
+        log.debug('⏭️  Auto-rho inputs changed, queueing current operation\n');
+        return startAutoRhoFlight(
+            appState,
+            parametersComponent,
+            services,
+            flightKey,
+            appState.autoRhoPromise
+        );
     }
 
     // Preserve the defensive guard for legacy/test callers which may own the
@@ -39,28 +53,65 @@ export function calculateAutoRho(
         return Promise.resolve(null);
     }
 
+    return startAutoRhoFlight(
+        appState,
+        parametersComponent,
+        services,
+        flightKey,
+        null
+    );
+}
+
+function startAutoRhoFlight(
+    appState: AppState,
+    parametersComponent: AnalysisParametersComponent | null,
+    services: ShellServices,
+    flightKey: string,
+    predecessor: Promise<number | null> | null
+): Promise<number | null> {
     appState.isCalculatingAutoRho = true;
 
-    // Start on a microtask so the promise is installed before any early return
-    // in the operation can settle it. That makes the flag and promise one
-    // atomic single-flight lifetime even on disabled/missing-input paths.
     let operation!: Promise<number | null>;
-    operation = Promise.resolve()
-        .then(() => performAutoRho(appState, parametersComponent, services))
+    const start = predecessor
+        ? predecessor.catch(() => null)
+        : Promise.resolve<number | null>(null);
+    operation = start
+        .then(() =>
+            performAutoRho(
+                appState,
+                parametersComponent,
+                services,
+                flightKey
+            )
+        )
         .finally(() => {
             if (appState.autoRhoPromise === operation) {
                 appState.autoRhoPromise = null;
+                appState.autoRhoFlightKey = null;
                 appState.isCalculatingAutoRho = false;
             }
         });
     appState.autoRhoPromise = operation;
+    appState.autoRhoFlightKey = flightKey;
     return operation;
+}
+
+function captureAutoRhoFlightKey(appState: AppState): string {
+    const mapStart = document.getElementById('mapTrimStartSlider') as HTMLInputElement | null;
+    const mapEnd = document.getElementById('mapTrimEndSlider') as HTMLInputElement | null;
+    const sectionStart = document.getElementById('trimStartSlider') as HTMLInputElement | null;
+    const sectionEnd = document.getElementById('trimEndSlider') as HTMLInputElement | null;
+    const start = mapStart?.value ?? sectionStart?.value ?? 'missing';
+    const end = mapEnd?.value ?? sectionEnd?.value ?? 'missing';
+    const autoEnabled = appState.currentParameters?.auto_calculate_rho ?? false;
+    return `${appState.autoRhoInputRevision ?? 0}:${start}:${end}:${autoEnabled ? 1 : 0}`;
 }
 
 async function performAutoRho(
     appState: AppState,
     parametersComponent: AnalysisParametersComponent | null,
-    services: ShellServices
+    services: ShellServices,
+    flightKey: string
 ): Promise<number | null> {
 
     // `services.hideLoading()` is a global, non-refcounted toggle that also
@@ -76,6 +127,15 @@ async function performAutoRho(
         loadingShown = false;
         services.hideLoading();
     };
+    const ownsCurrentInputs = (): boolean =>
+        captureAutoRhoFlightKey(appState) === flightKey;
+    const abandonStaleFlight = (): boolean => {
+        if (ownsCurrentInputs()) return false;
+        hideLoadingIfOwned();
+        log.debug('⏭️  Auto-rho inputs changed; discarding stale result\n');
+        return true;
+    };
+    if (abandonStaleFlight()) return null;
 
     // WEATH-03 rung 3 guard: the public wrapper owns the structural `finally`,
     // so no failure path can leave
@@ -204,6 +264,7 @@ async function performAutoRho(
             // Get weather data (from cache or API)
             log.debug('🔄 Fetching weather data (checking cache first)...\n');
             let weatherEntry: WeatherCacheEntry = await weatherCache.getWeatherData(metadata, weatherAPI);
+            if (abandonStaleFlight()) return null;
 
             // Check if cached entry has wind data - if not, re-fetch from API
             if (weatherEntry.source === 'cache' &&
@@ -211,6 +272,7 @@ async function performAutoRho(
                 log.debug('⚠️  Cached entry missing wind data, re-fetching from API...');
                 // Fetch directly from API to get complete data
                 const freshData = await weatherAPI.fetchWeatherData(metadata);
+                if (abandonStaleFlight()) return null;
                 weatherEntry = {
                     key: weatherEntry.key,
                     data: freshData,
@@ -317,6 +379,7 @@ async function performAutoRho(
                 );
             }
 
+            if (abandonStaleFlight()) return null;
             parametersComponent.setParameters(updateParams);
             refreshCrrTempReadout(parametersComponent.getParameters());
             refreshWindHeightReadout(parametersComponent.getParameters());
@@ -338,6 +401,10 @@ async function performAutoRho(
 
         } catch (error) {
             hideLoadingIfOwned();
+
+            // An obsolete request must not clear provenance or notify against
+            // the activity/selection which replaced it.
+            if (!ownsCurrentInputs()) return null;
 
             // WEATH-03 rungs 3/4: degrade to the manual/prior rho.
             // Diagnostics stay internal (log only); the user-facing text comes
@@ -373,6 +440,7 @@ async function performAutoRho(
         // than it used to), and blindly toggling would dismiss a concurrent
         // operation's overlay and re-enable the Analyze button mid-run.
         hideLoadingIfOwned();
+        if (!ownsCurrentInputs()) return null;
         log.error('Unexpected error in calculateAutoRho:', error);
 
         // Anything reaching here is a bug in the auto-rho path, not a weather

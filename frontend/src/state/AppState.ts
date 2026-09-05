@@ -227,7 +227,16 @@ export interface AnalysisState {
 	veStatus: VeStatus;
 	airSpeedCalibrationPercent: number;
 	isCalculatingAutoRho: boolean;
+	/** One advertised current/queued weather operation for this AppState. */
 	autoRhoPromise: Promise<number | null> | null;
+	/** Input ownership for `autoRhoPromise`; different keys serialize. */
+	autoRhoFlightKey: string | null;
+	/** Changes whenever the activity or filtered selection identity changes. */
+	autoRhoInputRevision: number;
+	/** Identity of the Standard render allowed to continue after an await. */
+	standardPanelOwner: object | null;
+	/** Non-null only while that panel's first weather input is unsettled. */
+	standardInitialAutoRhoOwner: object | null;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
 }
@@ -302,6 +311,10 @@ export class AppState {
 		airSpeedCalibrationPercent: 0,
 		isCalculatingAutoRho: false,
 		autoRhoPromise: null,
+		autoRhoFlightKey: null,
+		autoRhoInputRevision: 0,
+		standardPanelOwner: null,
+		standardInitialAutoRhoOwner: null,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
 	};
@@ -329,6 +342,7 @@ export class AppState {
 	};
 
 	setLoadedActivity(activity: LoadedActivity | null): void {
+		this.invalidateAutoRhoInputs();
 		this.activity.loadedActivity = activity;
 		this.activity.currentFitData = activity?.data ?? null;
 		this.activity.currentFitResult = activity?.result ?? null;
@@ -362,6 +376,7 @@ export class AppState {
 	}
 
 	set currentFitData(fitData: ActivityDataLike | null) {
+		this.invalidateAutoRhoInputs();
 		this.activity.currentFitData = fitData;
 		if (this.activity.loadedActivity) {
 			this.activity.loadedActivity.data = fitData;
@@ -374,6 +389,7 @@ export class AppState {
 	}
 
 	set currentFitResult(result: ActivityResult | null) {
+		this.invalidateAutoRhoInputs();
 		this.activity.currentFitResult = result;
 		this.activity.currentFitData = result?.fit_data ?? null;
 		this.activity.currentLaps = result?.laps ?? [];
@@ -411,7 +427,12 @@ export class AppState {
 	}
 
 	set filteredLapData(filteredLapData: FilteredLapData | null) {
+		this.invalidateAutoRhoInputs();
 		this.selection.filteredLapData = filteredLapData;
+	}
+
+	invalidateAutoRhoInputs(): void {
+		this.analysis.autoRhoInputRevision += 1;
 	}
 
 	get isCalculatingAutoRho(): boolean {
@@ -428,6 +449,34 @@ export class AppState {
 
 	set autoRhoPromise(promise: Promise<number | null> | null) {
 		this.analysis.autoRhoPromise = promise;
+	}
+
+	get autoRhoFlightKey(): string | null {
+		return this.analysis.autoRhoFlightKey;
+	}
+
+	set autoRhoFlightKey(key: string | null) {
+		this.analysis.autoRhoFlightKey = key;
+	}
+
+	get autoRhoInputRevision(): number {
+		return this.analysis.autoRhoInputRevision;
+	}
+
+	get standardPanelOwner(): object | null {
+		return this.analysis.standardPanelOwner;
+	}
+
+	set standardPanelOwner(owner: object | null) {
+		this.analysis.standardPanelOwner = owner;
+	}
+
+	get standardInitialAutoRhoOwner(): object | null {
+		return this.analysis.standardInitialAutoRhoOwner;
+	}
+
+	set standardInitialAutoRhoOwner(owner: object | null) {
+		this.analysis.standardInitialAutoRhoOwner = owner;
 	}
 
 	get lastWeatherQueryKey(): string | null {

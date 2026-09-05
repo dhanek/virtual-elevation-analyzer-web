@@ -1569,6 +1569,20 @@ describe("loading a new activity resets the analysis", () => {
 		expect(appState.selectedLaps).toEqual([]);
 	});
 
+	it("invalidates auto-rho input and Standard panel ownership", () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		const inputRevision = appState.autoRhoInputRevision;
+		appState.standardPanelOwner = {};
+		appState.standardInitialAutoRhoOwner = appState.standardPanelOwner;
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.autoRhoInputRevision).toBeGreaterThan(inputRevision);
+		expect(appState.standardPanelOwner).toBeNull();
+		expect(appState.standardInitialAutoRhoOwner).toBeNull();
+	});
+
 	/**
 	 * A FILE WITH EXACTLY ONE LAP HAS NO CHOICE TO MAKE.
 	 *

@@ -201,6 +201,12 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
  * re-Analyzes.
  */
 function tearDownVeAnalysisPanel(appState: AppState): void {
+	// Invalidate any asynchronous Standard-render continuation before touching
+	// the shared panel. A later completion may finish its network work, but it no
+	// longer owns a request, binding, or map-fit side effect.
+	appState.standardPanelOwner = null;
+	appState.standardInitialAutoRhoOwner = null;
+
 	// The exact class the three render files remove to show the panel, and one
 	// of the two `isVeSectionVisible` (`requestModeUpdate.ts:73-78`) checks.
 	// `#veAnalysisContent.innerHTML` is deliberately left alone — the next

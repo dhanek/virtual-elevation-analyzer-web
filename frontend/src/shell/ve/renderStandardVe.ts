@@ -272,6 +272,18 @@ export async function showVirtualElevationAnalysisInline(
 		appState.currentParameters = { ...DEFAULT_PARAMETERS };
 	}
 
+	// This token owns every asynchronous continuation started by this render.
+	// Install it before the first await so a second render invalidates this one
+	// even while saved settings are still loading.
+	const panelOwner = {};
+	const activityAtRender = appState.currentFitData;
+	const autoRhoRevisionAtRender = appState.autoRhoInputRevision ?? 0;
+	appState.standardPanelOwner = panelOwner;
+	appState.standardInitialAutoRhoOwner = appState.currentParameters
+		.auto_calculate_rho
+		? panelOwner
+		: null;
+
 	if (appState.currentFileHash && parameterStorage) {
 		const savedParams = await parameterStorage.loadLapSettings(
 			appState.currentFileHash,
@@ -360,7 +372,13 @@ export async function showVirtualElevationAnalysisInline(
 	}
 
 	const veAnalysisContent = document.getElementById("veAnalysisContent");
-	if (!veAnalysisContent) return;
+	if (!veAnalysisContent) {
+		if (appState.standardPanelOwner === panelOwner) {
+			appState.standardPanelOwner = null;
+			appState.standardInitialAutoRhoOwner = null;
+		}
+		return;
+	}
 
 	// WR-01. The outgoing panel's tab callbacks close over ITS profiles and draw
 	// into element ids this new markup reuses, so they must not outlive it.
@@ -556,6 +574,14 @@ export async function showVirtualElevationAnalysisInline(
             </div>
         </div>
     `;
+	const renderedPanel = veAnalysisContent.firstElementChild;
+	const stillOwnsPanel = (): boolean =>
+		appState.standardPanelOwner === panelOwner &&
+		appState.currentFitData === activityAtRender &&
+		(appState.autoRhoInputRevision ?? 0) === autoRhoRevisionAtRender &&
+		renderedPanel?.parentElement === veAnalysisContent &&
+		!veSection?.classList.contains("hidden") &&
+		!veSection?.classList.contains("workflow-section--inactive");
 
 	// THE BUTTON THE MARKUP ABOVE JUST CREATED IS ENABLED. DISABLE IT.
 	//
@@ -620,13 +646,37 @@ export async function showVirtualElevationAnalysisInline(
 	// latest-input-wins funnel below coalesces that request with this explicit
 	// initial one into a single producer pass over the settled inputs.
 	if (appState.currentParameters.auto_calculate_rho) {
-		try {
-			await calculateAutoRho(appState, parametersComponent, services);
-		} catch (error) {
-			// The normal weather-failure contract resolves to null. This catch keeps
-			// the manual fallback usable even if a reporting/DOM failure escapes.
-			log.error("Auto-rho initial calculation error:", error);
+		let operation = calculateAutoRho(
+			appState,
+			parametersComponent,
+			services,
+		);
+		while (true) {
+			try {
+				await operation;
+			} catch (error) {
+				// The normal weather-failure contract resolves to null. This catch keeps
+				// the manual fallback usable even if a reporting/DOM failure escapes.
+				log.error("Auto-rho initial calculation error:", error);
+			}
+
+			// A trim/selection change can serialize a fresh flight behind the one
+			// this render first received. Follow that promise handoff before opening
+			// the producer gate; this is event-driven joining, not polling.
+			const successor = appState.autoRhoPromise;
+			if (!successor || successor === operation) break;
+			operation = successor;
 		}
+	}
+	if (!stillOwnsPanel()) {
+		if (appState.standardInitialAutoRhoOwner === panelOwner) {
+			appState.standardInitialAutoRhoOwner = null;
+		}
+		log.debug("Standard VE render was replaced while auto-rho was pending");
+		return;
+	}
+	if (appState.standardInitialAutoRhoOwner === panelOwner) {
+		appState.standardInitialAutoRhoOwner = null;
 	}
 	requestModeUpdate("parameters");
 
@@ -665,7 +715,7 @@ export async function showVirtualElevationAnalysisInline(
 	});
 
 	setTimeout(() => {
-		if (mapVisualization && appState.filteredVEData) {
+		if (stillOwnsPanel() && mapVisualization && appState.filteredVEData) {
 			mapVisualization.fitBoundsToTrimRegion(
 				appState.presetTrimStart,
 				appState.presetTrimEnd ?? timestamps.length - 1,
