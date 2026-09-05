@@ -1575,12 +1575,17 @@ describe("loading a new activity resets the analysis", () => {
 		const inputRevision = appState.autoRhoInputRevision;
 		appState.standardPanelOwner = {};
 		appState.standardInitialAutoRhoOwner = appState.standardPanelOwner;
+		appState.standardPendingAutoRhoDebounce = {
+			owner: appState.standardPanelOwner,
+			promise: Promise.resolve(),
+		};
 
 		resetAnalysisForNewActivity();
 
 		expect(appState.autoRhoInputRevision).toBeGreaterThan(inputRevision);
 		expect(appState.standardPanelOwner).toBeNull();
 		expect(appState.standardInitialAutoRhoOwner).toBeNull();
+		expect(appState.standardPendingAutoRhoDebounce).toBeNull();
 	});
 
 	/**

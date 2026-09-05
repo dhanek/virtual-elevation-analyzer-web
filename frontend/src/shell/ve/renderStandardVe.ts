@@ -279,6 +279,7 @@ export async function showVirtualElevationAnalysisInline(
 	const activityAtRender = appState.currentFitData;
 	const autoRhoRevisionAtRender = appState.autoRhoInputRevision ?? 0;
 	appState.standardPanelOwner = panelOwner;
+	appState.standardPendingAutoRhoDebounce = null;
 	appState.standardInitialAutoRhoOwner = appState.currentParameters
 		.auto_calculate_rho
 		? panelOwner
@@ -646,7 +647,7 @@ export async function showVirtualElevationAnalysisInline(
 	// latest-input-wins funnel below coalesces that request with this explicit
 	// initial one into a single producer pass over the settled inputs.
 	if (appState.currentParameters.auto_calculate_rho) {
-		let operation = calculateAutoRho(
+		let operation: Promise<unknown> = calculateAutoRho(
 			appState,
 			parametersComponent,
 			services,
@@ -660,10 +661,21 @@ export async function showVirtualElevationAnalysisInline(
 				log.error("Auto-rho initial calculation error:", error);
 			}
 
-			// A trim/selection change can serialize a fresh flight behind the one
-			// this render first received. Follow that promise handoff before opening
-			// the producer gate; this is event-driven joining, not polling.
-			const successor = appState.autoRhoPromise;
+			// A trim event publishes its pending debounce immediately, before the
+			// unchanged 500 ms delay advertises the fresh weather flight. Prefer that
+			// owner-scoped boundary, then follow direct flight handoffs as before.
+			// Thus an absent autoRhoPromise means settled inputs only when no current
+			// debounce is waiting to create one. This remains promise-driven joining.
+			// The binder mutates this property from an event callback, which TypeScript's
+			// local control-flow analysis cannot infer after the render initialized it.
+			const pendingDebounce = appState.standardPendingAutoRhoDebounce as {
+				owner: object;
+				promise: Promise<void>;
+			} | null;
+			const successor =
+				pendingDebounce?.owner === panelOwner
+					? pendingDebounce.promise
+					: appState.autoRhoPromise;
 			if (!successor || successor === operation) break;
 			operation = successor;
 		}

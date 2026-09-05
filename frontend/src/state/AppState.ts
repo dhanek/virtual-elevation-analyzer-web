@@ -237,6 +237,11 @@ export interface AnalysisState {
 	standardPanelOwner: object | null;
 	/** Non-null only while that panel's first weather input is unsettled. */
 	standardInitialAutoRhoOwner: object | null;
+	/** A trim debounce already requested by the owning initial Standard panel. */
+	standardPendingAutoRhoDebounce: {
+		owner: object;
+		promise: Promise<void>;
+	} | null;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
 }
@@ -315,6 +320,7 @@ export class AppState {
 		autoRhoInputRevision: 0,
 		standardPanelOwner: null,
 		standardInitialAutoRhoOwner: null,
+		standardPendingAutoRhoDebounce: null,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
 	};
@@ -477,6 +483,19 @@ export class AppState {
 
 	set standardInitialAutoRhoOwner(owner: object | null) {
 		this.analysis.standardInitialAutoRhoOwner = owner;
+	}
+
+	get standardPendingAutoRhoDebounce(): {
+		owner: object;
+		promise: Promise<void>;
+	} | null {
+		return this.analysis.standardPendingAutoRhoDebounce;
+	}
+
+	set standardPendingAutoRhoDebounce(
+		pending: { owner: object; promise: Promise<void> } | null,
+	) {
+		this.analysis.standardPendingAutoRhoDebounce = pending;
 	}
 
 	get lastWeatherQueryKey(): string | null {

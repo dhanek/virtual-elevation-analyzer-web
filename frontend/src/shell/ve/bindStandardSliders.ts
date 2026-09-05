@@ -552,15 +552,49 @@ export function setupVESliders(
 	// surface one level up from the one the table removed.
 
 	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	const panelOwner = appState.standardPanelOwner;
+	let pendingDebounce:
+		| { promise: Promise<void>; resolve: () => void }
+		| null = null;
 	const triggerAutoRhoOnTrimChange = () => {
 		if (autoRhoDebounceTimer) clearTimeout(autoRhoDebounceTimer);
-		autoRhoDebounceTimer = setTimeout(() => {
-			if (appState.currentParameters?.auto_calculate_rho) {
-				calculateAutoRho(appState, parametersComponent, services).catch(
-					(err) => {
-						log.error("Auto-rho calculation error on trim change:", err);
-					},
-				);
+		if (!pendingDebounce) {
+			let resolvePending!: () => void;
+			const promise = new Promise<void>((resolve) => {
+				resolvePending = resolve;
+			});
+			pendingDebounce = { promise, resolve: resolvePending };
+			if (
+				panelOwner &&
+				appState.standardInitialAutoRhoOwner === panelOwner
+			) {
+				appState.standardPendingAutoRhoDebounce = {
+					owner: panelOwner,
+					promise,
+				};
+			}
+		}
+		autoRhoDebounceTimer = setTimeout(async () => {
+			const pending = pendingDebounce;
+			pendingDebounce = null;
+			autoRhoDebounceTimer = null;
+			try {
+				if (
+					appState.standardPanelOwner === panelOwner &&
+					appState.currentParameters?.auto_calculate_rho
+				) {
+					await calculateAutoRho(appState, parametersComponent, services);
+				}
+			} catch (err) {
+				log.error("Auto-rho calculation error on trim change:", err);
+			} finally {
+				if (
+					appState.standardPendingAutoRhoDebounce?.promise ===
+					pending?.promise
+				) {
+					appState.standardPendingAutoRhoDebounce = null;
+				}
+				pending?.resolve();
 			}
 		}, 500);
 	};

@@ -206,6 +206,7 @@ function tearDownVeAnalysisPanel(appState: AppState): void {
 	// longer owns a request, binding, or map-fit side effect.
 	appState.standardPanelOwner = null;
 	appState.standardInitialAutoRhoOwner = null;
+	appState.standardPendingAutoRhoDebounce = null;
 
 	// The exact class the three render files remove to show the panel, and one
 	// of the two `isVeSectionVisible` (`requestModeUpdate.ts:73-78`) checks.

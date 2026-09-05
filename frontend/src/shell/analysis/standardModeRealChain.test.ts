@@ -173,6 +173,7 @@ const params = {
 	crr: 0.0042,
 	crr_min: 0.001,
 	crr_max: 0.02,
+	rho: 1.2345,
 	air_speed_offset: 0,
 	wind_speed: 3,
 	wind_direction: 90,
@@ -921,6 +922,7 @@ describe("standard: the first auto-rho result is atomic", () => {
 		);
 		appState.currentParameters!.auto_calculate_rho = true;
 		const fallbackRho = appState.currentParameters!.rho;
+		expect(fallbackRho).toBe(1.2345);
 
 		const renderPromise = renderStitched();
 		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
@@ -934,6 +936,69 @@ describe("standard: the first auto-rho result is atomic", () => {
 		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
 		expect(calculatorInputs).toHaveLength(2);
 		expect(calculatorInputs.every((input) => input.rho === fallbackRho)).toBe(true);
+	});
+
+	it("keeps the gate closed when trim changes before its debounce advertises a successor", async () => {
+		const settledTrimRho = 1.19;
+		let resolveInitial!: () => void;
+		let resolveCurrent!: () => void;
+		autoRho.calculate
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveInitial = () => {
+						state.autoRhoPromise = null;
+						resolve(null);
+					};
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			})
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveCurrent = () => {
+						state.currentParameters!.rho = settledTrimRho;
+						state.autoRhoPromise = null;
+						resolve(settledTrimRho);
+					};
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			});
+		appState.currentParameters!.auto_calculate_rho = true;
+
+		const renderPromise = renderStitched();
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		const trim = document.getElementById("trimStartSlider") as HTMLInputElement;
+		trim.value = "10";
+		trim.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(100);
+
+		resolveInitial();
+		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(399);
+
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+		expect(calculatorInputs).toEqual([]);
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(2);
+		expect(calculatorInputs).toEqual([]);
+		expect(storeButton().disabled).toBe(true);
+
+		resolveCurrent();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs).toHaveLength(2);
+		expect(
+			calculatorInputs.every((input) => input.rho === settledTrimRho),
+		).toBe(true);
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
 	});
 
 	it("follows a newer trim-flight handoff before opening the producer gate", async () => {
