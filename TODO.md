@@ -391,7 +391,7 @@ changed and why.
 
 ### Analyze owns selection; the producer owns results — 2026-09-05
 
-Implemented on `retire-analyze-calculator-pass`. 94 test files / 1123 tests pass; root
+Implemented on `retire-analyze-calculator-pass`. 94 test files / 1134 tests pass; root
 `npm run check:frontend` and frontend `npm run lint` are clean.
 
 - [x] **[L] Retire the analyze legs' own calculator pass.** The three analyze legs now select and
@@ -408,6 +408,13 @@ Implemented on `retire-analyze-calculator-pass`. 94 test files / 1123 tests pass
       complete result, and `error` on failure. Store Result is disabled unless the state is
       `ready`, making the formerly silent interval before the producer's first paint visible and
       non-storable.
+
+      Final lifecycle review routed Section 3 map trim and panel trim through one
+      owner-scoped 500 ms weather boundary, guarded Standard after each yielding
+      render boundary, and made Store completion derive enablement from the current
+      `veStatus` without touching a replacement panel. Focused regressions cover both
+      predecessor-settlement orders, repeated and cross-surface gestures, render
+      replacement/teardown, producer failures, and stale storage completion.
 
       The GPS chain and out-and-back fixture-chain suites retain their numeric assertions and
       goldens unchanged. Their mechanism-specific lifecycle assertions were updated to await the

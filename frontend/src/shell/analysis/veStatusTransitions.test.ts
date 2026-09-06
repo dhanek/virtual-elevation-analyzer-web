@@ -8,13 +8,9 @@ import { updateModeVEPlots } from "./updateModeVEPlots";
  * These assert the ORDER of the status writes, which is the property the
  * refactor rests on: nothing may observe `ready` before `summarize` has run.
  *
- * A second test asserting the full idle -> computing -> ready sequence through
- * a real `handler.summarize` call was scoped out here: it needs a populated
- * `AppState` (fit data, parameters, laps) built the way
- * `analyzeResultLifecycle.test.ts` builds one, but that file's `makeFitData` /
- * `makeAppState` helpers are private to it, not exported for reuse. Per the
- * task brief, rather than inventing a parallel fixture layer, that assertion
- * is left to Task 3+ (or a follow-up that first exports a shared fixture).
+ * The real mode-chain suites now cover idle/computing/ready ordering through
+ * each handler's actual summarize seam. This focused file keeps the missing-
+ * input transition small and direct.
  */
 describe("veStatus transitions in the producer", () => {
 	beforeEach(() => {

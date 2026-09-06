@@ -18,6 +18,7 @@ import {
 } from "../../utils/GpsLapDetection";
 import { saveMapTrimSettings } from "../../analysis/MultiSegmentSettings";
 import { calculateAutoRho } from "../ve";
+import { scheduleStandardAutoRho } from "../ve/standardAutoRhoScheduler";
 import {
 	renderSection3Template,
 	bindLapSelection,
@@ -1913,26 +1914,15 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 			}
 		});
 
-		// Add auto-rho trigger on map trim slider changes (debounced)
-		let mapAutoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+		// The map and panel are two faces of one trim window. Their weather
+		// requests share one owner-scoped 500 ms deadline, including while a
+		// predecessor flight remains active.
 		const triggerAutoRhoOnMapTrimChange = () => {
-			if (mapAutoRhoDebounceTimer) {
-				clearTimeout(mapAutoRhoDebounceTimer);
-			}
-			mapAutoRhoDebounceTimer = setTimeout(() => {
-				if (
-					deps.appState.currentParameters?.auto_calculate_rho &&
-					!deps.appState.isCalculatingAutoRho
-				) {
-					calculateAutoRho(
-						deps.appState,
-						deps.getParametersComponent(),
-						getServices(deps),
-					).catch((err) => {
-						log.error("Auto-rho calculation error on map trim change:", err);
-					});
-				}
-			}, 500); // Wait 500ms after last slider change
+			void scheduleStandardAutoRho(
+				deps.appState,
+				deps.getParametersComponent,
+				getServices(deps),
+			);
 		};
 
 		newMapTrimStartSlider.addEventListener(

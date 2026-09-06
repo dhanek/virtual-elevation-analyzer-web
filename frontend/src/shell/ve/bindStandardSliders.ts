@@ -15,7 +15,7 @@ import {
 	buildSpeedPowerFigure,
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
-import { calculateAutoRho } from "./autoRho";
+import { scheduleStandardAutoRho } from "./standardAutoRhoScheduler";
 import { ShellServices } from "../analysis/types";
 import { veViewMatchesSelection } from "./veSelectionGuard";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -551,52 +551,12 @@ export function setupVESliders(
 	// that dropped every call. Configuring it per mode was the forget-to-call
 	// surface one level up from the one the table removed.
 
-	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-	const panelOwner = appState.standardPanelOwner;
-	let pendingDebounce:
-		| { promise: Promise<void>; resolve: () => void }
-		| null = null;
 	const triggerAutoRhoOnTrimChange = () => {
-		if (autoRhoDebounceTimer) clearTimeout(autoRhoDebounceTimer);
-		if (!pendingDebounce) {
-			let resolvePending!: () => void;
-			const promise = new Promise<void>((resolve) => {
-				resolvePending = resolve;
-			});
-			pendingDebounce = { promise, resolve: resolvePending };
-			if (
-				panelOwner &&
-				appState.standardInitialAutoRhoOwner === panelOwner
-			) {
-				appState.standardPendingAutoRhoDebounce = {
-					owner: panelOwner,
-					promise,
-				};
-			}
-		}
-		autoRhoDebounceTimer = setTimeout(async () => {
-			const pending = pendingDebounce;
-			pendingDebounce = null;
-			autoRhoDebounceTimer = null;
-			try {
-				if (
-					appState.standardPanelOwner === panelOwner &&
-					appState.currentParameters?.auto_calculate_rho
-				) {
-					await calculateAutoRho(appState, parametersComponent, services);
-				}
-			} catch (err) {
-				log.error("Auto-rho calculation error on trim change:", err);
-			} finally {
-				if (
-					appState.standardPendingAutoRhoDebounce?.promise ===
-					pending?.promise
-				) {
-					appState.standardPendingAutoRhoDebounce = null;
-				}
-				pending?.resolve();
-			}
-		}, 500);
+		void scheduleStandardAutoRho(
+			appState,
+			() => parametersComponent,
+			services,
+		);
 	};
 
 	// The map's trim twins are the same control with a second face, so the binder

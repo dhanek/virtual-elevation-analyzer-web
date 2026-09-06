@@ -63,6 +63,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	createVeCalculator: (input: any) => {
+		if (calculatorFailure.enabled) throw new Error("calculator failed");
 		calculatorInputs.push({
 			cda: input.cda,
 			rho: input.params.rho,
@@ -91,6 +92,7 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 const calculatorInputs = vi.hoisted(
 	() => [] as Array<{ cda: number; rho: number }>,
 );
+const calculatorFailure = vi.hoisted(() => ({ enabled: false }));
 
 /** The overlay's far end: the functions that actually paint its figures. */
 const overlay = vi.hoisted(() => ({ ve: vi.fn(), vd: vi.fn() }));
@@ -151,9 +153,11 @@ const draws: Array<{ id: string; data: any[]; layout: any }> = [];
  * five `newPlot` calls in `initializeVEAnalysis` were invisible to this chain.
  */
 const drawMethods: Array<{ id: string; method: "newPlot" | "react" }> = [];
+let failingPlotTarget: string | null = null;
 
 function fakePlotly(name: "newPlot" | "react") {
 	return (id: string, ...rest: unknown[]) => {
+		if (id === failingPlotTarget) throw new Error(`Plotly failed for ${id}`);
 		drawMethods.push({ id, method: name });
 		drawTargets.push(id);
 		draws.push({ id, data: (rest[0] as any[]) ?? [], layout: rest[1] });
@@ -254,13 +258,15 @@ let appState: AppState;
 async function renderStitched(options: {
 	parametersComponent?: AnalysisParametersComponent | null;
 	mapVisualization?: any;
+	parameterStorage?: ParameterStorage;
+	analyzedLaps?: number[];
 } = {}): Promise<void> {
 	const fit = makeFitData();
 	appState.isGpsLapModeActive = false;
 	appState.currentGpsLapIndexRanges = null;
 	await showVirtualElevationAnalysisInline(
 		appState,
-		{} as unknown as ParameterStorage,
+		options.parameterStorage ?? ({} as unknown as ParameterStorage),
 		options.parametersComponent ?? null,
 		makeServices(appState),
 		options.mapVisualization ?? null,
@@ -271,7 +277,7 @@ async function renderStitched(options: {
 			onShowAllResults: () => {},
 			saveCurrentLapSettings: () => {},
 		},
-		[1, 2],
+		options.analyzedLaps ?? [1, 2],
 		fit.timestamps.map((_, i) => i),
 		fit.timestamps,
 		fit.power,
@@ -433,7 +439,9 @@ beforeEach(() => {
 	missingTargets.length = 0;
 	draws.length = 0;
 	drawMethods.length = 0;
+	failingPlotTarget = null;
 	calculatorInputs.length = 0;
+	calculatorFailure.enabled = false;
 	overlay.ve.mockClear();
 	overlay.vd.mockClear();
 	autoRho.calculate.mockReset();
@@ -858,6 +866,78 @@ describe("standard: the Store Result window", () => {
 		await settle();
 		expect(appState.veStatus).toBe("ready");
 		expect(storeButton().disabled).toBe(false);
+	});
+});
+
+describe("standard: asynchronous render ownership", () => {
+	it("lets B mount before A resumes without A overwriting B's saved settings or panel", async () => {
+		appState.currentFileHash = "hash";
+		let resolveA!: (value: any) => void;
+		let resolveB!: (value: any) => void;
+		const parameterStorage = {
+			loadLapSettings: (_hash: string, laps: number[]) =>
+				new Promise((resolve) => {
+					if (laps[0] === 1) resolveA = resolve;
+					else resolveB = resolve;
+				}),
+		} as unknown as ParameterStorage;
+
+		const renderA = renderStitched({ parameterStorage, analyzedLaps: [1] });
+		await Promise.resolve();
+		const renderB = renderStitched({ parameterStorage, analyzedLaps: [2] });
+		await Promise.resolve();
+
+		resolveB({ cda: 0.42, crr: 0.0042, trimStart: 20, trimEnd: 350 });
+		await renderB;
+		resolveA({ cda: 0.31, crr: 0.0042, trimStart: 10, trimEnd: 360 });
+		await renderA;
+		await settle();
+
+		expect((document.getElementById("cdaSlider") as HTMLInputElement).value).toBe("0.42");
+		expect(appState.currentAnalyzedLaps).toEqual([2]);
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+	});
+
+	it("does not mount after activity teardown wins during saved-settings load", async () => {
+		appState.currentFileHash = "hash";
+		let resolveSettings!: (value: null) => void;
+		const parameterStorage = {
+			loadLapSettings: () =>
+				new Promise<null>((resolve) => {
+					resolveSettings = resolve;
+				}),
+		} as unknown as ParameterStorage;
+
+		const render = renderStitched({ parameterStorage });
+		await Promise.resolve();
+		appState.standardPanelOwner = null;
+		appState.currentFitData = null;
+		document.getElementById("veAnalysisSection")?.classList.add("hidden");
+		resolveSettings(null);
+		await render;
+
+		expect(document.getElementById("veAnalysisContent")?.children).toHaveLength(0);
+		expect(document.getElementById("storeResult")).toBeNull();
+	});
+});
+
+describe("standard: producer error transitions", () => {
+	it("sets error when every segment calculator throws", async () => {
+		calculatorFailure.enabled = true;
+		await renderStitched();
+		await settle();
+
+		expect(appState.veStatus).toBe("error");
+		expect(storeButton().disabled).toBe(true);
+	});
+
+	it("requestModeUpdate catch replaces a premature ready state with error", async () => {
+		failingPlotTarget = "vePlot";
+		await renderStitched();
+		await settle();
+
+		expect(appState.veStatus).toBe("error");
+		expect(storeButton().disabled).toBe(true);
 	});
 });
 

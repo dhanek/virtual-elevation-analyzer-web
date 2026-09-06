@@ -154,6 +154,14 @@ export async function handleStoreResult(
     if (!storeBtn) return;
 
     const originalText = storeBtn.textContent;
+    const restoreCurrentButton = (): void => {
+        // A later Analyze may have replaced the whole panel while storage was
+        // pending. Completion belongs to the captured button only; it must not
+        // rewrite the replacement panel's label or enablement.
+        if (document.getElementById('storeResult') !== storeBtn) return;
+        storeBtn.textContent = originalText || 'Store Result';
+        storeBtn.disabled = appState.veStatus !== 'ready';
+    };
 
     storeInFlight = true;
     try {
@@ -361,17 +369,17 @@ export async function handleStoreResult(
 
         await resultsStorage.saveResult(saveData);
 
-        storeBtn.textContent = '✓ Stored';
+        if (document.getElementById('storeResult') === storeBtn) {
+            storeBtn.textContent = '✓ Stored';
+        }
         setTimeout(() => {
-            storeBtn.disabled = false;
-            storeBtn.textContent = originalText || 'Store Result';
+            restoreCurrentButton();
         }, 2000);
     } catch (error) {
         log.error('❌ Failed to store result:', error);
         alert('Failed to store result. See console for details.');
 
-        storeBtn.disabled = false;
-        storeBtn.textContent = originalText || 'Store Result';
+        restoreCurrentButton();
     } finally {
         storeInFlight = false;
     }

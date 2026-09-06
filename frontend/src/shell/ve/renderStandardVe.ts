@@ -260,9 +260,8 @@ export async function showVirtualElevationAnalysisInline(
 	 * field, so dropping the parameter would silently shift `cdaReference` and
 	 * `defaultAirSpeedOffset` up by one at every call site.
 	 *
-	 * The seed below reads temperature from `fitData` through
-	 * `buildFilteredDataFromIndexGroups` instead — the same source, but with the
-	 * NaN "no reading" marker rather than a fabricated 0 °C.
+	 * Temperature now reaches the sole producer through `fitData`; keeping this
+	 * positional slot prevents the following arguments from shifting.
 	 */
 	_temperature: number[] = [],
 	cdaReference: number[] | null = null,
@@ -284,12 +283,20 @@ export async function showVirtualElevationAnalysisInline(
 		.auto_calculate_rho
 		? panelOwner
 		: null;
+	const stillOwnsRenderState = (): boolean =>
+		appState.standardPanelOwner === panelOwner &&
+		appState.currentFitData === activityAtRender &&
+		(appState.autoRhoInputRevision ?? 0) === autoRhoRevisionAtRender;
 
 	if (appState.currentFileHash && parameterStorage) {
 		const savedParams = await parameterStorage.loadLapSettings(
 			appState.currentFileHash,
 			analyzedLaps,
 		);
+		// Saved settings are the first yielding boundary. A newer render or a
+		// teardown may have taken ownership while storage was pending; in that
+		// case this continuation must not write shared state or mount controls.
+		if (!stillOwnsRenderState()) return;
 		if (savedParams) {
 			if (savedParams.cda !== null)
 				appState.currentParameters.cda = savedParams.cda;
@@ -623,6 +630,10 @@ export async function showVirtualElevationAnalysisInline(
 	// Create empty placeholder plots first (so Plotly divs exist)
 	// The actual VE calculation will happen after sliders are set up
 	await initializeVEAnalysis(appState, analysisInput, selectedIndices);
+	if (!stillOwnsPanel()) {
+		log.debug("Standard VE render was replaced during plot initialization");
+		return;
+	}
 
 	// Now set up sliders - this binds event handlers that read from sliders
 	// and recalculate VE with the correct parameter values

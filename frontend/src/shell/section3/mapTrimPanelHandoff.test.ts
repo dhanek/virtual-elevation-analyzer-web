@@ -30,6 +30,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type PrimitiveArgs = Record<string, any>;
 
 const primitive = vi.fn(async (_args: PrimitiveArgs) => null);
+const autoRho = vi.hoisted(() => ({ calculate: vi.fn() }));
+
+vi.mock("../ve/autoRho", () => ({
+	calculateAutoRho: (...args: unknown[]) => autoRho.calculate(...args),
+}));
+
+vi.mock("../ve", async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	calculateAutoRho: (...args: unknown[]) => autoRho.calculate(...args),
+}));
 
 vi.mock("../analysis/updateModeVEPlots", () => ({
 	updateModeVEPlots: (args: PrimitiveArgs) => primitive(args),
@@ -82,6 +92,7 @@ import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import { AppState } from "../../state/AppState";
 import { bindModeControls } from "../analysis/bindModeControls";
+import { scheduleStandardAutoRho } from "../ve/standardAutoRhoScheduler";
 import {
 	clearModeUpdateCallbacks,
 	registerModeUpdateCallbacks,
@@ -306,6 +317,8 @@ beforeEach(() => {
 	setupDom();
 	mapInstances.length = 0;
 	primitive.mockClear();
+	autoRho.calculate.mockReset();
+	autoRho.calculate.mockResolvedValue(null);
 	resetModeUpdateRequests();
 	clearModeUpdateCallbacks();
 	registerModeUpdateCallbacks("standard", () => noopCallbacks);
@@ -350,6 +363,103 @@ describe("the map's trim face and the panel's, in one document", () => {
 		// And the panel actually shows the window it recomputed. A "fix" that
 		// recomputes while leaving the slider reading 200 is not a fix.
 		expect(el("trimStartSlider").value).toBe("150");
+	});
+});
+
+describe("map trim's owner-scoped pending weather boundary", () => {
+	it("advertises the real map gesture immediately and runs current weather when the predecessor settles before 500 ms", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		appState.currentParameters!.auto_calculate_rho = true;
+		vi.useFakeTimers();
+		const owner = {};
+		appState.standardPanelOwner = owner;
+		appState.standardInitialAutoRhoOwner = owner;
+		appState.isCalculatingAutoRho = true;
+
+		dragMapTrimStart(25);
+		const pending = appState.standardPendingAutoRhoDebounce;
+		expect(pending?.owner).toBe(owner);
+		let settled = false;
+		pending?.promise.then(() => (settled = true));
+
+		await vi.advanceTimersByTimeAsync(200);
+		appState.isCalculatingAutoRho = false;
+		await vi.advanceTimersByTimeAsync(299);
+		expect(autoRho.calculate).not.toHaveBeenCalled();
+		expect(settled).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+		await pending?.promise;
+		expect(settled).toBe(true);
+	});
+
+	it("does not drop changed-input weather when the predecessor remains active past 500 ms", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		appState.currentParameters!.auto_calculate_rho = true;
+		vi.useFakeTimers();
+		const owner = {};
+		appState.standardPanelOwner = owner;
+		appState.standardInitialAutoRhoOwner = owner;
+		appState.isCalculatingAutoRho = true;
+		let resolveQueued!: () => void;
+		autoRho.calculate.mockImplementationOnce(
+			() =>
+				new Promise<null>((resolve) => {
+					resolveQueued = () => resolve(null);
+				}),
+		);
+
+		dragMapTrimStart(30);
+		const pending = appState.standardPendingAutoRhoDebounce;
+		let settled = false;
+		pending?.promise.then(() => (settled = true));
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+		expect(settled).toBe(false);
+		resolveQueued();
+		await pending?.promise;
+		expect(settled).toBe(true);
+	});
+
+	it("keeps one 500 ms deadline from the last repeated map gesture", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		appState.currentParameters!.auto_calculate_rho = true;
+		vi.useFakeTimers();
+
+		dragMapTrimStart(20);
+		await vi.advanceTimersByTimeAsync(300);
+		dragMapTrimEnd(350);
+		await vi.advanceTimersByTimeAsync(499);
+		expect(autoRho.calculate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+	});
+
+	it("shares the last-gesture deadline across panel scheduling and a real map event", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		appState.currentParameters!.auto_calculate_rho = true;
+		vi.useFakeTimers();
+		const owner = {};
+		appState.standardPanelOwner = owner;
+		appState.standardInitialAutoRhoOwner = owner;
+
+		void scheduleStandardAutoRho(appState, () => null, {} as never);
+		await vi.advanceTimersByTimeAsync(300);
+		dragMapTrimStart(40);
+		await vi.advanceTimersByTimeAsync(499);
+		expect(autoRho.calculate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
 	});
 });
 
