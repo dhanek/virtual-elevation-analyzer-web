@@ -449,7 +449,7 @@ changed and why.
 
       | | before | after |
       |---|---|---|
-      | 3 sections, primary legs only | 1.3 ms | 0.1 ms |
+      | 3 sections, primary legs only | 1.3 ms | 0.15 ms |
       | 3 sections, with compare series (scored twice) | **2.6 ms** | **0.3 ms** |
       | 8 sections | 7.2 ms | 0.8 ms |
       | 600 → 2400 samples/leg (4× targets AND 4× haystack) | **15.3×** | **5.9×** |
