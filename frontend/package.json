@@ -10,7 +10,8 @@
     "lint": "eslint src scripts vite.config.ts vitest.config.ts --max-warnings=0",
     "test": "vitest run",
     "profile:slider": "vite-node scripts/profile-slider-recompute.ts",
-    "profile:gps-lap-render": "vite-node scripts/profile-gps-lap-render.ts"
+    "profile:gps-lap-render": "vite-node scripts/profile-gps-lap-render.ts",
+    "profile:out-and-back": "vite-node scripts/profile-out-and-back-aggregation.ts"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",

@@ -5,7 +5,7 @@
  */
 import type { OutAndBackVEProfile } from './types';
 import type { SegmentSupplementarySeries } from '../../analysis/SegmentSupplementarySeries';
-import { getMultiSegmentColor, interpolateElevation } from '../multiSegment/shared';
+import { getMultiSegmentColor, interpolateAscending, interpolateElevation } from '../multiSegment/shared';
 import {
     buildMultiSegmentWindFigure,
     buildMultiSegmentPowerFigure,
@@ -311,7 +311,7 @@ function scoreOutAndBackLegs(
             // RMSE calculation for outbound
             for (let i = 0; i < profile.outboundDistances.length; i++) {
                 const dist = profile.outboundDistances[i];
-                const meanElev = interpolateElevation(dist, meanElevation.distances, meanElevation.elevation);
+                const meanElev = interpolateAscending(dist, meanElevation.distances, meanElevation.elevation);
                 if (!isNaN(meanElev)) {
                     const error = calibratedOutboundVE[i] - meanElev;
                     sumSquaredError += error * error;
@@ -337,7 +337,7 @@ function scoreOutAndBackLegs(
             // RMSE calculation for inbound
             for (let i = 0; i < mirroredDistances.length; i++) {
                 const dist = mirroredDistances[i];
-                const meanElev = interpolateElevation(dist, meanElevation.distances, meanElevation.elevation);
+                const meanElev = interpolateAscending(dist, meanElevation.distances, meanElevation.elevation);
                 if (!isNaN(meanElev)) {
                     const error = calibratedInboundVE[i] - meanElev;
                     sumSquaredError += error * error;
@@ -424,7 +424,7 @@ function residualsOverMean(
     const y: number[] = [];
     for (let j = 0; j < distances.length; j++) {
         const dist = distances[j];
-        const meanElev = interpolateElevation(dist, meanElevation.distances, meanElevation.elevation);
+        const meanElev = interpolateAscending(dist, meanElevation.distances, meanElevation.elevation);
         if (!isNaN(meanElev)) {
             y.push(calibrated[j] - meanElev);
             x.push(dist);
