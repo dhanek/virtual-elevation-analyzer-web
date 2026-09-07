@@ -34,7 +34,10 @@ import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
-import { configureAnalyzeOrchestrator, handleAnalyze } from "./analyzeOrchestrator";
+import {
+	configureAnalyzeOrchestrator,
+	handleAnalyze,
+} from "./analyzeOrchestrator";
 import { applyVeStatus } from "../../state/veStatus";
 
 const SAMPLE_COUNT = 120;

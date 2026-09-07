@@ -130,7 +130,10 @@ describe("the optimizer's search bounds stay the user's own", () => {
 		]) {
 			const text = readFileSync(join(__dirname, f), "utf8");
 			for (const line of text.split("\n")) {
-				if (/id="crr(Slider|Value)"/.test(line) && /crr_min|crr_max/.test(line)) {
+				if (
+					/id="crr(Slider|Value)"/.test(line) &&
+					/crr_min|crr_max/.test(line)
+				) {
 					offenders.push(`${f}: ${line.trim().slice(0, 80)}`);
 				}
 			}
@@ -155,7 +158,10 @@ describe("the optimizer's search bounds stay the user's own", () => {
 		]) {
 			const text = readFileSync(join(__dirname, f), "utf8");
 			for (const line of text.split("\n")) {
-				if (/id="cda(Slider|Value)"/.test(line) && /cda_min|cda_max/.test(line)) {
+				if (
+					/id="cda(Slider|Value)"/.test(line) &&
+					/cda_min|cda_max/.test(line)
+				) {
 					offenders.push(`${f}: ${line.trim().slice(0, 80)}`);
 				}
 			}

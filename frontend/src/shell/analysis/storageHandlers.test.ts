@@ -16,7 +16,10 @@ import {
 	showNotesDialog,
 } from "./storageHandlers";
 import type { AppState } from "../../state/AppState";
-import type { ParameterStorage, LapSettings } from "../../utils/ParameterStorage";
+import type {
+	ParameterStorage,
+	LapSettings,
+} from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import { applyVeStatus } from "../../state/veStatus";
 
@@ -281,7 +284,10 @@ describe("handleStoreResult trim window", () => {
 		addInput("crrSlider", "0.005");
 
 		const saved: Record<string, unknown>[] = [];
-		await storeWithNotes(makeTrimmedStandardState(), makeResultsStorageStub(saved));
+		await storeWithNotes(
+			makeTrimmedStandardState(),
+			makeResultsStorageStub(saved),
+		);
 
 		expect(saved).toHaveLength(1);
 		// Averaged over the 300 samples on screen, not over an empty slice.
@@ -301,7 +307,10 @@ describe("handleStoreResult trim window", () => {
 		addInput("crrSlider", "0.005");
 
 		const saved: Record<string, unknown>[] = [];
-		await storeWithNotes(makeTrimmedStandardState(), makeResultsStorageStub(saved));
+		await storeWithNotes(
+			makeTrimmedStandardState(),
+			makeResultsStorageStub(saved),
+		);
 
 		expect(saved[0].trimStart).toBe(700);
 		expect(saved[0].trimEnd).toBe(1000);

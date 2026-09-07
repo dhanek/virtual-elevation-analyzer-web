@@ -212,13 +212,15 @@ function configure(
 
 function startSlider(): HTMLInputElement {
 	const el = document.getElementById("mapTrimStartSlider");
-	if (!el) throw new Error("mapTrimStartSlider missing — Section 3 did not render");
+	if (!el)
+		throw new Error("mapTrimStartSlider missing — Section 3 did not render");
 	return el as HTMLInputElement;
 }
 
 function endSlider(): HTMLInputElement {
 	const el = document.getElementById("mapTrimEndSlider");
-	if (!el) throw new Error("mapTrimEndSlider missing — Section 3 did not render");
+	if (!el)
+		throw new Error("mapTrimEndSlider missing — Section 3 did not render");
 	return el as HTMLInputElement;
 }
 
@@ -367,8 +369,12 @@ describe("the map-trim sliders and the recompute funnel", () => {
 
 		dragStartTo(55);
 
-		expect((document.getElementById("trimStartSlider") as HTMLInputElement).value).toBe("55");
-		expect((document.getElementById("trimStartValue") as HTMLInputElement).value).toBe("55");
+		expect(
+			(document.getElementById("trimStartSlider") as HTMLInputElement).value,
+		).toBe("55");
+		expect(
+			(document.getElementById("trimStartValue") as HTMLInputElement).value,
+		).toBe("55");
 	});
 
 	/**

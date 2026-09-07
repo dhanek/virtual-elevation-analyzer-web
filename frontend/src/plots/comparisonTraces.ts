@@ -28,12 +28,15 @@
  * place to put a curve whose starting value is unknown, and silently anchoring
  * it to zero would draw a plausible-looking line at the wrong height.
  */
-export function anchorSeriesTo(series: number[], anchorValue: number): number[] {
-    if (series.length === 0) {
-        return [];
-    }
-    const offset = anchorValue - series[0];
-    return series.map(value => value + offset);
+export function anchorSeriesTo(
+	series: number[],
+	anchorValue: number,
+): number[] {
+	if (series.length === 0) {
+		return [];
+	}
+	const offset = anchorValue - series[0];
+	return series.map((value) => value + offset);
 }
 
 /**
@@ -44,6 +47,9 @@ export function anchorSeriesTo(series: number[], anchorValue: number): number[] 
  * instead would silently shorten a plotted trace, and a residual curve that
  * quietly stops early is exactly the kind of thing nobody notices.
  */
-export function residualsAgainst(series: number[], reference: number[]): number[] {
-    return series.map((value, index) => value - reference[index]);
+export function residualsAgainst(
+	series: number[],
+	reference: number[],
+): number[] {
+	return series.map((value, index) => value - reference[index]);
 }

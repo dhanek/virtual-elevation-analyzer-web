@@ -212,7 +212,9 @@ export interface StitchedStandardSeries {
  * no switch at all. Checked on the total rather than per sample, because a
  * stationary stretch inside a ride is legitimate and repeats a value honestly.
  */
-export function hasUsableDistance(series: Pick<StitchedStandardSeries, 'cumulativeDistanceKm'>): boolean {
+export function hasUsableDistance(
+	series: Pick<StitchedStandardSeries, "cumulativeDistanceKm">,
+): boolean {
 	const km = series.cumulativeDistanceKm;
 	if (km.length < 2) return false;
 	const last = km[km.length - 1];

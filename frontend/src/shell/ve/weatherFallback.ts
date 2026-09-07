@@ -76,10 +76,14 @@ const CODED_MESSAGES = new Map<string, string>([
  * @param error - Anything thrown by the weather fetch path.
  * @returns The user-facing message and its severity.
  */
-export function resolveWeatherFailure(error: unknown): WeatherFailureResolution {
+export function resolveWeatherFailure(
+	error: unknown,
+): WeatherFailureResolution {
 	if (error instanceof WeatherAPIError) {
 		const coded =
-			typeof error.code === "string" ? CODED_MESSAGES.get(error.code) : undefined;
+			typeof error.code === "string"
+				? CODED_MESSAGES.get(error.code)
+				: undefined;
 
 		return {
 			userMessage: coded

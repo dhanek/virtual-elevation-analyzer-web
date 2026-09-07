@@ -87,9 +87,7 @@ describe("normalizeLoadedParameters (D-07)", () => {
 	});
 
 	test("an existing provenance survives the factor normalisation", () => {
-		const normalized = normalizeOrFail(
-			legacyRecord({ wind_entry: "weather" }),
-		);
+		const normalized = normalizeOrFail(legacyRecord({ wind_entry: "weather" }));
 
 		expect(normalized.wind_height_factor).toBe(1.0);
 		expect(normalized.wind_entry).toBe("weather");
@@ -108,7 +106,10 @@ describe("normalizeLoadedParameters (D-07)", () => {
 	});
 
 	test("a stored factor of 0 is left alone (=== undefined, not falsiness)", () => {
-		const stored = legacyRecord({ wind_height_factor: 0, wind_entry: "manual" });
+		const stored = legacyRecord({
+			wind_height_factor: 0,
+			wind_entry: "manual",
+		});
 
 		const normalized = normalizeOrFail(stored);
 

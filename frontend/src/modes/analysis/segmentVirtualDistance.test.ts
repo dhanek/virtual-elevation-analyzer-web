@@ -152,11 +152,17 @@ describe("multi-lap Standard stores per-lap virtual distances (entry (h))", () =
 		// against 10 m/s of ground speed.
 		expect(appState.currentVirtualDistances[0].airKm).toBeCloseTo(0.108, 10);
 		expect(appState.currentVirtualDistances[0].groundKm).toBeCloseTo(0.09, 10);
-		expect(appState.currentVirtualDistances[0].differencePercent).toBeCloseTo(20, 8);
+		expect(appState.currentVirtualDistances[0].differencePercent).toBeCloseTo(
+			20,
+			8,
+		);
 
 		expect(appState.currentVirtualDistances[1].airKm).toBeCloseTo(0.126, 10);
 		expect(appState.currentVirtualDistances[1].groundKm).toBeCloseTo(0.09, 10);
-		expect(appState.currentVirtualDistances[1].differencePercent).toBeCloseTo(40, 8);
+		expect(appState.currentVirtualDistances[1].differencePercent).toBeCloseTo(
+			40,
+			8,
+		);
 	});
 
 	it("no longer leaves the stored virtual distances at zero", () => {
@@ -186,7 +192,10 @@ describe("multi-lap Standard stores per-lap virtual distances (entry (h))", () =
 		// What integrating the two laps end to end would give: the 601-second
 		// stop between them charged at lap 3's apparent wind.
 		const concatenated = computeVirtualDistanceWindowTotals({
-			timestamps: [...timestamps().slice(10, 20), ...timestamps().slice(20, 30)],
+			timestamps: [
+				...timestamps().slice(10, 20),
+				...timestamps().slice(20, 30),
+			],
 			velocity: Array.from({ length: 20 }, () => 10),
 			windSpeed: [
 				...Array.from({ length: 10 }, () => 12),
@@ -229,7 +238,9 @@ describe("single-lap Standard is unregressed", () => {
 
 		expect(appState.currentVirtualDistances).toHaveLength(1);
 		expect(appState.currentVirtualDistances[0].airKm).toBe(expected.airKm);
-		expect(appState.currentVirtualDistances[0].groundKm).toBe(expected.groundKm);
+		expect(appState.currentVirtualDistances[0].groundKm).toBe(
+			expected.groundKm,
+		);
 		expect(appState.currentVirtualDistances[0].differencePercent).toBe(
 			expected.differencePercent,
 		);
@@ -238,7 +249,11 @@ describe("single-lap Standard is unregressed", () => {
 
 describe("the segment modes store per-segment figures too", () => {
 	/** GPS-lap reads the cumulative series its stacked plot draws. */
-	function makeStackedProfile(label: string, startIdx: number, airKm: number[]) {
+	function makeStackedProfile(
+		label: string,
+		startIdx: number,
+		airKm: number[],
+	) {
 		const profile = makeProfile(label, startIdx, 12);
 		profile.supplementarySeries.virtualDistanceAirKm = airKm;
 		profile.supplementarySeries.virtualDistanceGroundKm = airKm.map(
@@ -259,14 +274,16 @@ describe("the segment modes store per-segment figures too", () => {
 			makeInputs(),
 		);
 
-		expect(appState.currentVirtualDistances.map((entry) => entry.label)).toEqual([
-			"Lap 2",
-			"Lap 3",
-		]);
+		expect(
+			appState.currentVirtualDistances.map((entry) => entry.label),
+		).toEqual(["Lap 2", "Lap 3"]);
 		expect(appState.currentVirtualDistances[0].airKm).toBe(2.4);
 		expect(appState.currentVirtualDistances[0].groundKm).toBeCloseTo(2, 10);
 		expect(appState.currentVirtualDistances[1].airKm).toBe(3.0);
-		expect(appState.currentVirtualDistances[1].differencePercent).toBeCloseTo(20, 8);
+		expect(appState.currentVirtualDistances[1].differencePercent).toBeCloseTo(
+			20,
+			8,
+		);
 	});
 
 	/**
@@ -308,10 +325,9 @@ describe("the segment modes store per-segment figures too", () => {
 
 		// Four legs in, TWO entries out.
 		expect(appState.currentVirtualDistances).toHaveLength(2);
-		expect(appState.currentVirtualDistances.map((entry) => entry.label)).toEqual([
-			"Section 1",
-			"Section 2",
-		]);
+		expect(
+			appState.currentVirtualDistances.map((entry) => entry.label),
+		).toEqual(["Section 1", "Section 2"]);
 		// Section 1 is 1.0 + 1.5 of air; section 2 is 2.0 + 2.0.
 		expect(appState.currentVirtualDistances[0].airKm).toBeCloseTo(2.5, 10);
 		expect(appState.currentVirtualDistances[1].airKm).toBeCloseTo(4.0, 10);

@@ -44,10 +44,7 @@ function leg(): SegmentSupplementarySeries {
 }
 
 /** `compare` decides which figure pair `renderOutAndBackPlots` builds. */
-function section(
-	sectionNumber: number,
-	compare: boolean,
-): OutAndBackVEProfile {
+function section(sectionNumber: number, compare: boolean): OutAndBackVEProfile {
 	return {
 		sectionNumber,
 		outboundRange: { startIdx: 0, endIdx: 2 },
@@ -118,7 +115,11 @@ describe("out-and-back plots redraw by diffing, not by teardown", () => {
 
 	it("uses react for the VE and residual plots and newPlot for none", () => {
 		const Plotly = (window as unknown as { Plotly: unknown }).Plotly;
-		renderOutAndBackPlots(Plotly, [section(1, false), section(2, false)], meanElevation);
+		renderOutAndBackPlots(
+			Plotly,
+			[section(1, false), section(2, false)],
+			meanElevation,
+		);
 
 		expect(calls.newPlot).toEqual([]);
 		expect(calls.react).toEqual(["oabVePlot", "oabVeResidualsPlot"]);
@@ -126,7 +127,11 @@ describe("out-and-back plots redraw by diffing, not by teardown", () => {
 
 	it("uses react for the two compare plots and newPlot for none", () => {
 		const Plotly = (window as unknown as { Plotly: unknown }).Plotly;
-		renderOutAndBackPlots(Plotly, [section(1, true), section(2, true)], meanElevation);
+		renderOutAndBackPlots(
+			Plotly,
+			[section(1, true), section(2, true)],
+			meanElevation,
+		);
 
 		expect(calls.newPlot).toEqual([]);
 		expect(calls.react).toEqual([
@@ -145,7 +150,9 @@ describe("out-and-back plots redraw by diffing, not by teardown", () => {
 		const Plotly = (window as unknown as { Plotly: unknown }).Plotly;
 		renderOutAndBackPlots(Plotly, [section(1, true)], meanElevation);
 
-		expect(document.getElementById("oabCompareView")!.classList.contains("hidden")).toBe(false);
+		expect(
+			document.getElementById("oabCompareView")!.classList.contains("hidden"),
+		).toBe(false);
 		expect(resized).toEqual(["oabVeComparePlot", "oabVeCompareResidualsPlot"]);
 	});
 
@@ -155,7 +162,9 @@ describe("out-and-back plots redraw by diffing, not by teardown", () => {
 		const Plotly = (window as unknown as { Plotly: unknown }).Plotly;
 		renderOutAndBackPlots(Plotly, [section(1, false)], meanElevation);
 
-		expect(document.getElementById("oabCompareView")!.classList.contains("hidden")).toBe(true);
+		expect(
+			document.getElementById("oabCompareView")!.classList.contains("hidden"),
+		).toBe(true);
 		expect(resized).toEqual([]);
 	});
 
@@ -165,6 +174,8 @@ describe("out-and-back plots redraw by diffing, not by teardown", () => {
 		// already (outAndBackVdHeader.test.ts).
 		renderOutAndBackVdPlot([section(3, false), section(4, false)]);
 
-		expect(document.querySelectorAll(".ve-metrics-compact__line")).toHaveLength(2);
+		expect(document.querySelectorAll(".ve-metrics-compact__line")).toHaveLength(
+			2,
+		);
 	});
 });

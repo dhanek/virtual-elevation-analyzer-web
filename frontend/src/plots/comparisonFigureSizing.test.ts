@@ -122,9 +122,7 @@ describe("virtual elevation comparison figure sizing", () => {
 			// `#veResidualsPlot` (`bindStandardSliders.ts:184`), so they must
 			// agree here or flipping the wind source to *compare* relabels the
 			// axis under the user.
-			expect(xAxisTitle(comparison[figure])).toBe(
-				xAxisTitle(standard[figure]),
-			);
+			expect(xAxisTitle(comparison[figure])).toBe(xAxisTitle(standard[figure]));
 		},
 	);
 

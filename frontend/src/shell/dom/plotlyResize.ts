@@ -1,11 +1,11 @@
-import { log } from '../../utils/log'
+import { log } from "../../utils/log";
 
 /**
  * Plotly's graph-div marker class. Plotly stamps it on every element it has
  * plotted into, so it is the honest test for "this div is a live graph" —
  * `Plots.resize` throws on a div that was never plotted.
  */
-const PLOTLY_GRAPH_SELECTOR = '.js-plotly-plot'
+const PLOTLY_GRAPH_SELECTOR = ".js-plotly-plot";
 
 /**
  * Every way this app takes a container off screen: the shared `.hidden` utility
@@ -16,7 +16,7 @@ const PLOTLY_GRAPH_SELECTOR = '.js-plotly-plot'
  * An ancestor matching any of these means the graph measures zero.
  */
 const HIDDEN_SELECTOR =
-    '.hidden, [hidden], .ve-tab-content:not(.ve-tab-content--active)'
+	".hidden, [hidden], .ve-tab-content:not(.ve-tab-content--active)";
 
 /**
  * Re-measure every Plotly graph inside a container that has just become
@@ -64,34 +64,38 @@ const HIDDEN_SELECTOR =
  * tab from opening.
  */
 export function resizePlotlyGraphsIn(root: HTMLElement): void {
-    const Plotly = (window as unknown as {
-        Plotly?: { Plots?: { resize?: (gd: Element) => unknown } }
-    }).Plotly
-    const Plots = Plotly?.Plots
-    const resize = Plots?.resize
-    if (!resize) return
+	const Plotly = (
+		window as unknown as {
+			Plotly?: { Plots?: { resize?: (gd: Element) => unknown } };
+		}
+	).Plotly;
+	const Plots = Plotly?.Plots;
+	const resize = Plots?.resize;
+	if (!resize) return;
 
-    root.querySelectorAll(PLOTLY_GRAPH_SELECTOR).forEach(graph => {
-        // A HIDDEN GRAPH IS EXACTLY THE CASE THIS FUNCTION EXISTS TO UNDO, so
-        // it must not be handed one: `Plots.resize` deletes `layout.width` and
-        // re-autosizes against `gd.offsetWidth`, which is 0 inside a
-        // `display: none` subtree, pinning the graph at that measurement until
-        // something redraws it.
-        //
-        // The guard belongs here rather than at the call sites, which
-        // disagreed about it: `renderOutAndBackPlots` scopes its call to the
-        // compare view for precisely this reason, while `activateTab` passes a
-        // whole pane — and the out-and-back VE pane CONTAINS the compare view,
-        // which is `.hidden` whenever the selection is not in compare mode. A
-        // Power/VE tab round trip therefore zero-width-pinned the two compare
-        // graphs until the next full render repaired them.
-        if (graph.closest(HIDDEN_SELECTOR)) return
-        try {
-            void Promise.resolve(resize.call(Plots, graph)).catch((error: unknown) => {
-                log.debug('Plotly resize failed for a graph', error)
-            })
-        } catch (error) {
-            log.debug('Plotly resize threw for a graph', error)
-        }
-    })
+	root.querySelectorAll(PLOTLY_GRAPH_SELECTOR).forEach((graph) => {
+		// A HIDDEN GRAPH IS EXACTLY THE CASE THIS FUNCTION EXISTS TO UNDO, so
+		// it must not be handed one: `Plots.resize` deletes `layout.width` and
+		// re-autosizes against `gd.offsetWidth`, which is 0 inside a
+		// `display: none` subtree, pinning the graph at that measurement until
+		// something redraws it.
+		//
+		// The guard belongs here rather than at the call sites, which
+		// disagreed about it: `renderOutAndBackPlots` scopes its call to the
+		// compare view for precisely this reason, while `activateTab` passes a
+		// whole pane — and the out-and-back VE pane CONTAINS the compare view,
+		// which is `.hidden` whenever the selection is not in compare mode. A
+		// Power/VE tab round trip therefore zero-width-pinned the two compare
+		// graphs until the next full render repaired them.
+		if (graph.closest(HIDDEN_SELECTOR)) return;
+		try {
+			void Promise.resolve(resize.call(Plots, graph)).catch(
+				(error: unknown) => {
+					log.debug("Plotly resize failed for a graph", error);
+				},
+			);
+		} catch (error) {
+			log.debug("Plotly resize threw for a graph", error);
+		}
+	});
 }

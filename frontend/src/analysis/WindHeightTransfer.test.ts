@@ -23,9 +23,9 @@ describe("resolveWindHeightFactor", () => {
 	});
 
 	test("returns the legacy factor when the factor is explicitly undefined", () => {
-		expect(
-			resolveWindHeightFactor({ wind_height_factor: undefined }),
-		).toBe(LEGACY_WIND_HEIGHT_FACTOR);
+		expect(resolveWindHeightFactor({ wind_height_factor: undefined })).toBe(
+			LEGACY_WIND_HEIGHT_FACTOR,
+		);
 	});
 
 	// A record read back from IndexedDB can hold anything (T-08-01); every
@@ -120,13 +120,13 @@ describe("resolveAppliedWindSpeed", () => {
 
 	test("passes a null wind through as null", () => {
 		// No wind is not zero wind.
-		expect(resolveAppliedWindSpeed({ wind_height_factor: 0.5 }, null)).toBeNull();
+		expect(
+			resolveAppliedWindSpeed({ wind_height_factor: 0.5 }, null),
+		).toBeNull();
 	});
 
 	test("returns a non-finite wind unchanged", () => {
-		expect(
-			resolveAppliedWindSpeed({ wind_height_factor: 0.5 }, NaN),
-		).toBeNaN();
+		expect(resolveAppliedWindSpeed({ wind_height_factor: 0.5 }, NaN)).toBeNaN();
 	});
 });
 

@@ -56,7 +56,9 @@ function readHiddenColumns(): Set<string> {
 		// preference must not be able to take the view down or hide a column
 		// nobody asked to hide.
 		const known = new Set(RESULT_COLUMNS.map((column) => column.id));
-		return new Set(parsed.filter((id): id is string => known.has(id as string)));
+		return new Set(
+			parsed.filter((id): id is string => known.has(id as string)),
+		);
 	} catch (error) {
 		// A private window, cleared site data, or storage the browser refuses.
 		// The view still opens; it just shows every column.

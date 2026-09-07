@@ -44,7 +44,11 @@ import type {
 	ResolvedUpdateInputs,
 	SegmentVeProfile,
 } from "../../modes/analysis/types";
-import type { ActivityDataLike, AppState, WindSource } from "../../state/AppState";
+import type {
+	ActivityDataLike,
+	AppState,
+	WindSource,
+} from "../../state/AppState";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
 import { applyVeStatus } from "../../state/veStatus";
@@ -341,9 +345,7 @@ export async function updateModeVEPlots(
 				indices,
 				distancesKm: supplementarySeries.distancesKm,
 				timeIndices: slice.timestamps.map((_, i) => i),
-				virtualElevation: Array.from(
-					result.virtual_elevation as Float64Array,
-				),
+				virtualElevation: Array.from(result.virtual_elevation as Float64Array),
 				virtualElevationCompare,
 				resultCompare,
 				actualElevation: params.velodrome

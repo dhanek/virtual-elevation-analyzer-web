@@ -110,7 +110,11 @@ describe("the GPS gate follows the FIT lap selection", () => {
 			return offset === undefined ? null : { gateTimeOffset: offset };
 		});
 		saveGpsMarkerSettings = vi.fn(
-			async (_hash: string, laps: number[], settings: { gateTimeOffset: number }) => {
+			async (
+				_hash: string,
+				laps: number[],
+				settings: { gateTimeOffset: number },
+			) => {
 				saved.set(key(laps), settings.gateTimeOffset);
 			},
 		);
@@ -223,11 +227,13 @@ describe("the GPS gate follows the FIT lap selection", () => {
 		const firstLoadBlocked = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		loadGpsMarkerSettings.mockImplementationOnce(async (_h: string, laps: number[]) => {
-			await firstLoadBlocked;
-			const offset = saved.get(key(laps));
-			return offset === undefined ? null : { gateTimeOffset: offset };
-		});
+		loadGpsMarkerSettings.mockImplementationOnce(
+			async (_h: string, laps: number[]) => {
+				await firstLoadBlocked;
+				const offset = saved.get(key(laps));
+				return offset === undefined ? null : { gateTimeOffset: offset };
+			},
+		);
 
 		// First change: two laps, its load parked mid-flight.
 		appState.selectedLaps = [1, 2];
@@ -286,7 +292,10 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 	let runOutAndBackDetection: ReturnType<typeof vi.fn>;
 	let redetect: () => void;
 
-	const saved = new Map<string, { gateATimeOffset: number; gateBTimeOffset: number }>();
+	const saved = new Map<
+		string,
+		{ gateATimeOffset: number; gateBTimeOffset: number }
+	>();
 	const key = (laps: number[]) => laps.join(",");
 
 	beforeEach(async () => {
@@ -338,7 +347,10 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 		redetect();
 		await settle();
 
-		expect(loadOutAndBackMarkerSettings).toHaveBeenLastCalledWith("hash-1", [1, 2]);
+		expect(loadOutAndBackMarkerSettings).toHaveBeenLastCalledWith(
+			"hash-1",
+			[1, 2],
+		);
 		expect(el("oabGateASlider").value).toBe("40");
 		expect(el("oabGateBSlider").value).toBe("280");
 		expect(el("oabGateBSlider").max).toBe("300");
@@ -378,7 +390,10 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 		await settle();
 
 		expect(saveOutAndBackMarkerSettings).not.toHaveBeenCalled();
-		expect(saved.get("1,2")).toEqual({ gateATimeOffset: 40, gateBTimeOffset: 280 });
+		expect(saved.get("1,2")).toEqual({
+			gateATimeOffset: 40,
+			gateBTimeOffset: 280,
+		});
 	});
 
 	it("still saves when the user moves a gate themselves", async () => {

@@ -1,9 +1,9 @@
 /** What the x-axis of a standard plot is measuring. */
-export type PlotXAxis = 'time' | 'distance';
+export type PlotXAxis = "time" | "distance";
 
 export const X_AXIS_TITLES: Record<PlotXAxis, string> = {
-    time: 'Time (seconds)',
-    distance: 'Distance (km)',
+	time: "Time (seconds)",
+	distance: "Distance (km)",
 };
 
 /**
@@ -24,57 +24,71 @@ export const X_AXIS_TITLES: Record<PlotXAxis, string> = {
  * arrays with kilometres.
  */
 export interface PlotContext {
-    trimStart: number;
-    trimEnd: number;
-    contextBefore: number;
-    contextAfter: number;
-    extendedStart: number;
-    extendedEnd: number;
-    xPointsBefore: number[];
-    xPointsMain: number[];
-    xPointsAfter: number[];
-    /** The trim boundaries in x coordinates, for the dashed boundary lines. */
-    xTrimStart: number;
-    xTrimEnd: number;
-    xMin: number;
-    xMax: number;
-    /** The axis title the builders render, so no builder hardcodes one. */
-    xAxisTitle: string;
-    axis: PlotXAxis;
+	trimStart: number;
+	trimEnd: number;
+	contextBefore: number;
+	contextAfter: number;
+	extendedStart: number;
+	extendedEnd: number;
+	xPointsBefore: number[];
+	xPointsMain: number[];
+	xPointsAfter: number[];
+	/** The trim boundaries in x coordinates, for the dashed boundary lines. */
+	xTrimStart: number;
+	xTrimEnd: number;
+	xMin: number;
+	xMax: number;
+	/** The axis title the builders render, so no builder hardcodes one. */
+	xAxisTitle: string;
+	axis: PlotXAxis;
 }
 
 export interface ContextSlices<T> {
-    before: T[];
-    main: T[];
-    after: T[];
+	before: T[];
+	main: T[];
+	after: T[];
 }
 
-export function createPlotContext(length: number, trimStart: number, trimEnd: number, sideContext: number = 5): PlotContext {
-    const contextBefore = Math.min(trimStart, sideContext);
-    const contextAfter = Math.min(length - 1 - trimEnd, sideContext);
-    const extendedStart = trimStart - contextBefore;
-    const extendedEnd = trimEnd + 1 + contextAfter;
+export function createPlotContext(
+	length: number,
+	trimStart: number,
+	trimEnd: number,
+	sideContext: number = 5,
+): PlotContext {
+	const contextBefore = Math.min(trimStart, sideContext);
+	const contextAfter = Math.min(length - 1 - trimEnd, sideContext);
+	const extendedStart = trimStart - contextBefore;
+	const extendedEnd = trimEnd + 1 + contextAfter;
 
-    return {
-        trimStart,
-        trimEnd,
-        contextBefore,
-        contextAfter,
-        extendedStart,
-        extendedEnd,
-        // THE TIME AXIS IS THE SAMPLE INDEX. It reads as seconds because FIT
-        // records at 1 Hz, which is why `xTrimStart`/`xTrimEnd` below are simply
-        // the indices — the identity that stops holding under a distance axis.
-        xPointsBefore: contextBefore > 0 ? Array.from({ length: contextBefore + 1 }, (_, i) => i + extendedStart) : [],
-        xPointsMain: Array.from({ length: trimEnd - trimStart + 1 }, (_, i) => i + trimStart),
-        xPointsAfter: contextAfter > 0 ? Array.from({ length: contextAfter + 1 }, (_, i) => i + trimEnd) : [],
-        xTrimStart: trimStart,
-        xTrimEnd: trimEnd,
-        xMin: extendedStart,
-        xMax: extendedEnd - 1,
-        xAxisTitle: X_AXIS_TITLES.time,
-        axis: 'time',
-    };
+	return {
+		trimStart,
+		trimEnd,
+		contextBefore,
+		contextAfter,
+		extendedStart,
+		extendedEnd,
+		// THE TIME AXIS IS THE SAMPLE INDEX. It reads as seconds because FIT
+		// records at 1 Hz, which is why `xTrimStart`/`xTrimEnd` below are simply
+		// the indices — the identity that stops holding under a distance axis.
+		xPointsBefore:
+			contextBefore > 0
+				? Array.from({ length: contextBefore + 1 }, (_, i) => i + extendedStart)
+				: [],
+		xPointsMain: Array.from(
+			{ length: trimEnd - trimStart + 1 },
+			(_, i) => i + trimStart,
+		),
+		xPointsAfter:
+			contextAfter > 0
+				? Array.from({ length: contextAfter + 1 }, (_, i) => i + trimEnd)
+				: [],
+		xTrimStart: trimStart,
+		xTrimEnd: trimEnd,
+		xMin: extendedStart,
+		xMax: extendedEnd - 1,
+		xAxisTitle: X_AXIS_TITLES.time,
+		axis: "time",
+	};
 }
 
 /**
@@ -96,78 +110,94 @@ export function createPlotContext(length: number, trimStart: number, trimEnd: nu
  * the switch a context swap rather than four plot rewrites.
  */
 export function createDistancePlotContext(
-    cumulativeKm: ArrayLike<number>,
-    trimStart: number,
-    trimEnd: number,
-    sideContext: number = 5,
+	cumulativeKm: ArrayLike<number>,
+	trimStart: number,
+	trimEnd: number,
+	sideContext: number = 5,
 ): PlotContext {
-    const base = createPlotContext(cumulativeKm.length, trimStart, trimEnd, sideContext);
+	const base = createPlotContext(
+		cumulativeKm.length,
+		trimStart,
+		trimEnd,
+		sideContext,
+	);
 
-    // A sample index the series does not carry cannot be plotted at a distance.
-    // Clamping rather than emitting NaN keeps the axis monotonic; the arrays are
-    // built from `base`, so an out-of-range index can only come from a caller
-    // that handed over a shorter distance series than the one it trimmed.
-    const at = (index: number): number => {
-        const clamped = Math.min(Math.max(index, 0), cumulativeKm.length - 1);
-        const value = cumulativeKm[clamped];
-        return Number.isFinite(value) ? value : 0;
-    };
+	// A sample index the series does not carry cannot be plotted at a distance.
+	// Clamping rather than emitting NaN keeps the axis monotonic; the arrays are
+	// built from `base`, so an out-of-range index can only come from a caller
+	// that handed over a shorter distance series than the one it trimmed.
+	const at = (index: number): number => {
+		const clamped = Math.min(Math.max(index, 0), cumulativeKm.length - 1);
+		const value = cumulativeKm[clamped];
+		return Number.isFinite(value) ? value : 0;
+	};
 
-    const xPointsBefore = base.xPointsBefore.map(at);
-    const xPointsMain = base.xPointsMain.map(at);
-    const xPointsAfter = base.xPointsAfter.map(at);
+	const xPointsBefore = base.xPointsBefore.map(at);
+	const xPointsMain = base.xPointsMain.map(at);
+	const xPointsAfter = base.xPointsAfter.map(at);
 
-    return {
-        ...base,
-        xPointsBefore,
-        xPointsMain,
-        xPointsAfter,
-        xTrimStart: at(trimStart),
-        xTrimEnd: at(trimEnd),
-        xMin: at(base.extendedStart),
-        xMax: at(base.extendedEnd - 1),
-        xAxisTitle: X_AXIS_TITLES.distance,
-        axis: 'distance',
-    };
+	return {
+		...base,
+		xPointsBefore,
+		xPointsMain,
+		xPointsAfter,
+		xTrimStart: at(trimStart),
+		xTrimEnd: at(trimEnd),
+		xMin: at(base.extendedStart),
+		xMax: at(base.extendedEnd - 1),
+		xAxisTitle: X_AXIS_TITLES.distance,
+		axis: "distance",
+	};
 }
 
-export function createContextSlices<T>(values: ArrayLike<T>, context: PlotContext): ContextSlices<T> {
-    const series = Array.from(values);
+export function createContextSlices<T>(
+	values: ArrayLike<T>,
+	context: PlotContext,
+): ContextSlices<T> {
+	const series = Array.from(values);
 
-    return {
-        before: context.contextBefore > 0 ? series.slice(context.extendedStart, context.trimStart + 1) : [],
-        main: series.slice(context.trimStart, context.trimEnd + 1),
-        after: context.contextAfter > 0 ? series.slice(context.trimEnd, context.extendedEnd) : [],
-    };
+	return {
+		before:
+			context.contextBefore > 0
+				? series.slice(context.extendedStart, context.trimStart + 1)
+				: [],
+		main: series.slice(context.trimStart, context.trimEnd + 1),
+		after:
+			context.contextAfter > 0
+				? series.slice(context.trimEnd, context.extendedEnd)
+				: [],
+	};
 }
 
-export function buildTrimBoundaryShapes(context: PlotContext): Array<Record<string, unknown>> {
-    return [
-        {
-            type: 'line',
-            x0: context.xTrimStart,
-            x1: context.xTrimStart,
-            y0: 0,
-            y1: 1,
-            yref: 'paper',
-            line: {
-                color: 'rgba(100, 100, 100, 0.3)',
-                width: 1.5,
-                dash: 'dash',
-            },
-        },
-        {
-            type: 'line',
-            x0: context.xTrimEnd,
-            x1: context.xTrimEnd,
-            y0: 0,
-            y1: 1,
-            yref: 'paper',
-            line: {
-                color: 'rgba(100, 100, 100, 0.3)',
-                width: 1.5,
-                dash: 'dash',
-            },
-        },
-    ];
+export function buildTrimBoundaryShapes(
+	context: PlotContext,
+): Array<Record<string, unknown>> {
+	return [
+		{
+			type: "line",
+			x0: context.xTrimStart,
+			x1: context.xTrimStart,
+			y0: 0,
+			y1: 1,
+			yref: "paper",
+			line: {
+				color: "rgba(100, 100, 100, 0.3)",
+				width: 1.5,
+				dash: "dash",
+			},
+		},
+		{
+			type: "line",
+			x0: context.xTrimEnd,
+			x1: context.xTrimEnd,
+			y0: 0,
+			y1: 1,
+			yref: "paper",
+			line: {
+				color: "rgba(100, 100, 100, 0.3)",
+				width: 1.5,
+				dash: "dash",
+			},
+		},
+	];
 }

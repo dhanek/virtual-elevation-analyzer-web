@@ -98,7 +98,11 @@ export interface ModeControlSpec {
 	decimals?: number;
 }
 
-const ALL_MODES: readonly AnalysisModeId[] = ["standard", "gpsLap", "outAndBack"];
+const ALL_MODES: readonly AnalysisModeId[] = [
+	"standard",
+	"gpsLap",
+	"outAndBack",
+];
 /** The GPS templates render no trim markup at all — see 07-RESEARCH.md §Priority 6. */
 const STANDARD_ONLY: readonly AnalysisModeId[] = ["standard"];
 

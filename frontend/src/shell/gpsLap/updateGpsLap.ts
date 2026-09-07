@@ -220,7 +220,8 @@ export function createGpsLapUpdateCallbacks(
 						profile.indices.length > 0
 							? normalized.timestamps[last] - normalized.timestamps[first]
 							: 0,
-					totalDistance: profile.distancesKm[profile.distancesKm.length - 1] ?? 0,
+					totalDistance:
+						profile.distancesKm[profile.distancesKm.length - 1] ?? 0,
 				};
 			});
 			memoMean = meanElevationFor(profiles, memoLaps);

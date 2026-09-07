@@ -208,7 +208,10 @@ function setup(overrides: Partial<AppState> = {}): Harness {
 		saveSettings: () => {},
 		onTrimMapUpdate: (start, end) => trimMapUpdates.push({ start, end }),
 		mapCanFollow: () =>
-			veViewMatchesSelection(appState.currentAnalyzedLaps, appState.selectedLaps),
+			veViewMatchesSelection(
+				appState.currentAnalyzedLaps,
+				appState.selectedLaps,
+			),
 		triggerAutoRho: () => {},
 		getOffsetMetricWindows: () => [{ start: 0, end: LAST_INDEX }],
 		getSyncErrorSeries: () => ({
@@ -248,9 +251,7 @@ async function interact(spec: ModeControlSpec): Promise<void> {
 			// up, trim end moves down; everything else moves within its own range.
 			if (spec.reason === "trim" || spec.reason === "mapTrim") {
 				range.value =
-					spec.elements.role === "end"
-						? (LAST_INDEX - 40).toString()
-						: "40";
+					spec.elements.role === "end" ? (LAST_INDEX - 40).toString() : "40";
 			} else if (spec.reason === "cda") {
 				range.value = "0.31";
 			} else if (spec.reason === "crr") {
@@ -371,10 +372,7 @@ describe("standard: every rendered row reaches the primitive exactly once", () =
 			await interact(spec);
 
 			const args = soleCall();
-			expect(args.cda).toBeCloseTo(
-				spec.reason === "cda" ? 0.31 : CDA,
-				6,
-			);
+			expect(args.cda).toBeCloseTo(spec.reason === "cda" ? 0.31 : CDA, 6);
 			expect(args.crr).toBeCloseTo(spec.reason === "crr" ? 0.0051 : CRR, 6);
 			// The wind-source row is the only one that changes the source.
 			expect(args.windSource).toBe(
@@ -639,7 +637,6 @@ describe("standard: the air-speed offset row is bound and writes its readout", (
 	});
 });
 
-
 /**
  * THE FULL CONTROL x MODE PRODUCT.
  *
@@ -726,10 +723,7 @@ function setupMode(modeCase: ModeCase): AppState {
 	primitive.mockClear();
 	modeState.gps = modeCase.detectionMode;
 
-	const appState = Object.assign(
-		makeAppState(),
-		modeCase.state,
-	) as AppState;
+	const appState = Object.assign(makeAppState(), modeCase.state) as AppState;
 
 	clearModeUpdateCallbacks();
 	registerModeUpdateCallbacks(modeCase.modeId, () => noopCallbacks);

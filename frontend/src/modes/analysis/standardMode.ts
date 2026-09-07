@@ -272,7 +272,9 @@ export const standardMode: AnalysisModeHandler = {
 			new Set(
 				profiles
 					.map((profile) => profile.segment.itemNumber)
-					.filter((itemNumber): itemNumber is number => itemNumber !== undefined),
+					.filter(
+						(itemNumber): itemNumber is number => itemNumber !== undefined,
+					),
 			),
 		);
 

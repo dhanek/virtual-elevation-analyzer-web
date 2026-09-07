@@ -22,80 +22,104 @@
  * no single fraction can clear the title at the clamp minimum without pushing
  * the legend off the figure at the clamp maximum.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from "vitest";
 import {
-    BELOW_AXIS_LEGEND_MARGIN_B,
-    belowAxisLegend,
-} from './StandardPlotBuilders'
+	BELOW_AXIS_LEGEND_MARGIN_B,
+	belowAxisLegend,
+} from "./StandardPlotBuilders";
 import {
-    buildMultiSegmentPowerFigure,
-    buildMultiSegmentVirtualDistanceFigure,
-    buildMultiSegmentWindFigure,
-} from './MultiSegmentPlotBuilders'
-import type { SegmentSupplementarySeries } from '../analysis/SegmentSupplementarySeries'
+	buildMultiSegmentPowerFigure,
+	buildMultiSegmentVirtualDistanceFigure,
+	buildMultiSegmentWindFigure,
+} from "./MultiSegmentPlotBuilders";
+import type { SegmentSupplementarySeries } from "../analysis/SegmentSupplementarySeries";
 
-const LENGTH = 12
-const series = (scale: number) => Array.from({ length: LENGTH }, (_, i) => i * scale)
+const LENGTH = 12;
+const series = (scale: number) =>
+	Array.from({ length: LENGTH }, (_, i) => i * scale);
 
 const metrics: SegmentSupplementarySeries = {
-    distancesKm: series(0.1),
-    powerWatts: series(20),
-    apparentWindSpeedMps: series(1),
-    virtualDistanceAirKm: series(0.11),
-    virtualDistanceGroundKm: series(0.1),
-}
+	distancesKm: series(0.1),
+	powerWatts: series(20),
+	apparentWindSpeedMps: series(1),
+	virtualDistanceAirKm: series(0.11),
+	virtualDistanceGroundKm: series(0.1),
+};
 
 const overlaySeries = [
-    { label: 'Lap 1', color: '#1f77b4', metrics },
-    { label: 'Lap 2', color: '#d62728', metrics },
-]
+	{ label: "Lap 1", color: "#1f77b4", metrics },
+	{ label: "Lap 2", color: "#d62728", metrics },
+];
 
 /** Every figure in the app whose legend sits below the x-axis. */
 const figures: Array<[string, { layout: Record<string, unknown> }]> = [
-    ['multi-segment wind', buildMultiSegmentWindFigure({ title: 'Wind', series: overlaySeries })],
-    ['multi-segment power', buildMultiSegmentPowerFigure({ title: 'Power', series: overlaySeries })],
-    ['multi-segment VD', buildMultiSegmentVirtualDistanceFigure({ title: 'VD', series: overlaySeries })],
-]
+	[
+		"multi-segment wind",
+		buildMultiSegmentWindFigure({ title: "Wind", series: overlaySeries }),
+	],
+	[
+		"multi-segment power",
+		buildMultiSegmentPowerFigure({ title: "Power", series: overlaySeries }),
+	],
+	[
+		"multi-segment VD",
+		buildMultiSegmentVirtualDistanceFigure({
+			title: "VD",
+			series: overlaySeries,
+		}),
+	],
+];
 
-describe('below-axis legends are pinned to the container, not the plot area', () => {
-    it.each(figures)('%s positions its legend against the container', (_id, figure) => {
-        expect(figure.layout.legend).toEqual(belowAxisLegend())
-    })
+describe("below-axis legends are pinned to the container, not the plot area", () => {
+	it.each(figures)(
+		"%s positions its legend against the container",
+		(_id, figure) => {
+			expect(figure.layout.legend).toEqual(belowAxisLegend());
+		},
+	);
 
-    it.each(figures)('%s leaves room for the legend AND the axis title', (_id, figure) => {
-        // The legend and the margin are one setting in two fields: pinning the
-        // legend to the figure's bottom edge only works if the margin there is
-        // deep enough to hold it and the axis title above it.
-        expect((figure.layout.margin as { b: number }).b).toBe(BELOW_AXIS_LEGEND_MARGIN_B)
-    })
+	it.each(figures)(
+		"%s leaves room for the legend AND the axis title",
+		(_id, figure) => {
+			// The legend and the margin are one setting in two fields: pinning the
+			// legend to the figure's bottom edge only works if the margin there is
+			// deep enough to hold it and the axis title above it.
+			expect((figure.layout.margin as { b: number }).b).toBe(
+				BELOW_AXIS_LEGEND_MARGIN_B,
+			);
+		},
+	);
 
-    it.each(figures)('%s never reintroduces a negative paper fraction', (_id, figure) => {
-        const legend = figure.layout.legend as { y?: number; yref?: string }
-        expect(legend.yref).toBe('container')
-        expect(legend.y).toBeGreaterThanOrEqual(0)
-    })
-})
+	it.each(figures)(
+		"%s never reintroduces a negative paper fraction",
+		(_id, figure) => {
+			const legend = figure.layout.legend as { y?: number; yref?: string };
+			expect(legend.yref).toBe("container");
+			expect(legend.y).toBeGreaterThanOrEqual(0);
+		},
+	);
+});
 
-describe('belowAxisLegend itself', () => {
-    it('measures from the figure bottom edge, anchored by its own bottom', () => {
-        // `yref: 'container'` with any other anchor would put the legend's
-        // MIDDLE or TOP on the bottom edge and hang the rest off the figure.
-        expect(belowAxisLegend()).toEqual({
-            orientation: 'h',
-            yref: 'container',
-            yanchor: 'bottom',
-            y: 0,
-            x: 0.5,
-            xanchor: 'center',
-        })
-    })
+describe("belowAxisLegend itself", () => {
+	it("measures from the figure bottom edge, anchored by its own bottom", () => {
+		// `yref: 'container'` with any other anchor would put the legend's
+		// MIDDLE or TOP on the bottom edge and hang the rest off the figure.
+		expect(belowAxisLegend()).toEqual({
+			orientation: "h",
+			yref: "container",
+			yanchor: "bottom",
+			y: 0,
+			x: 0.5,
+			xanchor: "center",
+		});
+	});
 
-    it('centres the legend rather than taking Plotly\'s left default', () => {
-        // `legend.x` defaults to 0. The old layouts looked centred only because
-        // their entries happened to fill the width; setting `yref` made the
-        // default visible as a hard-left legend.
-        const legend = belowAxisLegend() as { x: number; xanchor: string }
-        expect(legend.x).toBe(0.5)
-        expect(legend.xanchor).toBe('center')
-    })
-})
+	it("centres the legend rather than taking Plotly's left default", () => {
+		// `legend.x` defaults to 0. The old layouts looked centred only because
+		// their entries happened to fill the width; setting `yref` made the
+		// default visible as a hard-left legend.
+		const legend = belowAxisLegend() as { x: number; xanchor: string };
+		expect(legend.x).toBe(0.5);
+		expect(legend.xanchor).toBe("center");
+	});
+});

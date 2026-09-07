@@ -110,7 +110,9 @@ describe("the out-and-back VD header", () => {
 		// A lone section drops the prefix, exactly as a lone lap does, and keeps
 		// the three span ids Standard has always exposed.
 		expect(document.getElementById("vdAirValue")!.textContent).toBe("2.000 km");
-		expect(document.getElementById("vdGroundValue")!.textContent).toBe("2.000 km");
+		expect(document.getElementById("vdGroundValue")!.textContent).toBe(
+			"2.000 km",
+		);
 		expect(document.getElementById("vdDiffValue")!.textContent).toBe("+0.00%");
 	});
 
@@ -124,7 +126,9 @@ describe("the out-and-back VD header", () => {
 		// air 3.0, ground 4.0 -> -25.00%. The mean of +100% and -66.67% is
 		// +16.67%, which is not what a distance ratio means.
 		expect(document.getElementById("vdAirValue")!.textContent).toBe("3.000 km");
-		expect(document.getElementById("vdGroundValue")!.textContent).toBe("4.000 km");
+		expect(document.getElementById("vdGroundValue")!.textContent).toBe(
+			"4.000 km",
+		);
 		expect(document.getElementById("vdDiffValue")!.textContent).toBe("-25.00%");
 	});
 
