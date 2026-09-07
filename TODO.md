@@ -356,33 +356,6 @@ re-deriving it):
       `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
       of the PR #7 review fixes, 2026-08-31*
 
-- [ ] **[S] A saved trim wider than the selection splits the slider from its number box.** Found
-      while trying to reproduce the stale-trim item below (now closed). `loadLapSettings` writes
-      `savedParams.trimEnd` into `appState.presetTrimEnd` with NO clamp against the incoming
-      selection's `timestamps.length - 1`, and the markup then renders both faces of the trim from
-      that one value. A `range` input clamps a value above its `max`; a `number` input does not. So
-      an over-range saved trim paints the sliders at the clamped maximum and the number boxes at
-      the raw saved figure — both pairs, panel and map. Measured in the app 2026-09-07 on the
-      reference ride: with `{trimEnd: 582}` planted under lap key `10` (274 samples),
-      `#trimEndSlider.value` and `#mapTrimEndSlider.value` read 273 while `#trimEndValue` and
-      `#mapTrimEndValue` read 582. RMSE stayed correct at 7.62 m, because every consumer downstream
-      reads the SLIDER — so this is a display split, not a wrong answer.
-
-      **Reachable only by planting the record**, which is why it is [S] and not larger: I could not
-      produce an over-range saved trim through the UI. Both writers derive their figure from the
-      current selection (`saveCurrentLapSettings` parses the clamped range slider;
-      `saveMapTrimSettings` writes the `presetTrimEnd` that `commitMapTrim` has just clamped), and
-      `section3Orchestration.ts` re-loads and resets the pair on every selection change. The one
-      candidate path I could not rule out by reading is a race: `bindMapTrim`'s slider listeners are
-      cloned and re-bound AFTER its `await loadLapSettings`, so during that window the PREVIOUS
-      selection's `commitMapTrim` is still live and closes over the previous `dataLength`, while
-      `appState.selectedLaps` already names the new one — a drag landing there would clamp against
-      the old length and save it under the new key. Not reproduced; a clamp at the load site closes
-      the hole either way and is three lines.
-      `frontend/src/shell/ve/renderStandardVe.ts` (the `savedParams` branch of
-      `showVirtualElevationAnalysisInline`) and `frontend/src/shell/section3/section3Orchestration.ts:1616-1620`
-      · *origin: in-app reproduction attempt for the item below, 2026-09-07*
-
 - [ ] **[S] `vite.config.ts` and `vitest.config.ts` are in neither tsc program, and neither is
       linted.** Bundle G closed this hole for `frontend/scripts/**`; the root config files still
       sit outside both `tsconfig.json` and `tsconfig.scripts.json` (verified with
@@ -455,6 +428,58 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### A stored trim is fitted to the selection it is loaded against — 2026-09-07
+
+- [x] **[S] A saved trim wider than the selection splits the slider from its number box.**
+      *Filed 2026-09-07 while reproducing the stale-trim report; fixed the same day.*
+
+      A trim window is stored per LAP KEY and can be read back against a selection of another
+      length. The panel and Section 3 each render both faces of the window from that one number,
+      and the two input types disagree about an out-of-range value: a `range` sanitizes to its
+      `min`/`max`, a `number` shows what it was given. So an unfitted load painted a slider and a
+      number box that did not match, and nothing reconciled them until the user touched one. This
+      is the trim analogue of F17-01, which `sliderBounds.ts` already records for Crr/CdA.
+
+      **Two writers reach it, and one needs no planting** — the item as filed claimed the split was
+      reachable only by planting a record, and named only two writers. Both claims were wrong, and
+      round 22's review caught them (F22-02). `saveCurrentMultiSegmentSettings`
+      (`MultiSegmentSettings.ts:93`) writes a hardcoded `{trimStart: 0, trimEnd: 0}` keyed by
+      `currentAnalyzedLaps`, which `segmentSummary.ts:222-238` documents as the SELECTION in the
+      segment modes — the same FIT-lap key space Standard reads. So a GPS-lap or out-and-back
+      analysis of a selection leaves `{0, 0}` under its key, and Standard on that selection reads
+      an end of 0 against a slider whose `min` is 30. The filed item also named the enclosing
+      function as `bindMapTrim`, which is not a symbol in this codebase (F22-01); it is
+      `initializeMapTrimControlsForSelectedLaps` (`section3Orchestration.ts:1527`), whose listener
+      clone/replace at `:1662-1682` runs after its `await loadLapSettings` at `:1612`.
+
+      **Fixed by fitting at the LOAD sites**, which closes every writer at once rather than asking
+      each to agree: `clampTrimWindow` in the new `frontend/src/analysis/trimBounds.ts`, called
+      from Standard's `savedParams` branch (`renderStandardVe.ts`) and from Section 3's
+      `savedSettings` branch (`section3Orchestration.ts`). The end is settled first and the start
+      fitted behind it, because the end is the edge the selection length bounds. A selection too
+      short to hold `MIN_TRIM_WINDOW_SAMPLES` spans whole rather than going negative. The module
+      is also the single home for that constant, which was declared in four files; the two this
+      fix touches now import it, leaving two.
+
+      Standard's branch additionally stops a half-written record leaking: a field absent from the
+      record falls back to the value already in `appState` — preserving the `!== undefined` guard
+      it replaces — and that fallback is fitted too, so a value carried from a previous selection
+      cannot survive out of range either.
+
+      **Checked in the app 2026-09-07** on the reference ride, lap 10 (274 samples), both
+      directions. With `{trimEnd: 582}` planted under key `10`: before, `#trimEndSlider` and
+      `#mapTrimEndSlider` read 273 while `#trimEndValue` and `#mapTrimEndValue` read 582; after,
+      all four read 273 and RMSE is unchanged at 7.62 m. With the segment modes' `{0, 0}` under
+      the same key: all four read 30, and the analysis runs on that 30-sample window (RMSE
+      0.88 m). Guarded by 14 tests — 7 unit cases on `clampTrimWindow`, 4 driving Standard's real
+      render through `standardModeRealChain.test.ts`, 3 driving Section 3's through
+      `mapTrimModeUpdate.test.ts`. Note that jsdom does not sanitize a `range` value, so the
+      integration tests pin the fitted number reaching both faces rather than reproducing the
+      split itself; the split is the browser-side consequence of the same unfitted number.
+      `frontend/src/analysis/trimBounds.ts` (new) · `renderStandardVe.ts` ·
+      `section3Orchestration.ts` · *origin: in-app reproduction attempt for the stale-trim item,
+      2026-09-07; F22-01 and F22-02 discharged here*
 
 ### The stale-trim report, retired by reproduction — 2026-09-07
 
