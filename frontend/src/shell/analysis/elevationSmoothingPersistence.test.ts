@@ -252,8 +252,6 @@ const lapProfile = (lapNumber: number) => ({
 	totalDistance: 2,
 });
 
-const meanElevation = { distances: [0, 1, 2], elevation: [0, 1, 2] };
-
 const sectionProfile = {
 	sectionNumber: 1,
 	outboundRange: { startIdx: 0, endIdx: 1 },
@@ -305,7 +303,6 @@ const MODES: readonly ModeUnderTest[] = [
 				{} as unknown as ResultsStorage,
 				async () => ({}),
 				[lapProfile(1), lapProfile(2)] as any,
-				meanElevation,
 				appState.currentParameters!,
 				true,
 				true,
@@ -323,7 +320,6 @@ const MODES: readonly ModeUnderTest[] = [
 				{} as unknown as ResultsStorage,
 				async () => ({}),
 				[sectionProfile] as any,
-				meanElevation,
 				appState.currentParameters!,
 				true,
 				true,

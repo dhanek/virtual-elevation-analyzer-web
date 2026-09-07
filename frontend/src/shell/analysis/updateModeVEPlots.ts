@@ -47,6 +47,7 @@ import type {
 import type { ActivityDataLike, AppState, WindSource } from "../../state/AppState";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
+import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
 import { resolveElevationProfile } from "./elevationProfileResolver";
 import { resolveRhoArray } from "./rhoArrayResolver";
@@ -120,8 +121,14 @@ export async function updateModeVEPlots(
 
 	if (!fitData || !params) {
 		log.error("Missing data for VE update");
+		applyVeStatus(appState, "idle");
 		return null;
 	}
+
+	// Everything below can take a full calculator sweep. The panel is on screen
+	// throughout, so the status is what tells Store Result the numbers beside it
+	// do not describe this selection yet.
+	applyVeStatus(appState, "computing");
 
 	const normalized = getNormalizedActivityArrays(fitData);
 
@@ -224,7 +231,37 @@ export async function updateModeVEPlots(
 			indices.push(i);
 		}
 
-		const segmentRho = rhoArray ? indices.map((i) => rhoArray[i]) : null;
+		// COMPLETE OR ABSENT, NEVER PARTIAL.
+		//
+		// `rhoArray[i]` on an index the series does not reach yields `undefined`,
+		// which crosses the WASM boundary as NaN and poisons the whole segment's
+		// integration. Nothing upstream rules that out: `resolveRhoArray` accepts
+		// a channel on `.some(rho => rho > 0)` and `getNormalizedActivityArrays`
+		// converts it without padding, so a device that stopped emitting air
+		// density mid-ride yields a series SHORTER than the ride.
+		//
+		// The rule is `rhoArrayResolver.ts:86`'s, verbatim: a short or
+		// hole-punched array under the calculator is a worse bug than a constant
+		// one. It was enforced in the three ANALYZE legs and never here, because
+		// this pass was the second producer and the legs were the ones being
+		// audited. Retiring the legs makes this the only pass there is, so the
+		// guard belongs to it.
+		//
+		// A LENGTH/RANGE CHECK, AND ONLY THAT — the same scope the legs' version
+		// had. An interior NaN in an otherwise-full-length channel still reaches
+		// the calculator, because `resolveRhoArray` accepts the series on a
+		// `.some(...)`; that is pre-existing and out of scope here.
+		let segmentRho: number[] | null = null;
+		if (rhoArray) {
+			const spans = indices.every((i) => i >= 0 && i < rhoArray.length);
+			if (spans) {
+				segmentRho = indices.map((i) => rhoArray[i]);
+			} else {
+				log.warn(
+					`Air density series (${rhoArray.length}) does not span ${segment.label}; using constant rho`,
+				);
+			}
+		}
 
 		try {
 			const supplementarySeries = buildSegmentSupplementarySeries({
@@ -322,6 +359,7 @@ export async function updateModeVEPlots(
 
 	if (profiles.length === 0) {
 		log.error("No valid segments to display");
+		applyVeStatus(appState, "error");
 		return null;
 	}
 
@@ -330,6 +368,14 @@ export async function updateModeVEPlots(
 	// The summarize seam owns the AppState result writes for every mode. This
 	// is what gives out-and-back its Store Result / Export CSV fix (D-17a, N-1).
 	handler.summarize(appState, profiles, aggregate, inputs);
+
+	// AFTER summarize, never before: summarize is what writes currentVEResult and
+	// its three siblings, and `ready` is the claim that those describe this
+	// selection. Written here, before the renders below -- but a throw out of
+	// one of those renders still reaches `requestModeUpdate`'s catch around its
+	// call to this function, which moves the status to `error` even though the
+	// result fields are complete.
+	applyVeStatus(appState, "ready");
 
 	const isTabActive = args.isTabActive ?? isVeTabActive;
 

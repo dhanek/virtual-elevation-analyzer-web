@@ -54,15 +54,15 @@ export function resolveRhoArray(
 /**
  * The same series, sliced onto ONE analyze selection.
  *
- * Standard's analyze leg builds its calculator over the concatenated,
- * deduplicated selection rather than over a full-activity range, so it cannot
- * reuse `updateModeVEPlots`' per-segment `indices.map(...)` slice. It was
- * therefore left with no `rhoArray` at all when the two GPS legs were fixed,
- * which meant the placeholder fit integrated a constant `params.rho` while the
- * update a macrotask later integrated the real per-point series — and, since
- * that paint now also writes the R²/RMSE/VE/Actual header, the wrong numbers
- * were on screen until the kick landed, or permanently on any path where the
- * scheduled pass never reaches `renderVe`.
+ * NO PRODUCTION CALLER, as of Standard's analyze-leg retirement. It existed for
+ * that leg's calculator, which fitted the concatenated, deduplicated selection
+ * rather than a full-activity range and so could not reuse `updateModeVEPlots`'
+ * per-segment `indices.map(...)` slice; until this function it was given no
+ * `rhoArray` at all, integrating a constant `params.rho` while the update a
+ * macrotask later integrated the real per-point series. That leg is deleted, so
+ * the divergence is gone rather than reconciled. KEPT because the rule below is
+ * unreachable from a per-segment slice and is still pinned by its own cases in
+ * `selectionRhoArray.test.ts`; a dead-code sweep may reasonably take it.
  *
  * `expectedLength` is the calculator's other series' length. Anything else
  * means the selection and the density series are not in the same index space,

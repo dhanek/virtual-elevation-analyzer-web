@@ -63,7 +63,6 @@ describe("the GPS-lap / stacked VD header", () => {
 			showVirtualDistanceTab: true,
 			selectedWindSource: "none",
 			currentAirSpeedCalibrationValue: "0",
-			initialStats: { meanR2: 0, meanRMSE: 0, closingError: 0 },
 			lapCount: 2,
 			defaultAirSpeedOffset: 0,
 			elevationToggleMarkup: "",

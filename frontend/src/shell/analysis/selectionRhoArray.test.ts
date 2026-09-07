@@ -79,7 +79,7 @@ describe("resolveSelectionRhoArray", () => {
 	});
 });
 
-describe("every analyze leg builds its calculator with a rho array", () => {
+describe("no analyze leg builds a calculator without a rho array", () => {
 	/**
 	 * Source-level, deliberately. The property is "no leg was forgotten", and
 	 * the thing that makes a leg wrong is an omission — which no test of the
@@ -93,13 +93,31 @@ describe("every analyze leg builds its calculator with a rho array", () => {
 	];
 
 	for (const leg of legs) {
-		it(`${leg} passes rhoArray to createVeCalculator`, () => {
+		it(`${leg} passes rhoArray to createVeCalculator, or builds no calculator at all`, () => {
 			const source = readFileSync(
 				fileURLToPath(new URL(leg, import.meta.url)),
 				"utf8",
 			);
 
 			const calculatorCalls = source.split("createVeCalculator({").length - 1;
+
+			// A RETIRED LEG, and this is how one is recognised rather than
+			// silently tolerated. Once a leg stops computing, the pairing below
+			// has nothing to pair and "zero calculators" would make the case pass
+			// for the wrong reason — the vacuity the `> 0` guard was there to
+			// prevent. So the guard becomes conditional on the IMPORT: a leg that
+			// still pulls in `VeCalculatorFactory` must build at least one
+			// calculator and give every one of them a rho array; a leg that does
+			// not import it must build none, and that absence is asserted rather
+			// than assumed. `updateModeVEPlots` is where the property lives for a
+			// retired leg, and `gpsModeRealChain.test.ts` holds it there.
+			const importsCalculatorFactory =
+				/from\s+["'][^"']*VeCalculatorFactory["']/.test(source);
+			if (!importsCalculatorFactory) {
+				expect(calculatorCalls).toBe(0);
+				return;
+			}
+
 			expect(calculatorCalls).toBeGreaterThan(0);
 			expect(source.split(/\brhoArray:/).length - 1).toBe(calculatorCalls);
 		});

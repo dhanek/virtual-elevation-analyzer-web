@@ -140,7 +140,6 @@ const MODES: readonly ModeUnderTest[] = [
 			buildGpsLapVeAnalysisTemplate({
 				...FLAGS,
 				params,
-				initialStats: { meanR2: 0.5, meanRMSE: 1, closingError: 2 },
 				lapCount: 2,
 				elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
 			}),
@@ -159,7 +158,6 @@ const MODES: readonly ModeUnderTest[] = [
 			buildOutAndBackVeAnalysisTemplate({
 				...FLAGS,
 				params,
-				initialStats: { rmse: 1, avgVeGain: 2, avgActualGain: 3 },
 				sectionCount: 1,
 				elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
 			}),

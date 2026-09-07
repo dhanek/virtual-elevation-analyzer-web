@@ -279,7 +279,7 @@ export function windHeightControlsMarkup(
  * Maintainer ruling (D-a, 2026-08-30): reopening a previously analysed file must
  * restore the exact conditions it was analysed under — the wind, its provenance
  * and the height factor. Auto-rho re-runs on load
- * (`fileLoadOrchestration.ts:389`, `bindStandardSliders.ts:632`, neither
+ * (`fileLoadOrchestration.ts`, `renderStandardVe.ts`, neither
  * suppressed by `isLoadingParameters`), and it used to assign the API's wind
  * unconditionally. Protecting only the FACTOR was never enough: a replaced wind
  * re-fits the stored analysis just as surely as a re-seeded k.

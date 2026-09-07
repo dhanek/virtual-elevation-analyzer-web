@@ -25,11 +25,8 @@ import {
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
-import { resolveRhoArray } from "../analysis/rhoArrayResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import {
 	resolveMultiSegmentAnalysisParams,
@@ -55,32 +52,40 @@ import {
 import { log } from "../../utils/log";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import {
-	calculateGpsLapStats,
-	calculateMeanElevationProfile,
-	renderGpsLapVEPlots,
 	renderGpsLapWindPlot,
 	renderGpsLapPowerPlot,
 	renderGpsLapVdPlot,
 } from "./gpsLapPlots";
-import type { GpsLapHeaderStats } from "./gpsLapPlots";
 import { createGpsLapUpdateCallbacks } from "./updateGpsLap";
 import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
-import { seedSegmentModeAnalyzeState } from "../../modes/analysis/segmentSummary";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
-import { stackedVirtualDistances } from "../../modes/analysis/segmentVirtualDistance";
+import { applyVeStatus } from "../../state/veStatus";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 
 /**
- * Calculate VE for each GPS-detected lap and show stacked plot.
+ * Select the GPS-detected laps and put the stacked panel on screen.
+ *
+ * THIS LEG NO LONGER RUNS THE PHYSICS. It used to build one calculator per lap
+ * and integrate a virtual elevation for each, so the panel could paint a first
+ * result; the post-bind `requestModeUpdate("parameters")` in `showGpsLapVEPlot`
+ * then recomputed the SAME segments through `updateModeVEPlots`, which is the
+ * only writer of `currentVEResult` and its siblings. One Analyze therefore cost
+ * `1 + 2N` calculator runs where `2N` would do, and — the structural half —
+ * every analyze-derived value had two producers that WR-03 showed do not agree.
+ *
+ * So this function selects laps, builds the per-lap supplementary series the
+ * Wind/Power/VD tabs draw, and renders panel STRUCTURE. Every physics-derived
+ * quantity — virtual elevation, R², RMSE, closing error, the stored result —
+ * arrives from the recompute a macrotask later, and `appState.veStatus` is what
+ * says whether it has landed yet (Store Result is disabled until it has).
  */
 export async function showGpsLapVEAnalysis(
 	services: ShellServices,
@@ -94,7 +99,7 @@ export async function showGpsLapVEAnalysis(
 	reuseCurrentSettings: boolean = false,
 ) {
 	const { appState } = services;
-	services.showLoading("Calculating VE for each lap...");
+	services.showLoading("Preparing lap analysis...");
 
 	// When the overlay was reached by stacking ordinary lap selections, real lap
 	// numbers are carried on appState so the legend matches the user's choice;
@@ -120,35 +125,29 @@ export async function showGpsLapVEAnalysis(
 	const allVelocity = normalizedArrays.velocity;
 	const allPositionLat = normalizedArrays.positionLat;
 	const allPositionLong = normalizedArrays.positionLong;
-	// WR-1: the analyze leg resolves the elevation profile exactly as the update
-	// path does (`updateGpsLap.ts`, `updateModeVEPlots.ts`). Reading
-	// `normalizedArrays.altitude` straight through meant that, with a DEM
-	// applied, the smoothing toggle rendered ON while this first paint was
-	// computed from the raw FIT channel -- and the numbers then moved on the
-	// first control nudge, when the primitive took over.
-	const allAltitude = resolveElevationProfile(
-		appState,
-		fitData,
-		normalizedArrays.altitude,
-	).altitude;
 	const allDistance = normalizedArrays.distance;
 
-	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT (WR-4 follow-up).
+	// NO ELEVATION AND NO AIR DENSITY ARE RESOLVED HERE ANY MORE.
 	//
-	// This calculator used to be built with NO `rhoArray` at all, while
-	// `updateModeVEPlots` passes a per-segment slice (`:251`). On any ride
-	// carrying usable air density the two passes therefore integrated different
-	// physics -- constant `params.rho` here, the real per-point series there --
-	// and the panel visibly changed by itself when the post-bind kick landed.
-	// Measured on the golden ride: mean RMSE 7.809 m at the analyze paint
-	// against 7.555 m one macrotask later, and the analyze number was the wrong
-	// one.
+	// Both were resolved for the deleted per-lap calculators, and both existed
+	// only because this leg was a SECOND producer that had to be talked into
+	// agreeing with the first:
 	//
-	// `resolveRhoArray` is the one resolver both paths share (D-06), so this is
-	// the same call the primitive makes, not a second opinion.
-	const allRho = resolveRhoArray(fitData, normalizedArrays);
+	//   - WR-1: this leg read `normalizedArrays.altitude` straight through, so
+	//     with a DEM applied the smoothing toggle rendered ON while the first
+	//     paint was computed from the raw FIT channel, and the numbers moved on
+	//     the first control nudge. Fixed by calling `resolveElevationProfile`
+	//     here too.
+	//   - WR-4 follow-up: this leg passed NO `rhoArray`, so on a ride carrying
+	//     usable air density the two passes integrated different physics --
+	//     mean RMSE 7.809 m at the analyze paint against 7.555 m one macrotask
+	//     later, and the analyze number was the wrong one. Fixed by calling
+	//     `resolveRhoArray` here too.
+	//
+	// `updateModeVEPlots` resolves both once per update, full length
+	// (`updateModeVEPlots.ts:168,177`), and is now the only pass that does. With
+	// one producer there is nothing left here to agree with.
 
-	// Handle wind/air speed
 	const gpsLapWindResolution = resolveWindSeries({
 		fitData,
 		windSource: getSelectedWindSource(),
@@ -177,13 +176,10 @@ export async function showGpsLapVEAnalysis(
 		log.debug("GPS Lap VE: No wind data available");
 	}
 
-	// Get CdA and Crr values. The stored Crr is 22 °C-referenced; the physics
-	// uses the temperature-corrected value when the correction is enabled.
-	const cda = resolveDisplayCda(resolvedParams.cda);
-	const crr = resolveDisplayCrr(resolvedParams.crr);
-	const appliedCrr = resolveAppliedCrr(resolvedParams, crr);
-
-	// Calculate VE for each lap
+	// Describe each lap. NO PHYSICS: what this loop builds is the per-lap
+	// supplementary series the Wind/Power/VD tabs draw, plus the duration and
+	// distance the summary table shows. `virtualElevation` is deliberately left
+	// empty — the recompute is the only pass that integrates one.
 	for (let lapIdx = 0; lapIdx < lapIndexRanges.length; lapIdx++) {
 		const range = lapIndexRanges[lapIdx];
 		const lapNumber = analyzedLapNumbers[lapIdx] ?? lapIdx + 1;
@@ -194,10 +190,8 @@ export async function showGpsLapVEAnalysis(
 		const lapVelocity: number[] = [];
 		const lapPositionLat: number[] = [];
 		const lapPositionLong: number[] = [];
-		const lapAltitude: number[] = [];
 		const lapDistance: number[] = [];
 		const lapWindSpeed: number[] = [];
-		const lapRho: number[] = [];
 
 		for (
 			let i = range.startIdx;
@@ -209,41 +203,37 @@ export async function showGpsLapVEAnalysis(
 			lapVelocity.push(allVelocity[i]);
 			lapPositionLat.push(allPositionLat[i]);
 			lapPositionLong.push(allPositionLong[i]);
-			lapAltitude.push(allAltitude[i]);
 			lapDistance.push(allDistance[i]);
 			lapWindSpeed.push(allWindSpeed[i]);
-			// BOUNDED BY THE DENSITY SERIES, not by `allTimestamps`.
-			// `hasAirDensityData` is a `.some(...)`, so a channel the device
-			// stopped emitting mid-ride is still accepted, and the tail indices
-			// here pushed `undefined` into a `number[]` — NaN rho across the
-			// WASM boundary for the whole lap. Same rule as
-			// `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a short
-			// array under the calculator is a worse bug than a constant one, so
-			// a lap the series does not span falls back to the constant
-			// `params.rho` instead.
-			//
-			// A LENGTH CHECK, AND ONLY THAT. An interior NaN in an
-			// otherwise-full-length channel still reaches the calculator —
-			// `hasAirDensityData` accepts the series on a `.some(...)`. That is
-			// pre-existing and out of this fix's scope; do not read the guard
-			// below as covering it.
-			if (allRho && i < allRho.length) lapRho.push(allRho[i]);
 		}
 
+		// KEPT, even though nothing here can throw on a short lap any more: the
+		// laps this leg keeps are the laps whose series the tabs draw, and a
+		// two-sample lap draws nothing useful. `updateModeVEPlots.ts:217` applies
+		// the identical `MIN_SEGMENT_SAMPLES` rule to the segments it computes, so
+		// on THIS rule the two passes agree without either filtering on the
+		// other's behalf.
+		//
+		// THEY DO NOT AGREE ON EVERY RULE, and the header says so first. `Laps: N`
+		// is rendered once, into `#gpsLapCountValue` from `lapProfiles.length`, and
+		// no updater rewrites it. That N is the count of laps this leg SELECTED.
+		// The producer applies one further rule this leg cannot: a lap whose fit
+		// throws is dropped by the `catch` in its segment loop
+		// (`updateModeVEPlots.ts:355-357`) and is on no plot, while it is
+		// still counted here. Detecting that from this side would mean running the
+		// calculator, which is exactly the pass this leg no longer has — only the
+		// producer knows which laps survived. So in that rare case the header
+		// over-counts the plotted laps by the number that threw. Accepted.
+		//
+		// The same asymmetry retires the "No valid laps to analyze" message for
+		// throwing laps: the check below sees the laps this leg selected, so a ride
+		// where every lap's fit throws puts the panel up and the producer then
+		// leaves it empty at status `"error"`.
 		if (lapTimestamps.length < 10) {
 			log.warn(
 				`Lap ${lapNumber} has too few data points (${lapTimestamps.length}), skipping`,
 			);
 			continue;
-		}
-
-		// After the skip above, so a lap that contributes nothing does not also
-		// warn about its rho.
-		const lapRhoUsable = !!allRho && lapRho.length === lapTimestamps.length;
-		if (allRho && !lapRhoUsable) {
-			log.warn(
-				`Air density series (${allRho.length}) does not span lap ${lapNumber}; using constant rho`,
-			);
 		}
 
 		const supplementarySeries = buildSegmentSupplementarySeries({
@@ -263,60 +253,27 @@ export async function showGpsLapVEAnalysis(
 		const duration = lapTimestamps[lapTimestamps.length - 1] - lapTimestamps[0];
 		const totalDistance = relativeDistances[relativeDistances.length - 1] ?? 0;
 
-		try {
-			const calculator = createVeCalculator({
-				timestamps: lapTimestamps,
-				power: lapPower,
-				velocity: lapVelocity,
-				positionLat: lapPositionLat,
-				positionLong: lapPositionLong,
-				altitude: lapAltitude,
-				distance: lapDistance,
-				windSpeed: lapWindSpeed,
-				rhoArray: lapRhoUsable ? lapRho : null,
-				params: resolvedParams,
-				cda,
-				crr: appliedCrr,
-			});
+		lapVEProfiles.push({
+			lapNumber,
+			range,
+			distances: relativeDistances,
+			// EMPTY, NOT ZEROED AND NOT FAKED. There is no first paint of a
+			// virtual elevation any more, and an array of the right length full
+			// of zeros would render as a flat line the user could mistake for a
+			// result. The recompute fills these in through `createGpsLapUpdateCallbacks`.
+			virtualElevation: [],
+			actualElevation: [],
+			// Compare (D-07/D-20) is resolved by the primitive, which is now the
+			// only pass that resolves anything.
+			virtualElevationCompare: null,
+			supplementarySeries,
+			duration,
+			totalDistance,
+		});
 
-			// Calculate VE for full lap
-			const result = calculator.calculate_virtual_elevation(
-				cda,
-				appliedCrr,
-				0,
-				lapTimestamps.length - 1,
-			);
-
-			// Extract VE values
-			const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-			// Get actual elevation (use zeros for velodrome mode)
-			const actualElevation = resolvedParams.velodrome
-				? new Array(lapAltitude.length).fill(0)
-				: lapAltitude;
-
-			lapVEProfiles.push({
-				lapNumber,
-				range,
-				distances: relativeDistances,
-				virtualElevation: veArray,
-				// The ANALYZE leg computes one wind source, so the initial paint
-				// is always single-source. The first `requestModeUpdate` after
-				// this panel binds repaints it through the primitive, which is
-				// where compare (D-07/D-20) is resolved.
-				virtualElevationCompare: null,
-				actualElevation: actualElevation,
-				supplementarySeries,
-				duration,
-				totalDistance,
-			});
-
-			log.debug(
-				`Lap ${lapNumber}: ${totalDistance.toFixed(2)} km, ${duration.toFixed(0)}s, ${veArray.length} points`,
-			);
-		} catch (err) {
-			log.error(`Failed to calculate VE for lap ${lapNumber}:`, err);
-		}
+		log.debug(
+			`Lap ${lapNumber}: ${totalDistance.toFixed(2)} km, ${duration.toFixed(0)}s, ${relativeDistances.length} points`,
+		);
 	}
 
 	services.hideLoading();
@@ -325,9 +282,6 @@ export async function showGpsLapVEAnalysis(
 		services.showError("No valid laps to analyze");
 		return;
 	}
-
-	// Calculate mean actual elevation profile
-	const meanElevationProfile = calculateMeanElevationProfile(lapVEProfiles);
 
 	// Check for constant wind settings
 	const hasConstantWind =
@@ -345,7 +299,6 @@ export async function showGpsLapVEAnalysis(
 		resultsStorage,
 		waitForPlotly,
 		lapVEProfiles,
-		meanElevationProfile,
 		resolvedParams,
 		hasAirSpeed || hasWindSpeed,
 		hasConstantWind,
@@ -355,7 +308,11 @@ export async function showGpsLapVEAnalysis(
 }
 
 /**
- * Show the GPS lap VE stacked plot with full controls (matching normal mode).
+ * Show the GPS lap VE stacked panel with full controls (matching normal mode).
+ *
+ * STRUCTURE ONLY. The profiles handed in carry no virtual elevation, so nothing
+ * here scores or draws a VE figure; the post-bind kick at the foot of this
+ * function is what computes and paints one.
  */
 export async function showGpsLapVEPlot(
 	services: ShellServices,
@@ -363,7 +320,6 @@ export async function showGpsLapVEPlot(
 	resultsStorage: ResultsStorage,
 	waitForPlotly: () => Promise<any>,
 	lapProfiles: LapVEProfile[],
-	meanElevation: { distances: number[]; elevation: number[] },
 	params: AnalysisParameters,
 	hasWindSpeed: boolean,
 	hasConstantWind: boolean,
@@ -372,58 +328,20 @@ export async function showGpsLapVEPlot(
 ) {
 	const { appState } = services;
 
-	// CR-01. THE PANEL AND THE ANALYSED SAMPLES GO ON SCREEN TOGETHER.
-	//
-	// Identical to the seed in `showOutAndBackVEPlot`, and for the identical
-	// reason: this mode had no analyze-time writer of `currentFilteredData`, so
-	// the field was first written by `summarize` when the user touched a
-	// control. Analyze -> Store Result with nothing in between therefore either
-	// refused, or averaged a previous Standard analysis's samples while
-	// persisting this ride's laps.
-	//
-	// Seeded from the SURVIVING profiles, NOT from `resolveActiveGpsLapRanges`
-	// (WR-03). The analyze pass above skips a lap under 10 samples (`:181-186`)
-	// and one whose calculator threw (`:255-257`), so the active-range list is a
-	// SUPERSET of what is on any plot — seeding from it put samples into
-	// `currentFilteredData` that no rendered profile describes. `profile.range`
-	// is what this lap was actually computed over.
-	//
-	// (This comment used to name `resolveActiveGpsLapRanges` and assert that the
-	// seed matches what the first recompute reproduces. That claim is what WR-03
-	// refuted, and it outlived the code it justified. `gpsModeRealChain.test.ts`
-	// and `outAndBackFixtureChain.test.ts` now hold the corrected property.)
-	// Computed BEFORE the seed: WR-3 records it, and the panel below renders
-	// from the same value, so the two cannot describe different sources.
+	// The wind source the panel below renders from, and the one the recompute
+	// will read back off the radios.
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
 
-	seedSegmentModeAnalyzeState(appState, {
-		ranges: lapProfiles
-			.map((profile) => profile.range)
-			.filter(
-				(range): range is { startIdx: number; endIdx: number } =>
-					range !== null,
-			),
-		// `selectedWindSource` is already the resolved panel source, so it is
-		// both arguments: `resolveRecordedWindSource` then preserves "compare"
-		// and passes the other two straight through.
-		requestedWindSource: selectedWindSource as never,
-		resolvedWindSource: selectedWindSource as never,
-		// One entry per lap, labelled as `gpsLapMode` labels its segments, so an
-		// analyze-time export reads identically to a post-update one.
-		// A lap whose series is absent contributes NO entry, rather than a zero
-		// -- the same rule `sectionVirtualDistances` applies to a section whose
-		// legs both failed. The analyze leg builds a series for every lap it
-		// keeps, so in production this filter removes nothing.
-		virtualDistances: stackedVirtualDistances(
-			lapProfiles
-				.filter((profile) => profile.supplementarySeries !== null)
-				.map((profile) => ({
-					label: `Lap ${profile.lapNumber}`,
-					metrics: profile.supplementarySeries!,
-				})),
-		),
-	});
+	// NO SEED HERE ANY MORE.
+	//
+	// This used to write currentFilteredData, currentWindSource and
+	// currentVirtualDistances from an analyze-time fit, so Store Result had
+	// something to read before the first recompute. WR-03 established that what
+	// it wrote was NOT what the recompute reproduces, so it was a second answer
+	// rather than a preview. `updateModeVEPlots` is now the only producer and
+	// `veStatus` covers the window.
+
 	const showWindTab = hasWindSpeed || hasConstantWind;
 	// PRESENCE, not visibility. The VD tab used to be gated on the selected
 	// source, so it was absent from the DOM under constant and only came back
@@ -451,8 +369,6 @@ export async function showGpsLapVEPlot(
 		return;
 	}
 
-	// Calculate initial statistics
-	const initialStats = calculateGpsLapStats(lapProfiles, meanElevation);
 	const currentAirSpeedCalibrationValue = formatAirSpeedCalibrationPercent(
 		appState.airSpeedCalibrationPercent,
 	);
@@ -466,7 +382,6 @@ export async function showGpsLapVEPlot(
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
-		initialStats,
 		lapCount: lapProfiles.length,
 		defaultAirSpeedOffset,
 		elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
@@ -477,6 +392,30 @@ export async function showGpsLapVEPlot(
 	// Wind/Power/VD rendering the PREVIOUS selection into this panel.
 	resetTabRenderMapForNewPanel();
 	veAnalysisContent.innerHTML = veAnalysisTemplate;
+
+	// THE BUTTON THE MARKUP ABOVE JUST CREATED IS ENABLED. DISABLE IT.
+	//
+	// `veAnalysisTemplate` ships `#storeResult` with no `disabled` attribute, so
+	// the innerHTML assignment on the line above has just put a live, clickable
+	// Store Result into the document — pointing at `currentVEResult` and its
+	// three siblings, which until the first update pass lands still hold the
+	// PREVIOUS analysis. `applyVeStatus` is the one writer that both sets the
+	// status and reflects it onto whatever button is in the document, which is
+	// why this runs AFTER the assignment and not before: before it, there is no
+	// button here to disable.
+	//
+	// This does NOT open the window — `handleAnalyze` already invalidated the
+	// status on entry, and has to, because everything between there and here
+	// (storage I/O, the lap loop, `waitForPlotly`) runs with the previous panel
+	// still mounted and its own `#storeResult` still enabled — including the
+	// `lapVEProfiles.length === 0` return, which never reaches this function.
+	// That line closes the window for the whole approach; this one re-closes the
+	// DOM half of it for markup that did not exist when it ran.
+	//
+	// `updateModeVEPlots` sets `computing` again on entry and `ready` after
+	// `summarize`. Also not a duplicate: the primitive covers ITS pass, which
+	// runs once per control gesture, long after this panel was built.
+	applyVeStatus(appState, "computing");
 
 	// Bind the stitched/stacked toggle when this overlay was reached from an
 	// ordinary 2+ lap selection (no-op otherwise).
@@ -520,21 +459,26 @@ export async function showGpsLapVEPlot(
 		},
 	});
 
-	// Render the plots using the shared function. `initialStats` is the SAME
-	// object the template above painted the header spans from, so the first
-	// paint and the plot cannot disagree either (D1).
-	renderGpsLapVEPlots(lapProfiles, meanElevation, initialStats);
+	// NO VE PAINT HERE ANY MORE.
+	//
+	// `renderGpsLapVEPlots` took a REQUIRED `GpsLapHeaderStats` (D1), and the
+	// only way to produce one is to score a virtual elevation this leg no longer
+	// computes. So the VE and residual figures, the three stat spans and the lap
+	// summary table are all painted by the kick below, through the same
+	// `renderVe` callback every later control gesture uses. The spans ship with
+	// the empty content the template gives them, which is what the panel already
+	// showed before a value existed.
 
 	// THE POST-BIND KICK (WR-4). Standard has had this since before the phase
 	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never
 	// carried this bug.
 	//
-	// Everything the analyze leg above computed is a FIRST PAINT, not a
-	// RESULT: it keeps `virtual_elevation` from each per-lap fit and discards
-	// r2, RMSE and the elevation gains. So without this line the only writer
-	// of `appState.currentVEResult` on an analyze was the stitched fit
-	// `prepareAnalysisPayload` runs over the concatenated selection, which
-	// this panel never displays -- and the first control nudge replaced it.
+	// It is now the ONLY producer, not a corrective second pass. The analyze
+	// leg above kept `virtual_elevation` from a per-lap fit and discarded r2,
+	// RMSE and the elevation gains, so without this line the only writer of
+	// `appState.currentVEResult` on an analyze was the stitched fit
+	// `prepareAnalysisPayload` runs over the concatenated selection, which this
+	// panel never displays -- and the first control nudge replaced it.
 	//
 	// Scheduled, not called: `requestModeUpdate` funnels into
 	// `scheduleRecompute`, so the pass lands on the next macrotask and the
@@ -677,11 +621,14 @@ export interface GpsLapVeTemplateOptions {
 	selectedWindSource: string;
 	currentAirSpeedCalibrationValue: string;
 	/**
-	 * The same three numbers `renderGpsLapVEPlots` writes into the header spans
-	 * on every later update. One named type, so the initial paint and the update
-	 * paint cannot fall out of step with each other.
+	 * NO `initialStats`. This used to carry the three header numbers the analyze
+	 * leg's own fit produced, so the template could paint them before the first
+	 * recompute. There is no analyze-time fit any more, and the spans therefore
+	 * ship EMPTY — exactly what the panel showed before a value existed — until
+	 * `renderGpsLapVEPlots` fills them from the aggregate the one producer
+	 * computed. `lapCount` stays: it is a property of the selection, not of the
+	 * physics.
 	 */
-	initialStats: GpsLapHeaderStats;
 	lapCount: number;
 	defaultAirSpeedOffset: number;
 	elevationToggleMarkup: string;
@@ -704,7 +651,6 @@ export function buildGpsLapVeAnalysisTemplate(
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
-		initialStats,
 		lapCount,
 		defaultAirSpeedOffset,
 		elevationToggleMarkup,
@@ -811,9 +757,14 @@ export function buildGpsLapVeAnalysisTemplate(
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stacked")}
                             <div class="ve-metrics-compact">
-                                Mean R²:<span id="gpsLapR2Value">${initialStats.meanR2.toFixed(4)}</span> |
-                                Mean RMSE:<span id="gpsLapRmseValue">${initialStats.meanRMSE.toFixed(2)}m</span> |
-                                Closing Error:<span id="gpsLapClosingErrorValue">${initialStats.closingError.toFixed(2)}m</span> |
+                                <!-- EMPTY until the one producer fills them:
+                                     renderGpsLapVEPlots writes all three from
+                                     the aggregate updateModeVEPlots computed,
+                                     and the analyze leg no longer has a number
+                                     of its own to disagree with it. -->
+                                Mean R²:<span id="gpsLapR2Value"></span> |
+                                Mean RMSE:<span id="gpsLapRmseValue"></span> |
+                                Closing Error:<span id="gpsLapClosingErrorValue"></span> |
                                 Laps:<span id="gpsLapCountValue">${lapCount}</span>
                                 <!-- Filled in only under "Compare both methods",
                                      so the three spans above are read as a pair

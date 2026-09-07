@@ -18,6 +18,7 @@ import {
 } from "../../utils/GpsLapDetection";
 import { saveMapTrimSettings } from "../../analysis/MultiSegmentSettings";
 import { calculateAutoRho } from "../ve";
+import { scheduleStandardAutoRho } from "../ve/standardAutoRhoScheduler";
 import {
 	renderSection3Template,
 	bindLapSelection,
@@ -201,6 +202,13 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
  * re-Analyzes.
  */
 function tearDownVeAnalysisPanel(appState: AppState): void {
+	// Invalidate any asynchronous Standard-render continuation before touching
+	// the shared panel. A later completion may finish its network work, but it no
+	// longer owns a request, binding, or map-fit side effect.
+	appState.standardPanelOwner = null;
+	appState.standardInitialAutoRhoOwner = null;
+	appState.standardPendingAutoRhoDebounce = null;
+
 	// The exact class the three render files remove to show the panel, and one
 	// of the two `isVeSectionVisible` (`requestModeUpdate.ts:73-78`) checks.
 	// `#veAnalysisContent.innerHTML` is deliberately left alone — the next
@@ -1906,26 +1914,15 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 			}
 		});
 
-		// Add auto-rho trigger on map trim slider changes (debounced)
-		let mapAutoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+		// The map and panel are two faces of one trim window. Their weather
+		// requests share one owner-scoped 500 ms deadline, including while a
+		// predecessor flight remains active.
 		const triggerAutoRhoOnMapTrimChange = () => {
-			if (mapAutoRhoDebounceTimer) {
-				clearTimeout(mapAutoRhoDebounceTimer);
-			}
-			mapAutoRhoDebounceTimer = setTimeout(() => {
-				if (
-					deps.appState.currentParameters?.auto_calculate_rho &&
-					!deps.appState.isCalculatingAutoRho
-				) {
-					calculateAutoRho(
-						deps.appState,
-						deps.getParametersComponent(),
-						getServices(deps),
-					).catch((err) => {
-						log.error("Auto-rho calculation error on map trim change:", err);
-					});
-				}
-			}, 500); // Wait 500ms after last slider change
+			void scheduleStandardAutoRho(
+				deps.appState,
+				deps.getParametersComponent,
+				getServices(deps),
+			);
 		};
 
 		newMapTrimStartSlider.addEventListener(

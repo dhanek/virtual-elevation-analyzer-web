@@ -63,6 +63,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	createVeCalculator: (input: any) => {
+		if (calculatorFailure.enabled) throw new Error("calculator failed");
+		calculatorInputs.push({
+			cda: input.cda,
+			rho: input.params.rho,
+		});
 		const n = input.timestamps.length;
 		const isConstantLeg = Array.from(input.windSpeed as number[]).every(
 			(value) => Number.isNaN(value),
@@ -84,8 +89,19 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	},
 }));
 
+const calculatorInputs = vi.hoisted(
+	() => [] as Array<{ cda: number; rho: number }>,
+);
+const calculatorFailure = vi.hoisted(() => ({ enabled: false }));
+
 /** The overlay's far end: the functions that actually paint its figures. */
 const overlay = vi.hoisted(() => ({ ve: vi.fn(), vd: vi.fn() }));
+
+const autoRho = vi.hoisted(() => ({ calculate: vi.fn() }));
+
+vi.mock("../ve/autoRho", () => ({
+	calculateAutoRho: (...args: unknown[]) => autoRho.calculate(...args),
+}));
 
 vi.mock("../gpsLap/gpsLapPlots", async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
@@ -102,7 +118,10 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
 	getGpsAnalysisMode: () => modeState.gps,
 }));
 
-import type { AnalysisParameters } from "../../components/AnalysisParameters";
+import {
+	AnalysisParametersComponent,
+	type AnalysisParameters,
+} from "../../components/AnalysisParameters";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
@@ -111,7 +130,10 @@ import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
 import { showVirtualElevationAnalysisInline } from "../ve/renderStandardVe";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
 import { resetRecomputeThrottle } from "./recomputeRunner";
-import { resetModeUpdateRequests } from "./requestModeUpdate";
+import {
+	requestModeUpdate,
+	resetModeUpdateRequests,
+} from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
 const HALF = SAMPLE_COUNT / 2;
@@ -131,9 +153,11 @@ const draws: Array<{ id: string; data: any[]; layout: any }> = [];
  * five `newPlot` calls in `initializeVEAnalysis` were invisible to this chain.
  */
 const drawMethods: Array<{ id: string; method: "newPlot" | "react" }> = [];
+let failingPlotTarget: string | null = null;
 
 function fakePlotly(name: "newPlot" | "react") {
 	return (id: string, ...rest: unknown[]) => {
+		if (id === failingPlotTarget) throw new Error(`Plotly failed for ${id}`);
 		drawMethods.push({ id, method: name });
 		drawTargets.push(id);
 		draws.push({ id, data: (rest[0] as any[]) ?? [], layout: rest[1] });
@@ -153,6 +177,7 @@ const params = {
 	crr: 0.0042,
 	crr_min: 0.001,
 	crr_max: 0.02,
+	rho: 1.2345,
 	air_speed_offset: 0,
 	wind_speed: 3,
 	wind_direction: 90,
@@ -220,6 +245,7 @@ function makeServices(appState: AppState): ShellServices {
  */
 function renderHostPage(): void {
 	document.body.innerHTML = `
+		<div id="paramsContainer"></div>
 		<div id="veAnalysisSection">
 			<div id="veAnalysisContent"></div>
 		</div>
@@ -229,16 +255,21 @@ function renderHostPage(): void {
 let appState: AppState;
 
 /** The STITCHED standard panel, through its real production entry point. */
-async function renderStitched(): Promise<void> {
+async function renderStitched(options: {
+	parametersComponent?: AnalysisParametersComponent | null;
+	mapVisualization?: any;
+	parameterStorage?: ParameterStorage;
+	analyzedLaps?: number[];
+} = {}): Promise<void> {
 	const fit = makeFitData();
 	appState.isGpsLapModeActive = false;
 	appState.currentGpsLapIndexRanges = null;
 	await showVirtualElevationAnalysisInline(
 		appState,
-		{} as unknown as ParameterStorage,
-		null,
+		options.parameterStorage ?? ({} as unknown as ParameterStorage),
+		options.parametersComponent ?? null,
 		makeServices(appState),
-		null,
+		options.mapVisualization ?? null,
 		{
 			onSaveScreenshot: () => {},
 			onStoreResult: () => {},
@@ -246,7 +277,7 @@ async function renderStitched(): Promise<void> {
 			onShowAllResults: () => {},
 			saveCurrentLapSettings: () => {},
 		},
-		[1, 2],
+		options.analyzedLaps ?? [1, 2],
 		fit.timestamps.map((_, i) => i),
 		fit.timestamps,
 		fit.power,
@@ -260,6 +291,21 @@ async function renderStitched(): Promise<void> {
 		null,
 		0,
 	);
+}
+
+function makeLiveParametersComponent(): AnalysisParametersComponent {
+	let initializing = true;
+	const component = new AnalysisParametersComponent(
+		"paramsContainer",
+		(parameters) => {
+			if (initializing) return;
+			appState.currentParameters = parameters;
+			requestModeUpdate("parameters");
+		},
+	);
+	component.setParameters(appState.currentParameters!);
+	initializing = false;
+	return component;
 }
 
 const lapProfile = (lapNumber: number) => ({
@@ -294,7 +340,6 @@ async function renderStacked(): Promise<void> {
 		{} as unknown as ResultsStorage,
 		async () => ({}),
 		[lapProfile(1), lapProfile(2)] as any,
-		{ distances: [0, 1, 2], elevation: [0, 1, 2] },
 		appState.currentParameters!,
 		true,
 		true,
@@ -305,6 +350,21 @@ async function renderStacked(): Promise<void> {
 
 async function settle(): Promise<void> {
 	await vi.advanceTimersByTimeAsync(500);
+}
+
+/**
+ * Standard's `#storeResult`, which the template ships in its sidebar footer.
+ *
+ * Throws rather than returning null on purpose: a template that stopped
+ * shipping the button would otherwise make every assertion below vacuous
+ * instead of failing.
+ */
+function storeButton(): HTMLButtonElement {
+	const button = document.getElementById(
+		"storeResult",
+	) as HTMLButtonElement | null;
+	if (!button) throw new Error("the panel has no #storeResult button");
+	return button;
 }
 
 function clickTab(tab: string): void {
@@ -379,8 +439,13 @@ beforeEach(() => {
 	missingTargets.length = 0;
 	draws.length = 0;
 	drawMethods.length = 0;
+	failingPlotTarget = null;
+	calculatorInputs.length = 0;
+	calculatorFailure.enabled = false;
 	overlay.ve.mockClear();
 	overlay.vd.mockClear();
+	autoRho.calculate.mockReset();
+	autoRho.calculate.mockResolvedValue(null);
 	clearModeUpdateCallbacks();
 	resetModeUpdateRequests();
 	modeState.gps = "None";
@@ -576,14 +641,34 @@ describe("standard (None): the STACKED overlay's VD tab", () => {
  * These drive the real `showVirtualElevationAnalysisInline`, so unlike
  * `storageHandlers.test.ts` (which hand-builds the field) they actually execute
  * the writer.
+ *
+ * WHAT CHANGED, AND WHY THESE CASES STILL EXIST. The guarantee is unchanged:
+ * Analyze followed straight by Store Result must never persist a PREVIOUS
+ * analysis's samples against this ride. What changed is the mechanism that
+ * delivers it. Standard used to hold it by SEEDING `currentFilteredData` from
+ * the render — a second writer of a field `summarize` also writes, in a second
+ * index space, which is the shape CR-02 was. That seed is deleted; the producer
+ * is now the field's only writer, and the window between the panel appearing and
+ * the producer landing is covered by REFUSAL instead: `veStatus` leaves
+ * `"ready"` when the new markup goes up, `handleStoreResult` gates on `"ready"`,
+ * and `#storeResult` is rendered disabled to say so.
+ *
+ * So each case below is in two halves — before settling, Store Result refuses;
+ * after settling, the producer has written exactly the arrays the seed used to
+ * write. Every expected value is the one the case always asserted.
  */
 describe("standard: currentFilteredData after the analyze render (CR-01)", () => {
 	/**
-	 * The seed, captured BEFORE the first recompute can overwrite it.
+	 * The value AFTER the post-bind request, which is the only pass that writes it.
+	 *
+	 * The `await settle()` is the part that changed: this used to be there the
+	 * instant `showVirtualElevationAnalysisInline` returned. The pre-settle half
+	 * is asserted by each caller rather than folded in here, because it is the
+	 * claim and not a setup step.
 	 *
 	 * `summarize` ASSIGNS a fresh object to `appState.currentFilteredData`, so
-	 * holding the reference is enough — the returned value is not mutated by the
-	 * pass that follows.
+	 * holding the reference is enough — the returned value is not mutated by
+	 * anything that follows.
 	 *
 	 * `showVirtualElevationAnalysisInline` leaves a recompute armed on a fake
 	 * timer, which used to have to be drained here: `scheduleRecompute`'s
@@ -594,26 +679,42 @@ describe("standard: currentFilteredData after the analyze render (CR-01)", () =>
 	 * test in the file, so no drain is needed here. Verified by removing the
 	 * hook: the clamp test below fails `expected 400 to be less than 400`.
 	 */
-	async function seedFromRender(): Promise<
+	async function producedByTheRecompute(): Promise<
 		NonNullable<AppState["currentFilteredData"]>
 	> {
-		await renderStitched();
-		const seeded = appState.currentFilteredData!;
-		return seeded;
+		await settle();
+		return appState.currentFilteredData!;
 	}
 
-	it("seeds through the shared concatenation, covering the analyzed laps", async () => {
-		const seeded = await seedFromRender();
+	/**
+	 * The refusal half. `veStatus` is what `handleStoreResult` actually gates on,
+	 * so it IS the refusal; the button is the same fact as the user meets it.
+	 */
+	function expectStoreResultRefusesForNow(): void {
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+	}
+
+	it("has the analysed samples in AppState once the producer has run, and refuses Store Result until then", async () => {
+		await renderStitched();
+
+		expectStoreResultRefusesForNow();
+
+		const written = await producedByTheRecompute();
 
 		// Both laps, one segment each — the segment convention
 		// `standardSegments.ts` documents.
-		expect(seeded.timestamps.length).toBe(SAMPLE_COUNT);
+		expect(written.timestamps.length).toBe(SAMPLE_COUNT);
 		// Four arrays of equal length, which `FilteredAnalysisData` implies and
 		// every consumer indexes in parallel.
-		expect(seeded.power.length).toBe(seeded.timestamps.length);
-		expect(seeded.velocity.length).toBe(seeded.timestamps.length);
-		expect(seeded.temperature.length).toBe(seeded.timestamps.length);
-		expect(seeded.temperature.every((t) => t === 20)).toBe(true);
+		expect(written.power.length).toBe(written.timestamps.length);
+		expect(written.velocity.length).toBe(written.timestamps.length);
+		expect(written.temperature.length).toBe(written.timestamps.length);
+		expect(written.temperature.every((t) => t === 20)).toBe(true);
+
+		// And only now will Store Result persist any of it.
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
 	});
 
 	it("marks a missing temperature channel as NaN, never 0 \u00b0C", async () => {
@@ -623,13 +724,17 @@ describe("standard: currentFilteredData after the analyze render (CR-01)", () =>
 		// indistinguishable from a genuine 0 \u00b0C ride.
 		(appState.currentFitData as any).temperature = [];
 
-		const seeded = await seedFromRender();
+		await renderStitched();
 
-		expect(seeded.temperature.length).toBe(seeded.timestamps.length);
-		expect(seeded.temperature.every(Number.isNaN)).toBe(true);
+		expectStoreResultRefusesForNow();
+
+		const written = await producedByTheRecompute();
+
+		expect(written.temperature.length).toBe(written.timestamps.length);
+		expect(written.temperature.every(Number.isNaN)).toBe(true);
 		// The marker `handleStoreResult`'s `.some(Number.isFinite)` guard reads to
 		// decide between a number and ABSENT.
-		expect(seeded.temperature.some(Number.isFinite)).toBe(false);
+		expect(written.temperature.some(Number.isFinite)).toBe(false);
 	});
 
 	it("still applies a SAVED trim that already sits at the 30-sample clamp", async () => {
@@ -655,39 +760,410 @@ describe("standard: currentFilteredData after the analyze render (CR-01)", () =>
 });
 
 /**
- * WR-4, Standard's half.
+ * WR-4, Standard's half — and the retirement of the `[S-M]` header jump.
  *
- * The header spans used to be interpolated into the template from
+ * The spans have had three writers. First the template interpolated
  * `prepareAnalysisPayload`'s `initialResult` -- a fit over the CONCATENATED
  * selection with NO trim window and the wind source forced to `"fit"` with the
- * offset off -- while the plot immediately below them was drawn from the fit
- * this render computes itself, WITH the trim and WITH the selected source
- * (`renderStandardVe.ts:100-123`). Two fits of one ride, stacked, until the
- * post-bind kick replaced both a macrotask later.
+ * offset off -- while the plot immediately below them was drawn from a fit the
+ * render computed itself, WITH the trim and WITH the selected source. Two fits
+ * of one ride, stacked. Then the template shipped the spans empty and
+ * `initializeVEAnalysis` filled them from the integration that had just drawn
+ * the curve, which made the header and the curve agree with each other.
  *
- * That parameter is gone: the template now ships the spans EMPTY and
- * `initializeVEAnalysis` fills them from the integration that just drew the
- * curve, on the same rule the virtual-distance header already followed. So the
- * disagreement is unwritable rather than merely corrected, and what is left to
- * guard is the half that can still regress -- that something fills them at all.
- * An empty template plus a forgotten fill would leave the user staring at
- * "R²: | RMSE: |" until the first nudge landed.
+ * IT DID NOT MAKE THEM AGREE WITH WHAT CAME NEXT, and that is `[S-M]`. The
+ * analyze paint was ONE fit over the concatenated selection; `updateModeVEPlots`
+ * fits each lap SEPARATELY and `renderMetrics` writes the MEAN of those fits
+ * into the same four spans a macrotask later (D-19 Option B). On a multi-lap
+ * selection those are different numbers, so the header changed by itself with no
+ * user action in between.
  *
- * Asserted BEFORE `settle()`, deliberately: after the kick, pass 3 has written
- * the spans and this would pass even if the first paint left them blank.
+ * WHAT CHANGED. The analyze-time fit is deleted, so there is no first quantity
+ * left to disagree: the spans ship empty and the producer is their only writer.
+ * That makes the jump unwritable rather than merely small, which is what retires
+ * the item. What remains to guard is the pair of halves below — that the render
+ * writes NOTHING into them (a reintroduced analyze fit fails the first half) and
+ * that the producer does fill them (a forgotten kick would leave the user
+ * staring at "R²: | RMSE: |" forever).
+ *
+ * The four expected values are unchanged from when this case asserted them of
+ * the analyze paint: the stub returns the same scalars for every lap, so one fit
+ * over two laps and the mean of two fits coincide here. That coincidence is the
+ * point — it means these numbers pin the FORMATTING and the writer, and the case
+ * is not silently asserting a different quantity than it used to.
  */
-describe("standard: the header spans at first paint (WR-4)", () => {
-	it("carries the fit the plot below them was drawn from", async () => {
+describe("standard: the header spans (WR-4, and the [S-M] header jump)", () => {
+	it("ships them empty and lets the producer be the one that fills them", async () => {
 		await renderStitched();
 
+		// BEFORE the kick. Empty, because nothing has been fitted yet — and
+		// deliberately not a dash or a spinner, which would be a second thing to
+		// keep in sync with the four real values.
+		expect(document.getElementById("r2Value")?.textContent).toBe("");
+		expect(document.getElementById("rmseValue")?.textContent).toBe("");
+		expect(document.getElementById("veGainValue")?.textContent).toBe("");
+		expect(document.getElementById("actualGainValue")?.textContent).toBe("");
+
+		await settle();
+
 		// The mocked calculator's own numbers -- so reaching them means the
-		// render's own integration, not a value handed in from outside.
+		// producer's per-lap integration, not a value handed in from outside.
 		expect(document.getElementById("r2Value")?.textContent).toBe("0.5000");
 		expect(document.getElementById("rmseValue")?.textContent).toBe("1.00m");
 		expect(document.getElementById("veGainValue")?.textContent).toBe("2.00m");
 		expect(document.getElementById("actualGainValue")?.textContent).toBe(
 			"3.00m",
 		);
+	});
+});
+
+/**
+ * STANDARD'S STORE-RESULT WINDOW.
+ *
+ * Standard's own copies of the two cases `gpsModeRealChain.test.ts` and
+ * `outAndBackFixtureChain.test.ts` already carry for their modes. They cannot be
+ * shared: each calls its mode's render function directly, and the line under
+ * test — `applyVeStatus(appState, "computing")` immediately after the innerHTML
+ * assignment — is per-render-function.
+ *
+ * WHY THAT LINE EXISTS. The template ships `#storeResult` with no `disabled`
+ * attribute, so the innerHTML assignment puts a live, clickable Store Result
+ * into the document pointing at `currentVEResult` and its three siblings —
+ * which, until the first update pass lands, still hold the PREVIOUS analysis.
+ * `handleAnalyze`'s entry write cannot cover it, because that button does not
+ * exist when the orchestrator runs. Without the line, deleting the analyze-time
+ * seed would reintroduce the CR-01/WR-3 defect on the SECOND Analyze.
+ */
+describe("standard: the Store Result window", () => {
+	it("ships the Store Result button disabled until the producer is ready", async () => {
+		await renderStitched();
+
+		expect(storeButton().disabled).toBe(true);
+
+		await settle();
+
+		expect(storeButton().disabled).toBe(false);
+	});
+
+	it("stops claiming ready when a second analyze puts up a new panel", async () => {
+		// The first analysis, all the way to ready. This is the only case in the
+		// file whose PRECONDITION is a genuinely `"ready"` status, which is what
+		// makes the re-render below a real test rather than a restatement of the
+		// first-analyze case above.
+		await renderStitched();
+		await settle();
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+
+		// A second Analyze, onto the SAME AppState: `currentVEResult` and its
+		// siblings still describe the previous selection at this instant.
+		await renderStitched();
+
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		// And the status is re-earned rather than merely withheld.
+		await settle();
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+	});
+});
+
+describe("standard: asynchronous render ownership", () => {
+	it("lets B mount before A resumes without A overwriting B's saved settings or panel", async () => {
+		appState.currentFileHash = "hash";
+		let resolveA!: (value: any) => void;
+		let resolveB!: (value: any) => void;
+		const parameterStorage = {
+			loadLapSettings: (_hash: string, laps: number[]) =>
+				new Promise((resolve) => {
+					if (laps[0] === 1) resolveA = resolve;
+					else resolveB = resolve;
+				}),
+		} as unknown as ParameterStorage;
+
+		const renderA = renderStitched({ parameterStorage, analyzedLaps: [1] });
+		await Promise.resolve();
+		const renderB = renderStitched({ parameterStorage, analyzedLaps: [2] });
+		await Promise.resolve();
+
+		resolveB({ cda: 0.42, crr: 0.0042, trimStart: 20, trimEnd: 350 });
+		await renderB;
+		resolveA({ cda: 0.31, crr: 0.0042, trimStart: 10, trimEnd: 360 });
+		await renderA;
+		await settle();
+
+		expect((document.getElementById("cdaSlider") as HTMLInputElement).value).toBe("0.42");
+		expect(appState.currentAnalyzedLaps).toEqual([2]);
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+	});
+
+	it("does not mount after activity teardown wins during saved-settings load", async () => {
+		appState.currentFileHash = "hash";
+		let resolveSettings!: (value: null) => void;
+		const parameterStorage = {
+			loadLapSettings: () =>
+				new Promise<null>((resolve) => {
+					resolveSettings = resolve;
+				}),
+		} as unknown as ParameterStorage;
+
+		const render = renderStitched({ parameterStorage });
+		await Promise.resolve();
+		appState.standardPanelOwner = null;
+		appState.currentFitData = null;
+		document.getElementById("veAnalysisSection")?.classList.add("hidden");
+		resolveSettings(null);
+		await render;
+
+		expect(document.getElementById("veAnalysisContent")?.children).toHaveLength(0);
+		expect(document.getElementById("storeResult")).toBeNull();
+	});
+});
+
+describe("standard: producer error transitions", () => {
+	it("sets error when every segment calculator throws", async () => {
+		calculatorFailure.enabled = true;
+		await renderStitched();
+		await settle();
+
+		expect(appState.veStatus).toBe("error");
+		expect(storeButton().disabled).toBe(true);
+	});
+
+	it("requestModeUpdate catch replaces a premature ready state with error", async () => {
+		failingPlotTarget = "vePlot";
+		await renderStitched();
+		await settle();
+
+		expect(appState.veStatus).toBe("error");
+		expect(storeButton().disabled).toBe(true);
+	});
+});
+
+describe("standard: the first auto-rho result is atomic", () => {
+	it("gates edits through success and produces once from the settled rho and latest CdA", async () => {
+		const weatherRho = 1.1984;
+		let settleAutoRho!: () => void;
+		autoRho.calculate.mockImplementationOnce(
+			(_state, parametersComponent: AnalysisParametersComponent) =>
+				new Promise<number>((resolve) => {
+					settleAutoRho = () => {
+						parametersComponent.setParameters({ rho: weatherRho });
+						resolve(weatherRho);
+					};
+				}),
+		);
+		appState.currentParameters!.auto_calculate_rho = true;
+		const parametersComponent = makeLiveParametersComponent();
+
+		const renderPromise = renderStitched({ parametersComponent });
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		const cdaSlider = document.getElementById("cdaSlider") as HTMLInputElement;
+		cdaSlider.value = DRAGGED_CDA.toString();
+		cdaSlider.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(calculatorInputs).toEqual([]);
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(0);
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		settleAutoRho();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs).toHaveLength(2);
+		expect(calculatorInputs.every((input) => input.rho === weatherRho)).toBe(true);
+		expect(calculatorInputs.every((input) => input.cda === DRAGGED_CDA)).toBe(true);
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+	});
+
+	it.each([
+		["weather failure fallback", "resolve"],
+		["rejected completion fallback", "reject"],
+	] as const)("publishes one pass after %s", async (_label, completion) => {
+		let finish!: () => void;
+		autoRho.calculate.mockImplementationOnce(
+			() =>
+				new Promise<number | null>((resolve, reject) => {
+					finish = () =>
+						completion === "resolve"
+							? resolve(null)
+							: reject(new Error("weather completion failed"));
+				}),
+		);
+		appState.currentParameters!.auto_calculate_rho = true;
+		const fallbackRho = appState.currentParameters!.rho;
+		expect(fallbackRho).toBe(1.2345);
+
+		const renderPromise = renderStitched();
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+		await vi.advanceTimersByTimeAsync(100);
+		expect(calculatorInputs).toEqual([]);
+
+		finish();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs).toHaveLength(2);
+		expect(calculatorInputs.every((input) => input.rho === fallbackRho)).toBe(true);
+	});
+
+	it("keeps the gate closed when trim changes before its debounce advertises a successor", async () => {
+		const settledTrimRho = 1.19;
+		let resolveInitial!: () => void;
+		let resolveCurrent!: () => void;
+		autoRho.calculate
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveInitial = () => {
+						state.autoRhoPromise = null;
+						resolve(null);
+					};
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			})
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveCurrent = () => {
+						state.currentParameters!.rho = settledTrimRho;
+						state.autoRhoPromise = null;
+						resolve(settledTrimRho);
+					};
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			});
+		appState.currentParameters!.auto_calculate_rho = true;
+
+		const renderPromise = renderStitched();
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		const trim = document.getElementById("trimStartSlider") as HTMLInputElement;
+		trim.value = "10";
+		trim.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(100);
+
+		resolveInitial();
+		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(399);
+
+		expect(autoRho.calculate).toHaveBeenCalledTimes(1);
+		expect(calculatorInputs).toEqual([]);
+		expect(appState.veStatus).not.toBe("ready");
+		expect(storeButton().disabled).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(2);
+		expect(calculatorInputs).toEqual([]);
+		expect(storeButton().disabled).toBe(true);
+
+		resolveCurrent();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs).toHaveLength(2);
+		expect(
+			calculatorInputs.every((input) => input.rho === settledTrimRho),
+		).toBe(true);
+		expect(appState.veStatus).toBe("ready");
+		expect(storeButton().disabled).toBe(false);
+	});
+
+	it("follows a newer trim-flight handoff before opening the producer gate", async () => {
+		let resolveInitial!: () => void;
+		let resolveCurrent!: () => void;
+		autoRho.calculate
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveInitial = () => resolve(null);
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			})
+			.mockImplementationOnce((state: AppState) => {
+				const promise = new Promise<number | null>((resolve) => {
+					resolveCurrent = () => {
+						state.currentParameters!.rho = 1.19;
+						resolve(1.19);
+					};
+				});
+				state.autoRhoPromise = promise;
+				return promise;
+			});
+		appState.currentParameters!.auto_calculate_rho = true;
+
+		const renderPromise = renderStitched();
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		const trim = document.getElementById("trimStartSlider") as HTMLInputElement;
+		trim.value = "10";
+		trim.dispatchEvent(new Event("input", { bubbles: true }));
+		await vi.advanceTimersByTimeAsync(500);
+		expect(autoRho.calculate).toHaveBeenCalledTimes(2);
+
+		resolveInitial();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(calculatorInputs).toEqual([]);
+		expect(storeButton().disabled).toBe(true);
+
+		resolveCurrent();
+		await renderPromise;
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(calculatorInputs.every((input) => input.rho === 1.19)).toBe(true);
+	});
+
+	it("abandons a rejected continuation after a replacement panel owns the app", async () => {
+		let rejectOld!: (error: Error) => void;
+		autoRho.calculate.mockImplementationOnce(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectOld = reject;
+				}),
+		);
+		appState.currentParameters!.auto_calculate_rho = true;
+		const oldMap = { fitBoundsToTrimRegion: vi.fn() };
+		const oldRender = renderStitched({ mapVisualization: oldMap });
+		await vi.waitFor(() => expect(autoRho.calculate).toHaveBeenCalledTimes(1));
+
+		appState.currentParameters!.auto_calculate_rho = false;
+		const currentMap = { fitBoundsToTrimRegion: vi.fn() };
+		await renderStitched({ mapVisualization: currentMap });
+		await settle();
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+
+		rejectOld(new Error("old panel weather failed"));
+		await oldRender;
+		await vi.advanceTimersByTimeAsync(1000);
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
+		expect(oldMap.fitBoundsToTrimRegion).not.toHaveBeenCalled();
+		expect(currentMap.fitBoundsToTrimRegion).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not wait for or fetch weather when auto-rho is disabled", async () => {
+		await renderStitched();
+
+		expect(autoRho.calculate).not.toHaveBeenCalled();
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(0);
+
+		await settle();
+
+		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
 	});
 });
 
@@ -708,10 +1184,18 @@ describe("standard: the header spans at first paint (WR-4)", () => {
  * A stub that provided only `react` would make this vacuous: any renderer would
  * be forced onto it. `fakePlotly` supplies both and records which was used, so
  * choosing `newPlot` is available and simply not taken.
+ *
+ * WHAT CHANGED. The five ids are no longer opened by one caller. `#windSpeedPlot`
+ * / `#speedPowerPlot` / `#vdPlot` are drawn by the render, which needs no fit for
+ * any of them; `#vePlot` / `#veResidualsPlot` need a virtual elevation and are
+ * now opened by the post-bind request. So the case settles first. Both assertions
+ * are the ones it always made — all five ids appear, and `newPlot` is chosen
+ * nowhere — and neither depends on which pass drew what.
  */
 describe("standard: plots redraw by diffing, not by teardown", () => {
 	it("opens all five plots with react and none with newPlot", async () => {
 		await renderStitched();
+		await settle();
 
 		expect(drawMethods.filter(draw => draw.method === "newPlot")).toEqual([]);
 		expect(drawMethods.map(draw => draw.id)).toEqual(

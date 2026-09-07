@@ -19,18 +19,100 @@ import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallba
  * @param parametersComponent - UI component for parameters
  * @param services - Shell services (loading, etc.)
  */
-export async function calculateAutoRho(
+export function calculateAutoRho(
     appState: AppState,
     parametersComponent: AnalysisParametersComponent | null,
     services: ShellServices
 ): Promise<number | null> {
-    // Prevent infinite loops
-    if (appState.isCalculatingAutoRho) {
-        log.debug('⏭️  Auto-rho calculation already in progress, skipping\n');
-        return null;
+    const flightKey = captureAutoRhoFlightKey(appState);
+
+    // Same inputs join the exact flight. Different activity/selection inputs
+    // replace the advertised flight with a serialized successor: the old
+    // request may finish its network work, but its ownership checks reject
+    // every state/UI write before the successor queries the current inputs.
+    if (appState.autoRhoPromise) {
+        if (appState.autoRhoFlightKey === flightKey) {
+            log.debug('⏭️  Auto-rho calculation already in progress, joining\n');
+            return appState.autoRhoPromise;
+        }
+
+        log.debug('⏭️  Auto-rho inputs changed, queueing current operation\n');
+        return startAutoRhoFlight(
+            appState,
+            parametersComponent,
+            services,
+            flightKey,
+            appState.autoRhoPromise
+        );
     }
 
+    // Preserve the defensive guard for legacy/test callers which may own the
+    // boolean without having registered a promise through this function.
+    if (appState.isCalculatingAutoRho) {
+        log.debug('⏭️  Auto-rho calculation already in progress, skipping\n');
+        return Promise.resolve(null);
+    }
+
+    return startAutoRhoFlight(
+        appState,
+        parametersComponent,
+        services,
+        flightKey,
+        null
+    );
+}
+
+function startAutoRhoFlight(
+    appState: AppState,
+    parametersComponent: AnalysisParametersComponent | null,
+    services: ShellServices,
+    flightKey: string,
+    predecessor: Promise<number | null> | null
+): Promise<number | null> {
     appState.isCalculatingAutoRho = true;
+
+    let operation!: Promise<number | null>;
+    const start = predecessor
+        ? predecessor.catch(() => null)
+        : Promise.resolve<number | null>(null);
+    operation = start
+        .then(() =>
+            performAutoRho(
+                appState,
+                parametersComponent,
+                services,
+                flightKey
+            )
+        )
+        .finally(() => {
+            if (appState.autoRhoPromise === operation) {
+                appState.autoRhoPromise = null;
+                appState.autoRhoFlightKey = null;
+                appState.isCalculatingAutoRho = false;
+            }
+        });
+    appState.autoRhoPromise = operation;
+    appState.autoRhoFlightKey = flightKey;
+    return operation;
+}
+
+function captureAutoRhoFlightKey(appState: AppState): string {
+    const mapStart = document.getElementById('mapTrimStartSlider') as HTMLInputElement | null;
+    const mapEnd = document.getElementById('mapTrimEndSlider') as HTMLInputElement | null;
+    const sectionStart = document.getElementById('trimStartSlider') as HTMLInputElement | null;
+    const sectionEnd = document.getElementById('trimEndSlider') as HTMLInputElement | null;
+    const start = mapStart?.value ?? sectionStart?.value ?? 'missing';
+    const end = mapEnd?.value ?? sectionEnd?.value ?? 'missing';
+    const autoEnabled = appState.currentParameters?.auto_calculate_rho ?? false;
+    return `${appState.autoRhoInputRevision ?? 0}:${start}:${end}:${autoEnabled ? 1 : 0}`;
+}
+
+async function performAutoRho(
+    appState: AppState,
+    parametersComponent: AnalysisParametersComponent | null,
+    services: ShellServices,
+    flightKey: string
+): Promise<number | null> {
 
     // `services.hideLoading()` is a global, non-refcounted toggle that also
     // re-enables the Analyze button. Auto-rho runs from detached timers
@@ -45,13 +127,22 @@ export async function calculateAutoRho(
         loadingShown = false;
         services.hideLoading();
     };
+    const ownsCurrentInputs = (): boolean =>
+        captureAutoRhoFlightKey(appState) === flightKey;
+    const abandonStaleFlight = (): boolean => {
+        if (ownsCurrentInputs()) return false;
+        hideLoadingIfOwned();
+        log.debug('⏭️  Auto-rho inputs changed; discarding stale result\n');
+        return true;
+    };
+    if (abandonStaleFlight()) return null;
 
-    // WEATH-03 rung 3 guard: everything after the in-progress flag is set runs
-    // inside this try/finally, so no failure path can leave
+    // WEATH-03 rung 3 guard: the public wrapper owns the structural `finally`,
+    // so no failure path can leave
     // `isCalculatingAutoRho` stuck at true (which would permanently disable
     // auto-rho for the session) — including a throw from inside a catch
     // handler (`hideLoading` / `showNotification` both touch the DOM). The flag
-    // is cleared in exactly one place, the `finally` below, so a future early
+    // is cleared in exactly one place, that wrapper's `finally`, so a future early
     // return cannot reintroduce the leak. Callers discard the return value, so
     // returning null simply leaves the manual/prior rho in place and analysis
     // continues.
@@ -173,6 +264,7 @@ export async function calculateAutoRho(
             // Get weather data (from cache or API)
             log.debug('🔄 Fetching weather data (checking cache first)...\n');
             let weatherEntry: WeatherCacheEntry = await weatherCache.getWeatherData(metadata, weatherAPI);
+            if (abandonStaleFlight()) return null;
 
             // Check if cached entry has wind data - if not, re-fetch from API
             if (weatherEntry.source === 'cache' &&
@@ -180,6 +272,7 @@ export async function calculateAutoRho(
                 log.debug('⚠️  Cached entry missing wind data, re-fetching from API...');
                 // Fetch directly from API to get complete data
                 const freshData = await weatherAPI.fetchWeatherData(metadata);
+                if (abandonStaleFlight()) return null;
                 weatherEntry = {
                     key: weatherEntry.key,
                     data: freshData,
@@ -266,8 +359,8 @@ export async function calculateAutoRho(
             // The "unknown" case is decided inside the sync hook, which returns
             // {} for it — one decision site, testable with no bind() call. It
             // matters at *this* call site because auto-rho genuinely re-fires on
-            // load, from fileLoad/fileLoadOrchestration.ts:389 and
-            // ve/bindStandardSliders.ts:632; neither is suppressed by
+            // load, from fileLoad/fileLoadOrchestration.ts and Standard's
+            // awaited initial render; neither is suppressed by
             // isLoadingParameters, which only short-circuits
             // handleParametersChange (analysis/analyzeOrchestrator.ts:171). So
             // on any saved file with auto_calculate_rho: true this merge runs
@@ -286,6 +379,7 @@ export async function calculateAutoRho(
                 );
             }
 
+            if (abandonStaleFlight()) return null;
             parametersComponent.setParameters(updateParams);
             refreshCrrTempReadout(parametersComponent.getParameters());
             refreshWindHeightReadout(parametersComponent.getParameters());
@@ -307,6 +401,10 @@ export async function calculateAutoRho(
 
         } catch (error) {
             hideLoadingIfOwned();
+
+            // An obsolete request must not clear provenance or notify against
+            // the activity/selection which replaced it.
+            if (!ownsCurrentInputs()) return null;
 
             // WEATH-03 rungs 3/4: degrade to the manual/prior rho.
             // Diagnostics stay internal (log only); the user-facing text comes
@@ -342,6 +440,7 @@ export async function calculateAutoRho(
         // than it used to), and blindly toggling would dismiss a concurrent
         // operation's overlay and re-enable the Analyze button mid-run.
         hideLoadingIfOwned();
+        if (!ownsCurrentInputs()) return null;
         log.error('Unexpected error in calculateAutoRho:', error);
 
         // Anything reaching here is a bug in the auto-rho path, not a weather
@@ -353,8 +452,6 @@ export async function calculateAutoRho(
         showNotification(AUTO_RHO_FAILURE_MESSAGE, 'error');
 
         return null;
-    } finally {
-        appState.isCalculatingAutoRho = false;
     }
 }
 

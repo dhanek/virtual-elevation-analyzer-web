@@ -287,26 +287,31 @@ describe.skipIf(!ready)("WR-4 on the golden ride, through real WASM", () => {
 });
 
 /**
- * DOES THE PANEL JUMP WHEN THE KICK LANDS?
+ * HOW MANY TIMES IS THE PANEL PAINTED PER ANALYZE?
  *
- * The kick repaints the panel one macrotask after Analyze. If the analyze leg
- * and the primitive compute the same numbers, that repaint is invisible and
- * costs only time. If they DISAGREE, the user watches the plot and the header
- * change by themselves right after pressing Analyze.
+ * The user presses Analyze and, one macrotask later, the post-bind kick runs the
+ * update primitive and paints. The question this block exists to answer is
+ * whether anything ELSE paints in between. It used to: the GPS-lap analyze leg
+ * ran its own per-lap fit and painted from it, so the panel was painted twice
+ * per Analyze from two independent producers, and if those two disagreed the
+ * user watched the plot and the header change by themselves right after pressing
+ * the button — over a macrotask, which is not a duration a person can resolve
+ * into cause and effect.
  *
- * This is not checkable by eye -- a macrotask is not a duration a person can
- * resolve -- so it is checked by capturing what the panel was painted with on
- * each pass and comparing the numbers. `painted[0]` is the analyze leg's own
- * paint; `painted[last]` is the kick's.
+ * That leg is retired. The panel is now painted by the producer and by nothing
+ * else, so the claim under test is a count: `painted` is empty until the kick
+ * lands and holds exactly one entry afterwards. A regression that reintroduced
+ * an analyze-time fit appears here as a second entry.
  *
  * RHO IS THE AXIS UNDER TEST. The golden fixture zero-fills `air_density_data`,
- * so `resolveRhoArray` returns null for it and BOTH passes fall back to the
- * constant `params.rho` -- which would make this comparison agree for the one
- * reason that proves nothing. The ride's real per-point series is carried
- * separately by the fixture, so it is installed here to put the two passes on
- * the axis that can actually separate them.
+ * so `resolveRhoArray` returns null for it and the pass falls back to the
+ * constant `params.rho` — the one input on which the two old producers were
+ * known to differ, and therefore the one on which a reintroduced second paint is
+ * most likely to be a *differing* second paint. The ride's real per-point series
+ * is carried separately by the fixture and is installed in the `beforeEach`
+ * below so the single pass is exercised on it.
  */
-describe.skipIf(!ready)("the analyze paint and the kick's repaint", () => {
+describe.skipIf(!ready)("how many times one Analyze paints", () => {
 	beforeAll(() => {
 		initSync({ module: readFileSync(WASM_PATH) });
 	});
@@ -369,20 +374,35 @@ describe.skipIf(!ready)("the analyze paint and the kick's repaint", () => {
 		resetModeUpdateRequests();
 	});
 
-	it("paints the same numbers, so the repaint is invisible", async () => {
-		const firstPaint = painted[0];
-		expect(firstPaint).toBeDefined();
+	/**
+	 * THE SAME QUESTION, ANSWERED BY CONSTRUCTION.
+	 *
+	 * This case used to capture the analyze leg's paint and the kick's paint and
+	 * assert the two agreed to nine digits, because two producers of one number
+	 * is a defect you can only manage by testing that they never disagree. The
+	 * management is now unnecessary: the analyze leg paints NOTHING, so there is
+	 * no earlier number for the kick to contradict and the repaint is not a
+	 * repaint at all.
+	 *
+	 * The assertion follows the guarantee: exactly one paint per Analyze, and it
+	 * is the producer's. A regression that reintroduced an analyze-time fit
+	 * would show up here as a second entry in `painted` — which is what makes
+	 * this a guard and not a tautology, and the strongest form of the original
+	 * claim available: numbers that are never computed twice cannot jump.
+	 *
+	 * RHO IS STILL THE AXIS. The fixture's real per-point series is installed in
+	 * the `beforeEach` above precisely because it is the input the two passes
+	 * used to treat differently; it stays, so the single pass is exercised on it.
+	 */
+	it("paints once, so there is no repaint to be visible", async () => {
+		expect(painted).toHaveLength(0);
 
 		await settle();
 
-		const afterKick = painted[painted.length - 1];
-		expect(painted.length).toBeGreaterThan(1);
+		expect(painted).toHaveLength(1);
 
-		// Anti-vacuity: a fit that collapsed to zeros would agree trivially.
-		expect(afterKick.meanRMSE).toBeGreaterThan(1);
-
-		expect(firstPaint.meanRMSE).toBeCloseTo(afterKick.meanRMSE, 9);
-		expect(firstPaint.meanR2).toBeCloseTo(afterKick.meanR2, 9);
-		expect(firstPaint.closingError).toBeCloseTo(afterKick.closingError, 9);
+		// Anti-vacuity: this must be a real fit of the ride, not an empty pass
+		// that painted a zeroed stats object.
+		expect(painted[0].meanRMSE).toBeGreaterThan(1);
 	});
 });

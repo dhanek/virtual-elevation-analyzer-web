@@ -9,7 +9,7 @@
  * handleParametersChange -> synthetic trim-slider "input") used to persist the
  * previous lap's trim values under the newly selected lap's key.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import {
 	handleStoreResult,
 	saveCurrentLapSettings,
@@ -18,6 +18,7 @@ import {
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage, LapSettings } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
+import { applyVeStatus } from "../../state/veStatus";
 
 function addInput(id: string, value: string): void {
 	const el = document.createElement("input");
@@ -51,6 +52,8 @@ function makeAppStateStub(overrides: Partial<AppState>): AppState {
 		selectedLaps: [],
 		currentAnalyzedLaps: [],
 		airSpeedCalibrationPercent: 0,
+		// A completed pass, unless a test overrides it to exercise the gate itself.
+		veStatus: "ready",
 		...overrides,
 	} as unknown as AppState;
 }
@@ -354,6 +357,55 @@ describe("handleStoreResult trim window", () => {
 });
 
 /**
+ * `veStatus === 'ready'` is SUPPOSED to mean `currentFilteredData` is
+ * populated and non-empty — but that invariant is enforced two files away, in
+ * `updateModeVEPlots.ts`, not here. This guards the case where it is violated
+ * anyway: `buildFilteredDataFromProfiles` used to hand back empty arrays
+ * unconditionally when `currentFitData` was falsy (`segmentSummary.ts:77-80`),
+ * which drove `trimEnd` to `-1` and threw a RangeError surfaced only as the
+ * generic "Failed to store result". `handleStoreResult` must catch the empty
+ * case itself rather than trusting the status field.
+ */
+describe("handleStoreResult when currentFilteredData is empty despite veStatus 'ready'", () => {
+	beforeEach(() => {
+		document.body.innerHTML = '<button id="storeResult"></button>';
+	});
+
+	it("does not store and alerts, without reaching the notes dialog", async () => {
+		const appState = makeAppStateStub({
+			currentAnalyzedLaps: [1],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentFilteredData: {
+				power: [],
+				velocity: [],
+				temperature: [],
+				timestamps: [],
+			},
+		} as unknown as Partial<AppState>);
+
+		const saved: Record<string, unknown>[] = [];
+		const storage = {
+			saveResult: async (data: Record<string, unknown>) => {
+				saved.push(data);
+			},
+		} as unknown as ResultsStorage;
+
+		const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+		await handleStoreResult(appState, storage);
+
+		expect(saved).toHaveLength(0);
+		expect(alertSpy).toHaveBeenCalledTimes(1);
+		// No dialog was ever opened for an empty result.
+		expect(document.querySelector(".notes-dialog")).toBeNull();
+
+		vi.restoreAllMocks();
+	});
+});
+
+/**
  * CANCEL IS NOT "OK WITH NO NOTES".
  *
  * `showNotesDialog` resolved `''` for both, so `handleStoreResult` could not
@@ -567,5 +619,107 @@ describe("double-clicking Store Result", () => {
 		await Promise.all([first, second]);
 
 		expect(saved).toHaveLength(1);
+	});
+});
+
+describe("Store Result completion follows the current VE lifecycle", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function storableState(): AppState {
+		return makeAppStateStub({
+			currentAnalyzedLaps: [1],
+			isGpsLapModeActive: false,
+			currentParameters: { crr_temp_correction: false },
+			currentVEResult: { cda: 0.25 },
+			currentVirtualDistances: [],
+			currentWindSource: "none",
+			currentFilteredData: {
+				power: [250, 250],
+				velocity: [10, 10],
+				temperature: [20, 20],
+				timestamps: [86_400, 86_401],
+			},
+		} as unknown as Partial<AppState>);
+	}
+
+	function setup(): HTMLButtonElement {
+		const button = document.createElement("button");
+		button.id = "storeResult";
+		button.textContent = "Store Result";
+		document.body.appendChild(button);
+		addInput("trimStartSlider", "0");
+		addInput("trimEndSlider", "1");
+		addInput("cdaSlider", "0.25");
+		addInput("crrSlider", "0.005");
+		return button;
+	}
+
+	it("keeps Store disabled when a producer fails before the success feedback expires", async () => {
+		const button = setup();
+		const appState = storableState();
+		const pending = handleStoreResult(appState, {
+			saveResult: async () => {},
+		} as unknown as ResultsStorage);
+		await Promise.resolve();
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+		await pending;
+		expect(button.textContent).toBe("✓ Stored");
+
+		applyVeStatus(appState, "error");
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(button.textContent).toBe("Store Result");
+		expect(button.disabled).toBe(true);
+	});
+
+	it("keeps Store disabled when storage rejects after the result was invalidated", async () => {
+		const button = setup();
+		const appState = storableState();
+		let rejectSave!: (error: Error) => void;
+		const pending = handleStoreResult(appState, {
+			saveResult: () =>
+				new Promise((_resolve, reject) => {
+					rejectSave = reject;
+				}),
+		} as unknown as ResultsStorage);
+		await Promise.resolve();
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(button.textContent).toBe("Storing..."));
+
+		applyVeStatus(appState, "error");
+		rejectSave(new Error("storage failed"));
+		await pending;
+
+		expect(button.textContent).toBe("Store Result");
+		expect(button.disabled).toBe(true);
+	});
+
+	it("does not rewrite a replacement panel when old success feedback expires", async () => {
+		setup();
+		const appState = storableState();
+		const pending = handleStoreResult(appState, {
+			saveResult: async () => {},
+		} as unknown as ResultsStorage);
+		await Promise.resolve();
+		(document.getElementById("notesOkBtn") as HTMLButtonElement).click();
+		await pending;
+
+		document.body.replaceChildren();
+		const replacement = document.createElement("button");
+		replacement.id = "storeResult";
+		replacement.textContent = "Replacement panel";
+		replacement.disabled = true;
+		document.body.appendChild(replacement);
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(replacement.textContent).toBe("Replacement panel");
+		expect(replacement.disabled).toBe(true);
 	});
 });

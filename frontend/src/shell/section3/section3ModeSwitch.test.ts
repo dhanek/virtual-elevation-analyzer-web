@@ -598,7 +598,6 @@ async function analyzeGpsLap(appState: AppState): Promise<void> {
 		{} as unknown as ResultsStorage,
 		async () => ({}),
 		[lapProfile(1), lapProfile(2)] as never,
-		{ distances: [0, 1, 2], elevation: [0, 1, 2] },
 		appState.currentParameters!,
 		true,
 		true,
@@ -1568,6 +1567,25 @@ describe("loading a new activity resets the analysis", () => {
 		// single-lap default would make an empty selection the wrong answer.
 		expect(appState.currentLaps).toHaveLength(2);
 		expect(appState.selectedLaps).toEqual([]);
+	});
+
+	it("invalidates auto-rho input and Standard panel ownership", () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		const inputRevision = appState.autoRhoInputRevision;
+		appState.standardPanelOwner = {};
+		appState.standardInitialAutoRhoOwner = appState.standardPanelOwner;
+		appState.standardPendingAutoRhoDebounce = {
+			owner: appState.standardPanelOwner,
+			promise: Promise.resolve(),
+		};
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.autoRhoInputRevision).toBeGreaterThan(inputRevision);
+		expect(appState.standardPanelOwner).toBeNull();
+		expect(appState.standardInitialAutoRhoOwner).toBeNull();
+		expect(appState.standardPendingAutoRhoDebounce).toBeNull();
 	});
 
 	/**
