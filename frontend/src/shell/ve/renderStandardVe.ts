@@ -591,6 +591,19 @@ export async function showVirtualElevationAnalysisInline(
 		!veSection?.classList.contains("hidden") &&
 		!veSection?.classList.contains("workflow-section--inactive");
 
+	// Release this render's claim on the initial auto-rho settle, if it still
+	// holds it. Every early return BELOW this point calls it, and the identical
+	// call at each one is the point: a reader comparing two returns should not
+	// have to work out whether an asymmetry is deliberate. The claim is only
+	// ever ours to drop -- a second render reassigns the field to its own token
+	// and `tearDownVeAnalysisPanel` nulls it outright, so the ownership test is
+	// what keeps this from clearing someone else's claim.
+	const releaseInitialAutoRhoOwner = (): void => {
+		if (appState.standardInitialAutoRhoOwner === panelOwner) {
+			appState.standardInitialAutoRhoOwner = null;
+		}
+	};
+
 	// THE BUTTON THE MARKUP ABOVE JUST CREATED IS ENABLED. DISABLE IT.
 	//
 	// The template ships `#storeResult` with no `disabled` attribute, so the
@@ -631,6 +644,7 @@ export async function showVirtualElevationAnalysisInline(
 	// The actual VE calculation will happen after sliders are set up
 	await initializeVEAnalysis(appState, analysisInput, selectedIndices);
 	if (!stillOwnsPanel()) {
+		releaseInitialAutoRhoOwner();
 		log.debug("Standard VE render was replaced during plot initialization");
 		return;
 	}
@@ -692,15 +706,11 @@ export async function showVirtualElevationAnalysisInline(
 		}
 	}
 	if (!stillOwnsPanel()) {
-		if (appState.standardInitialAutoRhoOwner === panelOwner) {
-			appState.standardInitialAutoRhoOwner = null;
-		}
+		releaseInitialAutoRhoOwner();
 		log.debug("Standard VE render was replaced while auto-rho was pending");
 		return;
 	}
-	if (appState.standardInitialAutoRhoOwner === panelOwner) {
-		appState.standardInitialAutoRhoOwner = null;
-	}
+	releaseInitialAutoRhoOwner();
 	requestModeUpdate("parameters");
 
 	// BIND THE BUTTONS, DO NOT TOUCH THE MAP.
