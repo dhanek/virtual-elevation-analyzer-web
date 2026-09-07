@@ -1,5 +1,9 @@
 import { AppState } from "../../state/AppState";
 import {
+	clampTrimWindow,
+	MIN_TRIM_WINDOW_SAMPLES,
+} from "../../analysis/trimBounds";
+import {
 	ParameterStorage,
 	type LapSettings,
 } from "../../utils/ParameterStorage";
@@ -44,7 +48,6 @@ import { noteTrimWindowRequested } from "../analysis/bindModeControls";
 import { saveCurrentLapSettings } from "../analysis/storageHandlers";
 import { sameItems } from "../ve/veSelectionGuard";
 
-const MIN_TRIM_WINDOW_SAMPLES = 30;
 
 /**
  * "Re-run the active GPS detection with the gates where they are now",
@@ -1614,9 +1617,19 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 				deps.appState.selectedLaps,
 			);
 			if (savedSettings) {
-				// Use saved trim values
-				deps.appState.presetTrimStart = savedSettings.trimStart;
-				deps.appState.presetTrimEnd = savedSettings.trimEnd;
+				// FITTED TO THESE LAPS, NOT TAKEN VERBATIM. Section 3 reads the same
+				// per-lap record the panel does and reads it FIRST, at the selection
+				// change rather than at the next Analyze, so an out-of-range window
+				// reaches the map pair before any panel exists — and
+				// `saveMapTrimSettings` can then persist what the pair is showing.
+				// `trimBounds.ts` names the two writers that can leave a window the
+				// selection cannot hold.
+				const fittedTrim = clampTrimWindow(
+					{ start: savedSettings.trimStart, end: savedSettings.trimEnd },
+					dataLength,
+				);
+				deps.appState.presetTrimStart = fittedTrim.start;
+				deps.appState.presetTrimEnd = fittedTrim.end;
 				trimPresetsFromSavedSettings = true;
 			} else {
 				// Set preset values to defaults
