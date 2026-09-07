@@ -319,20 +319,6 @@ re-deriving it):
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
 
-- [ ] **[S–M] `WeatherCache` never closes its IndexedDB connection, and `autoRho` builds a new
-      one per weather query.** `initialize()` assigns `this.db` and nothing ever calls
-      `db.close()`; `autoRho.ts:170` does `new WeatherCache()` inside the query path, so a long
-      session accumulates one open connection per distinct trim window. `ResultsStorage` in the
-      same directory DOES close its connections (`ResultsStorage.ts:319,338`), so this is below
-      the repo's own standard rather than a general style opinion.
-      Not folded into the cap work: the fix is a service-lifecycle change that `autoRho` owns —
-      a shared instance, or a close after each use — and the cap bounds rows, which is a
-      different resource. No user-visible failure has been reproduced; browsers hold idle
-      connections cheaply and reclaim them on unload, which is why this is sized S–M and not
-      urgent.
-      `frontend/src/utils/WeatherCache.ts:60-85`, `autoRho.ts:170`
-      *origin: PR #10 review round 9, F9-01*
-
 - [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
       deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
       own investigation before it can be sized.
@@ -420,6 +406,55 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### The weather cache is one session-scoped instance — 2026-09-07
+
+- [x] **[S–M] `WeatherCache` never closes its IndexedDB connection, and `autoRho` builds a new
+      one per weather query.** The leak is real and it is now closed, but **the item was wrong
+      about which half of it was below the repo's standard, and its anchor was stale** — both
+      established by reading before the fix, not assumed.
+
+      - The `new WeatherCache()` is at `autoRho.ts:261`, not `:170`.
+      - *"`ResultsStorage` in the same directory DOES close its connections
+        (`ResultsStorage.ts:319,338`), so this is below the repo's own standard"* — **it does
+        not.** `ResultsStorage` holds an unclosed long-lived `this.db` (`:225`, assigned `:464`)
+        exactly as `WeatherCache` did. The two `db.close()` calls at `:319`/`:338` are on a
+        TEMPORARY connection opened to check the schema version during migration, not on the
+        held one. `ParameterStorage` holds one for the session too. So holding a connection is
+        the repo's standard, and the "below standard" argument does not survive.
+
+      **What was actually wrong is the per-query CONSTRUCTION.** Every instance opens its own
+      connection on first use, and `autoRho` built one INSIDE the query path — which the
+      `lastWeatherQueryKey` guard lets through once per distinct trim window. So a long session
+      accumulated connections at the same rate `WEATHER_CACHE_MAX_ENTRIES` bounds rows, which is
+      what makes it worth fixing even though no user-visible failure was ever reproduced. Every
+      other store in that directory is built once and held; this brings the weather cache into
+      line with them rather than making it the exception in the other direction.
+
+      **Fixed with a module-level `weatherCacheInstance()`** plus a `close()` that clears
+      `initPromise` alongside `db` — the pairing is the whole correctness of it, since
+      `initialize()` memoizes and a close that left the promise behind would resolve instantly
+      against a dead connection. Both construction sites now use the accessor (`autoRho.ts`, and
+      the clear-storage handler in `initializeApplication.ts`, which had been opening a second
+      connection to clear behind the first). `resetWeatherCacheInstance()` runs in the existing
+      `beforeunload` handler beside `mapVisualization?.destroy()` — browsers reclaim an idle
+      connection at unload anyway, so that line is about stating the session lifetime rather than
+      about reclaiming memory.
+
+      Guarded by 6 tests against a real `fake-indexeddb`, using `deleteDatabase` as the
+      observable because an open connection makes a delete BLOCK rather than fail: a close that
+      released nothing, and a close that poisoned the instance, each fail a case. One of the six
+      is the paired negative — the connection IS held before `close()` — without which a
+      `close()` that did nothing would still pass. `autoRho.test.ts`'s mock now returns ONE cache
+      object rather than minting one per construction, so a regression to `new WeatherCache()`
+      cannot pass there unnoticed.
+
+      **Checked in the app 2026-09-07** on the reference ride, lap 10: the first analysis resolves
+      through the cache (`💾 Cached`, rho 1.1285, RMSE 7.62 m), and moving the trim to 60–230 —
+      a new centroid, so a new query key and the path that used to build a second cache — goes to
+      the network (`⬇️ API`) and recomputes to RMSE 11.10 m.
+      `frontend/src/utils/WeatherCache.ts` · `autoRho.ts:261` ·
+      `initializeApplication.ts` · *origin: PR #10 review round 9, F9-01*
 
 ### The build configs join a tsc program and the linter — 2026-09-07
 

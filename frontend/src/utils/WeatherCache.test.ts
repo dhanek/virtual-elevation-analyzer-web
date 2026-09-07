@@ -17,7 +17,12 @@
  */
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { WeatherCache, WEATHER_CACHE_MAX_ENTRIES } from "./WeatherCache";
+import {
+	WeatherCache,
+	WEATHER_CACHE_MAX_ENTRIES,
+	resetWeatherCacheInstance,
+	weatherCacheInstance,
+} from "./WeatherCache";
 import type { WeatherAPI, WeatherResponse } from "./WeatherAPI";
 import type { TrimRegionMetadata } from "./GeoCalculations";
 
@@ -227,5 +232,105 @@ describe("bounding the weather cache", () => {
 
 		expect((await cache.getCacheStats()).count).toBe(10);
 		expect(WEATHER_CACHE_MAX_ENTRIES).toBeGreaterThanOrEqual(10);
+	});
+});
+
+/**
+ * THE CONNECTION'S LIFETIME. `initialize()` assigned `this.db` and nothing ever
+ * released it, while `autoRho` built a NEW cache inside its query path — so a
+ * long session accumulated one open IndexedDB connection per distinct trim
+ * window, which is exactly the per-window churn the cap above is sized for.
+ *
+ * The observable is `deleteDatabase`, and it is the right one rather than a
+ * convenient one: an open connection makes a delete BLOCK rather than fail, so
+ * a leaked connection shows up as a request that never fires `onsuccess`. That
+ * is the same property the harness above documents as an unreadable hook
+ * timeout, used deliberately here.
+ */
+describe("WeatherCache connection lifetime", () => {
+	beforeEach(() => {
+		globalThis.indexedDB = new IDBFactory();
+	});
+
+	/** Resolves true if the delete completed, false if it was blocked. */
+	function deleteUnblocked(dbName: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const request = indexedDB.deleteDatabase(dbName);
+			request.onsuccess = () => resolve(true);
+			request.onerror = () => resolve(true);
+			request.onblocked = () => resolve(false);
+		});
+	}
+
+	it("releases the connection on close, so a delete is not blocked", async () => {
+		const cache = new WeatherCache();
+		await cache.initialize();
+
+		cache.close();
+
+		expect(await deleteUnblocked("ve-weather-cache")).toBe(true);
+	});
+
+	it("holds the connection open until close is called", async () => {
+		// The paired negative: without it, a `close()` that did nothing at all
+		// would still pass the case above, because nothing would have proved the
+		// connection was ever held.
+		const cache = new WeatherCache();
+		await cache.initialize();
+
+		expect(await deleteUnblocked("ve-weather-cache")).toBe(false);
+	});
+
+	it("re-opens on the next use after a close", async () => {
+		// Closing must not poison the instance: `initialize()` memoizes, so a
+		// close that left `initPromise` set would resolve immediately against a
+		// dead connection and every later read would throw.
+		const cache = new WeatherCache();
+		const api = countingApi();
+		await cache.getWeatherData(metadataAt(47.1), api);
+
+		cache.close();
+		const entry = await cache.getWeatherData(metadataAt(47.1), api);
+
+		expect(entry.data.temperature).toBe(weather.temperature);
+	});
+
+	it("is safe to close twice, and to close one that was never opened", async () => {
+		const cache = new WeatherCache();
+		expect(() => cache.close()).not.toThrow();
+
+		await cache.initialize();
+		cache.close();
+		expect(() => cache.close()).not.toThrow();
+	});
+});
+
+/**
+ * THE SHARED INSTANCE. The leak had two halves and `close()` only fixes one:
+ * `autoRho` constructed a cache INSIDE its query path, so each distinct trim
+ * window built an instance that opened its own connection. Every other store in
+ * this directory is built once and held (`ResultsStorage`, `ParameterStorage`),
+ * and that is the shape this restores — the accessor, not the constructor, is
+ * what callers on a hot path reach for.
+ */
+describe("the shared WeatherCache instance", () => {
+	beforeEach(() => {
+		globalThis.indexedDB = new IDBFactory();
+		resetWeatherCacheInstance();
+	});
+
+	it("hands every caller the same object", () => {
+		expect(weatherCacheInstance()).toBe(weatherCacheInstance());
+	});
+
+	it("re-opens after the shared instance is closed and released", async () => {
+		const first = weatherCacheInstance();
+		await first.initialize();
+
+		resetWeatherCacheInstance();
+
+		const second = weatherCacheInstance();
+		expect(second).not.toBe(first);
+		await expect(second.initialize()).resolves.toBeUndefined();
 	});
 });
