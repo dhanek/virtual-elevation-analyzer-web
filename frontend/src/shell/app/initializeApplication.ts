@@ -8,7 +8,10 @@ import { DEMManager, ElevationProfileCache } from "../../utils/DEMManager";
 import { RemoteDEMConfig } from "../../utils/RemoteDEMConfig";
 import { RemoteDEMService } from "../../utils/RemoteDEMService";
 import { MultiDEMManager } from "../../utils/MultiDEMManager";
-import { WeatherCache } from "../../utils/WeatherCache";
+import {
+	resetWeatherCacheInstance,
+	weatherCacheInstance,
+} from "../../utils/WeatherCache";
 import { log } from "../../utils/log";
 import { AppState } from "../../state/AppState";
 import { bindShowAllResultsButton } from "../analysis/storageHandlers";
@@ -334,9 +337,10 @@ export async function initializeApplicationShell(
 				await parameterStorage.clearAll();
 				await resultsStorage.clearAllResults();
 
-				// Also clear weather cache
-				const weatherCacheInstance = new WeatherCache();
-				await weatherCacheInstance.clearCache();
+				// Also clear weather cache — the SHARED instance, so this clears
+				// the same connection `autoRho` reads through rather than opening
+				// a second one to clear behind it.
+				await weatherCacheInstance().clearCache();
 
 				alert(
 					"All saved parameters, results, and weather cache have been cleared.",
@@ -351,6 +355,11 @@ export async function initializeApplicationShell(
 	// Clean up on page unload
 	window.addEventListener("beforeunload", () => {
 		mapVisualization?.destroy();
+		// Give up the weather cache's IndexedDB connection with it. Browsers
+		// reclaim an idle connection on unload anyway, so this is about saying
+		// the lifetime out loud rather than about reclaiming memory: the cache is
+		// now a session-scoped singleton, and this is where that session ends.
+		resetWeatherCacheInstance();
 	});
 
 	// Initialize viewport adapter first

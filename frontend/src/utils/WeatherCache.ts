@@ -49,6 +49,40 @@ interface WeatherCacheStats {
  */
 export const WEATHER_CACHE_MAX_ENTRIES = 5000;
 
+/**
+ * THE ONE CACHE THE APP USES, and the reason it is a module-level singleton
+ * rather than a `new` at each call site.
+ *
+ * Every instance opens its own IndexedDB connection on first use. `autoRho`
+ * built a cache INSIDE its query path, which runs once per distinct trim
+ * window, so a long session accumulated connections at exactly the rate
+ * `WEATHER_CACHE_MAX_ENTRIES` bounds rows. The other stores in this directory
+ * are built once and held for the session (`ResultsStorage`,
+ * `ParameterStorage`); this brings the weather cache into line with them.
+ *
+ * Note that those stores do NOT close their long-lived connections either —
+ * they hold one for the session by design, and so does this. The defect was the
+ * per-query CONSTRUCTION, not the holding.
+ */
+let sharedInstance: WeatherCache | null = null;
+
+/** The shared cache. Prefer this to `new WeatherCache()` at every call site. */
+export function weatherCacheInstance(): WeatherCache {
+    if (!sharedInstance) {
+        sharedInstance = new WeatherCache();
+    }
+    return sharedInstance;
+}
+
+/**
+ * Close the shared cache and drop it, so the next `weatherCacheInstance()`
+ * builds a fresh one. The unload handler calls this; tests call it to isolate.
+ */
+export function resetWeatherCacheInstance(): void {
+    sharedInstance?.close();
+    sharedInstance = null;
+}
+
 export class WeatherCache {
     private readonly dbName = 've-weather-cache';
     private readonly dbVersion = 1;
@@ -59,6 +93,32 @@ export class WeatherCache {
 
     constructor(maxEntries: number = WEATHER_CACHE_MAX_ENTRIES) {
         this.maxEntries = maxEntries;
+    }
+
+    /**
+     * Release the IndexedDB connection this instance holds.
+     *
+     * WHY THIS EXISTS AT ALL. `initialize()` assigned `this.db` and nothing ever
+     * released it, while `autoRho` built a NEW cache inside its query path — so
+     * a long session accumulated one open connection per distinct trim window,
+     * which is the same per-window churn `WEATHER_CACHE_MAX_ENTRIES` is sized
+     * for. The construction site is now a single shared instance
+     * (`weatherCacheInstance()`), which is the half that stops the accumulation;
+     * this method is what lets the one remaining connection be given up
+     * deliberately rather than only at unload.
+     *
+     * `initPromise` is cleared along with `db`, and that pairing is the whole
+     * correctness of it: `initialize()` returns the memoized promise when one is
+     * set, so a close that left it behind would resolve instantly against a
+     * connection that is gone and every later read would throw.
+     *
+     * Safe to call on an instance that was never opened, and safe to call twice
+     * — an unload handler and an explicit teardown can both reach it.
+     */
+    close(): void {
+        this.db?.close();
+        this.db = null;
+        this.initPromise = null;
     }
 
     /**

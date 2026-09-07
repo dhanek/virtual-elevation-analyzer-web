@@ -37,11 +37,25 @@ vi.mock("../dom/notifications", () => ({
 	showNotification: mocks.showNotification,
 }));
 
+/**
+ * ONE cache object across the whole mock, not one per construction, because
+ * that is now the production shape: `autoRho` reaches the SHARED instance
+ * through `weatherCacheInstance()` rather than building its own per query. A
+ * mock that minted a fresh object per call would let a regression back to
+ * `new WeatherCache()` pass here unnoticed.
+ */
+const sharedCacheDouble = {
+	getWeatherData: mocks.getWeatherData,
+	updateCachedEntry: mocks.updateCachedEntry,
+};
+
 vi.mock("../../utils/WeatherCache", () => ({
 	WeatherCache: class {
 		getWeatherData = mocks.getWeatherData;
 		updateCachedEntry = mocks.updateCachedEntry;
 	},
+	weatherCacheInstance: () => sharedCacheDouble,
+	resetWeatherCacheInstance: () => {},
 }));
 
 vi.mock("../../../pkg/virtual_elevation_analyzer.js", () => ({

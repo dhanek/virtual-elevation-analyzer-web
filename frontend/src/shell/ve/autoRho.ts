@@ -2,7 +2,7 @@ import { AppState } from '../../state/AppState';
 import { AnalysisParametersComponent, AnalysisParameters } from '../../components/AnalysisParameters';
 import { log } from '../../utils/log';
 import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } from '../../utils/GeoCalculations';
-import { WeatherCache, type WeatherCacheEntry } from '../../utils/WeatherCache';
+import { weatherCacheInstance, type WeatherCacheEntry } from '../../utils/WeatherCache';
 import { WeatherAPI, WeatherAPIError } from '../../utils/WeatherAPI';
 import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js';
 import { showNotification } from '../dom/notifications';
@@ -258,7 +258,13 @@ async function performAutoRho(
             log.debug('');
 
             // Initialize weather services
-            const weatherCache = new WeatherCache();
+            //
+            // THE SHARED CACHE, not a new one. This line runs once per distinct
+            // trim window (the `lastWeatherQueryKey` guard above lets a repeat
+            // query out early), and each instance opens its own IndexedDB
+            // connection that nothing released — so a long session accumulated
+            // connections at the same rate the cache mints rows.
+            const weatherCache = weatherCacheInstance();
             const weatherAPI = new WeatherAPI();
 
             // Get weather data (from cache or API)
