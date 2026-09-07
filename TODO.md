@@ -382,6 +382,51 @@ re-deriving it):
       aggregation. Measuring is cheap; the fix cost is unknown until it is measured.
       `renderOutAndBack.ts` · *origin: Phase 7 deferred-items*
 
+- [ ] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
+      `standardInitialAutoRhoOwner` asymmetrically.** The return right after `await
+      initializeVEAnalysis(...)` (`stillOwnsPanel()` false) does not clear the field; the
+      structurally identical return after the auto-rho settle loop does. Traced and NOT
+      reproducible as a live bug: every way `stillOwnsPanel()` can go false there either
+      reassigns `standardInitialAutoRhoOwner` (a second `showVirtualElevationAnalysisInline`
+      render) or clears it along with `standardPanelOwner`/`autoRhoInputRevision`
+      (`tearDownVeAnalysisPanel`), and the sliders bind below this point, so no interactive panel
+      can carry the wedged value. Readability only: a reader comparing the two returns cannot
+      tell the asymmetry is deliberate. Fix by adding the same three-line clear to the earlier
+      return, or by hoisting a shared `clearInitialAutoRhoOwner()` helper the two returns both
+      call.
+      `frontend/src/shell/ve/renderStandardVe.ts` (`showVirtualElevationAnalysisInline`, the
+      early return following `await initializeVEAnalysis`, versus the one following the
+      auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
+      maintainer 2026-09-04*
+
+- [ ] **[M] No formatter or indentation rule is machine-enforced; a misindented block passed
+      both `npm run check` and `npm run lint`.** A guard added to `requestModeUpdate`'s run
+      closure was indented one level shallow relative to the `if` that opened it — wrong enough
+      to mislead a reader about its nesting, invisible to both commands because neither checks
+      formatting. Wire `prettier --check` into `npm run check` (or add `@stylistic/indent`,
+      or an equivalent, to `frontend/eslint.config.js`'s existing flat config) so indentation
+      drift fails CI instead of needing a human reviewer to catch it. Deliberately not done
+      inside a refactor branch: either option means a repo-wide reformat diff, which does not
+      belong mixed into unrelated behavioural changes.
+      `frontend/package.json` (`check`, `lint` scripts), `frontend/eslint.config.js` · *origin:
+      PR #14 review round 20, F20-06 — deferred by the maintainer 2026-09-04*
+
+- [ ] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
+      retirement, each with a comment saying so.** All four exist only because Standard's
+      analyze-time placeholder calculator once needed them; that calculator is gone (see
+      *Analyze owns selection; the producer owns results* under **Done**), so each is now
+      dead in production but still pinned by its own test cases:
+      `resolveSelectionRhoArray` (`frontend/src/shell/analysis/rhoArrayResolver.ts`, no
+      production caller, exercised by `selectionRhoArray.test.ts`); `resolvePlaceholderWindSpeed`
+      (`frontend/src/shell/ve/standardSegments.ts`, no production caller — this is the function
+      F20-07 named `resolveSelectionWindSpeedForCalculator`, since renamed); `LapVEProfile.range`
+      (`frontend/src/shell/gpsLap/types.ts`); and the `outboundRange`/`inboundRange` pair on
+      the out-and-back profile type (`frontend/src/shell/outAndBack/types.ts`). Not a quick
+      delete: removing the two type fields ripples through a dozen fixture builders and both
+      GPS-mode chain suites by the review's own estimate, which is larger than the dead code
+      itself — scope that fixture work before starting.
+      *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
+
 ---
 
 ## Done
