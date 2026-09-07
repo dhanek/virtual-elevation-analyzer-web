@@ -1,0 +1,6 @@
+# Build output and vendored artefacts. `pkg` is wasm-pack's generated glue.
+dist
+pkg
+node_modules
+# Fixture data: large generated JSON whose diffs should stay reviewable as data.
+src/analysis/__fixtures__
