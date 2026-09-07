@@ -356,16 +356,32 @@ re-deriving it):
       `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
       of the PR #7 review fixes, 2026-08-31*
 
-- [ ] **[S] Re-analyzing a NARROWER lap selection paints a stale trim.** Analyze laps 10+12, untick
-      12, analyze lap 10 alone: the header paints RMSE 11.51 m and settles at 7.62 m. A fresh page
-      load of lap 10 alone paints 7.62 m once and never moves, so the jump is state carried over
-      from the previous selection — the trim reset in `showVirtualElevationAnalysisInline` only runs
-      inside the `if (appState.currentFileHash && parameterStorage)` branch and only when
-      `loadLapSettings` returns nothing, so a saved trim from the WIDER selection can reach
-      `initializeVEAnalysis` through `appState.presetTrimStart/End`. Not investigated beyond the
-      observation; reproduce it before believing that explanation.
-      `frontend/src/shell/ve/renderStandardVe.ts:318-345` · *origin: in-app check of the PR #7
-      review fixes, 2026-08-31*
+- [ ] **[S] A saved trim wider than the selection splits the slider from its number box.** Found
+      while trying to reproduce the stale-trim item below (now closed). `loadLapSettings` writes
+      `savedParams.trimEnd` into `appState.presetTrimEnd` with NO clamp against the incoming
+      selection's `timestamps.length - 1`, and the markup then renders both faces of the trim from
+      that one value. A `range` input clamps a value above its `max`; a `number` input does not. So
+      an over-range saved trim paints the sliders at the clamped maximum and the number boxes at
+      the raw saved figure — both pairs, panel and map. Measured in the app 2026-09-07 on the
+      reference ride: with `{trimEnd: 582}` planted under lap key `10` (274 samples),
+      `#trimEndSlider.value` and `#mapTrimEndSlider.value` read 273 while `#trimEndValue` and
+      `#mapTrimEndValue` read 582. RMSE stayed correct at 7.62 m, because every consumer downstream
+      reads the SLIDER — so this is a display split, not a wrong answer.
+
+      **Reachable only by planting the record**, which is why it is [S] and not larger: I could not
+      produce an over-range saved trim through the UI. Both writers derive their figure from the
+      current selection (`saveCurrentLapSettings` parses the clamped range slider;
+      `saveMapTrimSettings` writes the `presetTrimEnd` that `commitMapTrim` has just clamped), and
+      `section3Orchestration.ts` re-loads and resets the pair on every selection change. The one
+      candidate path I could not rule out by reading is a race: `bindMapTrim`'s slider listeners are
+      cloned and re-bound AFTER its `await loadLapSettings`, so during that window the PREVIOUS
+      selection's `commitMapTrim` is still live and closes over the previous `dataLength`, while
+      `appState.selectedLaps` already names the new one — a drag landing there would clamp against
+      the old length and save it under the new key. Not reproduced; a clamp at the load site closes
+      the hole either way and is three lines.
+      `frontend/src/shell/ve/renderStandardVe.ts` (the `savedParams` branch of
+      `showVirtualElevationAnalysisInline`) and `frontend/src/shell/section3/section3Orchestration.ts:1616-1620`
+      · *origin: in-app reproduction attempt for the item below, 2026-09-07*
 
 - [ ] **[S] `vite.config.ts` and `vitest.config.ts` are in neither tsc program, and neither is
       linted.** Bundle G closed this hole for `frontend/scripts/**`; the root config files still
@@ -382,7 +398,7 @@ re-deriving it):
       aggregation. Measuring is cheap; the fix cost is unknown until it is measured.
       `renderOutAndBack.ts` · *origin: Phase 7 deferred-items*
 
-- [ ] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
+- [x] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
       `standardInitialAutoRhoOwner` asymmetrically.** The return right after `await
       initializeVEAnalysis(...)` (`stillOwnsPanel()` false) does not clear the field; the
       structurally identical return after the auto-rho settle loop does. Traced and NOT
@@ -394,6 +410,12 @@ re-deriving it):
       tell the asymmetry is deliberate. Fix by adding the same three-line clear to the earlier
       return, or by hoisting a shared `clearInitialAutoRhoOwner()` helper the two returns both
       call.
+      **Done 2026-09-07**, by the second route: `releaseInitialAutoRhoOwner()` is declared beside
+      `stillOwnsPanel` and is now the only writer that drops this render's claim — both post-await
+      early returns and the settle-loop's own success path call it, so the three sites read
+      identically and no reader has to decide whether a difference is deliberate. Behaviour is
+      unchanged on the two sites that already cleared; the earlier return now clears too, which
+      the item's own tracing showed no live path can observe.
       `frontend/src/shell/ve/renderStandardVe.ts` (`showVirtualElevationAnalysisInline`, the
       early return following `await initializeVEAnalysis`, versus the one following the
       auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
@@ -433,6 +455,45 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### The stale-trim report, retired by reproduction — 2026-09-07
+
+- [x] **[S] Re-analyzing a NARROWER lap selection paints a stale trim.** *Filed 2026-08-31 from an
+      in-app check of the PR #7 review fixes: analyze laps 10+12, untick 12, analyze lap 10 alone,
+      and the header paints RMSE 11.51 m before settling at 7.62 m. The filed explanation was that
+      the trim reset in `showVirtualElevationAnalysisInline` runs only inside
+      `if (appState.currentFileHash && parameterStorage)` and only when `loadLapSettings` returns
+      nothing, letting the wider selection's trim reach `initializeVEAnalysis`. The item asked for a
+      reproduction before that explanation was believed. It does not survive one.*
+
+      **Not reproducible on `retire-analyze-calculator-pass`.** Measured in the app 2026-09-07 on
+      the reference ride with a rAF sampler plus a `MutationObserver` on `#veAnalysisSection`,
+      recording only on change. Analyzing laps 10+12 then narrowing to lap 10 traces
+      `rmse=8.10m trimE=582` → (new panel) `rmse= trimE=273` → `rmse=7.62m trimE=273`: the header
+      goes empty and fills once, at the correct trim, with no intermediate quantity. Re-run with
+      saved settings in play for the wider selection — trim dragged to 40/500 under key `10-12`
+      before narrowing — and the trace is the same. 11.51 m never appears; the only figure that
+      briefly persists is 8.10 m, which is the OUTGOING panel's own settled header standing until
+      the new markup replaces it 50 ms later.
+
+      **Two independent changes killed it, and neither is the cited block.** First, the analyze-leg
+      fit is gone (see *Analyze owns selection; the producer owns results*): with no analyze-time
+      quantity there is no first number to disagree with the producer's, which is what the 11.51 →
+      7.62 jump was. Second, `section3Orchestration.ts` already resets `presetTrimStart/End` per
+      selection change, at the selection change rather than at the next analyze, so the trim is
+      correct for the new selection before `showVirtualElevationAnalysisInline` is even called — the
+      cited reset is a redundant second one.
+
+      **The cited mechanism is also unreachable as written.** `appState.currentFileHash` is assigned
+      unconditionally once a file loads (`fileLoadOrchestration.ts:124`), so that guard never skips
+      the reset; and no writer produces a saved record missing `trimStart`/`trimEnd`
+      (`storageHandlers.ts` and both `MultiSegmentSettings.ts` writers always set both), so the
+      `savedParams`-present branch cannot silently keep a previous value either. What the load site
+      genuinely does lack is a CLAMP, which is a different defect with a different symptom and is
+      filed as its own item under **Standalone work**.
+      `frontend/src/shell/ve/renderStandardVe.ts` (`showVirtualElevationAnalysisInline`) ·
+      *origin: in-app check of the PR #7 review fixes, 2026-08-31; retired by in-app reproduction
+      2026-09-07*
 
 ### Analyze owns selection; the producer owns results — 2026-09-05
 
