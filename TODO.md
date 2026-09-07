@@ -356,14 +356,6 @@ re-deriving it):
       `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
       of the PR #7 review fixes, 2026-08-31*
 
-- [ ] **[S] `vite.config.ts` and `vitest.config.ts` are in neither tsc program, and neither is
-      linted.** Bundle G closed this hole for `frontend/scripts/**`; the root config files still
-      sit outside both `tsconfig.json` and `tsconfig.scripts.json` (verified with
-      `tsc --listFiles`) and outside `eslint src scripts`. Same failure shape as the bundle's own
-      item: a config file that cannot run still passes `npm run check`. Smaller stakes than the
-      scripts — a broken vite config fails loudly at `dev`/`build` — which is why it was not
-      folded in. *origin: PR #9 review round 7, F7-04*
-
 - [ ] **[M] Out-and-back's aggregation helpers have never been profiled.** GPS-lap's two
       equivalents each hid an O(targets × samples) rescan worth ~10 ms of a ~22 ms update.
       Out-and-back's `calculateOutAndBackStats` has the same shape and twice the segments. Not
@@ -428,6 +420,38 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### The build configs join a tsc program and the linter — 2026-09-07
+
+- [x] **[S] `vite.config.ts` and `vitest.config.ts` are in neither tsc program, and neither is
+      linted.** Bundle G closed this hole for `frontend/scripts/**`; the two build configs still
+      sat outside both `tsconfig.json` (whose `include` names `src` only) and
+      `tsconfig.scripts.json` (which named `scripts` only), and outside `eslint src scripts`.
+      Same failure shape as the bundle's own item, one directory up.
+
+      **The gap was demonstrated before it was closed**, rather than argued from the `include`
+      lines: `const broken: number = "not a number"`, a reference to an undeclared identifier, and
+      a `console.log` were appended to the two files, and `npm run check` and `npm run lint` both
+      passed clean. With the fix in place the same three files produce
+      `vite.config.ts(42,7): error TS2322`, `vite.config.ts(43,42): error TS2304`,
+      `vitest.config.ts(23,7): error TS2322` and `45:1 error Unexpected console statement`. The
+      deliberate breakage was then reverted and both commands are clean again.
+
+      They join `tsconfig.scripts.json` rather than `tsconfig.json` because they are Node programs
+      — `vite.config.ts` reads `process.env` and `__dirname` — and that file already carries
+      `types: ["node", "vite/client"]`. Membership re-verified with `tsc --listFiles`, the same
+      method that established the gap: both are now in the scripts program and neither is in the
+      `src` one. `eslint.config.js` gains a `*.config.ts` block with the Node globals, and
+      `npm run lint` names the two files, both mirroring the `scripts/**/*.ts` block bundle G
+      added for the identical reason. `no-console` is ERROR there too: a config file runs inside
+      the Vite CLI, whose own reporter owns stdout.
+
+      Both are listed by name rather than matched by a `*.config.ts` glob in the tsconfig, so
+      adding a third config file is a deliberate edit rather than a silent inclusion. *(The item
+      said "root config files"; they are at the FRONTEND package root, not the repository root —
+      there are no config files of these names at the repository root.)*
+      `frontend/tsconfig.scripts.json` · `frontend/eslint.config.js` · `frontend/package.json` ·
+      *origin: PR #9 review round 7, F7-04*
 
 ### A stored trim is fitted to the selection it is loaded against — 2026-09-07
 

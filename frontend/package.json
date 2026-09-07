@@ -7,7 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit && tsc -p tsconfig.scripts.json --noEmit",
-    "lint": "eslint src scripts --max-warnings=0",
+    "lint": "eslint src scripts vite.config.ts vitest.config.ts --max-warnings=0",
     "test": "vitest run",
     "profile:slider": "vite-node scripts/profile-slider-recompute.ts",
     "profile:gps-lap-render": "vite-node scripts/profile-gps-lap-render.ts"

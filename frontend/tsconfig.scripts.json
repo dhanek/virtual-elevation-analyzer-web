@@ -33,5 +33,17 @@
   "compilerOptions": {
     "types": ["node", "vite/client"]
   },
-  "include": ["scripts/**/*", "src/types/**/*.d.ts"]
+  // `vite.config.ts` and `vitest.config.ts` are Node programs too, and they
+  // belonged in NEITHER program until now: `tsconfig.json` includes `src` only,
+  // and this file included `scripts` only, so a config file that could not run
+  // still passed `npm run check`. Same failure shape as the `scripts` hole this
+  // file was created to close, one directory up. They are named explicitly
+  // rather than matched by a `*.config.ts` glob, so adding a third config file
+  // is a deliberate edit here rather than a silent inclusion.
+  "include": [
+    "scripts/**/*",
+    "src/types/**/*.d.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }
