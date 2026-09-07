@@ -409,6 +409,20 @@ Implemented on `retire-analyze-calculator-pass`. 94 test files / 1134 tests pass
       `ready`, making the formerly silent interval before the producer's first paint visible and
       non-storable.
 
+      Two behaviour changes follow from the analyze legs no longer running physics, and are worth
+      recording explicitly rather than leaving them in source comments alone. First, `Laps: N` /
+      `Sections: N` render once from the leg's own selection, so they count what the analyze leg
+      SELECTED, not what the producer plotted: a lap or leg whose fit throws is dropped by the
+      producer's segment-loop `catch` and appears on no plot while still being counted in the
+      header. GPS-lap has no rewriter, so there the over-count is permanent; accepted, because
+      detecting it from the leg's side would mean running the calculator, which is precisely the
+      pass this change removes. Second, the `"No valid laps to analyze"` and `"No valid
+      out-and-back sections to analyze"` messages are now checked against the laps the leg
+      selected, so a ride whose every lap's fit throws puts the panel up and the producer leaves
+      it empty at status `error` instead of showing the message. Both are deliberate consequences
+      of the leg no longer running physics; see the full comments at `renderGpsLap.ts:218-231` and
+      `renderOutAndBack.ts:220-235`.
+
       Final lifecycle review routed Section 3 map trim and panel trim through one
       owner-scoped 500 ms weather boundary, guarded Standard after each yielding
       render boundary, and made Store completion derive enablement from the current
@@ -1438,8 +1452,8 @@ pending an in-app check. 824 tests pass (up 8), `npm run check` and `npm run lin
       normalizedArrays.altitude).altitude`.
       `renderGpsLap.ts:113-124`, `renderOutAndBack.ts:105-116` · *origin: audit WR-1*
 
-      The guard is in `gpsModeRealChain.test.ts` — "the analyze leg honours the active elevation
-      profile", three cases per mode. That file was the right home because it already exists to
+      The guard is in `gpsModeRealChain.test.ts` — "analyze honours the active elevation profile",
+      three cases per mode. That file was the right home because it already exists to
       answer vacuous guards, and because the analyze leg is **not** `showGpsLapVEPlot`: that entry
       point is handed profiles already computed and never reaches a calculator. The real leg is
       `showGpsLapVEAnalysis` / `showOutAndBackVEAnalysis`, now driven directly. The probe is the

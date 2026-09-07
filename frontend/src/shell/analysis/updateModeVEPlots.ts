@@ -371,7 +371,10 @@ export async function updateModeVEPlots(
 
 	// AFTER summarize, never before: summarize is what writes currentVEResult and
 	// its three siblings, and `ready` is the claim that those describe this
-	// selection. The plot renders below are presentation and do not gate it.
+	// selection. Written here, before the renders below -- but a throw out of
+	// one of those renders still reaches `requestModeUpdate`'s catch around its
+	// call to this function, which moves the status to `error` even though the
+	// result fields are complete.
 	applyVeStatus(appState, "ready");
 
 	const isTabActive = args.isTabActive ?? isVeTabActive;

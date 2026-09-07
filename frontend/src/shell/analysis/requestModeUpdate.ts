@@ -268,9 +268,9 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	scheduleRecompute({
 		run: async () => {
 			if (
-			handler.id === "standard" &&
-			appState.standardPanelOwner !== standardPanelOwner
-		) {
+				handler.id === "standard" &&
+				appState.standardPanelOwner !== standardPanelOwner
+			) {
 				log.debug(
 					`requestModeUpdate(${reason}): Standard panel was replaced before the scheduled pass ran`,
 				);
