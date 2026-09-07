@@ -319,6 +319,32 @@ re-deriving it):
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
 
+- [ ] **[S–M] `calculateOutAndBackMeanElevation` feeds a DESCENDING array to an interpolator
+      that assumes ascending, so every mirrored-inbound leg contributes a constant.**
+      `outAndBackPlots.ts:69-70` builds `mirroredDistances = inboundDistances.map(d => maxDist - d)`,
+      which is descending, and hands it to `interpolateElevation` as the reference. That
+      function's first guard is `targetDist <= distances[0]`, and on a descending array
+      `distances[0]` is the MAXIMUM — so the guard fires for essentially every target and it
+      returns `elevations[0]`, the first inbound elevation sample, at every reference distance.
+      The inbound half of the mean profile is therefore a flat line at one sample's value rather
+      than a curve.
+
+      Measured 2026-09-07 with a direct probe: `[4,3,2,1,0]` against `[100,110,120,130,140]`
+      returns 100 for targets 0, 1, 2, 3 and 4; the same data ascending returns
+      100/110/120/130/140. Pinned as it stands by
+      `frontend/src/shell/multiSegment/shared.test.ts` so the behaviour cannot change by
+      accident.
+
+      **Deliberately not fixed alongside the profiling item**, and this is the reason: the mean
+      elevation is what out-and-back RMSE is measured against, so correcting it MOVES PUBLISHED
+      NUMBERS. That is a ruling, not a refactor — and it does not belong inside a change whose
+      whole claim was that it left the numbers alone. Whoever takes it needs to decide what the
+      mirrored inbound leg is meant to contribute, then re-baseline the out-and-back fixture
+      expectations. `interpolateAscending` already exists for the corrected shape.
+      `frontend/src/shell/outAndBack/outAndBackPlots.ts:69-79`,
+      `frontend/src/shell/multiSegment/shared.ts` · *origin: found while profiling the
+      aggregation helpers, 2026-09-07*
+
 - [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
       deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
       own investigation before it can be sized.
@@ -341,13 +367,6 @@ re-deriving it):
       number is never painted, and the dated in-app check below confirms one settled value set.
       `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
       of the PR #7 review fixes, 2026-08-31*
-
-- [ ] **[M] Out-and-back's aggregation helpers have never been profiled.** GPS-lap's two
-      equivalents each hid an O(targets × samples) rescan worth ~10 ms of a ~22 ms update.
-      Out-and-back's `calculateOutAndBackStats` has the same shape and twice the segments. Not
-      covered by the golden literals, which pin calculator output rather than downstream
-      aggregation. Measuring is cheap; the fix cost is unknown until it is measured.
-      `renderOutAndBack.ts` · *origin: Phase 7 deferred-items*
 
 - [x] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
       `standardInitialAutoRhoOwner` asymmetrically.** The return right after `await
@@ -406,6 +425,53 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Out-and-back's aggregation, measured then made linear — 2026-09-07
+
+- [x] **[M] Out-and-back's aggregation helpers have never been profiled.** They have now, and
+      the suspicion was right. *(The item's anchor was stale:
+      `calculateOutAndBackStats` is in `outAndBackPlots.ts:366`, not `renderOutAndBack.ts`.)*
+
+      **Measured first, fixed second.** `npm run profile:out-and-back` drives the real
+      `calculateOutAndBackStats` against synthesised profiles sized from `syntheticActivity.ts`,
+      the module the other two profilers share, so these numbers sit beside theirs. It reports
+      the shipped workload and then grows each axis separately, because "it is
+      O(targets × samples)" is a claim about GROWTH that one workload cannot settle.
+
+      | | before | after |
+      |---|---|---|
+      | 3 sections, primary legs only | 3.2 ms | 0.6 ms |
+      | 3 sections, with compare series (scored twice) | **6.2 ms** | **0.4 ms** |
+      | 8 sections | 18.0 ms | — |
+      | 600 → 2400 samples/leg (4× targets AND 4× haystack) | **15.4×** | **4.9×** |
+
+      That last row is the finding. Quadratic would be 16.0× and linear 4.0×; the before column
+      is quadratic to within noise. `interpolateElevation` linear-scans the reference once per
+      target, and `calculateOutAndBackStats` runs the whole scoring pass TWICE when compare
+      series exist.
+
+      **Fixed with `interpolateAscending`, a binary search declared BESIDE the old function
+      rather than replacing it.** The reason it is a second function is the item below: one
+      caller passes a descending array and depends on the old guard's behaviour, so making the
+      shared function order-aware would have changed out-and-back's RMSE inside a change that
+      set out to make it faster. Only the three hot sites switch — the ones interpolating
+      against `meanElevation.distances`, which `calculateOutAndBackMeanElevation` builds as a
+      uniform ascending ramp. The two sites in the mean-elevation build keep the old function
+      untouched.
+
+      The search is a LOWER BOUND, which is what makes it equivalent rather than merely close:
+      the linear scan returns the FIRST bracket straddling the target, so on repeated distances
+      it takes the earliest one, and picking the last `j` with `distances[j] <= target` would
+      differ there.
+
+      **Equivalence is measured, not argued**: 5001 targets across a 424-point reference — the
+      shape production builds — give `max |old - new| = 0`, exactly zero rather than within a
+      tolerance. `interpolateElevation` also gained its first tests: it had five call sites and
+      none. 96 test files / 1166 tests pass, including the out-and-back fixture chain and the
+      compare-figures suite, so no pinned number moved.
+      `frontend/src/shell/multiSegment/shared.ts` · `outAndBackPlots.ts:314,340,427` ·
+      `frontend/scripts/profile-out-and-back-aggregation.ts` (new) ·
+      *origin: Phase 7 deferred-items*
 
 ### The weather cache is one session-scoped instance — 2026-09-07
 
