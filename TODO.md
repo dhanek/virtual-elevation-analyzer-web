@@ -432,6 +432,15 @@ changed and why.
       the suspicion was right. *(The item's anchor was stale:
       `calculateOutAndBackStats` is in `outAndBackPlots.ts:366`, not `renderOutAndBack.ts`.)*
 
+      Criteria (concretised 2026-09-07, PR #19 review round 23):
+      - [x] D1 A runnable profiler measures the real `calculateOutAndBackStats`,
+            not a re-implementation
+      - [x] D2 The measurement settles whether the suspected O(targets × samples)
+            rescan is real, rather than only reporting a wall-clock number
+      - [x] D3 The reported numbers describe the SHIPPED workload
+      - [x] D4 Any fix that follows the measurement is shown not to move a pinned
+            number
+
       **Measured first, fixed second.** `npm run profile:out-and-back` drives the real
       `calculateOutAndBackStats` against synthesised profiles sized from `syntheticActivity.ts`,
       the module the other two profilers share, so these numbers sit beside theirs. It reports
@@ -440,10 +449,10 @@ changed and why.
 
       | | before | after |
       |---|---|---|
-      | 3 sections, primary legs only | 3.2 ms | 0.6 ms |
-      | 3 sections, with compare series (scored twice) | **6.2 ms** | **0.4 ms** |
-      | 8 sections | 18.0 ms | — |
-      | 600 → 2400 samples/leg (4× targets AND 4× haystack) | **15.4×** | **4.9×** |
+      | 3 sections, primary legs only | 1.3 ms | 0.1 ms |
+      | 3 sections, with compare series (scored twice) | **2.6 ms** | **0.3 ms** |
+      | 8 sections | 7.2 ms | 0.8 ms |
+      | 600 → 2400 samples/leg (4× targets AND 4× haystack) | **15.3×** | **5.9×** |
 
       That last row is the finding. Quadratic would be 16.0× and linear 4.0×; the before column
       is quadratic to within noise. `interpolateElevation` linear-scans the reference once per

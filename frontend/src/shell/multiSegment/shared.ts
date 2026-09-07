@@ -20,9 +20,6 @@ export function getMultiSegmentColor(index: number): string {
 }
 
 /**
- * Linear interpolation helper for elevation lookup at a target distance.
- */
-/**
  * The same interpolation as `interpolateElevation`, for an ASCENDING reference,
  * in O(log n) instead of O(n).
  *
@@ -69,6 +66,9 @@ export function interpolateAscending(targetDist: number, distances: number[], el
     return elevations[j] + t * (elevations[j + 1] - elevations[j]);
 }
 
+/**
+ * Linear interpolation helper for elevation lookup at a target distance.
+ */
 export function interpolateElevation(targetDist: number, distances: number[], elevations: number[]): number {
     if (distances.length === 0) return NaN;
     if (targetDist <= distances[0]) return elevations[0];

@@ -92,9 +92,8 @@ describe("interpolateAscending", () => {
 		const long = Array.from({ length: 1_200 }, (_, i) => (i / 1_199) * 4.2);
 		const elev = long.map((d) => 100 + Math.sin(d * 3) * 5);
 		for (const target of [0, 0.001, 1.7, 2.5, 4.1999, 4.2, 5]) {
-			expect(interpolateAscending(target, long, elev)).toBeCloseTo(
+			expect(interpolateAscending(target, long, elev)).toBe(
 				interpolateElevation(target, long, elev),
-				12,
 			);
 		}
 	});

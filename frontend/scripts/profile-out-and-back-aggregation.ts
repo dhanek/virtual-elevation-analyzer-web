@@ -7,9 +7,10 @@
  * The golden literals pin CALCULATOR output; they say nothing about the
  * aggregation that runs downstream of it on every slider move.
  *
- * WHAT IS REAL HERE. `calculateOutAndBackStats` and `createOutAndBackVEPlots`
- * are the production functions, imported and called. Nothing in the measured
- * path is re-implemented.
+ * WHAT IS REAL HERE. `calculateOutAndBackStats` is the production function,
+ * imported and called. Nothing in the measured path is re-implemented. Plot
+ * BUILDING is NOT measured — no plot-creation function is imported or called —
+ * so every number below excludes it.
  *
  * WHAT IS SYNTHESISED, AND WHY. The `OutAndBackVEProfile[]` inputs. Production
  * builds them in `toOutAndBackProfiles`, which needs a populated `AppState`, a
@@ -17,15 +18,21 @@
  * helpers under test and would put their cost inside the number. The shapes
  * here match what that function emits: monotonically increasing per-leg
  * distances in km, one VE sample per distance, and a mean-elevation reference
- * spanning the A→B leg. Sizes come from `syntheticActivity.ts`, the same module
- * the other two profilers use, so these numbers can sit beside theirs.
+ * spanning the A→B leg. Sample counts come from `syntheticActivity.ts`, the same
+ * module the other two profilers use, so these numbers can sit beside theirs;
+ * the mean-elevation reference is sized instead by PRODUCTION's own formula, so
+ * that the "shipped workload" row describes the shipped haystack.
  *
- * SECTION 2 is the complexity probe. The wall-clock number says how long the
- * helpers take; it does not say WHY, and "it is O(targets × samples)" is a claim
- * about growth that one workload cannot settle. So the same measurement runs at
- * three section counts with the per-section sample count held fixed, and the
- * interpolation calls are counted directly. Quadratic growth in the count is
- * visible in the ratio; linear growth would not be.
+ * SECTIONS 2 AND 3 ARE THE GROWTH PROBES. The wall-clock number says how long
+ * the helpers take; it does not say WHY, and "it is O(targets × samples)" is a
+ * claim about growth that one workload cannot settle. So each axis is grown on
+ * its own. SECTION 2 is the SECTION-count axis, with the per-section sample
+ * count held fixed: more sections is strictly more work of the same size, so
+ * both columns are linear here and this axis cannot show the rescan. SECTION 3
+ * is the SAMPLE axis, and it is the one that carries the finding: growing the
+ * samples per leg grows the targets AND the haystack together, so a per-target
+ * rescan shows up as roughly the SQUARE of the growth factor while a
+ * logarithmic lookup stays near linear.
  *
  * Run: `npm run profile:out-and-back` from `frontend/`.
  */
@@ -39,13 +46,20 @@ import { percentile, formatMs } from './syntheticActivity'
 
 const WARMUP_ITERATIONS = 5
 const MEASURED_ITERATIONS = 30
+const PROCESS_WARMUP_ITERATIONS = 200
 
 /** The maintainer's case: 3 sections is what the reference ride's gates produce. */
 const MAINTAINER_SECTION_COUNT = 3
 /** Samples per leg. A 7 200-sample activity split across 3 sections, two legs each. */
 const SAMPLES_PER_LEG = 1_200
-/** The mean-elevation reference spans one A→B leg. */
-const MEAN_ELEVATION_POINTS = SAMPLES_PER_LEG
+/** One leg's span in km. Production sizes its mean-elevation reference from this. */
+const LEG_DISTANCE_KM = 4.2
+/**
+ * The mean-elevation reference spans one A→B leg at PRODUCTION's resolution:
+ * `calculateOutAndBackMeanElevation` builds `max(100, floor(maxDistance * 100)) + 1`
+ * points, ~10 m intervals — `outAndBackPlots.ts:39-44`.
+ */
+const MEAN_ELEVATION_POINTS = Math.max(100, Math.floor(LEG_DISTANCE_KM * 100)) + 1
 
 function ramp(count: number, from: number, to: number): number[] {
     const step = (to - from) / Math.max(count - 1, 1)
@@ -65,7 +79,7 @@ function makeProfile(
     samplesPerLeg: number,
     withCompare: boolean,
 ): OutAndBackVEProfile {
-    const distances = ramp(samplesPerLeg, 0, 4.2)
+    const distances = ramp(samplesPerLeg, 0, LEG_DISTANCE_KM)
     return {
         sectionNumber,
         outboundRange: { startIdx: 0, endIdx: samplesPerLeg - 1 },
@@ -91,7 +105,7 @@ function makeInputs(sectionCount: number, samplesPerLeg: number, withCompare: bo
         makeProfile(i + 1, samplesPerLeg, withCompare),
     )
     const meanElevation = {
-        distances: ramp(MEAN_ELEVATION_POINTS, 0, 4.2),
+        distances: ramp(MEAN_ELEVATION_POINTS, 0, LEG_DISTANCE_KM),
         elevation: veSeries(MEAN_ELEVATION_POINTS, 1.3),
     }
     return { profiles, meanElevation }
@@ -109,14 +123,32 @@ function measure(run: () => void): { median: number; p95: number } {
     return { median: percentile(samples, 0.5), p95: percentile(samples, 0.95) }
 }
 
+/**
+ * `measure`'s warm-up is per-configuration and does not cover the first call in the
+ * PROCESS. Without this, whichever Section 1 configuration runs first absorbs JIT
+ * warm-up and is reported 2.5-5x slow — enough to invert the two Section 1 rows.
+ */
+function warmUpProcess(): void {
+    const { profiles, meanElevation } = makeInputs(
+        MAINTAINER_SECTION_COUNT, SAMPLES_PER_LEG, true,
+    )
+    for (let i = 0; i < PROCESS_WARMUP_ITERATIONS; i++) {
+        calculateOutAndBackStats(profiles, meanElevation)
+    }
+}
+
 const out = (line: string) => process.stdout.write(`${line}\n`)
 
 function main(): void {
+    warmUpProcess()
     out('')
     out('OUT-AND-BACK AGGREGATION — calculateOutAndBackStats')
     out('='.repeat(72))
-    out(`  ${SAMPLES_PER_LEG} samples per leg, 2 legs per section,`)
-    out(`  ${MEAN_ELEVATION_POINTS}-point mean-elevation reference.`)
+    out(`  ${SAMPLES_PER_LEG} samples per leg, 2 legs per section, over ${LEG_DISTANCE_KM} km.`)
+    out(
+        `  ${MEAN_ELEVATION_POINTS}-point mean-elevation reference — production's own ` +
+            `~10 m spacing over that leg, not the sample count.`,
+    )
     out('')
 
     out('  Section 1 — the shipped workload')
@@ -186,7 +218,7 @@ function main(): void {
             makeProfile(i + 1, samples, true),
         )
         const meanElevation = {
-            distances: ramp(samples, 0, 4.2),
+            distances: ramp(samples, 0, LEG_DISTANCE_KM),
             elevation: veSeries(samples, 1.3),
         }
         const { median, p95 } = measure(() => {
