@@ -9,9 +9,9 @@
  * `initialResult`. Two things consumed it, and neither should have:
  *
  *   - Standard's header spans, which sat directly above a plot drawn from a
- *     DIFFERENT fit -- `initializeVEAnalysis`'s own, trimmed and on the selected
- *     wind source. The spans are filled from that one now, on the same rule the
- *     virtual-distance header already followed.
+ *     DIFFERENT fit -- `initializeVEAnalysis`'s own. BOTH fits are gone now: the
+ *     render computes nothing, the spans ship empty, and `updateModeVEPlots`
+ *     fills them (`renderStandardVe.ts` says why the second one had to go too).
  *   - `appState.currentVEResult`, assigned for EVERY mode. The GPS panels
  *     display N per-lap fits (2N legs for out-and-back) and never received
  *     `initialResult` at all, so Store Result straight after Analyze persisted

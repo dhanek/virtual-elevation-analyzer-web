@@ -86,17 +86,17 @@ export function resolveSelectionWindSeries(
 }
 
 /**
- * Which wind series the Standard PLACEHOLDER calculator is handed (D-05, the
- * last inline copy).
+ * Which wind series a calculator over the whole SELECTION should be handed
+ * (D-05, the last inline copy).
  *
- * `initializeVEAnalysis` paints once before the sliders are bound. Its plots
- * already read `resolveSelectionWindSeries`, but its calculator used to read
- * the RAW FIT channel — so the placeholder fit and the wind plotted under it
- * described different winds whenever an offset or a calibration was set. Phase
- * 7 filed this as unobservable, because a synthetic `input` on #trimStartSlider
- * replaces the paint immediately and the placeholder result is never written to
- * `appState`. Both remain true; neither makes the divergence correct, and both
- * are properties of the CALLER that a future edit can remove.
+ * NO PRODUCTION CALLER, as of Standard's analyze-leg retirement. It existed for
+ * the placeholder calculator `initializeVEAnalysis` built before the sliders were
+ * bound: that render's plots already read `resolveSelectionWindSeries` while its
+ * calculator read the RAW FIT channel, so the placeholder fit and the wind
+ * plotted under it described different winds whenever an offset or a calibration
+ * was set. The calculator is deleted, so the divergence is gone rather than
+ * fixed. KEPT because the rule it encodes — resolved under FIT, NaN fill under
+ * constant, raw on a length mismatch — is still pinned by its own cases.
  *
  * @param windSource   The selected source, already narrowed to fit/constant.
  * @param rawWindSpeed The selection's FIT channel as recorded.

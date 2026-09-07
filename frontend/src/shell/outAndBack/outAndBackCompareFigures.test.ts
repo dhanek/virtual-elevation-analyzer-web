@@ -281,7 +281,6 @@ describe('renderOutAndBackPlots — the second subplot has somewhere to go', () 
             showVirtualDistanceTab: true,
             selectedWindSource: 'compare',
             currentAirSpeedCalibrationValue: '0.0',
-            initialStats: { rmse: 1, avgVeGain: 2, avgActualGain: 0 },
             sectionCount: SECTION_COUNT,
             defaultAirSpeedOffset: 0,
             elevationToggleMarkup: '',

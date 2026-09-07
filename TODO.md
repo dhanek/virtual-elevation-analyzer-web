@@ -338,28 +338,9 @@ re-deriving it):
       own investigation before it can be sized.
       `gateMarkers.ts`, `bindGpsDetection.ts`, `bindOutAndBackDetection.ts`
 
-- [ ] **[L] Retire the GPS analyze legs' own calculator pass.** With WR-4 done, one Analyze click
-      still runs the physics twice in the GPS modes: the analyze leg computes N per-lap fits
-      (`renderGpsLap.ts:219`) or 2N leg fits (`renderOutAndBack.ts:193,259`) for the first paint,
-      and the post-bind kick then recomputes the same segments through `updateModeVEPlots`. So
-      GPS-lap costs `1 + 2N` runs where `2N` would do, and out-and-back `1 + 4N`.
-      Standard has the same shape (`renderStandardVe.ts:103`).
-
-      The target: the analyze leg selects segments and renders nothing, the panel ships with empty
-      stats the way Standard's header spans now do, and the kick's pass is the first and only paint.
-      That would also make `seedSegmentModeAnalyzeState` unnecessary — the seed exists precisely
-      because the analyze path had no writer, and it now has one.
-
-      NOT bundled with WR-4 on purpose. It is a first-paint SEQUENCING change (the panel would
-      render empty and fill on the next macrotask), which no test in this repo can settle — the
-      risk is flicker, not numbers. It also wants the WR-4 in-app check done first: if the kick
-      misbehaves visually, this builds on top of that.
-      `renderGpsLap.ts`, `renderOutAndBack.ts`, `renderStandardVe.ts` · *origin: WR-4 follow-up,
-      2026-08-31*
-
-- [ ] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
+- [x] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
       The analyze leg paints `updateMetricsDisplay` from ONE fit over the concatenated selection
-      (`renderStandardVe.ts:265`); the kick a macrotask later writes the MEAN of the per-lap fits
+      (`initializeVEAnalysis`); the kick a macrotask later writes the MEAN of the per-lap fits
       (D-09 entry g). For a multi-lap selection those are different quantities, so the header
       visibly changes by itself even though both numbers are correct for what they measure.
       Measured in the app 2026-08-31 on the reference ride, laps 10+12: RMSE 26.22 m → 8.10 m, R²
@@ -369,10 +350,11 @@ re-deriving it):
       Three ways out, and it needs a ruling: decompose the analyze leg per lap (correct, and the
       most work), paint the spans empty and let the kick fill them (cheapest, adds a flicker), or
       keep the combined figure and label it as such the way the VD header labels its combined line.
-      **Retiring the analyze legs' own calculator pass (the item above) subsumes this** — if that is
-      done first, this disappears with it.
-      `frontend/src/shell/ve/renderStandardVe.ts:251-273` · *origin: in-app check of the PR #7
-      review fixes, 2026-08-31*
+      **Subsumed by the analyze-leg retirement.** See *Analyze owns selection; the producer owns
+      results* under **Done** (2026-09-05). With no analyze-time fit, the concatenated-selection
+      number is never painted, and the dated in-app check below confirms one settled value set.
+      `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
+      of the PR #7 review fixes, 2026-08-31*
 
 - [ ] **[S] Re-analyzing a NARROWER lap selection paints a stale trim.** Analyze laps 10+12, untick
       12, analyze lap 10 alone: the header paints RMSE 11.51 m and settles at 7.62 m. A fresh page
@@ -400,12 +382,130 @@ re-deriving it):
       aggregation. Measuring is cheap; the fix cost is unknown until it is measured.
       `renderOutAndBack.ts` · *origin: Phase 7 deferred-items*
 
+- [ ] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
+      `standardInitialAutoRhoOwner` asymmetrically.** The return right after `await
+      initializeVEAnalysis(...)` (`stillOwnsPanel()` false) does not clear the field; the
+      structurally identical return after the auto-rho settle loop does. Traced and NOT
+      reproducible as a live bug: every way `stillOwnsPanel()` can go false there either
+      reassigns `standardInitialAutoRhoOwner` (a second `showVirtualElevationAnalysisInline`
+      render) or clears it along with `standardPanelOwner`/`autoRhoInputRevision`
+      (`tearDownVeAnalysisPanel`), and the sliders bind below this point, so no interactive panel
+      can carry the wedged value. Readability only: a reader comparing the two returns cannot
+      tell the asymmetry is deliberate. Fix by adding the same three-line clear to the earlier
+      return, or by hoisting a shared `clearInitialAutoRhoOwner()` helper the two returns both
+      call.
+      `frontend/src/shell/ve/renderStandardVe.ts` (`showVirtualElevationAnalysisInline`, the
+      early return following `await initializeVEAnalysis`, versus the one following the
+      auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
+      maintainer 2026-09-04*
+
+- [ ] **[M] No formatter or indentation rule is machine-enforced; a misindented block passed
+      both `npm run check` and `npm run lint`.** A guard added to `requestModeUpdate`'s run
+      closure was indented one level shallow relative to the `if` that opened it — wrong enough
+      to mislead a reader about its nesting, invisible to both commands because neither checks
+      formatting. Wire `prettier --check` into `npm run check` (or add `@stylistic/indent`,
+      or an equivalent, to `frontend/eslint.config.js`'s existing flat config) so indentation
+      drift fails CI instead of needing a human reviewer to catch it. Deliberately not done
+      inside a refactor branch: either option means a repo-wide reformat diff, which does not
+      belong mixed into unrelated behavioural changes.
+      `frontend/package.json` (`check`, `lint` scripts), `frontend/eslint.config.js` · *origin:
+      PR #14 review round 20, F20-06 — deferred by the maintainer 2026-09-04*
+
+- [ ] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
+      retirement, each with a comment saying so.** All four exist only because Standard's
+      analyze-time placeholder calculator once needed them; that calculator is gone (see
+      *Analyze owns selection; the producer owns results* under **Done**), so each is now
+      dead in production but still pinned by its own test cases:
+      `resolveSelectionRhoArray` (`frontend/src/shell/analysis/rhoArrayResolver.ts`, no
+      production caller, exercised by `selectionRhoArray.test.ts`); `resolvePlaceholderWindSpeed`
+      (`frontend/src/shell/ve/standardSegments.ts`, no production caller — this is the function
+      F20-07 named `resolveSelectionWindSpeedForCalculator`, since renamed); `LapVEProfile.range`
+      (`frontend/src/shell/gpsLap/types.ts`); and the `outboundRange`/`inboundRange` pair on
+      the out-and-back profile type (`frontend/src/shell/outAndBack/types.ts`). Not a quick
+      delete: removing the two type fields ripples through a dozen fixture builders and both
+      GPS-mode chain suites by the review's own estimate, which is larger than the dead code
+      itself — scope that fixture work before starting.
+      *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
+
 ---
 
 ## Done
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Analyze owns selection; the producer owns results — 2026-09-05
+
+Implemented on `retire-analyze-calculator-pass`. 94 test files / 1134 tests pass; root
+`npm run check:frontend` and frontend `npm run lint` are clean.
+
+- [x] **[L] Retire the analyze legs' own calculator pass.** The three analyze legs now select and
+      render structure only; `updateModeVEPlots` is the sole physics producer and the sole owner of
+      the four analyze-derived result fields. Per Analyze this deletes **N calculator runs in
+      GPS-lap** (the former one-per-lap pass), **2N in out-and-back** (one per outbound and inbound
+      leg), and **one in Standard** (the former fit over the concatenated selection). These counts
+      name the calls actually removed, independent of whether the surviving producer also builds a
+      comparison-wind calculator.
+
+      The now-unneeded `seedSegmentModeAnalyzeState` and `seedSegmentModeFilteredData` helpers are
+      deleted. Result lifecycle is explicit through `veStatus`: `idle` before work, `computing`
+      while the producer owns an update, `ready` only after the summarize seam has published a
+      complete result, and `error` on failure. Store Result is disabled unless the state is
+      `ready`, making the formerly silent interval before the producer's first paint visible and
+      non-storable.
+
+      Two behaviour changes follow from the analyze legs no longer running physics, and are worth
+      recording explicitly rather than leaving them in source comments alone. First, `Laps: N` /
+      `Sections: N` render once from the leg's own selection, so they count what the analyze leg
+      SELECTED, not what the producer plotted: a lap or leg whose fit throws is dropped by the
+      producer's segment-loop `catch` and appears on no plot while still being counted in the
+      header. GPS-lap has no rewriter, so there the over-count is permanent; accepted, because
+      detecting it from the leg's side would mean running the calculator, which is precisely the
+      pass this change removes. Second, the `"No valid laps to analyze"` and `"No valid
+      out-and-back sections to analyze"` messages are now checked against the laps the leg
+      selected, so a ride whose every lap's fit throws puts the panel up and the producer leaves
+      it empty at status `error` instead of showing the message. Both are deliberate consequences
+      of the leg no longer running physics; see the full comments at `renderGpsLap.ts:218-231` and
+      `renderOutAndBack.ts:220-235`.
+
+      Final lifecycle review routed Section 3 map trim and panel trim through one
+      owner-scoped 500 ms weather boundary, guarded Standard after each yielding
+      render boundary, and made Store completion derive enablement from the current
+      `veStatus` without touching a replacement panel. Focused regressions cover both
+      predecessor-settlement orders, repeated and cross-surface gestures, render
+      replacement/teardown, producer failures, and stale storage completion.
+
+      The GPS chain and out-and-back fixture-chain suites retain their numeric assertions and
+      goldens unchanged. Their mechanism-specific lifecycle assertions were updated to await the
+      sole producer and verify the non-ready/disabled gate before settling, then the ready/enabled
+      state afterward.
+
+      **Checked in the app, GPS modes, 2026-09-04.** On the reference ride, GPS-lap with four
+      virtual laps showed an empty loading interval of **236 ms cold** (about 14 frames and
+      perceptible; explicitly accepted by the maintainer), then **71 ms warm**. Out-and-back with
+      three sections showed **27 ms**. Every metric moved from empty directly to one final value;
+      none replaced one numeric value with another. Store Result stayed disabled throughout and,
+      after ready, stored values matched the panels: GPS-lap mean RMSE **4.11 m**, VE gain
+      **5.7462**, laps **1-2-3-4**; out-and-back RMSE **2.77 m**, VE gain **0.40 m**, actual gain
+      **0.00 m**, sections **3**. Test rows and parameter changes were removed and the stores were
+      restored.
+
+      **Checked in the app, Standard, 2026-09-05.** After the auto-rho first-paint race found by
+      the initial gate was fixed, both cold paths painted exactly one final set: no stored parameter
+      record at **491 ms**, and a stored-record load at **438 ms**, each **R² 0.0186 / RMSE
+      2.15 m / VE gain 3.60 m / actual gain −0.58 m**. Laps 10+12 moved from the previous result
+      through **22 ms empty** to one final set (**R² 0.0206 / RMSE 1.94 m / VE gain 3.31 m /
+      actual gain −0.61 m**). A frame-level two-lap run measured Store Result disabled at
+      **5.6 ms**, empty at **38.9 ms**, and ready/final at **59.0 ms**, with no frame showing an
+      enabled empty panel and no numeric self-change. Disabled store attempts added nothing; the
+      intentional ready-state row matched the panel and was deleted, and both stores were restored.
+
+      This also closes the dated *Standard's header jumps on a multi-lap selection* repro above:
+      the combined-selection analyze value no longer exists, so only the producer's per-lap mean
+      reaches the shared header span.
+
+      `renderGpsLap.ts`, `renderOutAndBack.ts`, `renderStandardVe.ts`, `updateModeVEPlots.ts` ·
+      *origin: WR-4 follow-up, 2026-08-31*
 
 ### Standard's two Crr fallbacks — 2026-09-04
 
@@ -1397,8 +1497,8 @@ pending an in-app check. 824 tests pass (up 8), `npm run check` and `npm run lin
       normalizedArrays.altitude).altitude`.
       `renderGpsLap.ts:113-124`, `renderOutAndBack.ts:105-116` · *origin: audit WR-1*
 
-      The guard is in `gpsModeRealChain.test.ts` — "the analyze leg honours the active elevation
-      profile", three cases per mode. That file was the right home because it already exists to
+      The guard is in `gpsModeRealChain.test.ts` — "analyze honours the active elevation profile",
+      three cases per mode. That file was the right home because it already exists to
       answer vacuous guards, and because the analyze leg is **not** `showGpsLapVEPlot`: that entry
       point is handed profiles already computed and never reaches a calculator. The real leg is
       `showGpsLapVEAnalysis` / `showOutAndBackVEAnalysis`, now driven directly. The probe is the

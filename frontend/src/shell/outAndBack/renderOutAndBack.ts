@@ -26,11 +26,8 @@ import {
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
-import { resolveElevationProfile } from "../analysis/elevationProfileResolver";
-import { resolveRhoArray } from "../analysis/rhoArrayResolver";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
-import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import {
 	resolveMultiSegmentAnalysisParams,
@@ -56,25 +53,20 @@ import {
 import { log } from "../../utils/log";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import {
-	calculateOutAndBackMeanElevation,
-	calculateOutAndBackStats,
-	renderOutAndBackPlots,
 	renderOutAndBackWindPlot,
 	renderOutAndBackPowerPlot,
 	renderOutAndBackVdPlot,
 } from "./outAndBackPlots";
 import { createOutAndBackUpdateCallbacks } from "./updateOutAndBack";
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
-import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
-import { seedSegmentModeAnalyzeState } from "../../modes/analysis/segmentSummary";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
-import { sectionVirtualDistances } from "../../modes/analysis/segmentVirtualDistance";
+import { applyVeStatus } from "../../state/veStatus";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -91,7 +83,10 @@ export async function showOutAndBackVEAnalysis(
 	reuseCurrentSettings: boolean = false,
 ) {
 	const { appState } = services;
-	services.showLoading("Calculating VE for out-and-back sections...");
+	// STRUCTURE, NOT PHYSICS. This leg no longer integrates anything, so the old
+	// "Calculating VE for out-and-back sections..." would have described work it
+	// does not do.
+	services.showLoading("Preparing out-and-back analysis...");
 
 	const analyzedSectionNumbers = sections.map(
 		(section) => section.sectionNumber,
@@ -112,65 +107,7 @@ export async function showOutAndBackVEAnalysis(
 	const allVelocity = normalizedArrays.velocity;
 	const allPositionLat = normalizedArrays.positionLat;
 	const allPositionLong = normalizedArrays.positionLong;
-	// WR-1: the analyze leg resolves the elevation profile exactly as the update
-	// path does (`updateGpsLap.ts`, `updateModeVEPlots.ts`). Reading
-	// `normalizedArrays.altitude` straight through meant that, with a DEM
-	// applied, the smoothing toggle rendered ON while this first paint was
-	// computed from the raw FIT channel -- and the numbers then moved on the
-	// first control nudge, when the primitive took over.
-	const allAltitude = resolveElevationProfile(
-		appState,
-		fitData,
-		normalizedArrays.altitude,
-	).altitude;
 	const allDistance = normalizedArrays.distance;
-
-	// RHO, RESOLVED EXACTLY AS THE PRIMITIVE RESOLVES IT (WR-4 follow-up).
-	//
-	// This calculator used to be built with NO `rhoArray` at all, while
-	// `updateModeVEPlots` passes a per-segment slice (`:251`). On any ride
-	// carrying usable air density the two passes therefore integrated different
-	// physics -- constant `params.rho` here, the real per-point series there --
-	// and the panel visibly changed by itself when the post-bind kick landed.
-	// Measured on the golden ride: mean RMSE 7.809 m at the analyze paint
-	// against 7.555 m one macrotask later, and the analyze number was the wrong
-	// one.
-	//
-	// `resolveRhoArray` is the one resolver both paths share (D-06), so this is
-	// the same call the primitive makes, not a second opinion.
-	const allRho = resolveRhoArray(fitData, normalizedArrays);
-
-	/**
-	 * The rho slice for one leg, on `extractSegmentData`'s own bounds
-	 * (`SegmentExtractor.ts:26`) so the series cannot end up a different length
-	 * from the ones beside it.
-	 *
-	 * BOUNDED BY THE DENSITY SERIES AS WELL. `hasAirDensityData` is a
-	 * `.some(...)`, so a channel the device stopped emitting mid-ride is still
-	 * accepted, and indexing on `allTimestamps` alone put `undefined` into a
-	 * `number[]` — NaN rho across the WASM boundary for that leg. Same rule as
-	 * `resolveSelectionRhoArray` (`rhoArrayResolver.ts:86`): a leg the series
-	 * does not span falls back to the constant `params.rho` rather than to a
-	 * short one.
-	 *
-	 * A LENGTH CHECK, AND ONLY THAT — an interior NaN in a full-length channel
-	 * still reaches the calculator, since `hasAirDensityData` accepts the series
-	 * on a `.some(...)`. Pre-existing, and not what this guard covers.
-	 */
-	const legRho = (startIdx: number, endIdx: number): number[] | null => {
-		if (!allRho) return null;
-		const slice: number[] = [];
-		for (let i = startIdx; i <= endIdx && i < allTimestamps.length; i++) {
-			if (i >= allRho.length) {
-				log.warn(
-					`Air density series (${allRho.length}) does not span leg ${startIdx}-${endIdx}; using constant rho`,
-				);
-				return null;
-			}
-			slice.push(allRho[i]);
-		}
-		return slice;
-	};
 
 	// Handle wind/air speed via typed locals.
 	const outAndBackWindResolution = resolveWindSeries({
@@ -201,170 +138,139 @@ export async function showOutAndBackVEAnalysis(
 		log.debug("Out and Back VE: No wind data available");
 	}
 
-	// The stored Crr is 22 °C-referenced; the physics uses the
-	// temperature-corrected value when the correction is enabled.
-	const cda = resolveDisplayCda(resolvedParams.cda);
-	const crr = resolveDisplayCrr(resolvedParams.crr);
-	const appliedCrr = resolveAppliedCrr(resolvedParams, crr);
+	/**
+	 * Describe ONE leg. NO PHYSICS.
+	 *
+	 * What this builds is the supplementary series the Wind/Power/VD tabs draw
+	 * plus the leg's full-activity range; `virtual_elevation` is the recompute's
+	 * to produce and nothing here integrates one. `null` means the leg is too
+	 * short to be worth drawing.
+	 *
+	 * It slices by hand rather than through `extractSegmentData` because the one
+	 * series that helper adds over these seven is ALTITUDE, and altitude was
+	 * only ever here to feed the calculator and the `actualElevation` copy that
+	 * went with it. Resolving an elevation profile and slicing it for nobody
+	 * would be work with no reader.
+	 */
+	const describeLeg = (
+		startIdx: number,
+		endIdx: number,
+	): {
+		range: { startIdx: number; endIdx: number };
+		series: ReturnType<typeof buildSegmentSupplementarySeries>;
+	} | null => {
+		const timestamps: number[] = [];
+		const power: number[] = [];
+		const velocity: number[] = [];
+		const positionLat: number[] = [];
+		const positionLong: number[] = [];
+		const distance: number[] = [];
+		const windSpeed: number[] = [];
 
-	// Calculate VE for each section (outbound and inbound separately)
+		for (let i = startIdx; i <= endIdx && i < allTimestamps.length; i++) {
+			timestamps.push(allTimestamps[i]);
+			power.push(allPower[i]);
+			velocity.push(allVelocity[i]);
+			positionLat.push(allPositionLat[i]);
+			positionLong.push(allPositionLong[i]);
+			distance.push(allDistance[i]);
+			windSpeed.push(allWindSpeed[i]);
+		}
+
+		// KEPT, even though nothing here can throw on a short leg any more: the
+		// legs this loop keeps are the legs whose series the tabs draw, and a
+		// two-sample leg draws nothing useful. `updateModeVEPlots.ts` applies the
+		// identical `MIN_SEGMENT_SAMPLES` rule to the segments it computes, so on
+		// THIS rule the two passes agree without either filtering on the other's
+		// behalf.
+		if (timestamps.length < 10) {
+			return null;
+		}
+
+		return {
+			range: { startIdx, endIdx },
+			series: buildSegmentSupplementarySeries({
+				timestamps,
+				power,
+				velocity,
+				positionLat,
+				positionLong,
+				distance,
+				windSpeed,
+				params: resolvedParams,
+				selectedWindSource: outAndBackWindResolution.selectedWindSource,
+			}),
+		};
+	};
+
+	// Describe each section's two legs. THE TWO PASSES DO NOT AGREE ON EVERY
+	// RULE, and this is where out-and-back's version of that asymmetry lives.
+	//
+	// A section survives here when at least one of its legs cleared the sample
+	// floor. The producer applies one further rule this loop cannot: a leg whose
+	// fit THROWS is dropped by the `catch` in `updateModeVEPlots`' segment loop
+	// and appears on no plot, while it is still counted here. Detecting that from
+	// this side would mean running the calculator, which is exactly the pass this
+	// leg no longer has — only the producer knows which legs survived.
+	//
+	// Consequences, stated rather than smoothed over:
+	//
+	//   - `Sections: N` is rendered once from `profiles.length`, so between the
+	//     panel going up and the first recompute landing it can over-count. It
+	//     SELF-CORRECTS WHEN AT LEAST ONE LEG SURVIVES:
+	//     `createOutAndBackUpdateCallbacks`' `renderMetrics` rewrites
+	//     `#oabSectionCountValue` from `aggregate.segmentCount`, which is the
+	//     producer's surviving-section count. GPS-lap has no such rewriter,
+	//     which is why its equivalent divergence is permanent and this one is a
+	//     first-frame artefact.
+	//   - EXCEPT when every leg's fit throws: `updateModeVEPlots` hits
+	//     `profiles.length === 0`, calls `applyVeStatus(appState, "error")` and
+	//     returns before `renderMetrics` ever runs (`updateModeVEPlots.ts:360-363`
+	//     vs. `:380`). On that ride the over-counted `Sections: N` from this loop
+	//     is never corrected and sits next to the empty panel at status `"error"`.
+	//   - "No valid out-and-back sections to analyze" no longer fires for legs
+	//     whose fit throws: the check below sees the legs this loop selected, so
+	//     a ride where every fit throws puts the panel up and the producer then
+	//     leaves it empty at status `"error"` by the path above, rather than
+	//     this leg's own showError.
 	for (const section of sections) {
-		const profile: OutAndBackVEProfile = {
+		const outbound = describeLeg(
+			section.outboundStartIdx,
+			section.outboundEndIdx,
+		);
+		const inbound = describeLeg(section.inboundStartIdx, section.inboundEndIdx);
+
+		if (!outbound && !inbound) {
+			log.warn(
+				`Section ${section.sectionNumber} has no leg with enough data points, skipping`,
+			);
+			continue;
+		}
+
+		profiles.push({
 			sectionNumber: section.sectionNumber,
-			outboundDistances: [],
+			outboundRange: outbound?.range ?? null,
+			outboundDistances: outbound?.series.distancesKm ?? [],
+			// EMPTY, NOT ZEROED AND NOT FAKED. There is no first paint of a
+			// virtual elevation any more, and an array of the right length full of
+			// zeros would render as a flat line the user could mistake for a
+			// result. `createOutAndBackUpdateCallbacks` fills these in.
 			outboundVE: [],
+			// Compare (D-07/D-20) is resolved by the primitive, which is now the
+			// only pass that resolves anything.
 			outboundVECompare: null,
 			outboundActualElevation: [],
-			outboundSeries: null,
-			outboundRange: null,
-			inboundDistances: [],
+			outboundSeries: outbound?.series ?? null,
+			inboundRange: inbound?.range ?? null,
+			inboundDistances: inbound?.series.distancesKm ?? [],
 			inboundVE: [],
 			inboundVECompare: null,
 			inboundActualElevation: [],
-			inboundSeries: null,
-			inboundRange: null,
+			inboundSeries: inbound?.series ?? null,
 			outboundDuration: section.outboundDuration,
 			inboundDuration: section.inboundDuration,
 			totalDistance: section.totalDistance,
-		};
-
-		// Process outbound segment (A → B)
-		try {
-			const outboundData = extractSegmentData({
-				startIdx: section.outboundStartIdx,
-				endIdx: section.outboundEndIdx,
-				allTimestamps,
-				allPower,
-				allVelocity,
-				allPositionLat,
-				allPositionLong,
-				allAltitude,
-				allDistance,
-				allWindSpeed,
-			});
-
-			if (outboundData.timestamps.length >= 10) {
-				const calculator = createVeCalculator({
-					timestamps: outboundData.timestamps,
-					power: outboundData.power,
-					velocity: outboundData.velocity,
-					positionLat: outboundData.positionLat,
-					positionLong: outboundData.positionLong,
-					altitude: outboundData.altitude,
-					distance: outboundData.distance,
-					windSpeed: outboundData.windSpeed,
-					rhoArray: legRho(section.outboundStartIdx, section.outboundEndIdx),
-					params: resolvedParams,
-					cda,
-					crr: appliedCrr,
-				});
-
-				const result = calculator.calculate_virtual_elevation(
-					cda,
-					appliedCrr,
-					0,
-					outboundData.timestamps.length - 1,
-				);
-				const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-				profile.outboundRange = {
-					startIdx: section.outboundStartIdx,
-					endIdx: section.outboundEndIdx,
-				};
-				profile.outboundSeries = buildSegmentSupplementarySeries({
-					timestamps: outboundData.timestamps,
-					power: outboundData.power,
-					velocity: outboundData.velocity,
-					positionLat: outboundData.positionLat,
-					positionLong: outboundData.positionLong,
-					distance: outboundData.distance,
-					windSpeed: outboundData.windSpeed,
-					params: resolvedParams,
-					selectedWindSource: outAndBackWindResolution.selectedWindSource,
-				});
-				profile.outboundDistances = profile.outboundSeries.distancesKm;
-				profile.outboundVE = veArray;
-				profile.outboundActualElevation = resolvedParams.velodrome
-					? new Array(outboundData.altitude.length).fill(0)
-					: [...outboundData.altitude];
-			}
-		} catch (err) {
-			log.error(
-				`Failed to calculate outbound VE for section ${section.sectionNumber}:`,
-				err,
-			);
-		}
-
-		// Process inbound segment (B → A)
-		try {
-			const inboundData = extractSegmentData({
-				startIdx: section.inboundStartIdx,
-				endIdx: section.inboundEndIdx,
-				allTimestamps,
-				allPower,
-				allVelocity,
-				allPositionLat,
-				allPositionLong,
-				allAltitude,
-				allDistance,
-				allWindSpeed,
-			});
-
-			if (inboundData.timestamps.length >= 10) {
-				const calculator = createVeCalculator({
-					timestamps: inboundData.timestamps,
-					power: inboundData.power,
-					velocity: inboundData.velocity,
-					positionLat: inboundData.positionLat,
-					positionLong: inboundData.positionLong,
-					altitude: inboundData.altitude,
-					distance: inboundData.distance,
-					windSpeed: inboundData.windSpeed,
-					rhoArray: legRho(section.inboundStartIdx, section.inboundEndIdx),
-					params: resolvedParams,
-					cda,
-					crr: appliedCrr,
-				});
-
-				const result = calculator.calculate_virtual_elevation(
-					cda,
-					appliedCrr,
-					0,
-					inboundData.timestamps.length - 1,
-				);
-				const veArray = Array.from(result.virtual_elevation as Float64Array);
-
-				profile.inboundRange = {
-					startIdx: section.inboundStartIdx,
-					endIdx: section.inboundEndIdx,
-				};
-				profile.inboundSeries = buildSegmentSupplementarySeries({
-					timestamps: inboundData.timestamps,
-					power: inboundData.power,
-					velocity: inboundData.velocity,
-					positionLat: inboundData.positionLat,
-					positionLong: inboundData.positionLong,
-					distance: inboundData.distance,
-					windSpeed: inboundData.windSpeed,
-					params: resolvedParams,
-					selectedWindSource: outAndBackWindResolution.selectedWindSource,
-				});
-				profile.inboundDistances = profile.inboundSeries.distancesKm;
-				profile.inboundVE = veArray;
-				profile.inboundActualElevation = resolvedParams.velodrome
-					? new Array(inboundData.altitude.length).fill(0)
-					: [...inboundData.altitude];
-			}
-		} catch (err) {
-			log.error(
-				`Failed to calculate inbound VE for section ${section.sectionNumber}:`,
-				err,
-			);
-		}
-
-		if (profile.outboundVE.length > 0 || profile.inboundVE.length > 0) {
-			profiles.push(profile);
-		}
+		});
 	}
 
 	services.hideLoading();
@@ -373,9 +279,6 @@ export async function showOutAndBackVEAnalysis(
 		services.showError("No valid out-and-back sections to analyze");
 		return;
 	}
-
-	// Calculate mean actual elevation profile (mirroring inbound)
-	const meanElevation = calculateOutAndBackMeanElevation(profiles);
 
 	// Check for constant wind settings
 	const hasConstantWind =
@@ -393,7 +296,6 @@ export async function showOutAndBackVEAnalysis(
 		resultsStorage,
 		waitForPlotly,
 		profiles,
-		meanElevation,
 		resolvedParams,
 		hasAirSpeed || hasWindSpeed,
 		hasConstantWind,
@@ -429,6 +331,15 @@ export function outAndBackVdTabMarkup(
                         `;
 }
 
+/**
+ * NO `initialStats` FIELD HERE. This used to carry the three header numbers the
+ * analyze leg's own two fits produced, so the template could paint them before
+ * the first recompute. There is no analyze-time fit any more, and the spans
+ * therefore ship EMPTY — exactly what the panel showed before a value existed —
+ * until `renderMetrics` fills them from the aggregate the one producer
+ * computed. `sectionCount` below stays: it is a property of the selection, not
+ * of the physics.
+ */
 export interface OutAndBackVeTemplateOptions {
 	params: AnalysisParameters;
 	hasWindSpeed: boolean;
@@ -437,11 +348,6 @@ export interface OutAndBackVeTemplateOptions {
 	showVirtualDistanceTab: boolean;
 	selectedWindSource: string;
 	currentAirSpeedCalibrationValue: string;
-	initialStats: {
-		rmse: number;
-		avgVeGain: number;
-		avgActualGain: number;
-	};
 	sectionCount: number;
 	defaultAirSpeedOffset: number;
 	elevationToggleMarkup: string;
@@ -476,7 +382,6 @@ export function buildOutAndBackVeAnalysisTemplate(
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
-		initialStats,
 		sectionCount,
 		defaultAirSpeedOffset,
 		elevationToggleMarkup,
@@ -582,9 +487,14 @@ export function buildOutAndBackVeAnalysisTemplate(
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             <div class="ve-metrics-compact">
-                                RMSE:<span id="oabRmseValue">${initialStats.rmse.toFixed(2)}m</span> |
-                                VE Gain:<span id="oabVeGainValue">${initialStats.avgVeGain.toFixed(2)}m</span> |
-                                Actual:<span id="oabActualGainValue">${initialStats.avgActualGain.toFixed(2)}m</span> |
+                                <!-- EMPTY until the one producer fills them:
+                                     renderMetrics writes all three from the
+                                     aggregate updateModeVEPlots computed, and
+                                     the analyze leg no longer has a number of
+                                     its own to disagree with it. -->
+                                RMSE:<span id="oabRmseValue"></span> |
+                                VE Gain:<span id="oabVeGainValue"></span> |
+                                Actual:<span id="oabActualGainValue"></span> |
                                 Sections:<span id="oabSectionCountValue">${sectionCount}</span>
                                 <!-- Filled in only under "Compare both methods",
                                      so the paired spans above are read as two
@@ -653,13 +563,19 @@ export function buildOutAndBackVeAnalysisTemplate(
     `;
 }
 
+/**
+ * Show the out-and-back VE panel with full controls.
+ *
+ * STRUCTURE ONLY. The profiles handed in carry no virtual elevation, so nothing
+ * here scores or draws a VE figure; the post-bind kick at the foot of this
+ * function is what computes and paints one.
+ */
 export async function showOutAndBackVEPlot(
 	services: ShellServices,
 	parameterStorage: ParameterStorage,
 	resultsStorage: ResultsStorage,
 	waitForPlotly: () => Promise<any>,
 	profiles: OutAndBackVEProfile[],
-	meanElevation: { distances: number[]; elevation: number[] },
 	params: AnalysisParameters,
 	hasWindSpeed: boolean,
 	hasConstantWind: boolean,
@@ -668,57 +584,26 @@ export async function showOutAndBackVEPlot(
 ) {
 	const { appState } = services;
 
-	// CR-01. THE PANEL AND THE ANALYSED SAMPLES GO ON SCREEN TOGETHER.
-	//
-	// `currentFilteredData` had no analyze-time writer for this mode: the only
-	// other one is `summarize`, which first runs when the user touches a
-	// control. So Analyze -> Store Result with nothing in between either
-	// refused ("no analysed samples"), or — if a Standard analysis had run
-	// earlier in the session — averaged THAT selection's power, speed and
-	// recording date while persisting this ride's result and sections.
-	//
-	// Seeded here rather than in `showOutAndBackVEAnalysis` because this is the
-	// entry point every path to a rendered out-and-back panel passes through,
-	// including a re-render from preserved profiles. Goes through
-	// `seedSegmentModeFilteredData` so the arrays are built by the same
-	// concatenation `summarize` uses — a second assembly would be one more
-	// writer of a field whose writers disagreeing was CR-02.
-	//
-	// The seed covers the LEGS THAT PRODUCED OUTPUT, not the selected sections
-	// (WR-03/WR-06). Either leg of a section can come back null — its calculator
-	// threw (`:223`, `:289`) — and a section keeps its place in the profile list
-	// as long as ONE leg survived. Ranging over the sections would therefore seed
-	// samples no plotted leg describes, which is why the filter below is on the
-	// per-leg ranges rather than on `resolveActiveOutAndBackSections`.
-	// Computed BEFORE the seed: WR-3 records it, and the panel below renders from
-	// the same value, so the two cannot describe different sources.
+	// The wind source the panel below renders from, and the one the recompute
+	// will read back off the radios.
 	const selectedWindSource =
 		preservedWindSource || (hasWindSpeed ? "fit" : "constant");
 
-	seedSegmentModeAnalyzeState(appState, {
-		ranges: profiles.flatMap((profile) =>
-			[profile.outboundRange, profile.inboundRange].filter(
-				(range): range is { startIdx: number; endIdx: number } =>
-					range !== null,
-			),
-		),
-		// Both arguments, as in renderGpsLap: `selectedWindSource` is already the
-		// resolved panel source, and `resolveRecordedWindSource` preserves
-		// "compare" while passing the other two straight through.
-		requestedWindSource: selectedWindSource as never,
-		resolvedWindSource: selectedWindSource as never,
-		// ONE entry per SECTION, not per leg — the maintainer's ruling that
-		// `outAndBackMode.summarize` already follows. Reusing the same builder is
-		// what keeps an analyze-time export identical to a post-update one, 2N
-		// lines being exactly what it exists to prevent.
-		virtualDistances: sectionVirtualDistances(
-			profiles.map((profile) => ({
-				label: `Section ${profile.sectionNumber}`,
-				outbound: profile.outboundSeries ?? null,
-				inbound: profile.inboundSeries ?? null,
-			})),
-		),
-	});
+	// NO SEED HERE ANY MORE.
+	//
+	// This used to write currentFilteredData, currentWindSource and
+	// currentVirtualDistances from the analyze-time fits, so Store Result had
+	// something to read before the first recompute. WR-03 established that what
+	// it wrote was NOT what the recompute reproduces, so it was a second answer
+	// rather than a preview. `updateModeVEPlots` is now the only producer and
+	// `veStatus` covers the window.
+	//
+	// The seam it called had out-and-back as its last caller and is deleted with
+	// it. `sectionVirtualDistances` — the one-entry-per-SECTION stacking that
+	// call passed in, rather than the one-per-leg default — is unaffected:
+	// `outAndBackMode.summarize` has always been its other caller, and that is
+	// now its only one.
+
 	const showWindTab = hasWindSpeed || hasConstantWind;
 	// PRESENCE, not visibility — see the identical note in renderGpsLap.ts.
 	const showVirtualDistanceTab = hasWindSpeed;
@@ -739,8 +624,6 @@ export async function showOutAndBackVEPlot(
 		return;
 	}
 
-	// Calculate initial statistics
-	const initialStats = calculateOutAndBackStats(profiles, meanElevation);
 	const currentAirSpeedCalibrationValue = formatAirSpeedCalibrationPercent(
 		appState.airSpeedCalibrationPercent,
 	);
@@ -759,11 +642,37 @@ export async function showOutAndBackVEPlot(
 		showVirtualDistanceTab,
 		selectedWindSource,
 		currentAirSpeedCalibrationValue,
-		initialStats,
 		sectionCount: profiles.length,
 		defaultAirSpeedOffset,
 		elevationToggleMarkup: elevationSmoothingToggleMarkup(appState),
 	});
+
+	// THE BUTTON THE MARKUP ABOVE JUST CREATED IS ENABLED. DISABLE IT.
+	//
+	// The template ships `#storeResult` with no `disabled` attribute, so the
+	// innerHTML assignment on the line above has just put a live, clickable Store
+	// Result into the document — pointing at `currentVEResult` and its three
+	// siblings, which until the first update pass lands still hold the PREVIOUS
+	// analysis. `applyVeStatus` is the one writer that both sets the status and
+	// reflects it onto whatever button is in the document, which is why this runs
+	// AFTER the assignment and not before: before it, there is no button here to
+	// disable.
+	//
+	// This does NOT open the window — `handleAnalyze` already invalidated the
+	// status on entry, and has to, because everything between there and here
+	// (storage I/O, the section loop, `waitForPlotly`) runs with the previous
+	// panel still mounted and its own `#storeResult` still enabled — including
+	// the `profiles.length === 0` return, which never reaches this function.
+	// That line closes the window for the whole approach; this one re-closes the
+	// DOM half of it for markup that did not exist when it ran.
+	//
+	// `updateModeVEPlots` sets `computing` again on entry and `ready` after
+	// `summarize`. Also not a duplicate: the primitive covers ITS pass, which
+	// runs once per control gesture, long after this panel was built.
+	//
+	// Mirrors `renderGpsLap.ts`, which needs the identical line for the identical
+	// reason.
+	applyVeStatus(appState, "computing");
 
 	// Setup slider sync with recalculation
 	// The renderer half of the mode seam, registered from the render that owns
@@ -807,17 +716,20 @@ export async function showOutAndBackVEPlot(
 		},
 	});
 
-	// Initial plot render
-	renderOutAndBackPlots(Plotly, profiles, meanElevation);
+	// NO INITIAL PLOT RENDER. The profiles above carry no virtual elevation, so
+	// there is nothing to draw until the post-bind kick below lands and
+	// `createOutAndBackUpdateCallbacks.renderVe` paints the producer's numbers.
+	// Drawing here would have plotted empty series into `#oabVePlot` and
+	// `#oabVeResidualsPlot` a macrotask before the real ones arrived.
 
 	// THE POST-BIND KICK (WR-4). Standard has had this since before the phase
 	// -- `renderStandardVe.ts:562` -- which is the whole reason Standard never
 	// carried this bug.
 	//
-	// Everything the analyze leg above computed is a FIRST PAINT, not a
-	// RESULT: it keeps `virtual_elevation` from each per-lap fit and discards
-	// r2, RMSE and the elevation gains. So without this line the only writer
-	// of `appState.currentVEResult` on an analyze was the stitched fit
+	// It is now the ONLY producer, not a corrective second pass. The analyze
+	// leg above computes no virtual elevation at all -- it slices each leg's
+	// samples and leaves the fit to this kick. So without this line the only
+	// writer of `appState.currentVEResult` on an analyze was the stitched fit
 	// `prepareAnalysisPayload` runs over the concatenated selection, which
 	// this panel never displays -- and the first control nudge replaced it.
 	//

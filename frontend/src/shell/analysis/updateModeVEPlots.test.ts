@@ -43,6 +43,7 @@ import { AppState } from "../../state/AppState";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import * as WindSourceResolver from "../../analysis/WindSourceResolver";
+import { applyVeStatus } from "../../state/veStatus";
 import { updateModeVEPlots } from "./updateModeVEPlots";
 
 const SAMPLE_COUNT = 60;
@@ -457,6 +458,54 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 
 		expect(outcome).not.toBeNull();
 		expect(calculatorCalls[0].rhoArray).toBeNull();
+	});
+});
+
+/**
+ * `:131`'s `applyVeStatus(appState, "computing")` looks redundant on every test
+ * above: a FIRST Analyze already leaves the panel at `computing` from the
+ * render, so those fixtures pass with or without the line. The case it
+ * actually covers is a SECOND pass over an already-`ready` panel -- a slider
+ * gesture -- where without it `veStatus` would stay `ready` for the whole
+ * recompute and `#storeResult` would stay enabled mid-gesture.
+ */
+describe("the entry write to `computing` covers a second pass over a ready panel", () => {
+	it("a second pass over a ready panel leaves ready at entry", async () => {
+		const appState = stateFor("gpsLap");
+		const handler = getAnalysisModeHandler(HANDLER_KEY.gpsLap);
+		const { callbacks, calls } = spyCallbacks();
+
+		// The state a second pass (a slider gesture on an already-analyzed
+		// panel) actually starts from. If the fixture failed to reach `ready`,
+		// this assertion shows it rather than the rest of the test passing
+		// vacuously.
+		applyVeStatus(appState, "ready");
+		expect(appState.veStatus).toBe("ready");
+
+		let recordedStatus = "SENTINEL";
+		const originalAggregate = callbacks.aggregate;
+		callbacks.aggregate = (profiles) => {
+			recordedStatus = appState.veStatus;
+			return originalAggregate(profiles);
+		};
+
+		await updateModeVEPlots({
+			appState,
+			handler,
+			callbacks,
+			windSource: "fit",
+			cda: 0.3,
+			crr: 0.005,
+			isTabActive: () => false,
+		});
+
+		// The probe actually ran -- without this, a fixture that throws before
+		// `updateModeVEPlots.ts:367` would pass vacuously on the assertion below.
+		expect(calls.aggregate).toBe(1);
+		// The redundant-looking entry write at `updateModeVEPlots.ts:131` is what
+		// makes this "computing" rather than the stale "ready" left over from the
+		// panel's previous pass.
+		expect(recordedStatus).toBe("computing");
 	});
 });
 

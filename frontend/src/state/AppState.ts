@@ -18,6 +18,7 @@ import type {
 	LapData,
 	ParsingStatistics,
 } from "@wasm/virtual_elevation_analyzer.js";
+import type { VeStatus } from "./veStatus";
 
 export type WindSource = "constant" | "fit" | "compare" | "none";
 export type ActivitySource = "fit" | "csv";
@@ -211,8 +212,36 @@ export interface AnalysisState {
 	 */
 	currentVirtualDistances: SegmentVirtualDistance[];
 	currentWindSource: WindSource;
+	/**
+	 * Whether `currentVEResult` and the three fields written beside it describe
+	 * the current selection yet.
+	 *
+	 * A SIBLING FIELD, not a wrapper around `currentVEResult`: that object is
+	 * sometimes the raw wasm-bindgen `VEResult`, whose properties live on a
+	 * prototype and are lost if it is spread (see `currentVirtualDistances`).
+	 *
+	 * Written ONLY by `applyVeStatus` (`state/veStatus.ts`), which also reflects
+	 * it onto `#storeResult`. Two writers is how the flag and the button drift
+	 * apart, which is the failure this whole change exists to remove.
+	 */
+	veStatus: VeStatus;
 	airSpeedCalibrationPercent: number;
 	isCalculatingAutoRho: boolean;
+	/** One advertised current/queued weather operation for this AppState. */
+	autoRhoPromise: Promise<number | null> | null;
+	/** Input ownership for `autoRhoPromise`; different keys serialize. */
+	autoRhoFlightKey: string | null;
+	/** Changes whenever the activity or filtered selection identity changes. */
+	autoRhoInputRevision: number;
+	/** Identity of the Standard render allowed to continue after an await. */
+	standardPanelOwner: object | null;
+	/** Non-null only while that panel's first weather input is unsettled. */
+	standardInitialAutoRhoOwner: object | null;
+	/** A trim debounce already requested by the owning initial Standard panel. */
+	standardPendingAutoRhoDebounce: {
+		owner: object;
+		promise: Promise<void>;
+	} | null;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
 }
@@ -283,8 +312,15 @@ export class AppState {
 		currentVEResult: null,
 		currentVirtualDistances: [],
 		currentWindSource: "none",
+		veStatus: "idle",
 		airSpeedCalibrationPercent: 0,
 		isCalculatingAutoRho: false,
+		autoRhoPromise: null,
+		autoRhoFlightKey: null,
+		autoRhoInputRevision: 0,
+		standardPanelOwner: null,
+		standardInitialAutoRhoOwner: null,
+		standardPendingAutoRhoDebounce: null,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
 	};
@@ -312,6 +348,7 @@ export class AppState {
 	};
 
 	setLoadedActivity(activity: LoadedActivity | null): void {
+		this.invalidateAutoRhoInputs();
 		this.activity.loadedActivity = activity;
 		this.activity.currentFitData = activity?.data ?? null;
 		this.activity.currentFitResult = activity?.result ?? null;
@@ -345,6 +382,7 @@ export class AppState {
 	}
 
 	set currentFitData(fitData: ActivityDataLike | null) {
+		this.invalidateAutoRhoInputs();
 		this.activity.currentFitData = fitData;
 		if (this.activity.loadedActivity) {
 			this.activity.loadedActivity.data = fitData;
@@ -357,6 +395,7 @@ export class AppState {
 	}
 
 	set currentFitResult(result: ActivityResult | null) {
+		this.invalidateAutoRhoInputs();
 		this.activity.currentFitResult = result;
 		this.activity.currentFitData = result?.fit_data ?? null;
 		this.activity.currentLaps = result?.laps ?? [];
@@ -394,7 +433,12 @@ export class AppState {
 	}
 
 	set filteredLapData(filteredLapData: FilteredLapData | null) {
+		this.invalidateAutoRhoInputs();
 		this.selection.filteredLapData = filteredLapData;
+	}
+
+	invalidateAutoRhoInputs(): void {
+		this.analysis.autoRhoInputRevision += 1;
 	}
 
 	get isCalculatingAutoRho(): boolean {
@@ -403,6 +447,55 @@ export class AppState {
 
 	set isCalculatingAutoRho(isCalculating: boolean) {
 		this.analysis.isCalculatingAutoRho = isCalculating;
+	}
+
+	get autoRhoPromise(): Promise<number | null> | null {
+		return this.analysis.autoRhoPromise;
+	}
+
+	set autoRhoPromise(promise: Promise<number | null> | null) {
+		this.analysis.autoRhoPromise = promise;
+	}
+
+	get autoRhoFlightKey(): string | null {
+		return this.analysis.autoRhoFlightKey;
+	}
+
+	set autoRhoFlightKey(key: string | null) {
+		this.analysis.autoRhoFlightKey = key;
+	}
+
+	get autoRhoInputRevision(): number {
+		return this.analysis.autoRhoInputRevision;
+	}
+
+	get standardPanelOwner(): object | null {
+		return this.analysis.standardPanelOwner;
+	}
+
+	set standardPanelOwner(owner: object | null) {
+		this.analysis.standardPanelOwner = owner;
+	}
+
+	get standardInitialAutoRhoOwner(): object | null {
+		return this.analysis.standardInitialAutoRhoOwner;
+	}
+
+	set standardInitialAutoRhoOwner(owner: object | null) {
+		this.analysis.standardInitialAutoRhoOwner = owner;
+	}
+
+	get standardPendingAutoRhoDebounce(): {
+		owner: object;
+		promise: Promise<void>;
+	} | null {
+		return this.analysis.standardPendingAutoRhoDebounce;
+	}
+
+	set standardPendingAutoRhoDebounce(
+		pending: { owner: object; promise: Promise<void> } | null,
+	) {
+		this.analysis.standardPendingAutoRhoDebounce = pending;
 	}
 
 	get lastWeatherQueryKey(): string | null {
@@ -483,6 +576,14 @@ export class AppState {
 
 	set currentWindSource(windSource: WindSource) {
 		this.analysis.currentWindSource = windSource;
+	}
+
+	get veStatus(): VeStatus {
+		return this.analysis.veStatus;
+	}
+
+	set veStatus(status: VeStatus) {
+		this.analysis.veStatus = status;
 	}
 
 	get currentAnalyzedLaps(): number[] {

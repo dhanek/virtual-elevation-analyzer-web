@@ -90,7 +90,8 @@ describe("no site re-introduces its own Crr fallback literal", () => {
 	 * `crr_max: 0.03` in `AnalysisParameters.ts` — real bounds, not fallbacks —
 	 * and turns the guard into noise nobody reads.
 	 *
-	 * Mutation: restore `crr ?? 0.005` at `renderStandardVe.ts:84`, or re-add
+	 * Mutation: put `crr ?? 0.005` back into any resolver — `updateModeVEPlots`'s
+	 * `resolveAppliedCrr` call is where the computed half lives now — or re-add
 	 * `const FALLBACK_CRR = 0.008;` to `requestModeUpdate.ts`, and this fails
 	 * naming the file and the line.
 	 */

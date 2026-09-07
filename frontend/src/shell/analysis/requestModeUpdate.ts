@@ -31,6 +31,7 @@ import {
 	UNSET_CDA_FALLBACK,
 	UNSET_CRR_FALLBACK,
 } from "../../analysis/unsetParameterFallbacks";
+import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
 import { getSelectedWindSource, toWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
@@ -213,6 +214,24 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	// no null branch to guard.
 	const handler = resolveActiveModeHandler(appState);
 
+	// Standard exposes its controls before the initial automatic-weather
+	// operation settles. Preserve those edits in the DOM/state, but do not let
+	// any of them publish the first result with pre-weather inputs. The render
+	// owner clears this narrow gate and makes one explicit request afterward,
+	// which reads the latest values. Other modes and later Standard updates never
+	// see the gate.
+	if (
+		handler.id === "standard" &&
+		appState.standardInitialAutoRhoOwner != null
+	) {
+		log.debug(
+			`requestModeUpdate(${reason}): waiting for Standard's initial auto-rho`,
+		);
+		return;
+	}
+	const standardPanelOwner =
+		handler.id === "standard" ? appState.standardPanelOwner : null;
+
 	// Defaults the two GPS update paths already used when a slider was missing —
 	// now the shared constants, so there is one numeric stand-in and not two.
 	const cda = readNumber("cdaSlider", "cdaValue", UNSET_CDA_FALLBACK);
@@ -248,6 +267,15 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 
 	scheduleRecompute({
 		run: async () => {
+			if (
+				handler.id === "standard" &&
+				appState.standardPanelOwner !== standardPanelOwner
+			) {
+				log.debug(
+					`requestModeUpdate(${reason}): Standard panel was replaced before the scheduled pass ran`,
+				);
+				return;
+			}
 			// RE-CHECKED HERE, not only at the top of this function (NEW-1).
 			//
 			// Everything this closure needs — `handler`, `callbacks`, `segments` —
@@ -267,15 +295,23 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 				);
 				return;
 			}
-			await updateModeVEPlots({
-				appState,
-				handler,
-				callbacks,
-				windSource,
-				cda,
-				crr,
-				segments,
-			});
+			try {
+				await updateModeVEPlots({
+					appState,
+					handler,
+					callbacks,
+					windSource,
+					cda,
+					crr,
+					segments,
+				});
+			} catch (err) {
+				// The runner logs and swallows. Without this the status would stay
+				// `computing` for the panel's lifetime and Store Result would never
+				// re-enable.
+				applyVeStatus(appState, "error");
+				throw err;
+			}
 		},
 	});
 }

@@ -15,7 +15,7 @@ import {
 	buildSpeedPowerFigure,
 	buildVirtualDistanceFigure,
 } from "../../plots/StandardPlotBuilders";
-import { calculateAutoRho } from "./autoRho";
+import { scheduleStandardAutoRho } from "./standardAutoRhoScheduler";
 import { ShellServices } from "../analysis/types";
 import { veViewMatchesSelection } from "./veSelectionGuard";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -66,13 +66,14 @@ export function formatCoveredLapCount(
 }
 
 /**
- * THE one writer of Standard's four metric spans.
+ * THE one writer of Standard's four metric spans. `renderMetrics` below is its
+ * only caller now, and nothing outside this module imports it.
  *
- * Exported for `initializeVEAnalysis`, which fills them at first paint from the
- * SAME integration that drew the curve beneath them. Before that the template
- * painted them from `prepareAnalysisPayload`'s stitched fit -- a different trim
- * window and a different wind source from the plot underneath -- so the header
- * and the curve disagreed until the post-bind kick replaced both.
+ * Two predecessors each put a number on screen that something else replaced: the
+ * template's, from `prepareAnalysisPayload`'s stitched fit, then
+ * `initializeVEAnalysis`'s own, which agreed with the curve it drew but not with
+ * `renderMetrics` -- the MEAN of the per-lap fits (D-19 Option B), which one fit
+ * over N laps is not. `[S-M]`, retired with that fit.
  */
 export function updateMetricsDisplay(
 	r2: number,
@@ -550,33 +551,13 @@ export function setupVESliders(
 	// that dropped every call. Configuring it per mode was the forget-to-call
 	// surface one level up from the one the table removed.
 
-	let autoRhoDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	const triggerAutoRhoOnTrimChange = () => {
-		if (autoRhoDebounceTimer) clearTimeout(autoRhoDebounceTimer);
-		autoRhoDebounceTimer = setTimeout(() => {
-			if (
-				appState.currentParameters?.auto_calculate_rho &&
-				!appState.isCalculatingAutoRho
-			) {
-				calculateAutoRho(appState, parametersComponent, services).catch(
-					(err) => {
-						log.error("Auto-rho calculation error on trim change:", err);
-					},
-				);
-			}
-		}, 500);
+		void scheduleStandardAutoRho(
+			appState,
+			() => parametersComponent,
+			services,
+		);
 	};
-
-	if (
-		appState.currentParameters?.auto_calculate_rho &&
-		!appState.isCalculatingAutoRho
-	) {
-		setTimeout(() => {
-			calculateAutoRho(appState, parametersComponent, services).catch((err) => {
-				log.error("Auto-rho initial calculation error:", err);
-			});
-		}, 1000);
-	}
 
 	// The map's trim twins are the same control with a second face, so the binder
 	// owns their handlers. Their RANGES are not declarative — they come from this

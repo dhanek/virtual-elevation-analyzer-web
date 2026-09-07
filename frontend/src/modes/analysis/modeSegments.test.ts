@@ -510,8 +510,9 @@ describe('buildFilteredDataFromProfiles keeps temperature aligned', () => {
 /**
  * WR-06. `selectedItems` was the RAW `appState.selectedLaps`, and
  * `standardMode.render` hands it straight to `currentAnalyzedLaps`
- * (`renderStandardVe.ts:264`). That value is the key
- * `parameterStorage.saveLapSettings` / `loadLapSettings` use and the `laps`
+ * (`renderStandardVe.ts`'s `appState.currentAnalyzedLaps =` assignment). That
+ * value is the key `parameterStorage.saveLapSettings` / `loadLapSettings` use
+ * and the `laps`
  * field Store Result persists — so a lap number with no entry in `currentLaps`
  * (a stale selection after a file reload) keyed the saved trim/CdA/Crr under a
  * lap set that did not match the segments actually analysed.

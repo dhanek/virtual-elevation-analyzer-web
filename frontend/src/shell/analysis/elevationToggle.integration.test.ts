@@ -14,7 +14,12 @@
  *   - Standard          -> prepareAnalysisPayload.test.ts,
  *                          "slices the ACTIVE elevation profile"
  *   - GPS-lap           -> gpsModeRealChain.test.ts,
- *   - out-and-back         "the analyze leg honours the active elevation profile"
+ *   - out-and-back         "analyze honours the active elevation profile"
+ *
+ * That case dropped "the analyze leg" from its name when the three analyze legs
+ * stopped computing: it now analyzes, lets the post-bind recompute land, and
+ * asserts on the series the SHARED PRODUCER was handed. There is no leg-owned
+ * elevation resolution left in any mode to name.
  *
  * Each of those asserts the series that reached the physics, through the real
  * entry point. Add mode coverage there, not here.
