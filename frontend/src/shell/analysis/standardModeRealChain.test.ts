@@ -1354,3 +1354,81 @@ describe("standard: the time/distance x-axis switch", () => {
 		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Distance (km)");
 	});
 });
+
+/**
+ * A STORED TRIM IS KEYED BY LAP; THE SELECTION IT IS READ AGAINST CAN BE ANOTHER
+ * LENGTH. The panel renders both faces of the trim from one number, and the two
+ * input types disagree about out-of-range values: a `range` sanitizes to its
+ * `min`/`max`, a `number` shows what it was given. So an unclamped load paints a
+ * slider and a number box that do not match, and nothing reconciles them until
+ * the user touches one.
+ *
+ * Measured in the app 2026-09-07 on the reference ride: `{trimEnd: 582}` planted
+ * under lap key `10` (274 samples) left `#trimEndSlider` reading 273 and
+ * `#trimEndValue` reading 582. `saveCurrentMultiSegmentSettings` reaches the
+ * other direction without any planting — it writes a hardcoded `{0, 0}` under
+ * the SELECTION key, which Standard reads back against a slider whose `min`
+ * is 30.
+ */
+describe("standard: a stored trim is fitted to the selection it is loaded against", () => {
+	const trimSlider = () =>
+		document.getElementById("trimEndSlider") as HTMLInputElement;
+	const trimNumber = () =>
+		document.getElementById("trimEndValue") as HTMLInputElement;
+	const startSlider = () =>
+		document.getElementById("trimStartSlider") as HTMLInputElement;
+	const startNumber = () =>
+		document.getElementById("trimStartValue") as HTMLInputElement;
+
+	const renderWithSaved = async (settings: Record<string, unknown>) => {
+		appState.currentFileHash = "hash";
+		const parameterStorage = {
+			loadLapSettings: async () => settings,
+		} as unknown as ParameterStorage;
+		await renderStitched({ parameterStorage });
+		await settle();
+	};
+
+	it("pulls an end past the last sample back, and both faces agree", async () => {
+		await renderWithSaved({ cda: 0.3, crr: 0.004, trimStart: 0, trimEnd: 900 });
+
+		expect(trimSlider().value).toBe(String(SAMPLE_COUNT - 1));
+		expect(trimNumber().value).toBe(String(SAMPLE_COUNT - 1));
+		expect(appState.presetTrimEnd).toBe(SAMPLE_COUNT - 1);
+	});
+
+	it("lifts a zero end up to the floor, and both faces agree", async () => {
+		// The `saveCurrentMultiSegmentSettings` case, reachable without planting.
+		await renderWithSaved({ cda: 0.3, crr: 0.004, trimStart: 0, trimEnd: 0 });
+
+		expect(trimSlider().value).toBe("30");
+		expect(trimNumber().value).toBe("30");
+		expect(appState.presetTrimEnd).toBe(30);
+	});
+
+	it("pulls a start that would leave less than the floor back off the end", async () => {
+		await renderWithSaved({
+			cda: 0.3,
+			crr: 0.004,
+			trimStart: 395,
+			trimEnd: 399,
+		});
+
+		expect(startSlider().value).toBe(String(399 - 30));
+		expect(startNumber().value).toBe(String(399 - 30));
+		expect(appState.presetTrimStart).toBe(399 - 30);
+	});
+
+	it("leaves a window that already fits exactly as stored", async () => {
+		await renderWithSaved({
+			cda: 0.3,
+			crr: 0.004,
+			trimStart: 20,
+			trimEnd: 350,
+		});
+
+		expect(appState.presetTrimStart).toBe(20);
+		expect(appState.presetTrimEnd).toBe(350);
+		expect(trimNumber().value).toBe("350");
+	});
+});
