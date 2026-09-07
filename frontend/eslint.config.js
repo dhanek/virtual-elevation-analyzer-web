@@ -57,4 +57,30 @@ export default tseslint.config(
             '@typescript-eslint/no-unused-vars': 'off',
         },
     },
+    // The build configs, for the same reason the block above exists: the rules
+    // are scoped by `files`, so `vite.config.ts` and `vitest.config.ts` matched
+    // no block and `npm run lint` did not name them either. They are Node
+    // programs — `vite.config.ts` reads `process.env` and `__dirname` — so they
+    // take the Node globals rather than the browser ones.
+    //
+    // `no-console` stays ERROR here too. A config file runs inside the Vite CLI,
+    // whose own reporter owns stdout; a stray `console.log` there interleaves
+    // with the dev server's output rather than going somewhere a consumer reads.
+    {
+        files: ['*.config.ts'],
+        languageOptions: {
+            ecmaVersion: 2020,
+            sourceType: 'module',
+            globals: {
+                ...globals.node,
+            },
+        },
+        rules: {
+            'no-console': 'error',
+            'no-empty': 'off',
+            'prefer-const': 'off',
+            '@typescript-eslint/no-explicit-any': 'off',
+            '@typescript-eslint/no-unused-vars': 'off',
+        },
+    },
 )
