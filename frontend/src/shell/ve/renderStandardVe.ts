@@ -1,4 +1,8 @@
 import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
+import {
+	clampTrimWindow,
+	MIN_TRIM_WINDOW_SAMPLES,
+} from "../../analysis/trimBounds";
 import { AppState } from "../../state/AppState";
 import {
 	AnalysisInput,
@@ -54,7 +58,6 @@ import { requestModeUpdate } from "../analysis/requestModeUpdate";
 // Plotly.js type declaration
 declare const Plotly: any;
 
-const MIN_TRIM_WINDOW_SAMPLES = 30;
 
 export interface StandardVeCallbacks {
 	onSaveScreenshot: () => void;
@@ -302,10 +305,26 @@ export async function showVirtualElevationAnalysisInline(
 				appState.currentParameters.cda = savedParams.cda;
 			if (savedParams.crr !== null)
 				appState.currentParameters.crr = savedParams.crr;
-			if (savedParams.trimStart !== undefined)
-				appState.presetTrimStart = savedParams.trimStart;
-			if (savedParams.trimEnd !== undefined)
-				appState.presetTrimEnd = savedParams.trimEnd;
+			// FITTED TO THIS SELECTION, NOT TAKEN VERBATIM. The record is keyed by
+			// lap, and the same key can be read back against a different number of
+			// samples — see `trimBounds.ts` for the two writers that reach it. The
+			// markup below renders the slider and the number box from this one
+			// value, and only the slider sanitizes an out-of-range one, so an
+			// unfitted window paints two faces that disagree.
+			//
+			// A field absent from the record falls back to the value already in
+			// `appState` rather than to a default, which preserves the guard this
+			// replaces; the fallback is then fitted too, so a value carried over
+			// from a previous selection cannot survive out of range either.
+			const fittedTrim = clampTrimWindow(
+				{
+					start: savedParams.trimStart ?? appState.presetTrimStart,
+					end: savedParams.trimEnd ?? appState.presetTrimEnd,
+				},
+				timestamps.length,
+			);
+			appState.presetTrimStart = fittedTrim.start;
+			appState.presetTrimEnd = fittedTrim.end;
 			if (savedParams.airSpeedCalibration !== undefined) {
 				appState.airSpeedCalibrationPercent = savedParams.airSpeedCalibration;
 			}

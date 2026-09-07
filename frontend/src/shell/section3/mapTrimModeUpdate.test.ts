@@ -188,11 +188,14 @@ function makeAppState(): AppState {
  */
 const saveLapSettings = vi.fn(() => Promise.resolve());
 
-function configure(appState: AppState) {
+function configure(
+	appState: AppState,
+	loadLapSettings: () => Promise<unknown> = () => Promise.resolve(null),
+) {
 	configureSection3Orchestration({
 		appState,
 		parameterStorage: {
-			loadLapSettings: () => Promise.resolve(null),
+			loadLapSettings,
 			saveLapSettings,
 		} as never,
 		getMapVisualization: () =>
@@ -247,8 +250,11 @@ function mapTrimRequests(): number {
 	return modeUpdate.request.mock.calls.filter((c) => c[0] === "mapTrim").length;
 }
 
-async function renderSection3(appState: AppState) {
-	configure(appState);
+async function renderSection3(
+	appState: AppState,
+	loadLapSettings?: () => Promise<unknown>,
+) {
+	configure(appState, loadLapSettings);
 	await initializeSection3();
 	updateSelectedLaps();
 	await Promise.resolve();
@@ -558,5 +564,76 @@ describe("the 30-sample floor with NO panel to read — the pre-Analyze fallback
 		expect(appState.presetTrimStart).toBe(300);
 
 		expect(lastFit(map)).toEqual({ start: 300, end: 330 });
+	});
+});
+
+/**
+ * SECTION 3 LOADS THE SAME RECORD THE PANEL DOES, KEYED THE SAME WAY, AND IT
+ * RUNS FIRST — at the selection change rather than at the next Analyze. So an
+ * out-of-range stored window reaches the MAP pair before the panel exists, and
+ * `saveMapTrimSettings` can then persist whatever the map pair is showing.
+ * Fitting it here is what keeps the two faces of the map trim agreeing, and it
+ * is the same `clampTrimWindow` the panel's own load site uses.
+ *
+ * jsdom does not sanitize a `range` input's value the way a browser does, so
+ * these assert the FITTED value reaching both faces rather than reproducing the
+ * slider/number-box split itself; the split is the browser-side consequence of
+ * the same unfitted number.
+ */
+describe("a stored trim is fitted to the selected laps it is loaded against", () => {
+	beforeEach(() => {
+		setupDom();
+		mapInstances.length = 0;
+		modeUpdate.request.mockClear();
+		saveLapSettings.mockClear();
+	});
+
+	const renderWithSaved = async (settings: Record<string, unknown>) => {
+		const appState = makeAppState();
+		appState.currentFileHash = "hash";
+		await renderSection3(appState, () => Promise.resolve(settings));
+		await Promise.resolve();
+		return appState;
+	};
+
+	it("pulls an end past the last sample back to the last sample", async () => {
+		const appState = await renderWithSaved({
+			cda: null,
+			crr: null,
+			trimStart: 0,
+			trimEnd: 900,
+		});
+
+		expect(appState.presetTrimEnd).toBe(SAMPLE_COUNT - 1);
+		expect(value("mapTrimEndSlider")).toBe(String(SAMPLE_COUNT - 1));
+		expect(value("mapTrimEndValue")).toBe(String(SAMPLE_COUNT - 1));
+	});
+
+	it("lifts the hardcoded zero window the segment modes store up to the floor", async () => {
+		// `saveCurrentMultiSegmentSettings` writes `{trimStart: 0, trimEnd: 0}`
+		// keyed by the SELECTION, so a GPS-lap or out-and-back analysis of these
+		// laps leaves this record for Section 3 to read back.
+		const appState = await renderWithSaved({
+			cda: null,
+			crr: null,
+			trimStart: 0,
+			trimEnd: 0,
+		});
+
+		expect(appState.presetTrimEnd).toBe(30);
+		expect(value("mapTrimEndSlider")).toBe("30");
+		expect(value("mapTrimEndValue")).toBe("30");
+	});
+
+	it("leaves a window that already fits exactly as stored", async () => {
+		const appState = await renderWithSaved({
+			cda: null,
+			crr: null,
+			trimStart: 20,
+			trimEnd: 350,
+		});
+
+		expect(appState.presetTrimStart).toBe(20);
+		expect(appState.presetTrimEnd).toBe(350);
 	});
 });
