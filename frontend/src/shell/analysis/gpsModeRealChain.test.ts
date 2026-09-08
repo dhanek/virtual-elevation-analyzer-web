@@ -1149,6 +1149,16 @@ describe.each(MODES)(
  * `undefined` in every tail position, so this rewrite is what forced the guard
  * to be added there. The claim is unchanged and now covers the only pass there
  * is: rho reaching the calculator is complete or absent, never partial.
+ *
+ * WHAT THE OTHER FILE COVERS, so a deletion aimed at one cannot take the other.
+ * These cases are BEHAVIOURAL: they drive the real chain and inspect the values
+ * that reach the physics, which is why `null` versus a hole-punched array is
+ * visible here and nowhere else. The PRESENCE half — that every
+ * `createVeCalculator` call is given a `rhoArray:` at all, in every leg and in
+ * `updateModeVEPlots.ts` — is asserted source-level in
+ * `calculatorRhoArray.test.ts`. That guard supersedes only the presence
+ * property these cases held implicitly; it cannot see a runtime value, so it
+ * does not subsume anything below.
  */
 describe.each(MODES)(
 	"$name: the air-density slice under the calculator",
