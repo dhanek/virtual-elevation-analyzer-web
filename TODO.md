@@ -431,6 +431,10 @@ changed and why.
       - [x] E4 The formatter's output is stable and the other gates are unchanged —
             `check`, `lint`, `test`, `build` all clean, and prettier is idempotent
             over its own output
+      - [ ] E5 The PR-side check fails a misindented block on the pull request
+            rather than on the deploy *(unticked deliberately: no workflow run has
+            executed .github/workflows/pr-check.yml. Ticked only by a real run, with
+            the run recorded as the evidence.)*
 
       **Demonstrated before and after, with the item's own defect.** A block indented one level
       shallow relative to the `if` that opened it was inserted into
@@ -448,7 +452,7 @@ changed and why.
       are prettier's defaults are stated explicitly in `.prettierrc.json` rather than omitted, so
       a later reader can tell which were chosen.
 
-      **Three commits, deliberately.** Tooling (the dependency — prettier was neither declared
+      **The order is deliberate.** Tooling (the dependency — prettier was neither declared
       nor resolved anywhere on `origin/main`, whose `package-lock.json` contains no `prettier`
       entry at all, so the commit adds the dependency rather than pinning down a transitive one
       — plus config and ignore file), then the mechanical reformat on its own so it can be
@@ -472,11 +476,21 @@ changed and why.
       without it. **Worth carrying forward: a formatter can silently relocate a
       line-scoped directive.**
 
-      Verified after the reformat: `check`, `lint`, `build` and 96 files / 1166 tests all pass,
+      **The covered set is derived once and guarded, and the gate runs on the pull request.**
+      `frontend/src/tooling/formatterCoverage.test.ts` asserts that `check`, `format` and
+      `.prettierignore` agree, so an ignore line cannot silently pull first-party source back
+      out of the formatter. That structure is what F26-01 already cost once: `.prettierignore`
+      excluded a directory holding three TypeScript modules, and the item's own defect survived
+      in them. And `.github/workflows/pr-check.yml` runs `check`, `lint` and `test` on
+      `pull_request`, so a formatting slip fails the PR that introduces it rather than the
+      Pages deploy on `main`.
+
+      Verified after the reformat: `check`, `lint`, `build` and 97 files / 1169 tests all pass,
       and prettier is idempotent over its own output. `npm run format` is the writer.
       `frontend/package.json` · `frontend/.prettierrc.json` · `frontend/.prettierignore` ·
-      `.git-blame-ignore-revs` · *origin: PR #14 review round 20, F20-06 — deferred by the
-      maintainer 2026-09-04*
+      `.git-blame-ignore-revs` · `.github/workflows/pr-check.yml` ·
+      `frontend/src/tooling/formatterCoverage.test.ts` · *origin: PR #14 review round 20,
+      F20-06 — deferred by the maintainer 2026-09-04*
 
 ### Out-and-back's aggregation, measured then made linear — 2026-09-07
 
