@@ -249,7 +249,6 @@ export async function showOutAndBackVEAnalysis(
 
 		profiles.push({
 			sectionNumber: section.sectionNumber,
-			outboundRange: outbound?.range ?? null,
 			outboundDistances: outbound?.series.distancesKm ?? [],
 			// EMPTY, NOT ZEROED AND NOT FAKED. There is no first paint of a
 			// virtual elevation any more, and an array of the right length full of
@@ -261,7 +260,6 @@ export async function showOutAndBackVEAnalysis(
 			outboundVECompare: null,
 			outboundActualElevation: [],
 			outboundSeries: outbound?.series ?? null,
-			inboundRange: inbound?.range ?? null,
 			inboundDistances: inbound?.series.distancesKm ?? [],
 			inboundVE: [],
 			inboundVECompare: null,

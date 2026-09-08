@@ -319,8 +319,6 @@ const legSeries = (scale: number) => ({
 
 const sectionProfile = {
 	sectionNumber: 1,
-	outboundRange: { startIdx: 0, endIdx: HALF - 1 },
-	inboundRange: { startIdx: HALF, endIdx: LAST_INDEX },
 	outboundDistances: [0, 1, 2],
 	outboundVE: [0, 1, 2],
 	outboundActualElevation: [0, 1, 2],

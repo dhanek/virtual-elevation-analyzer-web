@@ -198,7 +198,6 @@ export function createGpsLapUpdateCallbacks(
 					// `AppState.recomputeStatus` and `cancelActiveRecompute`'s
 					// parameter, and it was unguarded where `duration` below is
 					// guarded.
-					range: null,
 					// The handler labels from the same lookup; relabelling here
 					// keeps the summary table and the stored result agreeing.
 					//

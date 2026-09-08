@@ -181,8 +181,6 @@ function makeFitData() {
 
 const SECTION = {
 	sectionNumber: 1,
-	outboundRange: { startIdx: 0, endIdx: 1 },
-	inboundRange: { startIdx: 2, endIdx: 3 },
 	outboundStartIdx: 0,
 	outboundEndIdx: HALF - 1,
 	inboundStartIdx: HALF,
@@ -257,8 +255,6 @@ const lapProfile = (lapNumber: number) => ({
 
 const sectionProfile = {
 	sectionNumber: 1,
-	outboundRange: { startIdx: 0, endIdx: 1 },
-	inboundRange: { startIdx: 2, endIdx: 3 },
 	outboundDistances: [0, 1, 2],
 	outboundVE: [0, 1, 2],
 	outboundActualElevation: [0, 1, 2],

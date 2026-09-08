@@ -45,8 +45,6 @@ const outboundElevation = legDistances.map(
 function retracingSection(): OutAndBackVEProfile {
 	return {
 		sectionNumber: 1,
-		outboundRange: { startIdx: 0, endIdx: SAMPLES - 1 },
-		inboundRange: { startIdx: SAMPLES, endIdx: 2 * SAMPLES - 1 },
 		outboundDistances: legDistances,
 		outboundVE: outboundElevation.slice(),
 		outboundVECompare: null,

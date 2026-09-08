@@ -255,7 +255,6 @@ export async function showGpsLapVEAnalysis(
 
 		lapVEProfiles.push({
 			lapNumber,
-			range,
 			distances: relativeDistances,
 			// EMPTY, NOT ZEROED AND NOT FAKED. There is no first paint of a
 			// virtual elevation any more, and an array of the right length full
