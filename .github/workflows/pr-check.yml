@@ -1,0 +1,76 @@
+name: PR check
+
+# `npm run check` — prettier plus both tsc passes — on the pull request itself.
+#
+# Without this it ran in CI only on push to `main`, inside the Pages deploy, so
+# a formatting slip or a type error failed the DEPLOY rather than the PR that
+# introduced it. The formatter is only machine-enforced if the machine runs it
+# where the change is still reviewable.
+#
+# This is a separate workflow rather than a `pull_request` trigger added to
+# `deploy.yml`, deliberately. That job holds `pages: write` and `id-token:
+# write` and ends in `actions/deploy-pages@v4`; running it from a pull request
+# would hand those permissions to PR code and end in a deploy. It also sits in
+# the `pages` concurrency group, which is `cancel-in-progress: false`, so PR
+# checks would queue behind deployments.
+#
+# No `push` trigger: `deploy.yml` already runs `npm run check` on pushes to
+# `main`.
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The WASM build is not optional, even though this workflow only runs the
+      # formatter and the type-checker. `npm run check` runs `tsc`, and
+      # `src/analysis/VeCalculatorFactory.ts`, `src/state/AppState.ts` and four
+      # test files import `@wasm/virtual_elevation_analyzer.js`, which
+      # `tsconfig.json` maps to `./pkg/*`. `frontend/pkg` is gitignored, so a
+      # checkout without these three steps fails type-checking for a reason
+      # that has nothing to do with formatting.
+      #
+      # Same actions and same pins as `deploy.yml`.
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd backend
+          wasm-pack build --target web --out-dir ../frontend/pkg
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Check Frontend
+        run: |
+          cd frontend
+          npm run check
