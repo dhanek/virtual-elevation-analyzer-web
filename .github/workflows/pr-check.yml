@@ -1,11 +1,20 @@
 name: PR check
 
-# `npm run check` — prettier plus both tsc passes — on the pull request itself.
+# `npm run check` — prettier plus both tsc passes — followed by `npm run lint`
+# and `npm run test`, on the pull request itself.
 #
-# Without this it ran in CI only on push to `main`, inside the Pages deploy, so
-# a formatting slip or a type error failed the DEPLOY rather than the PR that
-# introduced it. The formatter is only machine-enforced if the machine runs it
-# where the change is still reviewable.
+# Without this they ran in CI only on push to `main`, inside the Pages deploy,
+# so a formatting slip, a type error or a failing test failed the DEPLOY rather
+# than the PR that introduced it. The formatter is only machine-enforced if the
+# machine runs it where the change is still reviewable.
+#
+# The test step is here for one reason in particular: `npm run test` is what
+# executes `src/tooling/formatterCoverage.test.ts`, the guard that stops the
+# formatter's covered set silently shrinking — it asserts that `check`, `format`
+# and `.prettierignore` agree, so an ignore line cannot quietly pull first-party
+# source back out of the formatter. Without a test step that guard is enforced
+# only by the `main` Pages deploy: the same trap this workflow exists to remove,
+# one level up.
 #
 # This is a separate workflow rather than a `pull_request` trigger added to
 # `deploy.yml`, deliberately. That job holds `pages: write` and `id-token:
@@ -74,3 +83,13 @@ jobs:
         run: |
           cd frontend
           npm run check
+
+      - name: Lint Frontend
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Test Frontend
+        run: |
+          cd frontend
+          npm run test
