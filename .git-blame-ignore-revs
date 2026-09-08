@@ -9,3 +9,8 @@
 
 # style: reformat with prettier (2026-09-07) — 166 files, no behavioural change.
 fa35adebba3bc14a84d28530907258b127582ae7
+
+# style: reformat the two fixture loader modules with prettier (2026-09-08) —
+# 2 files, no behavioural change. The second mechanical reformat: these modules
+# sat behind the `.prettierignore` line that covered the fixture directory.
+f68a443f05e727535875031f90a8d72c1874d18d
