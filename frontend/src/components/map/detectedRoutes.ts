@@ -8,7 +8,10 @@
  * data (lap identity) and must stay byte-identical to v1.0 (MAP-02, UI-SPEC).
  */
 import * as L from "leaflet";
-import type { DetectedLap, OutAndBackSection } from "../../utils/GpsLapDetection";
+import type {
+	DetectedLap,
+	OutAndBackSection,
+} from "../../utils/GpsLapDetection";
 import { log } from "../../utils/log";
 import type { MapContext } from "./context";
 import { collectValidPoints } from "./geo";
@@ -35,7 +38,8 @@ export function showDetectedLaps(ctx: MapContext, laps: DetectedLap[]): void {
 
 	// Draw lap segments with different colors
 	for (const lap of laps) {
-		const color = LAP_SECTION_COLORS[(lap.lapNumber - 1) % LAP_SECTION_COLORS.length];
+		const color =
+			LAP_SECTION_COLORS[(lap.lapNumber - 1) % LAP_SECTION_COLORS.length];
 
 		// Extract route points for this lap
 		const { points: lapPoints } = collectValidPoints(
@@ -85,7 +89,9 @@ export function showOutAndBackSections(
 	// Draw each section (just the track segments, no labels)
 	for (const section of sections) {
 		const color =
-			LAP_SECTION_COLORS[(section.sectionNumber - 1) % LAP_SECTION_COLORS.length];
+			LAP_SECTION_COLORS[
+				(section.sectionNumber - 1) % LAP_SECTION_COLORS.length
+			];
 
 		// Draw outbound segment (A → B) - solid line
 		const { points: outboundPoints } = collectValidPoints(

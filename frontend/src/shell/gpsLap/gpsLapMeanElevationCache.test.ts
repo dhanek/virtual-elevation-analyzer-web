@@ -27,9 +27,10 @@ const spies = vi.hoisted(() => ({
 
 vi.mock("./gpsLapPlots", async (importOriginal) => {
 	const actual = await importOriginal<Record<string, unknown>>();
-	const realMean = actual.calculateMeanElevationProfile as (
-		laps: unknown,
-	) => { distances: number[]; elevation: number[] };
+	const realMean = actual.calculateMeanElevationProfile as (laps: unknown) => {
+		distances: number[];
+		elevation: number[];
+	};
 	return {
 		...actual,
 		calculateMeanElevationProfile: (laps: unknown) => {
@@ -77,11 +78,13 @@ const SAMPLE_COUNT = 200;
 const HALF = SAMPLE_COUNT / 2;
 
 /** A visibly different elevation profile, as a DEM selection would supply. */
-const FIT_ALTITUDE = Array.from({ length: SAMPLE_COUNT }, (_, i) =>
-	Math.sin(i / 20) * 3,
+const FIT_ALTITUDE = Array.from(
+	{ length: SAMPLE_COUNT },
+	(_, i) => Math.sin(i / 20) * 3,
 );
-const DEM_ALTITUDE = Array.from({ length: SAMPLE_COUNT }, (_, i) =>
-	Math.sin(i / 20) * 3 + 25,
+const DEM_ALTITUDE = Array.from(
+	{ length: SAMPLE_COUNT },
+	(_, i) => Math.sin(i / 20) * 3 + 25,
 );
 
 function makeAppState(): AppState {
@@ -176,8 +179,9 @@ describe("the GPS-lap mean-elevation cache", () => {
 
 		// What the elevation-smoothing / DEM toggle does: select another
 		// resolved profile. This is D-06's defect site.
-		(appState as unknown as { demRawNearestElevation: number[] }).
-			demRawNearestElevation = DEM_ALTITUDE;
+		(
+			appState as unknown as { demRawNearestElevation: number[] }
+		).demRawNearestElevation = DEM_ALTITUDE;
 		appState.activeDisplayProfile = "dem-raw-nearest";
 
 		await update(appState, 0.25);

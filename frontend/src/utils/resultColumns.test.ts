@@ -205,7 +205,6 @@ describe("the exported CSV", () => {
 			'has "quotes", and commas',
 		);
 	});
-
 });
 
 /**

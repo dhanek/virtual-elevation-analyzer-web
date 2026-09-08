@@ -60,9 +60,7 @@ export function formatCoveredLapCount(
 	covered: number,
 	selected: number,
 ): string {
-	return covered === selected
-		? `${covered}`
-		: `${covered} of ${selected}`;
+	return covered === selected ? `${covered}` : `${covered} of ${selected}`;
 }
 
 /**
@@ -252,7 +250,9 @@ function createStandardUpdateCallbacks(
 			const count = profiles.length;
 			const compareResults = profiles
 				.map((p) => p.resultCompare)
-				.filter((result): result is NonNullable<typeof result> => result !== null);
+				.filter(
+					(result): result is NonNullable<typeof result> => result !== null,
+				);
 
 			return {
 				r2: profiles.reduce((sum, p) => sum + p.result.r2, 0) / count,
@@ -552,11 +552,7 @@ export function setupVESliders(
 	// surface one level up from the one the table removed.
 
 	const triggerAutoRhoOnTrimChange = () => {
-		void scheduleStandardAutoRho(
-			appState,
-			() => parametersComponent,
-			services,
-		);
+		void scheduleStandardAutoRho(appState, () => parametersComponent, services);
 	};
 
 	// The map's trim twins are the same control with a second face, so the binder
@@ -623,15 +619,16 @@ export function setupVESliders(
 		// survives N-4's removal of the synthetic dispatch. Only its reason changed.
 		mapCanFollow: () =>
 			mapVisualization !== null &&
-			veViewMatchesSelection(appState.currentAnalyzedLaps, appState.selectedLaps),
+			veViewMatchesSelection(
+				appState.currentAnalyzedLaps,
+				appState.selectedLaps,
+			),
 		triggerAutoRho: triggerAutoRhoOnTrimChange,
 		// Standard has exactly one segment window — its trim — so the generalised
 		// per-segment mean (N-3) reduces to the number this panel already showed.
 		getOffsetMetricWindows: () => {
 			const { start, end } = currentTrim();
-			return Number.isNaN(start) || Number.isNaN(end)
-				? []
-				: [{ start, end }];
+			return Number.isNaN(start) || Number.isNaN(end) ? [] : [{ start, end }];
 		},
 		getSyncErrorSeries: () => ({ groundSpeed: velocity, airSpeed: windSpeed }),
 		getAutoCalibrationPercent: () => {

@@ -1,13 +1,13 @@
-import { log } from './log';
+import { log } from "./log";
 /**
  * Geospatial calculations for weather data retrieval
  */
 
 export interface RoundedTimeSlot {
-    date: string;          // YYYY-MM-DD (may advance to next day on midnight overflow)
-    slotHour: number;      // 0-23, hour component of nearest 15-min slot
-    slotMinute: number;    // 0, 15, 30, or 45, minute component of nearest 15-min slot
-    nearestHour: number;   // 0-23, independently rounded to nearest hour (for hourly API fallback)
+	date: string; // YYYY-MM-DD (may advance to next day on midnight overflow)
+	slotHour: number; // 0-23, hour component of nearest 15-min slot
+	slotMinute: number; // 0, 15, 30, or 45, minute component of nearest 15-min slot
+	nearestHour: number; // 0-23, independently rounded to nearest hour (for hourly API fallback)
 }
 
 /**
@@ -15,48 +15,49 @@ export interface RoundedTimeSlot {
  * Handles midnight overflow (e.g., 23:53 → 00:00 next day).
  */
 export function roundToNearest15Min(date: Date): RoundedTimeSlot {
-    const totalMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
+	const totalMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
 
-    // Round to nearest 15-min slot
-    const nearest15 = Math.round(totalMinutes / 15) * 15;
+	// Round to nearest 15-min slot
+	const nearest15 = Math.round(totalMinutes / 15) * 15;
 
-    // Handle overflow past midnight
-    const adjustedDate = new Date(date);
-    if (nearest15 >= 1440) {
-        adjustedDate.setUTCDate(adjustedDate.getUTCDate() + 1);
-    }
-    const slotMinutes = nearest15 % 1440;
+	// Handle overflow past midnight
+	const adjustedDate = new Date(date);
+	if (nearest15 >= 1440) {
+		adjustedDate.setUTCDate(adjustedDate.getUTCDate() + 1);
+	}
+	const slotMinutes = nearest15 % 1440;
 
-    // Nearest hour (independently rounded — may differ from slotHour)
-    const nearestHourTotal = Math.round(totalMinutes / 60) * 60;
-    const nearestHour = (nearestHourTotal % 1440) / 60;
+	// Nearest hour (independently rounded — may differ from slotHour)
+	const nearestHourTotal = Math.round(totalMinutes / 60) * 60;
+	const nearestHour = (nearestHourTotal % 1440) / 60;
 
-    const dateStr = nearest15 >= 1440
-        ? adjustedDate.toISOString().split('T')[0]
-        : date.toISOString().split('T')[0];
+	const dateStr =
+		nearest15 >= 1440
+			? adjustedDate.toISOString().split("T")[0]
+			: date.toISOString().split("T")[0];
 
-    return {
-        date: dateStr,
-        slotHour: Math.floor(slotMinutes / 60),
-        slotMinute: slotMinutes % 60,
-        nearestHour
-    };
+	return {
+		date: dateStr,
+		slotHour: Math.floor(slotMinutes / 60),
+		slotMinute: slotMinutes % 60,
+		nearestHour,
+	};
 }
 
 export interface TrimRegionMetadata {
-    avgLat: number;           // Average latitude (6 decimal precision)
-    avgLon: number;           // Average longitude (6 decimal precision)
-    middleTimestamp: number;  // Unix timestamp (seconds) at middle of trim region
-    middleDate: Date;         // JavaScript Date object
-    dataPointCount: number;   // Number of valid GPS points used
-    trimStart: number;        // Original trim start index
-    trimEnd: number;          // Original trim end index
+	avgLat: number; // Average latitude (6 decimal precision)
+	avgLon: number; // Average longitude (6 decimal precision)
+	middleTimestamp: number; // Unix timestamp (seconds) at middle of trim region
+	middleDate: Date; // JavaScript Date object
+	dataPointCount: number; // Number of valid GPS points used
+	trimStart: number; // Original trim start index
+	trimEnd: number; // Original trim end index
 }
 
 export interface FitDataForGeo {
-    position_lat: number[];
-    position_long: number[];
-    timestamps: number[];
+	position_lat: number[];
+	position_long: number[];
+	timestamps: number[];
 }
 
 /**
@@ -75,99 +76,105 @@ export interface FitDataForGeo {
  * @throws Error if no valid GPS data is found in trim region
  */
 export function calculateTrimRegionMetadata(
-    fitData: FitDataForGeo,
-    trimStart: number,
-    trimEnd: number
+	fitData: FitDataForGeo,
+	trimStart: number,
+	trimEnd: number,
 ): TrimRegionMetadata {
-    // Validate inputs
-    if (trimStart < 0 || trimEnd >= fitData.timestamps.length) {
-        throw new Error(
-            `Invalid trim region: start=${trimStart}, end=${trimEnd}, length=${fitData.timestamps.length}`
-        );
-    }
+	// Validate inputs
+	if (trimStart < 0 || trimEnd >= fitData.timestamps.length) {
+		throw new Error(
+			`Invalid trim region: start=${trimStart}, end=${trimEnd}, length=${fitData.timestamps.length}`,
+		);
+	}
 
-    if (trimStart >= trimEnd) {
-        throw new Error(
-            `Invalid trim region: start (${trimStart}) must be less than end (${trimEnd})`
-        );
-    }
+	if (trimStart >= trimEnd) {
+		throw new Error(
+			`Invalid trim region: start (${trimStart}) must be less than end (${trimEnd})`,
+		);
+	}
 
-    // Extract data from trim region (inclusive range)
-    const latSlice = fitData.position_lat.slice(trimStart, trimEnd + 1);
-    const lonSlice = fitData.position_long.slice(trimStart, trimEnd + 1);
-    const timestampSlice = fitData.timestamps.slice(trimStart, trimEnd + 1);
+	// Extract data from trim region (inclusive range)
+	const latSlice = fitData.position_lat.slice(trimStart, trimEnd + 1);
+	const lonSlice = fitData.position_long.slice(trimStart, trimEnd + 1);
+	const timestampSlice = fitData.timestamps.slice(trimStart, trimEnd + 1);
 
-    // Filter out invalid GPS coordinates
-    // Valid coordinates must:
-    // - Not be 0.0 (common default/missing value)
-    // - Not be NaN
-    // - Be within valid lat/lon ranges
-    const validPoints: Array<{ lat: number; lon: number; ts: number }> = [];
+	// Filter out invalid GPS coordinates
+	// Valid coordinates must:
+	// - Not be 0.0 (common default/missing value)
+	// - Not be NaN
+	// - Be within valid lat/lon ranges
+	const validPoints: Array<{ lat: number; lon: number; ts: number }> = [];
 
-    for (let i = 0; i < latSlice.length; i++) {
-        const lat = latSlice[i];
-        const lon = lonSlice[i];
-        const ts = timestampSlice[i];
+	for (let i = 0; i < latSlice.length; i++) {
+		const lat = latSlice[i];
+		const lon = lonSlice[i];
+		const ts = timestampSlice[i];
 
-        if (
-            isValidCoordinate(lat, lon) &&
-            !isNaN(ts) &&
-            ts > 0
-        ) {
-            validPoints.push({ lat, lon, ts });
-        }
-    }
+		if (isValidCoordinate(lat, lon) && !isNaN(ts) && ts > 0) {
+			validPoints.push({ lat, lon, ts });
+		}
+	}
 
-    if (validPoints.length === 0) {
-        throw new Error(
-            'No valid GPS data found in trim region. Please ensure your FIT file contains GPS coordinates.'
-        );
-    }
+	if (validPoints.length === 0) {
+		throw new Error(
+			"No valid GPS data found in trim region. Please ensure your FIT file contains GPS coordinates.",
+		);
+	}
 
-    // Calculate average latitude and longitude
-    // Using arithmetic mean (suitable for small areas)
-    let sumLat = 0;
-    let sumLon = 0;
+	// Calculate average latitude and longitude
+	// Using arithmetic mean (suitable for small areas)
+	let sumLat = 0;
+	let sumLon = 0;
 
-    for (const point of validPoints) {
-        sumLat += point.lat;
-        sumLon += point.lon;
-    }
+	for (const point of validPoints) {
+		sumLat += point.lat;
+		sumLon += point.lon;
+	}
 
-    const avgLat = sumLat / validPoints.length;
-    const avgLon = sumLon / validPoints.length;
+	const avgLat = sumLat / validPoints.length;
+	const avgLon = sumLon / validPoints.length;
 
-    // Calculate middle timestamp
-    // Using average of first and last timestamp in slice
-    const middleTimestamp = (timestampSlice[0] + timestampSlice[timestampSlice.length - 1]) / 2;
+	// Calculate middle timestamp
+	// Using average of first and last timestamp in slice
+	const middleTimestamp =
+		(timestampSlice[0] + timestampSlice[timestampSlice.length - 1]) / 2;
 
-    // Round coordinates to 6 decimal places
-    // 6 decimals = ~0.1 meter precision, sufficient for weather data
-    const roundedLat = Number(avgLat.toFixed(6));
-    const roundedLon = Number(avgLon.toFixed(6));
+	// Round coordinates to 6 decimal places
+	// 6 decimals = ~0.1 meter precision, sufficient for weather data
+	const roundedLat = Number(avgLat.toFixed(6));
+	const roundedLon = Number(avgLon.toFixed(6));
 
-    // Convert timestamp to Date object
-    const middleDate = new Date(middleTimestamp * 1000);
+	// Convert timestamp to Date object
+	const middleDate = new Date(middleTimestamp * 1000);
 
-    log.debug('📊 GPS Calculation Summary:');
-    log.debug('  - Total points in slice:', latSlice.length);
-    log.debug('  - Valid GPS points:', validPoints.length);
-    log.debug('  - Invalid/filtered points:', latSlice.length - validPoints.length);
-    log.debug('  - Average latitude:', roundedLat);
-    log.debug('  - Average longitude:', roundedLon);
-    log.debug('  - First timestamp:', new Date(timestampSlice[0] * 1000).toISOString());
-    log.debug('  - Last timestamp:', new Date(timestampSlice[timestampSlice.length - 1] * 1000).toISOString());
-    log.debug('  - Middle timestamp:', middleDate.toISOString());
+	log.debug("📊 GPS Calculation Summary:");
+	log.debug("  - Total points in slice:", latSlice.length);
+	log.debug("  - Valid GPS points:", validPoints.length);
+	log.debug(
+		"  - Invalid/filtered points:",
+		latSlice.length - validPoints.length,
+	);
+	log.debug("  - Average latitude:", roundedLat);
+	log.debug("  - Average longitude:", roundedLon);
+	log.debug(
+		"  - First timestamp:",
+		new Date(timestampSlice[0] * 1000).toISOString(),
+	);
+	log.debug(
+		"  - Last timestamp:",
+		new Date(timestampSlice[timestampSlice.length - 1] * 1000).toISOString(),
+	);
+	log.debug("  - Middle timestamp:", middleDate.toISOString());
 
-    return {
-        avgLat: roundedLat,
-        avgLon: roundedLon,
-        middleTimestamp,
-        middleDate,
-        dataPointCount: validPoints.length,
-        trimStart,
-        trimEnd
-    };
+	return {
+		avgLat: roundedLat,
+		avgLon: roundedLon,
+		middleTimestamp,
+		middleDate,
+		dataPointCount: validPoints.length,
+		trimStart,
+		trimEnd,
+	};
 }
 
 /**
@@ -178,27 +185,27 @@ export function calculateTrimRegionMetadata(
  * @returns true if coordinates are valid
  */
 function isValidCoordinate(lat: number, lon: number): boolean {
-    // Check for NaN or undefined
-    if (isNaN(lat) || isNaN(lon)) {
-        return false;
-    }
+	// Check for NaN or undefined
+	if (isNaN(lat) || isNaN(lon)) {
+		return false;
+	}
 
-    // Check for zero (common missing value indicator)
-    if (lat === 0.0 && lon === 0.0) {
-        return false;
-    }
+	// Check for zero (common missing value indicator)
+	if (lat === 0.0 && lon === 0.0) {
+		return false;
+	}
 
-    // Check for valid latitude range (-90 to 90)
-    if (lat < -90 || lat > 90) {
-        return false;
-    }
+	// Check for valid latitude range (-90 to 90)
+	if (lat < -90 || lat > 90) {
+		return false;
+	}
 
-    // Check for valid longitude range (-180 to 180)
-    if (lon < -180 || lon > 180) {
-        return false;
-    }
+	// Check for valid longitude range (-180 to 180)
+	if (lon < -180 || lon > 180) {
+		return false;
+	}
 
-    return true;
+	return true;
 }
 
 /**
@@ -212,24 +219,24 @@ function isValidCoordinate(lat: number, lon: number): boolean {
  * @returns Distance in meters
  */
 export function calculateDistance(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
+	lat1: number,
+	lon1: number,
+	lat2: number,
+	lon2: number,
 ): number {
-    const EARTH_RADIUS_METERS = 6_371_000;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+	const EARTH_RADIUS_METERS = 6_371_000;
+	const φ1 = (lat1 * Math.PI) / 180;
+	const φ2 = (lat2 * Math.PI) / 180;
+	const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+	const Δλ = ((lon2 - lon1) * Math.PI) / 180;
 
-    const a =
-        Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+	const a =
+		Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+		Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
 
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return EARTH_RADIUS_METERS * c;
+	return EARTH_RADIUS_METERS * c;
 }
 
 /**
@@ -240,7 +247,7 @@ export function calculateDistance(
  * @returns Formatted string with hemisphere indicators
  */
 export function formatCoordinates(lat: number, lon: number): string {
-    const latDir = lat >= 0 ? 'N' : 'S';
-    const lonDir = lon >= 0 ? 'E' : 'W';
-    return `${Math.abs(lat).toFixed(6)}°${latDir}, ${Math.abs(lon).toFixed(6)}°${lonDir}`;
+	const latDir = lat >= 0 ? "N" : "S";
+	const lonDir = lon >= 0 ? "E" : "W";
+	return `${Math.abs(lat).toFixed(6)}°${latDir}, ${Math.abs(lon).toFixed(6)}°${lonDir}`;
 }

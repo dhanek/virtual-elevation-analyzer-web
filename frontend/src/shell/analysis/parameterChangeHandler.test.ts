@@ -180,8 +180,9 @@ describe("handleParametersChange leaves the funnel alone when it should", () => 
 
 	it("does not ask when there is no file to save against", () => {
 		const appState = makeAppState();
-		(appState as unknown as { currentFileHash: string | null }).currentFileHash =
-			null;
+		(
+			appState as unknown as { currentFileHash: string | null }
+		).currentFileHash = null;
 		configure(appState);
 		renderVisibleVeSection();
 

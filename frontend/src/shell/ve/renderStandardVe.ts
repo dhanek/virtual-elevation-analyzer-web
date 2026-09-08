@@ -1,4 +1,7 @@
-import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
+import {
+	displayCdaBounds,
+	displayCrrBounds,
+} from "../../analysis/sliderBounds";
 import {
 	clampTrimWindow,
 	MIN_TRIM_WINDOW_SAMPLES,
@@ -49,15 +52,11 @@ import {
 } from "../../analysis/unsetParameterFallbacks";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
-import {
-	bindTabButtons,
-	resetTabRenderMapForNewPanel,
-} from "../dom/tabs";
+import { bindTabButtons, resetTabRenderMapForNewPanel } from "../dom/tabs";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
 
 // Plotly.js type declaration
 declare const Plotly: any;
-
 
 export interface StandardVeCallbacks {
 	onSaveScreenshot: () => void;
@@ -163,9 +162,8 @@ export async function initializeVEAnalysis(
 		velocity: analysisInput.velocity,
 		windSpeed: resolvedWindSpeed,
 	};
-	const virtualDistanceFigure = buildVirtualDistanceFigure(
-		virtualDistanceInput,
-	);
+	const virtualDistanceFigure =
+		buildVirtualDistanceFigure(virtualDistanceInput);
 
 	// `react`, not `newPlot` (bundle D). Every one of these ids is redrawn on
 	// every slider update -- `bindStandardSliders` reaches all of them through
@@ -335,7 +333,9 @@ export async function showVirtualElevationAnalysisInline(
 			// into the sliders or map markers.
 			appState.presetTrimStart = 0;
 			appState.presetTrimEnd = timestamps.length - 1;
-			log.debug("No saved settings for lap selection, using default trim range");
+			log.debug(
+				"No saved settings for lap selection, using default trim range",
+			);
 		}
 	}
 
@@ -483,7 +483,9 @@ export async function showVirtualElevationAnalysisInline(
                             ${
 															hasWindSpeed
 																? airSpeedCalibrationControlMarkup(
-																		appState.airSpeedCalibrationPercent.toFixed(1),
+																		appState.airSpeedCalibrationPercent.toFixed(
+																			1,
+																		),
 																	)
 																: ""
 														}
@@ -571,7 +573,8 @@ export async function showVirtualElevationAnalysisInline(
 															 */
 															hasWindSpeed
 																? airSpeedOffsetControlMarkup(
-																		appState.currentParameters?.air_speed_offset,
+																		appState.currentParameters
+																			?.air_speed_offset,
 																		defaultAirSpeedOffset,
 																	)
 																: ""

@@ -18,11 +18,7 @@ import { renderGpsLapVdPlot } from "./gpsLapPlots";
 import { VD_HEADER_ID, virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import type { LapVEProfile } from "./types";
 
-function lap(
-	lapNumber: number,
-	airKm: number,
-	groundKm: number,
-): LapVEProfile {
+function lap(lapNumber: number, airKm: number, groundKm: number): LapVEProfile {
 	return {
 		lapNumber,
 		distances: [0, 1],

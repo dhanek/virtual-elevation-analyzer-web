@@ -36,9 +36,7 @@
  * controls — the same reasoning that put the controls in a table in the first
  * place. Nothing outside this file calls `configureModeUpdateRequests`.
  */
-import {
-	clampAirSpeedCalibrationPercent,
-} from "../../analysis/AirSpeedCalibration";
+import { clampAirSpeedCalibrationPercent } from "../../analysis/AirSpeedCalibration";
 import { calculateAirSpeedSyncError } from "../../analysis/WindSourceResolver";
 import type { AnalysisModeId } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
@@ -48,11 +46,11 @@ import { bindWindSourceRadios } from "../dom/windSource";
 import { bindCrrTempControls } from "../ve/crrTempControls";
 import { bindWindHeightControls } from "../ve/windHeightControls";
 import { bindElevationSmoothingToggle } from "./elevationProfileCycle";
+import { controlsForMode, type ModeControlSpec } from "./modeControlTable";
 import {
-	controlsForMode,
-	type ModeControlSpec,
-} from "./modeControlTable";
-import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
+	displayCdaBounds,
+	displayCrrBounds,
+} from "../../analysis/sliderBounds";
 import {
 	resolveDisplayCda,
 	resolveDisplayCrr,
@@ -252,7 +250,9 @@ export function bindModeControls(
 	}
 
 	function writeTrim(role: "start" | "end", value: number): void {
-		const slider = input(role === "start" ? "trimStartSlider" : "trimEndSlider");
+		const slider = input(
+			role === "start" ? "trimStartSlider" : "trimEndSlider",
+		);
 		const number = input(role === "start" ? "trimStartValue" : "trimEndValue");
 		if (slider) slider.value = value.toString();
 		if (number) number.value = value.toString();
@@ -488,7 +488,9 @@ export function bindModeControls(
 			case "delegated": {
 				const binding = {
 					getParams: () => appState.currentParameters,
-					setParams: (fields: Parameters<typeof mergeAnalysisParameters>[0]) => {
+					setParams: (
+						fields: Parameters<typeof mergeAnalysisParameters>[0],
+					) => {
 						mergeAnalysisParameters(fields);
 					},
 					onChange: () => finish(spec),

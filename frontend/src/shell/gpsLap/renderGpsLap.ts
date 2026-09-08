@@ -8,7 +8,10 @@
  * AnalysisParameters and computed numeric stats (no user-provided strings).
  * This matches the prior main.ts behavior; no new XSS surface is introduced.
  */
-import { displayCdaBounds, displayCrrBounds } from "../../analysis/sliderBounds";
+import {
+	displayCdaBounds,
+	displayCrrBounds,
+} from "../../analysis/sliderBounds";
 import {
 	resolveDisplayCda,
 	resolveDisplayCrr,
@@ -33,10 +36,7 @@ import {
 	saveCurrentMultiSegmentSettings,
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
-import {
-	resetTabRenderMapForNewPanel,
-	setupTabSwitching,
-} from "../dom/tabs";
+import { resetTabRenderMapForNewPanel, setupTabSwitching } from "../dom/tabs";
 import {
 	bindModeControls,
 	type BindModeControlsResult,

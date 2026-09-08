@@ -138,7 +138,10 @@ function syncPlotXAxisControls(): void {
 		.querySelectorAll<HTMLButtonElement>(`.${PLOT_X_AXIS_TOGGLE_CLASS}__btn`)
 		.forEach((button) => {
 			const isActive = button.dataset.axis === axis;
-			button.classList.toggle(`${PLOT_X_AXIS_TOGGLE_CLASS}__btn--active`, isActive);
+			button.classList.toggle(
+				`${PLOT_X_AXIS_TOGGLE_CLASS}__btn--active`,
+				isActive,
+			);
 			button.setAttribute("aria-pressed", isActive ? "true" : "false");
 		});
 }

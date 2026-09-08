@@ -214,7 +214,9 @@ describe.each(MODES)("the $name sidebar, as rendered", ({ render }) => {
 
 	it("hides the wind-height block under fit and shows it otherwise", () => {
 		expect(
-			render("fit").querySelector("#windHeightControls")?.hasAttribute("hidden"),
+			render("fit")
+				.querySelector("#windHeightControls")
+				?.hasAttribute("hidden"),
 		).toBe(true);
 		expect(
 			render("constant")

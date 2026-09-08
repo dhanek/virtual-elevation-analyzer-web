@@ -40,10 +40,7 @@ describe("crrTempFactor", () => {
 describe("applyCrrTempCorrection", () => {
 	test("scales a 22 °C-referenced Crr by the temperature factor", () => {
 		// Spec example direction: cold weather raises Crr.
-		expect(applyCrrTempCorrection(0.003, 10, 1.0)).toBeCloseTo(
-			0.003 * 1.31,
-			5,
-		);
+		expect(applyCrrTempCorrection(0.003, 10, 1.0)).toBeCloseTo(0.003 * 1.31, 5);
 	});
 });
 

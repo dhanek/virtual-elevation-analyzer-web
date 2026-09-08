@@ -391,18 +391,6 @@ re-deriving it):
       auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
       maintainer 2026-09-04*
 
-- [ ] **[M] No formatter or indentation rule is machine-enforced; a misindented block passed
-      both `npm run check` and `npm run lint`.** A guard added to `requestModeUpdate`'s run
-      closure was indented one level shallow relative to the `if` that opened it — wrong enough
-      to mislead a reader about its nesting, invisible to both commands because neither checks
-      formatting. Wire `prettier --check` into `npm run check` (or add `@stylistic/indent`,
-      or an equivalent, to `frontend/eslint.config.js`'s existing flat config) so indentation
-      drift fails CI instead of needing a human reviewer to catch it. Deliberately not done
-      inside a refactor branch: either option means a repo-wide reformat diff, which does not
-      belong mixed into unrelated behavioural changes.
-      `frontend/package.json` (`check`, `lint` scripts), `frontend/eslint.config.js` · *origin:
-      PR #14 review round 20, F20-06 — deferred by the maintainer 2026-09-04*
-
 - [ ] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
       retirement, each with a comment saying so.** All four exist only because Standard's
       analyze-time placeholder calculator once needed them; that calculator is gone (see
@@ -425,6 +413,102 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Formatting is machine-enforced — 2026-09-08
+
+- [x] **[M] No formatter or indentation rule is machine-enforced; a misindented block passed
+      both `npm run check` and `npm run lint`.** `prettier --check` now runs as the FIRST clause
+      of `npm run check`, so formatting drift fails before `tsc` is even reached.
+
+      Criteria (concretised 2026-09-08, PR #20 review round 26):
+      - [x] E1 A machine formatting check runs as part of `npm run check`
+      - [x] E2 A block indented one level shallow relative to the `if` that opened it
+            makes `npm run check` exit non-zero and name the file, in ANY first-party
+            TypeScript source file *(confirmed wide, 2026-09-08: the narrow reading
+            would let the item close while its own defect survives in three source
+            files that `.prettierignore` excluded)*
+      - [x] E3 The repo-wide reformat carries no behavioural change
+      - [x] E4 The formatter's output is stable and the other gates are unchanged —
+            `check`, `lint`, `test`, `build` all clean, and prettier is idempotent
+            over its own output
+      - [x] E5 The PR-side check fails a misindented block on the pull request
+            rather than on the deploy — **verified by two runs on PR #20, 2026-09-08**,
+            because a check never observed failing is not a check:
+            [run 34201718492](https://github.com/dhanek/virtual-elevation-analyzer-web/actions/runs/34201718492)
+            is green on the clean tree with `Check Frontend`, `Lint Frontend` and
+            `Test Frontend` all executed, and
+            [run 34201991724](https://github.com/dhanek/virtual-elevation-analyzer-web/actions/runs/34201991724)
+            **fails at `Check Frontend`** on a deliberate misindent, with `Lint` and
+            `Test` skipped behind it. The misindent went into
+            `src/analysis/__fixtures__/loadGoldenRide.ts` on purpose — one of the three
+            files `.prettierignore` was silently excluding before this item's own
+            blocking fix — so the failing run re-proves that fix end to end rather
+            than only the workflow. The misindent reached the branch as ONE
+            temporary commit, `ee896df`, which was then removed by a `git reset`
+            back to `acde3bd` — its reviewed tip — and a force-push. Not by a
+            revert: `ee896df`'s own message promised a revert commit, and none was
+            authored. The reset is the part of this episode git cannot reconstruct
+            once `ee896df` is collected, which is why it is written down here.
+
+      **Demonstrated before and after, with the item's own defect.** A block indented one level
+      shallow relative to the `if` that opened it was inserted into
+      `interpolateAscending`: before, `npm run check`, `npm run lint` and the suite all exited 0;
+      after, `check` exits **1** naming the file. The block was then removed and everything is
+      clean again.
+
+      **`useTabs: true`, and the choice was measured rather than defaulted.** 149 of 236
+      TypeScript files were tab-indented against 87 space-indented, and the tab side includes
+      everything written recently. Prettier's own 2-space default would have rewritten **234** of
+      236 files; tabs rewrote **168**, and left the majority style in the majority. That reformat
+      reached the tree in two commits, which is why no single commit shows 168: `fa35ade` moved
+      166 files, and the remaining two — the fixture loader modules — moved in `f68a443`. Note
+      the order, which is the reverse of what it looks like: `f68a443` reformatted those two
+      while they were still ignored, and `.prettierignore` was narrowed to the generated JSON it
+      was written for two commits later, in `8ccf8f0`. Splitting it that way is what kept
+      `npm run check` at exit 0 on every commit — narrowing first would have left an
+      intermediate commit failing its own gate. Options that
+      are prettier's defaults are stated explicitly in `.prettierrc.json` rather than omitted, so
+      a later reader can tell which were chosen.
+
+      **The order is deliberate.** Tooling (the dependency — prettier was neither declared
+      nor resolved anywhere on `origin/main`, whose `package-lock.json` contains no `prettier`
+      entry at all, so the commit adds the dependency rather than pinning down a transitive one
+      — plus config and ignore file), then the mechanical reformat on its own so it can be
+      listed in `.git-blame-ignore-revs`, then the wiring. That order means `npm run check`
+      never names a command the tree would fail. Commit `9853d28`'s own message still carries
+      the earlier, wrong reason and is deliberately left unrewritten: rewording it would change
+      `fa35ade`'s SHA, which `.git-blame-ignore-revs` hard-codes.
+
+      **One file needed a hand, and it is the interesting part.** In `recomputeRunner.test.ts`
+      prettier WRAPPED
+
+          // @ts-expect-error - RecomputeMode must not exist
+          export type _RecomputeModeMustNotExist = import("./recomputeRunner").RecomputeMode;
+
+      onto two lines. `@ts-expect-error` applies to the NEXT LINE, so the wrap moved the type
+      reference off it: the directive came to sit over `export type ... =`, which has no error,
+      and `tsc` reported TS2578 "unused '@ts-expect-error' directive" while the real error went
+      unsuppressed. A deliberate guard — the test asserts `RecomputeMode` does NOT exist — had
+      quietly stopped guarding anything, and it surfaced only because an unused directive is
+      itself an error. A `// prettier-ignore` pins the line with a comment naming what breaks
+      without it. **Worth carrying forward: a formatter can silently relocate a
+      line-scoped directive.**
+
+      **The covered set is derived once and guarded, and the gate runs on the pull request.**
+      `frontend/src/tooling/formatterCoverage.test.ts` asserts that `check`, `format` and
+      `.prettierignore` agree, so an ignore line cannot silently pull first-party source back
+      out of the formatter. That structure is what F26-01 already cost once: `.prettierignore`
+      excluded a directory holding three TypeScript modules, and the item's own defect survived
+      in them. And `.github/workflows/pr-check.yml` runs `check`, `lint` and `test` on
+      `pull_request`, so a formatting slip fails the PR that introduces it rather than the
+      Pages deploy on `main`.
+
+      Verified after the reformat: `check`, `lint`, `build` and 97 files / 1169 tests all pass,
+      and prettier is idempotent over its own output. `npm run format` is the writer.
+      `frontend/package.json` · `frontend/.prettierrc.json` · `frontend/.prettierignore` ·
+      `.git-blame-ignore-revs` · `.github/workflows/pr-check.yml` ·
+      `frontend/src/tooling/formatterCoverage.test.ts` · *origin: PR #14 review round 20,
+      F20-06 — deferred by the maintainer 2026-09-04*
 
 ### Out-and-back's aggregation, measured then made linear — 2026-09-07
 

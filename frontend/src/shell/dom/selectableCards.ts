@@ -1,16 +1,16 @@
-import { log } from '../../utils/log'
+import { log } from "../../utils/log";
 
 /**
  * Data shape for a selectable checkbox-card item.
  * Used for FIT laps, GPS detected laps, and out-and-back sections.
  */
 export interface SelectableCardItem {
-    id: string
-    label: string
-    details: string
-    checked: boolean
-    dataAttr: string
-    dataValue: string | number
+	id: string;
+	label: string;
+	details: string;
+	checked: boolean;
+	dataAttr: string;
+	dataValue: string | number;
 }
 
 /**
@@ -22,22 +22,25 @@ export interface SelectableCardItem {
  * @param cssClass - CSS class for the checkbox input (e.g. 'gps-lap-checkbox')
  * @returns HTML string of checkbox-card items, or empty string for empty input
  */
-export function renderSelectableCards(items: SelectableCardItem[], cssClass: string): string {
-    if (items.length === 0) return ''
+export function renderSelectableCards(
+	items: SelectableCardItem[],
+	cssClass: string,
+): string {
+	if (items.length === 0) return "";
 
-    return items
-        .map(item => {
-            const selectedClass = item.checked ? ' lap-checkbox-item--selected' : ''
-            const checkedAttr = item.checked ? ' checked' : ''
-            return `<div class="lap-checkbox-item${selectedClass}" data-${item.dataAttr}="${item.dataValue}">
+	return items
+		.map((item) => {
+			const selectedClass = item.checked ? " lap-checkbox-item--selected" : "";
+			const checkedAttr = item.checked ? " checked" : "";
+			return `<div class="lap-checkbox-item${selectedClass}" data-${item.dataAttr}="${item.dataValue}">
             <input type="checkbox" class="${cssClass}" id="${item.id}"${checkedAttr}>
             <div class="lap-info">
                 <div class="lap-number">${item.label}</div>
                 <div class="lap-details">${item.details}</div>
             </div>
-        </div>`
-        })
-        .join('')
+        </div>`;
+		})
+		.join("");
 }
 
 /**
@@ -51,57 +54,65 @@ export function renderSelectableCards(items: SelectableCardItem[], cssClass: str
  * @param onChange - Callback receiving array of selected numeric values
  */
 export function bindSelectableCardEvents(
-    container: HTMLElement,
-    checkboxClass: string,
-    dataAttr: string,
-    onChange: (selectedValues: number[]) => void,
+	container: HTMLElement,
+	checkboxClass: string,
+	dataAttr: string,
+	onChange: (selectedValues: number[]) => void,
 ): void {
-    const dataSelector = `data-${dataAttr}`
+	const dataSelector = `data-${dataAttr}`;
 
-    function collectSelected(): number[] {
-        const checked = container.querySelectorAll(`.${checkboxClass}:checked`) as NodeListOf<HTMLInputElement>
-        return Array.from(checked)
-            .map(cb => {
-                const item = cb.closest('.lap-checkbox-item')
-                return item ? parseInt(item.getAttribute(dataSelector) || '0', 10) : 0
-            })
-            .filter(v => v > 0)
-    }
+	function collectSelected(): number[] {
+		const checked = container.querySelectorAll(
+			`.${checkboxClass}:checked`,
+		) as NodeListOf<HTMLInputElement>;
+		return Array.from(checked)
+			.map((cb) => {
+				const item = cb.closest(".lap-checkbox-item");
+				return item ? parseInt(item.getAttribute(dataSelector) || "0", 10) : 0;
+			})
+			.filter((v) => v > 0);
+	}
 
-    function updateVisualState(): void {
-        container.querySelectorAll(`.lap-checkbox-item[${dataSelector}]`).forEach(item => {
-            const checkbox = item.querySelector(`.${checkboxClass}`) as HTMLInputElement | null
-            if (checkbox?.checked) {
-                item.classList.add('lap-checkbox-item--selected')
-            } else {
-                item.classList.remove('lap-checkbox-item--selected')
-            }
-        })
-    }
+	function updateVisualState(): void {
+		container
+			.querySelectorAll(`.lap-checkbox-item[${dataSelector}]`)
+			.forEach((item) => {
+				const checkbox = item.querySelector(
+					`.${checkboxClass}`,
+				) as HTMLInputElement | null;
+				if (checkbox?.checked) {
+					item.classList.add("lap-checkbox-item--selected");
+				} else {
+					item.classList.remove("lap-checkbox-item--selected");
+				}
+			});
+	}
 
-    function handleChange(): void {
-        const selected = collectSelected()
-        updateVisualState()
-        log.debug(`Selectable cards [${dataAttr}] selection changed:`, selected)
-        onChange(selected)
-    }
+	function handleChange(): void {
+		const selected = collectSelected();
+		updateVisualState();
+		log.debug(`Selectable cards [${dataAttr}] selection changed:`, selected);
+		onChange(selected);
+	}
 
-    // Bind checkbox change events
-    container.querySelectorAll(`.${checkboxClass}`).forEach(checkbox => {
-        checkbox.addEventListener('change', handleChange)
-    })
+	// Bind checkbox change events
+	container.querySelectorAll(`.${checkboxClass}`).forEach((checkbox) => {
+		checkbox.addEventListener("change", handleChange);
+	});
 
-    // Bind click handlers on card items to toggle their checkbox
-    container.querySelectorAll('.lap-checkbox-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            const target = e.target as Element
-            if (!target.classList.contains(checkboxClass)) {
-                const checkbox = item.querySelector(`.${checkboxClass}`) as HTMLInputElement | null
-                if (checkbox) {
-                    checkbox.checked = !checkbox.checked
-                    handleChange()
-                }
-            }
-        })
-    })
+	// Bind click handlers on card items to toggle their checkbox
+	container.querySelectorAll(".lap-checkbox-item").forEach((item) => {
+		item.addEventListener("click", (e) => {
+			const target = e.target as Element;
+			if (!target.classList.contains(checkboxClass)) {
+				const checkbox = item.querySelector(
+					`.${checkboxClass}`,
+				) as HTMLInputElement | null;
+				if (checkbox) {
+					checkbox.checked = !checkbox.checked;
+					handleChange();
+				}
+			}
+		});
+	});
 }

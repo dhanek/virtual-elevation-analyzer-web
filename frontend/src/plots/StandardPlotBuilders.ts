@@ -27,13 +27,17 @@
  * So: no `height` in any layout in this file. If a plot is the wrong size, the
  * stylesheet is where to fix it.
  */
-import { anchorSeriesTo, residualsAgainst } from './comparisonTraces';
-import { buildTrimBoundaryShapes, createContextSlices, type PlotContext } from './PlotContext';
+import { anchorSeriesTo, residualsAgainst } from "./comparisonTraces";
 import {
-    computeVirtualDistanceWindowTotals,
-    integrateVirtualDistance,
-    type VirtualDistanceTotals,
-} from '../analysis/VirtualDistance';
+	buildTrimBoundaryShapes,
+	createContextSlices,
+	type PlotContext,
+} from "./PlotContext";
+import {
+	computeVirtualDistanceWindowTotals,
+	integrateVirtualDistance,
+	type VirtualDistanceTotals,
+} from "../analysis/VirtualDistance";
 
 // The integration itself moved to analysis/VirtualDistance.ts once Store Result
 // and Export CSV started persisting these numbers (change-list entry (h)): the
@@ -41,58 +45,58 @@ import {
 // into this layer. Re-exported here so every existing import site keeps working
 // and there is still exactly ONE integration.
 export {
-    computeVirtualDistanceWindowTotals,
-    integrateVirtualDistance,
-    virtualDistanceDifferencePercent,
-} from '../analysis/VirtualDistance';
+	computeVirtualDistanceWindowTotals,
+	integrateVirtualDistance,
+	virtualDistanceDifferencePercent,
+} from "../analysis/VirtualDistance";
 export type {
-    VirtualDistanceIntegration,
-    VirtualDistanceTotals,
-    VirtualDistanceWindow,
-    SegmentVirtualDistance,
-} from '../analysis/VirtualDistance';
+	VirtualDistanceIntegration,
+	VirtualDistanceTotals,
+	VirtualDistanceWindow,
+	SegmentVirtualDistance,
+} from "../analysis/VirtualDistance";
 
 export type PlotTrace = Record<string, unknown>;
 export type PlotLayout = Record<string, unknown>;
 export type PlotConfig = Record<string, unknown>;
 
 export interface PlotDefinition {
-    data: PlotTrace[];
-    layout: PlotLayout;
-    config: PlotConfig;
+	data: PlotTrace[];
+	layout: PlotLayout;
+	config: PlotConfig;
 }
 
 export interface VirtualElevationFigures {
-    elevation: PlotDefinition;
-    residuals: PlotDefinition;
+	elevation: PlotDefinition;
+	residuals: PlotDefinition;
 }
 
 export interface VirtualElevationComparisonPlotInput {
-    context: PlotContext;
-    virtualElevationConstant: number[];
-    virtualElevationFit: number[];
-    actualElevation: number[];
+	context: PlotContext;
+	virtualElevationConstant: number[];
+	virtualElevationFit: number[];
+	actualElevation: number[];
 }
 
 export interface VirtualElevationPlotInput {
-    context: PlotContext;
-    virtualElevation: number[];
-    actualElevation: number[];
-    cdaLabel: string;
-    crrLabel: string;
+	context: PlotContext;
+	virtualElevation: number[];
+	actualElevation: number[];
+	cdaLabel: string;
+	crrLabel: string;
 }
 
 export interface WindSpeedPlotInput {
-    context: PlotContext;
-    velocity: number[];
-    fitWindSpeedKmh: Array<number | null>;
-    constantWindApparentKmh?: number[];
+	context: PlotContext;
+	velocity: number[];
+	fitWindSpeedKmh: Array<number | null>;
+	constantWindApparentKmh?: number[];
 }
 
 export interface SpeedPowerPlotInput {
-    context: PlotContext;
-    velocity: number[];
-    power: number[];
+	context: PlotContext;
+	velocity: number[];
+	power: number[];
 }
 
 /**
@@ -112,20 +116,20 @@ export interface SpeedPowerPlotInput {
  * `virtualDistanceCalibration.test.ts`.
  */
 export interface VirtualDistancePlotInput {
-    context: PlotContext;
-    timestamps: number[];
-    velocity: number[];
-    /** Already offset AND calibrated. Do not scale it again — see above. */
-    windSpeed: number[];
+	context: PlotContext;
+	timestamps: number[];
+	velocity: number[];
+	/** Already offset AND calibrated. Do not scale it again — see above. */
+	windSpeed: number[];
 }
 
 export function getDefaultPlotConfig(): PlotConfig {
-    return {
-        responsive: true,
-        displayModeBar: true,
-        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
-        displaylogo: false,
-    };
+	return {
+		responsive: true,
+		displayModeBar: true,
+		modeBarButtonsToRemove: ["pan2d", "lasso2d", "select2d"],
+		displaylogo: false,
+	};
 }
 
 /**
@@ -159,18 +163,18 @@ export function getDefaultPlotConfig(): PlotConfig {
  * `belowAxisLegend.test.ts`.
  */
 export function belowAxisLegend(): PlotLayout {
-    return {
-        orientation: 'h',
-        yref: 'container',
-        yanchor: 'bottom',
-        y: 0,
-        // Centred EXPLICITLY. Plotly's default `x` for a horizontal legend is 0,
-        // which the old layouts were quietly relying on not being applied --
-        // they read as centred because the entries filled the width. Measured in
-        // Chrome once `yref` was set: the legend went hard left.
-        x: 0.5,
-        xanchor: 'center',
-    };
+	return {
+		orientation: "h",
+		yref: "container",
+		yanchor: "bottom",
+		y: 0,
+		// Centred EXPLICITLY. Plotly's default `x` for a horizontal legend is 0,
+		// which the old layouts were quietly relying on not being applied --
+		// they read as centred because the entries filled the width. Measured in
+		// Chrome once `yref` was set: the legend went hard left.
+		x: 0.5,
+		xanchor: "center",
+	};
 }
 
 /** Bottom margin that fits an x-axis title AND `belowAxisLegend` under it. */
@@ -184,623 +188,666 @@ export const BELOW_AXIS_LEGEND_MARGIN_B = 100;
  * instead of being handed `[undefined, undefined]`.
  */
 function mainWindowRange(context: PlotContext): PlotLayout {
-    const points = context.xPointsMain;
-    if (points.length === 0) {
-        return {};
-    }
-    return { range: [points[0], points[points.length - 1]] };
+	const points = context.xPointsMain;
+	if (points.length === 0) {
+		return {};
+	}
+	return { range: [points[0], points[points.length - 1]] };
 }
 
-export function buildVirtualElevationFigures(input: VirtualElevationPlotInput): VirtualElevationFigures {
-    const virtualSlices = createContextSlices(input.virtualElevation, input.context);
-    const actualSlices = createContextSlices(input.actualElevation, input.context);
+export function buildVirtualElevationFigures(
+	input: VirtualElevationPlotInput,
+): VirtualElevationFigures {
+	const virtualSlices = createContextSlices(
+		input.virtualElevation,
+		input.context,
+	);
+	const actualSlices = createContextSlices(
+		input.actualElevation,
+		input.context,
+	);
 
-    const veOffset = actualSlices.main[0] - virtualSlices.main[0];
-    const offsetMain = virtualSlices.main.map(value => value + veOffset);
-    const offsetBefore = virtualSlices.before.map(value => value + veOffset);
-    const offsetAfter = virtualSlices.after.map(value => value + veOffset);
+	const veOffset = actualSlices.main[0] - virtualSlices.main[0];
+	const offsetMain = virtualSlices.main.map((value) => value + veOffset);
+	const offsetBefore = virtualSlices.before.map((value) => value + veOffset);
+	const offsetAfter = virtualSlices.after.map((value) => value + veOffset);
 
-    const elevationData: PlotTrace[] = [];
-    if (input.context.contextBefore > 0) {
-        elevationData.push(
-            {
-                x: input.context.xPointsBefore,
-                y: offsetBefore,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'VE (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-            {
-                x: input.context.xPointsBefore,
-                y: actualSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Actual (trimmed)',
-                line: { color: '#000000', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-        );
-    }
+	const elevationData: PlotTrace[] = [];
+	if (input.context.contextBefore > 0) {
+		elevationData.push(
+			{
+				x: input.context.xPointsBefore,
+				y: offsetBefore,
+				type: "scatter",
+				mode: "lines",
+				name: "VE (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+			{
+				x: input.context.xPointsBefore,
+				y: actualSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "Actual (trimmed)",
+				line: { color: "#000000", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+		);
+	}
 
-    elevationData.push(
-        {
-            x: input.context.xPointsMain,
-            y: offsetMain,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Virtual Elevation',
-            line: { color: '#4363d8', width: 2 },
-        },
-        {
-            x: input.context.xPointsMain,
-            y: actualSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Actual Elevation',
-            line: { color: '#000000', width: 2 },
-        },
-    );
+	elevationData.push(
+		{
+			x: input.context.xPointsMain,
+			y: offsetMain,
+			type: "scatter",
+			mode: "lines",
+			name: "Virtual Elevation",
+			line: { color: "#4363d8", width: 2 },
+		},
+		{
+			x: input.context.xPointsMain,
+			y: actualSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "Actual Elevation",
+			line: { color: "#000000", width: 2 },
+		},
+	);
 
-    if (input.context.contextAfter > 0) {
-        elevationData.push(
-            {
-                x: input.context.xPointsAfter,
-                y: offsetAfter,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'VE (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-            {
-                x: input.context.xPointsAfter,
-                y: actualSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Actual (trimmed)',
-                line: { color: '#000000', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-        );
-    }
+	if (input.context.contextAfter > 0) {
+		elevationData.push(
+			{
+				x: input.context.xPointsAfter,
+				y: offsetAfter,
+				type: "scatter",
+				mode: "lines",
+				name: "VE (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+			{
+				x: input.context.xPointsAfter,
+				y: actualSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "Actual (trimmed)",
+				line: { color: "#000000", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+		);
+	}
 
-    const annotationPosition = findOptimalAnnotationPosition(
-        [...offsetMain, ...actualSlices.main],
-        [...input.context.xPointsMain, ...input.context.xPointsMain],
-    );
+	const annotationPosition = findOptimalAnnotationPosition(
+		[...offsetMain, ...actualSlices.main],
+		[...input.context.xPointsMain, ...input.context.xPointsMain],
+	);
 
-    const residualsMain = offsetMain.map((value, index) => value - actualSlices.main[index]);
-    const residualsBefore = offsetBefore.map((value, index) => value - actualSlices.before[index]);
-    const residualsAfter = offsetAfter.map((value, index) => value - actualSlices.after[index]);
+	const residualsMain = offsetMain.map(
+		(value, index) => value - actualSlices.main[index],
+	);
+	const residualsBefore = offsetBefore.map(
+		(value, index) => value - actualSlices.before[index],
+	);
+	const residualsAfter = offsetAfter.map(
+		(value, index) => value - actualSlices.after[index],
+	);
 
-    const residualsData: PlotTrace[] = [];
-    if (input.context.contextBefore > 0) {
-        residualsData.push({
-            x: input.context.xPointsBefore,
-            y: residualsBefore,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Residuals (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-        });
-    }
+	const residualsData: PlotTrace[] = [];
+	if (input.context.contextBefore > 0) {
+		residualsData.push({
+			x: input.context.xPointsBefore,
+			y: residualsBefore,
+			type: "scatter",
+			mode: "lines",
+			name: "Residuals (trimmed)",
+			line: { color: "#4363d8", width: 2 },
+			opacity: 0.2,
+			showlegend: false,
+		});
+	}
 
-    residualsData.push({
-        x: input.context.xPointsMain,
-        y: residualsMain,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'VE - Actual',
-        line: { color: '#4363d8', width: 2 },
-    });
+	residualsData.push({
+		x: input.context.xPointsMain,
+		y: residualsMain,
+		type: "scatter",
+		mode: "lines",
+		name: "VE - Actual",
+		line: { color: "#4363d8", width: 2 },
+	});
 
-    if (input.context.contextAfter > 0) {
-        residualsData.push({
-            x: input.context.xPointsAfter,
-            y: residualsAfter,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Residuals (trimmed)',
-            line: { color: '#4363d8', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-        });
-    }
+	if (input.context.contextAfter > 0) {
+		residualsData.push({
+			x: input.context.xPointsAfter,
+			y: residualsAfter,
+			type: "scatter",
+			mode: "lines",
+			name: "Residuals (trimmed)",
+			line: { color: "#4363d8", width: 2 },
+			opacity: 0.2,
+			showlegend: false,
+		});
+	}
 
-    const allTimePoints = [
-        ...input.context.xPointsBefore,
-        ...input.context.xPointsMain,
-        ...input.context.xPointsAfter,
-    ];
-    if (allTimePoints.length > 0) {
-        residualsData.push({
-            x: [allTimePoints[0], allTimePoints[allTimePoints.length - 1]],
-            y: [0, 0],
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Zero Line',
-            line: { color: '#7f8c8d', width: 1, dash: 'dash' },
-            showlegend: false,
-        });
-    }
+	const allTimePoints = [
+		...input.context.xPointsBefore,
+		...input.context.xPointsMain,
+		...input.context.xPointsAfter,
+	];
+	if (allTimePoints.length > 0) {
+		residualsData.push({
+			x: [allTimePoints[0], allTimePoints[allTimePoints.length - 1]],
+			y: [0, 0],
+			type: "scatter",
+			mode: "lines",
+			name: "Zero Line",
+			line: { color: "#7f8c8d", width: 1, dash: "dash" },
+			showlegend: false,
+		});
+	}
 
-    return {
-        elevation: {
-            data: elevationData,
-            layout: {
-                title: { text: 'Virtual vs Actual Elevation Profile', font: { size: 14 } },
-                xaxis: {
-                    title: '',
-                    showgrid: true,
-                    gridcolor: '#e0e0e0',
-                    showticklabels: false,
-                    range: [input.context.xMin, input.context.xMax],
-                },
-                yaxis: {
-                    title: 'Elevation (m)',
-                    showgrid: true,
-                    gridcolor: '#e0e0e0',
-                },
-                legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-                shapes: buildTrimBoundaryShapes(input.context),
-                annotations: [{
-                    text: `CdA: ${input.cdaLabel}<br>Crr: ${input.crrLabel}`,
-                    xref: 'paper',
-                    yref: 'paper',
-                    x: annotationPosition.x,
-                    y: annotationPosition.y,
-                    xanchor: annotationPosition.xanchor,
-                    yanchor: annotationPosition.yanchor,
-                    showarrow: false,
-                    bgcolor: 'rgba(255,255,255,0.9)',
-                    bordercolor: '#4363d8',
-                    borderwidth: 1,
-                    borderpad: 6,
-                    font: {
-                        size: 12,
-                        family: 'monospace',
-                        color: '#2d3748',
-                    },
-                }],
-                margin: { l: 60, r: 20, t: 40, b: 5 },
-                plot_bgcolor: '#fafafa',
-                paper_bgcolor: 'white',
-            },
-            config: getDefaultPlotConfig(),
-        },
-        residuals: {
-            data: residualsData,
-            layout: {
-                title: { text: 'Residuals (Virtual - Actual Elevation)', font: { size: 12 } },
-                xaxis: {
-                    title: input.context.xAxisTitle,
-                    showgrid: true,
-                    gridcolor: '#e0e0e0',
-                    range: [input.context.xMin, input.context.xMax],
-                },
-                yaxis: {
-                    title: 'Residuals (m)',
-                    showgrid: true,
-                    gridcolor: '#e0e0e0',
-                    zeroline: true,
-                    zerolinecolor: '#7f8c8d',
-                    zerolinewidth: 1,
-                },
-                legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-                shapes: buildTrimBoundaryShapes(input.context),
-                margin: { l: 60, r: 20, t: 30, b: 60 },
-                plot_bgcolor: '#fafafa',
-                paper_bgcolor: 'white',
-            },
-            config: getDefaultPlotConfig(),
-        },
-    };
+	return {
+		elevation: {
+			data: elevationData,
+			layout: {
+				title: {
+					text: "Virtual vs Actual Elevation Profile",
+					font: { size: 14 },
+				},
+				xaxis: {
+					title: "",
+					showgrid: true,
+					gridcolor: "#e0e0e0",
+					showticklabels: false,
+					range: [input.context.xMin, input.context.xMax],
+				},
+				yaxis: {
+					title: "Elevation (m)",
+					showgrid: true,
+					gridcolor: "#e0e0e0",
+				},
+				legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+				shapes: buildTrimBoundaryShapes(input.context),
+				annotations: [
+					{
+						text: `CdA: ${input.cdaLabel}<br>Crr: ${input.crrLabel}`,
+						xref: "paper",
+						yref: "paper",
+						x: annotationPosition.x,
+						y: annotationPosition.y,
+						xanchor: annotationPosition.xanchor,
+						yanchor: annotationPosition.yanchor,
+						showarrow: false,
+						bgcolor: "rgba(255,255,255,0.9)",
+						bordercolor: "#4363d8",
+						borderwidth: 1,
+						borderpad: 6,
+						font: {
+							size: 12,
+							family: "monospace",
+							color: "#2d3748",
+						},
+					},
+				],
+				margin: { l: 60, r: 20, t: 40, b: 5 },
+				plot_bgcolor: "#fafafa",
+				paper_bgcolor: "white",
+			},
+			config: getDefaultPlotConfig(),
+		},
+		residuals: {
+			data: residualsData,
+			layout: {
+				title: {
+					text: "Residuals (Virtual - Actual Elevation)",
+					font: { size: 12 },
+				},
+				xaxis: {
+					title: input.context.xAxisTitle,
+					showgrid: true,
+					gridcolor: "#e0e0e0",
+					range: [input.context.xMin, input.context.xMax],
+				},
+				yaxis: {
+					title: "Residuals (m)",
+					showgrid: true,
+					gridcolor: "#e0e0e0",
+					zeroline: true,
+					zerolinecolor: "#7f8c8d",
+					zerolinewidth: 1,
+				},
+				legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+				shapes: buildTrimBoundaryShapes(input.context),
+				margin: { l: 60, r: 20, t: 30, b: 60 },
+				plot_bgcolor: "#fafafa",
+				paper_bgcolor: "white",
+			},
+			config: getDefaultPlotConfig(),
+		},
+	};
 }
 
-export function buildVirtualElevationComparisonFigures(input: VirtualElevationComparisonPlotInput): VirtualElevationFigures {
-    const fitSlices = createContextSlices(input.virtualElevationFit, input.context);
-    const constantSlices = createContextSlices(input.virtualElevationConstant, input.context);
-    const actualSlices = createContextSlices(input.actualElevation, input.context);
+export function buildVirtualElevationComparisonFigures(
+	input: VirtualElevationComparisonPlotInput,
+): VirtualElevationFigures {
+	const fitSlices = createContextSlices(
+		input.virtualElevationFit,
+		input.context,
+	);
+	const constantSlices = createContextSlices(
+		input.virtualElevationConstant,
+		input.context,
+	);
+	const actualSlices = createContextSlices(
+		input.actualElevation,
+		input.context,
+	);
 
-    // Each series is anchored INDEPENDENTLY on the first main-window actual
-    // sample, through the one shared helper the GPS comparison figures also use
-    // (07-04 Task 1). Output is unchanged: `comparisonTraces.test.ts` pins every
-    // y value of all six traces, and was green against the hand-rolled version
-    // before this call replaced it.
-    const offsetFit = anchorSeriesTo(fitSlices.main, actualSlices.main[0]);
-    const offsetConstant = anchorSeriesTo(constantSlices.main, actualSlices.main[0]);
-    const fitResiduals = residualsAgainst(offsetFit, actualSlices.main);
-    const constantResiduals = residualsAgainst(offsetConstant, actualSlices.main);
+	// Each series is anchored INDEPENDENTLY on the first main-window actual
+	// sample, through the one shared helper the GPS comparison figures also use
+	// (07-04 Task 1). Output is unchanged: `comparisonTraces.test.ts` pins every
+	// y value of all six traces, and was green against the hand-rolled version
+	// before this call replaced it.
+	const offsetFit = anchorSeriesTo(fitSlices.main, actualSlices.main[0]);
+	const offsetConstant = anchorSeriesTo(
+		constantSlices.main,
+		actualSlices.main[0],
+	);
+	const fitResiduals = residualsAgainst(offsetFit, actualSlices.main);
+	const constantResiduals = residualsAgainst(offsetConstant, actualSlices.main);
 
-    return {
-        elevation: {
-            data: [
-                {
-                    x: input.context.xPointsMain,
-                    y: offsetFit,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'VE (FIT Air Speed)',
-                    line: { color: '#4363d8', width: 2 },
-                },
-                {
-                    x: input.context.xPointsMain,
-                    y: actualSlices.main,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'Actual Elevation',
-                    line: { color: '#000000', width: 2 },
-                },
-                {
-                    x: input.context.xPointsMain,
-                    y: offsetConstant,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'VE (Constant Wind)',
-                    line: { color: '#a9a9a9', width: 2 },
-                },
-            ],
-            layout: {
-                title: 'Virtual Elevation Comparison',
-                // THE UPPER HALF OF A STACKED PAIR, so no title AND NO TICK
-                // LABELS — `buildVirtualElevationFigures`' elevation layout
-                // above says the same thing, and this builder draws into the
-                // same two containers (`bindStandardSliders.ts:184`): `#vePlot`
-                // over `#veResidualsPlot`, where the lower plot carries the
-                // shared x axis for both (`renderStandardVe.ts:532`).
-                //
-                // `showticklabels` is not cosmetic here. The `b: 5` margin below
-                // leaves five pixels of gutter, so Plotly drew the tick numbers
-                // straight through it and they came out sliced in half. Dropping
-                // the title alone left that, because the labels were never the
-                // title's doing.
-                xaxis: {
-                    title: '',
-                    showticklabels: false,
-                    // PINNED, like the non-compare pair's two axes: two
-                    // autoranged plots agree only by luck, and this pair is read
-                    // as one stacked chart.
-                    //
-                    // TO THE MAIN WINDOW, not to `context.xMin`/`xMax`.
-                    // `buildVirtualElevationFigures` may use the extended range
-                    // because it DRAWS the before and after slices as faded
-                    // context; these two figures draw `xPointsMain` and nothing
-                    // else, so the extended range would just be up to
-                    // `sideContext` samples of dead margin at each end.
-                    ...mainWindowRange(input.context),
-                },
-                yaxis: { title: 'Elevation (m)' },
-                showlegend: true,
-                // INSIDE THE PLOT AREA, at `buildVirtualElevationFigures`'
-                // coordinates. Plotly's default puts a legend outside on the
-                // right and shrinks the plot area to fit it, so the width taken
-                // depends on the longest entry — and this pair's two legends have
-                // different longest entries ("VE (FIT Air Speed)" against
-                // "Residuals (FIT Air Speed)"). The plots ended up with different
-                // domains and their gridlines no longer lined up, which is worse
-                // than the clipped labels it replaced: a stacked pair that does
-                // not share an x position is actively misleading.
-                legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-                hovermode: 'closest',
-                // NO `height` HERE, and none in any other figure: the CSS
-                // sizes the graph div and Plotly autosizes into it. See the
-                // "one sizing convention" note at the top of this file.
-                margin: { l: 60, r: 20, t: 40, b: 5 },
-            },
-            config: getDefaultPlotConfig(),
-        },
-        residuals: {
-            data: [
-                {
-                    x: input.context.xPointsMain,
-                    y: fitResiduals,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'Residuals (FIT Air Speed)',
-                    line: { color: '#4363d8', width: 2 },
-                },
-                {
-                    x: input.context.xPointsMain,
-                    y: constantResiduals,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'Residuals (Constant Wind)',
-                    line: { color: '#a9a9a9', width: 2 },
-                },
-                {
-                    x: input.context.xPointsMain,
-                    y: new Array(input.context.xPointsMain.length).fill(0),
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'Zero',
-                    line: { color: '#95a5a6', width: 1, dash: 'dash' },
-                },
-            ],
-            layout: {
-                title: 'Residuals Comparison (Virtual - Actual)',
-                xaxis: {
-                    title: input.context.xAxisTitle,
-                    ...mainWindowRange(input.context),
-                },
-                yaxis: { title: 'Residual (m)' },
-                showlegend: true,
-                // Same placement as the elevation layout above, so neither plot
-                // gives up horizontal space and the two share a domain.
-                legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-                hovermode: 'closest',
-                // Must match buildVirtualElevationFigures' residuals sizing.
-                margin: { l: 60, r: 20, t: 30, b: 60 },
-            },
-            config: getDefaultPlotConfig(),
-        },
-    };
+	return {
+		elevation: {
+			data: [
+				{
+					x: input.context.xPointsMain,
+					y: offsetFit,
+					type: "scatter",
+					mode: "lines",
+					name: "VE (FIT Air Speed)",
+					line: { color: "#4363d8", width: 2 },
+				},
+				{
+					x: input.context.xPointsMain,
+					y: actualSlices.main,
+					type: "scatter",
+					mode: "lines",
+					name: "Actual Elevation",
+					line: { color: "#000000", width: 2 },
+				},
+				{
+					x: input.context.xPointsMain,
+					y: offsetConstant,
+					type: "scatter",
+					mode: "lines",
+					name: "VE (Constant Wind)",
+					line: { color: "#a9a9a9", width: 2 },
+				},
+			],
+			layout: {
+				title: "Virtual Elevation Comparison",
+				// THE UPPER HALF OF A STACKED PAIR, so no title AND NO TICK
+				// LABELS — `buildVirtualElevationFigures`' elevation layout
+				// above says the same thing, and this builder draws into the
+				// same two containers (`bindStandardSliders.ts:184`): `#vePlot`
+				// over `#veResidualsPlot`, where the lower plot carries the
+				// shared x axis for both (`renderStandardVe.ts:532`).
+				//
+				// `showticklabels` is not cosmetic here. The `b: 5` margin below
+				// leaves five pixels of gutter, so Plotly drew the tick numbers
+				// straight through it and they came out sliced in half. Dropping
+				// the title alone left that, because the labels were never the
+				// title's doing.
+				xaxis: {
+					title: "",
+					showticklabels: false,
+					// PINNED, like the non-compare pair's two axes: two
+					// autoranged plots agree only by luck, and this pair is read
+					// as one stacked chart.
+					//
+					// TO THE MAIN WINDOW, not to `context.xMin`/`xMax`.
+					// `buildVirtualElevationFigures` may use the extended range
+					// because it DRAWS the before and after slices as faded
+					// context; these two figures draw `xPointsMain` and nothing
+					// else, so the extended range would just be up to
+					// `sideContext` samples of dead margin at each end.
+					...mainWindowRange(input.context),
+				},
+				yaxis: { title: "Elevation (m)" },
+				showlegend: true,
+				// INSIDE THE PLOT AREA, at `buildVirtualElevationFigures`'
+				// coordinates. Plotly's default puts a legend outside on the
+				// right and shrinks the plot area to fit it, so the width taken
+				// depends on the longest entry — and this pair's two legends have
+				// different longest entries ("VE (FIT Air Speed)" against
+				// "Residuals (FIT Air Speed)"). The plots ended up with different
+				// domains and their gridlines no longer lined up, which is worse
+				// than the clipped labels it replaced: a stacked pair that does
+				// not share an x position is actively misleading.
+				legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+				hovermode: "closest",
+				// NO `height` HERE, and none in any other figure: the CSS
+				// sizes the graph div and Plotly autosizes into it. See the
+				// "one sizing convention" note at the top of this file.
+				margin: { l: 60, r: 20, t: 40, b: 5 },
+			},
+			config: getDefaultPlotConfig(),
+		},
+		residuals: {
+			data: [
+				{
+					x: input.context.xPointsMain,
+					y: fitResiduals,
+					type: "scatter",
+					mode: "lines",
+					name: "Residuals (FIT Air Speed)",
+					line: { color: "#4363d8", width: 2 },
+				},
+				{
+					x: input.context.xPointsMain,
+					y: constantResiduals,
+					type: "scatter",
+					mode: "lines",
+					name: "Residuals (Constant Wind)",
+					line: { color: "#a9a9a9", width: 2 },
+				},
+				{
+					x: input.context.xPointsMain,
+					y: new Array(input.context.xPointsMain.length).fill(0),
+					type: "scatter",
+					mode: "lines",
+					name: "Zero",
+					line: { color: "#95a5a6", width: 1, dash: "dash" },
+				},
+			],
+			layout: {
+				title: "Residuals Comparison (Virtual - Actual)",
+				xaxis: {
+					title: input.context.xAxisTitle,
+					...mainWindowRange(input.context),
+				},
+				yaxis: { title: "Residual (m)" },
+				showlegend: true,
+				// Same placement as the elevation layout above, so neither plot
+				// gives up horizontal space and the two share a domain.
+				legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+				hovermode: "closest",
+				// Must match buildVirtualElevationFigures' residuals sizing.
+				margin: { l: 60, r: 20, t: 30, b: 60 },
+			},
+			config: getDefaultPlotConfig(),
+		},
+	};
 }
 
-export function buildWindSpeedFigure(input: WindSpeedPlotInput): PlotDefinition {
-    const groundSpeedKmh = input.velocity.map(value => value * 3.6);
-    const groundSlices = createContextSlices(groundSpeedKmh, input.context);
-    const fitWindSlices = createContextSlices(input.fitWindSpeedKmh, input.context);
-    const constantWindSlices = input.constantWindApparentKmh
-        ? createContextSlices(input.constantWindApparentKmh, input.context)
-        : null;
+export function buildWindSpeedFigure(
+	input: WindSpeedPlotInput,
+): PlotDefinition {
+	const groundSpeedKmh = input.velocity.map((value) => value * 3.6);
+	const groundSlices = createContextSlices(groundSpeedKmh, input.context);
+	const fitWindSlices = createContextSlices(
+		input.fitWindSpeedKmh,
+		input.context,
+	);
+	const constantWindSlices = input.constantWindApparentKmh
+		? createContextSlices(input.constantWindApparentKmh, input.context)
+		: null;
 
-    const traces: PlotTrace[] = [];
-    if (input.context.contextBefore > 0) {
-        traces.push({
-            x: input.context.xPointsBefore,
-            y: groundSlices.before,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Ground Speed (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-        });
+	const traces: PlotTrace[] = [];
+	if (input.context.contextBefore > 0) {
+		traces.push({
+			x: input.context.xPointsBefore,
+			y: groundSlices.before,
+			type: "scatter",
+			mode: "lines",
+			name: "Ground Speed (trimmed)",
+			line: { color: "#000000", width: 2 },
+			opacity: 0.2,
+			showlegend: false,
+		});
 
-        if (fitWindSlices.main.some(value => value !== null)) {
-            traces.push({
-                x: input.context.xPointsBefore,
-                y: fitWindSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (FIT Air) (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            });
-        }
+		if (fitWindSlices.main.some((value) => value !== null)) {
+			traces.push({
+				x: input.context.xPointsBefore,
+				y: fitWindSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "Apparent (FIT Air) (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			});
+		}
 
-        if (constantWindSlices) {
-            traces.push({
-                x: input.context.xPointsBefore,
-                y: constantWindSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (Constant Wind) (trimmed)',
-                line: { color: '#a9a9a9', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            });
-        }
-    }
+		if (constantWindSlices) {
+			traces.push({
+				x: input.context.xPointsBefore,
+				y: constantWindSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "Apparent (Constant Wind) (trimmed)",
+				line: { color: "#a9a9a9", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			});
+		}
+	}
 
-    traces.push({
-        x: input.context.xPointsMain,
-        y: groundSlices.main,
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Ground Speed',
-        line: { color: '#000000', width: 2 },
-    });
+	traces.push({
+		x: input.context.xPointsMain,
+		y: groundSlices.main,
+		type: "scatter",
+		mode: "lines",
+		name: "Ground Speed",
+		line: { color: "#000000", width: 2 },
+	});
 
-    if (fitWindSlices.main.some(value => value !== null)) {
-        traces.push({
-            x: input.context.xPointsMain,
-            y: fitWindSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Apparent (FIT Air)',
-            line: { color: '#4363d8', width: 2 },
-        });
-    }
+	if (fitWindSlices.main.some((value) => value !== null)) {
+		traces.push({
+			x: input.context.xPointsMain,
+			y: fitWindSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "Apparent (FIT Air)",
+			line: { color: "#4363d8", width: 2 },
+		});
+	}
 
-    if (constantWindSlices) {
-        traces.push({
-            x: input.context.xPointsMain,
-            y: constantWindSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Apparent (Constant Wind)',
-            line: { color: '#a9a9a9', width: 2 },
-        });
-    }
+	if (constantWindSlices) {
+		traces.push({
+			x: input.context.xPointsMain,
+			y: constantWindSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "Apparent (Constant Wind)",
+			line: { color: "#a9a9a9", width: 2 },
+		});
+	}
 
-    if (input.context.contextAfter > 0) {
-        traces.push({
-            x: input.context.xPointsAfter,
-            y: groundSlices.after,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Ground Speed (trimmed)',
-            line: { color: '#000000', width: 2 },
-            opacity: 0.2,
-            showlegend: false,
-        });
+	if (input.context.contextAfter > 0) {
+		traces.push({
+			x: input.context.xPointsAfter,
+			y: groundSlices.after,
+			type: "scatter",
+			mode: "lines",
+			name: "Ground Speed (trimmed)",
+			line: { color: "#000000", width: 2 },
+			opacity: 0.2,
+			showlegend: false,
+		});
 
-        if (fitWindSlices.main.some(value => value !== null)) {
-            traces.push({
-                x: input.context.xPointsAfter,
-                y: fitWindSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (FIT Air) (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            });
-        }
+		if (fitWindSlices.main.some((value) => value !== null)) {
+			traces.push({
+				x: input.context.xPointsAfter,
+				y: fitWindSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "Apparent (FIT Air) (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			});
+		}
 
-        if (constantWindSlices) {
-            traces.push({
-                x: input.context.xPointsAfter,
-                y: constantWindSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Apparent (Constant Wind) (trimmed)',
-                line: { color: '#a9a9a9', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            });
-        }
-    }
+		if (constantWindSlices) {
+			traces.push({
+				x: input.context.xPointsAfter,
+				y: constantWindSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "Apparent (Constant Wind) (trimmed)",
+				line: { color: "#a9a9a9", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			});
+		}
+	}
 
-    return {
-        data: traces,
-        layout: {
-            title: { text: 'Wind Speed Analysis', font: { size: 14 } },
-            xaxis: {
-                title: input.context.xAxisTitle,
-                showgrid: true,
-                gridcolor: '#e0e0e0',
-                range: [input.context.xMin, input.context.xMax],
-            },
-            yaxis: {
-                title: 'Speed (km/h)',
-                showgrid: true,
-                gridcolor: '#e0e0e0',
-            },
-            legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-            shapes: buildTrimBoundaryShapes(input.context),
-            margin: { l: 60, r: 20, t: 40, b: 60 },
-            plot_bgcolor: '#fafafa',
-            paper_bgcolor: 'white',
-        },
-        config: { responsive: true },
-    };
+	return {
+		data: traces,
+		layout: {
+			title: { text: "Wind Speed Analysis", font: { size: 14 } },
+			xaxis: {
+				title: input.context.xAxisTitle,
+				showgrid: true,
+				gridcolor: "#e0e0e0",
+				range: [input.context.xMin, input.context.xMax],
+			},
+			yaxis: {
+				title: "Speed (km/h)",
+				showgrid: true,
+				gridcolor: "#e0e0e0",
+			},
+			legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+			shapes: buildTrimBoundaryShapes(input.context),
+			margin: { l: 60, r: 20, t: 40, b: 60 },
+			plot_bgcolor: "#fafafa",
+			paper_bgcolor: "white",
+		},
+		config: { responsive: true },
+	};
 }
 
-export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinition {
-    const speedKmh = input.velocity.map(value => value * 3.6);
-    const speedSlices = createContextSlices(speedKmh, input.context);
-    const powerSlices = createContextSlices(input.power, input.context);
+export function buildSpeedPowerFigure(
+	input: SpeedPowerPlotInput,
+): PlotDefinition {
+	const speedKmh = input.velocity.map((value) => value * 3.6);
+	const speedSlices = createContextSlices(speedKmh, input.context);
+	const powerSlices = createContextSlices(input.power, input.context);
 
-    const traces: PlotTrace[] = [];
-    if (input.context.contextBefore > 0) {
-        traces.push(
-            {
-                x: input.context.xPointsBefore,
-                y: speedSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Speed (trimmed)',
-                line: { color: '#000000', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-                yaxis: 'y',
-            },
-            {
-                x: input.context.xPointsBefore,
-                y: powerSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Power (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-                yaxis: 'y2',
-            },
-        );
-    }
+	const traces: PlotTrace[] = [];
+	if (input.context.contextBefore > 0) {
+		traces.push(
+			{
+				x: input.context.xPointsBefore,
+				y: speedSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "Speed (trimmed)",
+				line: { color: "#000000", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+				yaxis: "y",
+			},
+			{
+				x: input.context.xPointsBefore,
+				y: powerSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "Power (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+				yaxis: "y2",
+			},
+		);
+	}
 
-    traces.push(
-        {
-            x: input.context.xPointsMain,
-            y: speedSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Speed',
-            line: { color: '#000000', width: 2 },
-            yaxis: 'y',
-        },
-        {
-            x: input.context.xPointsMain,
-            y: powerSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Power',
-            line: { color: '#4363d8', width: 2 },
-            yaxis: 'y2',
-        },
-    );
+	traces.push(
+		{
+			x: input.context.xPointsMain,
+			y: speedSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "Speed",
+			line: { color: "#000000", width: 2 },
+			yaxis: "y",
+		},
+		{
+			x: input.context.xPointsMain,
+			y: powerSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "Power",
+			line: { color: "#4363d8", width: 2 },
+			yaxis: "y2",
+		},
+	);
 
-    if (input.context.contextAfter > 0) {
-        traces.push(
-            {
-                x: input.context.xPointsAfter,
-                y: speedSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Speed (trimmed)',
-                line: { color: '#000000', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-                yaxis: 'y',
-            },
-            {
-                x: input.context.xPointsAfter,
-                y: powerSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Power (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-                yaxis: 'y2',
-            },
-        );
-    }
+	if (input.context.contextAfter > 0) {
+		traces.push(
+			{
+				x: input.context.xPointsAfter,
+				y: speedSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "Speed (trimmed)",
+				line: { color: "#000000", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+				yaxis: "y",
+			},
+			{
+				x: input.context.xPointsAfter,
+				y: powerSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "Power (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+				yaxis: "y2",
+			},
+		);
+	}
 
-    return {
-        data: traces,
-        layout: {
-            title: { text: 'Speed & Power', font: { size: 14 } },
-            xaxis: {
-                title: input.context.xAxisTitle,
-                showgrid: true,
-                gridcolor: '#e0e0e0',
-                range: [input.context.xMin, input.context.xMax],
-            },
-            yaxis: {
-                title: 'Speed (km/h)',
-                titlefont: { color: '#000000' },
-                tickfont: { color: '#000000' },
-                showgrid: true,
-                gridcolor: '#e0e0e0',
-            },
-            yaxis2: {
-                title: 'Power (W)',
-                titlefont: { color: '#4363d8' },
-                tickfont: { color: '#4363d8' },
-                overlaying: 'y',
-                side: 'right',
-                showgrid: false,
-            },
-            legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-            shapes: buildTrimBoundaryShapes(input.context),
-            margin: { l: 60, r: 60, t: 40, b: 60 },
-            plot_bgcolor: '#fafafa',
-            paper_bgcolor: 'white',
-        },
-        config: { responsive: true },
-    };
+	return {
+		data: traces,
+		layout: {
+			title: { text: "Speed & Power", font: { size: 14 } },
+			xaxis: {
+				title: input.context.xAxisTitle,
+				showgrid: true,
+				gridcolor: "#e0e0e0",
+				range: [input.context.xMin, input.context.xMax],
+			},
+			yaxis: {
+				title: "Speed (km/h)",
+				titlefont: { color: "#000000" },
+				tickfont: { color: "#000000" },
+				showgrid: true,
+				gridcolor: "#e0e0e0",
+			},
+			yaxis2: {
+				title: "Power (W)",
+				titlefont: { color: "#4363d8" },
+				tickfont: { color: "#4363d8" },
+				overlaying: "y",
+				side: "right",
+				showgrid: false,
+			},
+			legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+			shapes: buildTrimBoundaryShapes(input.context),
+			margin: { l: 60, r: 60, t: 40, b: 60 },
+			plot_bgcolor: "#fafafa",
+			paper_bgcolor: "white",
+		},
+		config: { responsive: true },
+	};
 }
 
 /**
@@ -811,181 +858,202 @@ export function buildSpeedPowerFigure(input: SpeedPowerPlotInput): PlotDefinitio
  * `#vdDiffValue` spans sit directly above that curve, and a header sourced from
  * anywhere else drifts away from it the moment a trim slider moves.
  */
-export function computeVirtualDistanceTotals(input: VirtualDistancePlotInput): VirtualDistanceTotals {
-    return computeVirtualDistanceWindowTotals({
-        timestamps: input.timestamps,
-        velocity: input.velocity,
-        windSpeed: input.windSpeed,
-        trimStart: input.context.trimStart,
-        trimEnd: input.context.trimEnd,
-    });
+export function computeVirtualDistanceTotals(
+	input: VirtualDistancePlotInput,
+): VirtualDistanceTotals {
+	return computeVirtualDistanceWindowTotals({
+		timestamps: input.timestamps,
+		velocity: input.velocity,
+		windSpeed: input.windSpeed,
+		trimStart: input.context.trimStart,
+		trimEnd: input.context.trimEnd,
+	});
 }
 
-export function buildVirtualDistanceFigure(input: VirtualDistancePlotInput): PlotDefinition {
-    const { air: vdAir, ground: vdGround } = integrateVirtualDistance(
-        input.timestamps,
-        input.velocity,
-        input.windSpeed,
-        input.context.trimStart,
-    );
+export function buildVirtualDistanceFigure(
+	input: VirtualDistancePlotInput,
+): PlotDefinition {
+	const { air: vdAir, ground: vdGround } = integrateVirtualDistance(
+		input.timestamps,
+		input.velocity,
+		input.windSpeed,
+		input.context.trimStart,
+	);
 
-    const airSlices = createContextSlices(vdAir.map(value => value / 1000), input.context);
-    const groundSlices = createContextSlices(vdGround.map(value => value / 1000), input.context);
+	const airSlices = createContextSlices(
+		vdAir.map((value) => value / 1000),
+		input.context,
+	);
+	const groundSlices = createContextSlices(
+		vdGround.map((value) => value / 1000),
+		input.context,
+	);
 
-    const traces: PlotTrace[] = [];
-    if (input.context.contextBefore > 0) {
-        traces.push(
-            {
-                x: input.context.xPointsBefore,
-                y: airSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'VD Air (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-            {
-                x: input.context.xPointsBefore,
-                y: groundSlices.before,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'VD Ground (trimmed)',
-                line: { color: '#000000', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-        );
-    }
+	const traces: PlotTrace[] = [];
+	if (input.context.contextBefore > 0) {
+		traces.push(
+			{
+				x: input.context.xPointsBefore,
+				y: airSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "VD Air (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+			{
+				x: input.context.xPointsBefore,
+				y: groundSlices.before,
+				type: "scatter",
+				mode: "lines",
+				name: "VD Ground (trimmed)",
+				line: { color: "#000000", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+		);
+	}
 
-    traces.push(
-        {
-            x: input.context.xPointsMain,
-            y: airSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VD from Air Speed',
-            line: { color: '#4363d8', width: 2 },
-        },
-        {
-            x: input.context.xPointsMain,
-            y: groundSlices.main,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'VD from Ground Speed',
-            line: { color: '#000000', width: 2 },
-        },
-    );
+	traces.push(
+		{
+			x: input.context.xPointsMain,
+			y: airSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "VD from Air Speed",
+			line: { color: "#4363d8", width: 2 },
+		},
+		{
+			x: input.context.xPointsMain,
+			y: groundSlices.main,
+			type: "scatter",
+			mode: "lines",
+			name: "VD from Ground Speed",
+			line: { color: "#000000", width: 2 },
+		},
+	);
 
-    if (input.context.contextAfter > 0) {
-        traces.push(
-            {
-                x: input.context.xPointsAfter,
-                y: airSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'VD Air (trimmed)',
-                line: { color: '#4363d8', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-            {
-                x: input.context.xPointsAfter,
-                y: groundSlices.after,
-                type: 'scatter',
-                mode: 'lines',
-                name: 'VD Ground (trimmed)',
-                line: { color: '#000000', width: 2 },
-                opacity: 0.2,
-                showlegend: false,
-            },
-        );
-    }
+	if (input.context.contextAfter > 0) {
+		traces.push(
+			{
+				x: input.context.xPointsAfter,
+				y: airSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "VD Air (trimmed)",
+				line: { color: "#4363d8", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+			{
+				x: input.context.xPointsAfter,
+				y: groundSlices.after,
+				type: "scatter",
+				mode: "lines",
+				name: "VD Ground (trimmed)",
+				line: { color: "#000000", width: 2 },
+				opacity: 0.2,
+				showlegend: false,
+			},
+		);
+	}
 
-    return {
-        data: traces,
-        layout: {
-            title: { text: 'Virtual Distance: Air Speed vs Ground Speed', font: { size: 14 } },
-            xaxis: {
-                title: input.context.xAxisTitle,
-                showgrid: true,
-                gridcolor: '#e0e0e0',
-                range: [input.context.xMin, input.context.xMax],
-            },
-            yaxis: {
-                title: 'Cumulative Distance (km)',
-                showgrid: true,
-                gridcolor: '#e0e0e0',
-            },
-            legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.8)' },
-            shapes: buildTrimBoundaryShapes(input.context),
-            margin: { l: 60, r: 60, t: 40, b: 60 },
-            plot_bgcolor: '#fafafa',
-            paper_bgcolor: 'white',
-        },
-        config: { responsive: true },
-    };
+	return {
+		data: traces,
+		layout: {
+			title: {
+				text: "Virtual Distance: Air Speed vs Ground Speed",
+				font: { size: 14 },
+			},
+			xaxis: {
+				title: input.context.xAxisTitle,
+				showgrid: true,
+				gridcolor: "#e0e0e0",
+				range: [input.context.xMin, input.context.xMax],
+			},
+			yaxis: {
+				title: "Cumulative Distance (km)",
+				showgrid: true,
+				gridcolor: "#e0e0e0",
+			},
+			legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+			shapes: buildTrimBoundaryShapes(input.context),
+			margin: { l: 60, r: 60, t: 40, b: 60 },
+			plot_bgcolor: "#fafafa",
+			paper_bgcolor: "white",
+		},
+		config: { responsive: true },
+	};
 }
 
-function findOptimalAnnotationPosition(elevationData: number[], timeData: number[]): {
-    x: number;
-    y: number;
-    xanchor: 'left' | 'right';
-    yanchor: 'top' | 'bottom';
+function findOptimalAnnotationPosition(
+	elevationData: number[],
+	timeData: number[],
+): {
+	x: number;
+	y: number;
+	xanchor: "left" | "right";
+	yanchor: "top" | "bottom";
 } {
-    if (elevationData.length === 0) {
-        return { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' };
-    }
+	if (elevationData.length === 0) {
+		return { x: 0.98, y: 0.98, xanchor: "right", yanchor: "top" };
+	}
 
-    const minElevation = Math.min(...elevationData);
-    const maxElevation = Math.max(...elevationData);
-    const elevationRange = maxElevation - minElevation;
-    const minTime = Math.min(...timeData);
-    const maxTime = Math.max(...timeData);
-    const timeRange = maxTime - minTime;
+	const minElevation = Math.min(...elevationData);
+	const maxElevation = Math.max(...elevationData);
+	const elevationRange = maxElevation - minElevation;
+	const minTime = Math.min(...timeData);
+	const maxTime = Math.max(...timeData);
+	const timeRange = maxTime - minTime;
 
-    const corners = [
-        {
-            x: 0.98,
-            y: 0.98,
-            xanchor: 'right' as const,
-            yanchor: 'top' as const,
-            timeMin: minTime + 0.7 * timeRange,
-            timeMax: maxTime,
-            elevationMin: minElevation + 0.7 * elevationRange,
-            elevationMax: maxElevation,
-        },
-        {
-            x: 0.98,
-            y: 0.02,
-            xanchor: 'right' as const,
-            yanchor: 'bottom' as const,
-            timeMin: minTime + 0.7 * timeRange,
-            timeMax: maxTime,
-            elevationMin: minElevation,
-            elevationMax: minElevation + 0.3 * elevationRange,
-        },
-        {
-            x: 0.02,
-            y: 0.02,
-            xanchor: 'left' as const,
-            yanchor: 'bottom' as const,
-            timeMin: minTime,
-            timeMax: minTime + 0.3 * timeRange,
-            elevationMin: minElevation,
-            elevationMax: minElevation + 0.3 * elevationRange,
-        },
-    ];
+	const corners = [
+		{
+			x: 0.98,
+			y: 0.98,
+			xanchor: "right" as const,
+			yanchor: "top" as const,
+			timeMin: minTime + 0.7 * timeRange,
+			timeMax: maxTime,
+			elevationMin: minElevation + 0.7 * elevationRange,
+			elevationMax: maxElevation,
+		},
+		{
+			x: 0.98,
+			y: 0.02,
+			xanchor: "right" as const,
+			yanchor: "bottom" as const,
+			timeMin: minTime + 0.7 * timeRange,
+			timeMax: maxTime,
+			elevationMin: minElevation,
+			elevationMax: minElevation + 0.3 * elevationRange,
+		},
+		{
+			x: 0.02,
+			y: 0.02,
+			xanchor: "left" as const,
+			yanchor: "bottom" as const,
+			timeMin: minTime,
+			timeMax: minTime + 0.3 * timeRange,
+			elevationMin: minElevation,
+			elevationMax: minElevation + 0.3 * elevationRange,
+		},
+	];
 
-    const scoredCorners = corners.map(corner => ({
-        ...corner,
-        score: elevationData.reduce((count, elevation, index) => {
-            const time = timeData[index];
-            return time >= corner.timeMin && time <= corner.timeMax && elevation >= corner.elevationMin && elevation <= corner.elevationMax
-                ? count + 1
-                : count;
-        }, 0),
-    }));
+	const scoredCorners = corners.map((corner) => ({
+		...corner,
+		score: elevationData.reduce((count, elevation, index) => {
+			const time = timeData[index];
+			return time >= corner.timeMin &&
+				time <= corner.timeMax &&
+				elevation >= corner.elevationMin &&
+				elevation <= corner.elevationMax
+				? count + 1
+				: count;
+		}, 0),
+	}));
 
-    return scoredCorners.reduce((best, current) => current.score < best.score ? current : best);
+	return scoredCorners.reduce((best, current) =>
+		current.score < best.score ? current : best,
+	);
 }

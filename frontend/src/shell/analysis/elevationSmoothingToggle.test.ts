@@ -51,7 +51,9 @@ describe("elevationSmoothingToggleMarkup", () => {
 			appStateWithProfiles("dem-raw-nearest"),
 		);
 		expect(
-			document.querySelector('[data-smoothing="off"]')!.classList.contains("lap-view-toggle-btn--active"),
+			document
+				.querySelector('[data-smoothing="off"]')!
+				.classList.contains("lap-view-toggle-btn--active"),
 		).toBe(true);
 	});
 });
@@ -63,12 +65,16 @@ describe("bindElevationSmoothingToggle", () => {
 		const onToggle = vi.fn();
 		bindElevationSmoothingToggle(appState, onToggle);
 
-		(document.querySelector('[data-smoothing="off"]') as HTMLButtonElement).click();
+		(
+			document.querySelector('[data-smoothing="off"]') as HTMLButtonElement
+		).click();
 
 		expect(appState.activeDisplayProfile).toBe("dem-raw-nearest");
 		expect(onToggle).toHaveBeenCalledWith(false);
 		expect(
-			document.querySelector('[data-smoothing="off"]')!.classList.contains("lap-view-toggle-btn--active"),
+			document
+				.querySelector('[data-smoothing="off"]')!
+				.classList.contains("lap-view-toggle-btn--active"),
 		).toBe(true);
 	});
 
@@ -78,7 +84,9 @@ describe("bindElevationSmoothingToggle", () => {
 		const onToggle = vi.fn();
 		bindElevationSmoothingToggle(appState, onToggle);
 
-		(document.querySelector('[data-smoothing="on"]') as HTMLButtonElement).click();
+		(
+			document.querySelector('[data-smoothing="on"]') as HTMLButtonElement
+		).click();
 
 		expect(onToggle).not.toHaveBeenCalled();
 		expect(appState.activeDisplayProfile).toBe("dem-interpolated-smoothed-5pt");

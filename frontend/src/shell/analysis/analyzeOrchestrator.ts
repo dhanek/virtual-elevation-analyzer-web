@@ -531,8 +531,7 @@ export async function handleAnalyze(): Promise<void> {
 				// selections; stacked reuses the GPS-lap overlay renderer with
 				// per-lap index ranges derived from each lap's time span.
 				if (selection.mode === "standard" && args.analyzedLaps.length >= 2) {
-					const timestamps =
-						getNormalizedActivityArrays(fitData).timestamps;
+					const timestamps = getNormalizedActivityArrays(fitData).timestamps;
 					const selectedLapInputs = args.analyzedLaps
 						.map((lapNumber) => ({
 							lapNumber,

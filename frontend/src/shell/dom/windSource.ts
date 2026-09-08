@@ -1,9 +1,9 @@
-import { log } from '../../utils/log'
-import type { WindSource } from '../../state/AppState'
-import { syncWindHeightControlsVisibility } from '../ve/windHeightControls'
-import { syncFitWindControlsVisibility } from '../ve/windSourceVisibility'
+import { log } from "../../utils/log";
+import type { WindSource } from "../../state/AppState";
+import { syncWindHeightControlsVisibility } from "../ve/windHeightControls";
+import { syncFitWindControlsVisibility } from "../ve/windSourceVisibility";
 
-const WIND_SOURCES: readonly string[] = ['fit', 'constant', 'compare', 'none']
+const WIND_SOURCES: readonly string[] = ["fit", "constant", "compare", "none"];
 
 /**
  * Get the currently selected wind source radio value.
@@ -13,8 +13,10 @@ const WIND_SOURCES: readonly string[] = ['fit', 'constant', 'compare', 'none']
  * This replaces the 13 scattered inline queries for the checked wind source.
  */
 export function getSelectedWindSource(): string {
-    const checked = document.querySelector('input[name="windSource"]:checked') as HTMLInputElement | null
-    return checked?.value ?? 'fit'
+	const checked = document.querySelector(
+		'input[name="windSource"]:checked',
+	) as HTMLInputElement | null;
+	return checked?.value ?? "fit";
 }
 
 /**
@@ -27,11 +29,13 @@ export function getSelectedWindSource(): string {
  * cannot catch that, because a cast is exactly the thing that erases the check.
  */
 export function toWindSource(value: string): WindSource {
-    if (WIND_SOURCES.includes(value)) {
-        return value as WindSource
-    }
-    log.error(`Unknown wind source "${value}" on the checked radio; falling back to "fit".`)
-    return 'fit'
+	if (WIND_SOURCES.includes(value)) {
+		return value as WindSource;
+	}
+	log.error(
+		`Unknown wind source "${value}" on the checked radio; falling back to "fit".`,
+	);
+	return "fit";
 }
 
 /**
@@ -65,17 +69,17 @@ export function toWindSource(value: string): WindSource {
  * `bindModeControls` reports that row as skipped rather than as bound.
  */
 export function bindWindSourceRadios(onChange: () => void): boolean {
-    syncWindHeightControlsVisibility(getSelectedWindSource())
-    syncFitWindControlsVisibility(getSelectedWindSource())
-    const radios = document.querySelectorAll('input[name="windSource"]')
-    radios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            const selected = getSelectedWindSource()
-            log.debug('Wind source changed:', selected)
-            syncWindHeightControlsVisibility(selected)
-            syncFitWindControlsVisibility(selected)
-            onChange()
-        })
-    })
-    return radios.length > 0
+	syncWindHeightControlsVisibility(getSelectedWindSource());
+	syncFitWindControlsVisibility(getSelectedWindSource());
+	const radios = document.querySelectorAll('input[name="windSource"]');
+	radios.forEach((radio) => {
+		radio.addEventListener("change", () => {
+			const selected = getSelectedWindSource();
+			log.debug("Wind source changed:", selected);
+			syncWindHeightControlsVisibility(selected);
+			syncFitWindControlsVisibility(selected);
+			onChange();
+		});
+	});
+	return radios.length > 0;
 }

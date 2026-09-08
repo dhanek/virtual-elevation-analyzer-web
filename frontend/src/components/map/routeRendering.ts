@@ -37,8 +37,7 @@ export function fitBoundsToSelectedLaps(ctx: MapContext): void {
 	const selectedLaps = ctx.getSelectedLaps();
 	const laps = ctx.getLaps();
 
-	if (!fitData || routePoints.length === 0 || selectedLaps.length === 0)
-		return;
+	if (!fitData || routePoints.length === 0 || selectedLaps.length === 0) return;
 
 	// Collect all GPS points that belong to selected laps.
 	// routePoints/routePointIndices are the collectValidPoints result over

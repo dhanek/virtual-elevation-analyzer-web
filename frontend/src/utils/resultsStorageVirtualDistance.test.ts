@@ -70,8 +70,18 @@ describe("the CSV carries per-segment virtual distances", () => {
 		const csv = generateCSVFromResults([
 			legacyRecord({
 				virtualDistances: [
-					{ label: "Lap 2", airKm: 0.108, groundKm: 0.09, differencePercent: 20 },
-					{ label: "Lap 3", airKm: 0.126, groundKm: 0.09, differencePercent: 40 },
+					{
+						label: "Lap 2",
+						airKm: 0.108,
+						groundKm: 0.09,
+						differencePercent: 20,
+					},
+					{
+						label: "Lap 3",
+						airKm: 0.126,
+						groundKm: 0.09,
+						differencePercent: 40,
+					},
 				],
 			}),
 		]);
@@ -103,7 +113,12 @@ describe("the CSV carries per-segment virtual distances", () => {
 				legacyRecord({
 					lapKey: "2",
 					virtualDistances: [
-						{ label: "Lap 2", airKm: 2.476, groundKm: 2.702, differencePercent: -8.36 },
+						{
+							label: "Lap 2",
+							airKm: 2.476,
+							groundKm: 2.702,
+							differencePercent: -8.36,
+						},
 					],
 				}),
 			]),
@@ -146,8 +161,18 @@ describe("records stored before entry (h) still load and export", () => {
 			legacyRecord({
 				lapKey: "2-3",
 				virtualDistances: [
-					{ label: "Lap 2", airKm: 0.108, groundKm: 0.09, differencePercent: 20 },
-					{ label: "Lap 3", airKm: 0.126, groundKm: 0.09, differencePercent: 40 },
+					{
+						label: "Lap 2",
+						airKm: 0.108,
+						groundKm: 0.09,
+						differencePercent: 20,
+					},
+					{
+						label: "Lap 3",
+						airKm: 0.126,
+						groundKm: 0.09,
+						differencePercent: 40,
+					},
 				],
 			}),
 		]);

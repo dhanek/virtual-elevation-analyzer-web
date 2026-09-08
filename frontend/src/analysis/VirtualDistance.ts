@@ -74,7 +74,8 @@ export function integrateVirtualDistance(
 		const apparentSpeed = !isNaN(windSpeed[i]) ? windSpeed[i] : 0;
 		air[i] = air[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
 
-		const groundSpeed = !isNaN(velocity[i]) && velocity[i] > 0 ? velocity[i] : 0;
+		const groundSpeed =
+			!isNaN(velocity[i]) && velocity[i] > 0 ? velocity[i] : 0;
 		ground[i] = ground[i - 1] + groundSpeed * dt;
 	}
 

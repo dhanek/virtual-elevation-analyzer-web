@@ -87,7 +87,10 @@ vi.mock("../outAndBack/outAndBackPlots", async (importOriginal) => ({
 import { resolveMultiSegmentAnalysisParams } from "../../analysis/MultiSegmentSettings";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import { AppState } from "../../state/AppState";
-import type { LapSettings, ParameterStorage } from "../../utils/ParameterStorage";
+import type {
+	LapSettings,
+	ParameterStorage,
+} from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "./types";
 import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
@@ -286,10 +289,7 @@ async function toggleSmoothingOn(): Promise<void> {
 interface ModeUnderTest {
 	name: string;
 	gpsAnalysisMode: string;
-	render: (
-		appState: AppState,
-		storage: ParameterStorage,
-	) => Promise<void>;
+	render: (appState: AppState, storage: ParameterStorage) => Promise<void>;
 }
 
 const MODES: readonly ModeUnderTest[] = [

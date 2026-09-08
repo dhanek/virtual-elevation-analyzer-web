@@ -31,15 +31,11 @@ const LEAK_SENTINEL = "SECRET_STATUS_500";
  * leak sentinel so any assertion on the fixture doubles as a no-leak check.
  */
 function weatherError(code?: string): WeatherAPIError {
-	return new WeatherAPIError(
-		`Weather API error: 500 ${LEAK_SENTINEL}`,
-		code,
-		{
-			status: 500,
-			statusText: LEAK_SENTINEL,
-			url: `https://api.open-meteo.com/v1/forecast?key=${LEAK_SENTINEL}`,
-		},
-	);
+	return new WeatherAPIError(`Weather API error: 500 ${LEAK_SENTINEL}`, code, {
+		status: 500,
+		statusText: LEAK_SENTINEL,
+		url: `https://api.open-meteo.com/v1/forecast?key=${LEAK_SENTINEL}`,
+	});
 }
 
 /**
@@ -122,7 +118,9 @@ describe("WEATH-03 shipped message text is frozen (06-05 parity bar)", () => {
 	});
 
 	test("the three coded suffixes have not drifted", () => {
-		expect(resolveWeatherFailure(weatherError("DATA_TOO_OLD")).userMessage).toBe(
+		expect(
+			resolveWeatherFailure(weatherError("DATA_TOO_OLD")).userMessage,
+		).toBe(
 			"Could not fetch weather data: Activity is too old (>92 days). Using manual rho value.",
 		);
 		expect(resolveWeatherFailure(weatherError("API_ERROR")).userMessage).toBe(
@@ -272,11 +270,14 @@ describe("resolveWeatherFailure — total over every failure shape", () => {
 	// showable: that is what lets `autoRho.ts` degrade unconditionally without
 	// inspecting the failure. (That the degradation actually preserves the
 	// manual rho — T-06-08 — is asserted in autoRho.test.ts.)
-	test.each(ALL_FAILURES)("$label resolves to a showable result", ({ error }) => {
-		const resolution = resolveWeatherFailure(error);
-		expect(["warning", "error"]).toContain(resolution.severity);
-		expect(resolution.userMessage.length).toBeGreaterThan(0);
-	});
+	test.each(ALL_FAILURES)(
+		"$label resolves to a showable result",
+		({ error }) => {
+			const resolution = resolveWeatherFailure(error);
+			expect(["warning", "error"]).toContain(resolution.severity);
+			expect(resolution.userMessage.length).toBeGreaterThan(0);
+		},
+	);
 
 	test("weather-client failures warn, unexpected bugs error", () => {
 		// Severity split is behavioural: an outage is a warning (expected),

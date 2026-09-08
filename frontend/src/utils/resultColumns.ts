@@ -34,10 +34,7 @@ export interface ResultColumn {
 	readonly id: string;
 	readonly header: string;
 	/** The value, UNESCAPED. CSV quoting belongs to the CSV writer. */
-	readonly cell: (
-		result: StoredVEResult,
-		vd: VirtualDistanceCells,
-	) => string;
+	readonly cell: (result: StoredVEResult, vd: VirtualDistanceCells) => string;
 	/**
 	 * Emit this cell wrapped in quotes even when it contains nothing that needs
 	 * escaping. Only `Notes` does, and only because it always has: a record with
@@ -50,10 +47,8 @@ export interface ResultColumn {
 }
 
 /** `undefined` reads as an empty cell, never as a fabricated value. */
-const optional = (
-	value: number | undefined,
-	digits: number,
-): string => (value === undefined ? "" : value.toFixed(digits));
+const optional = (value: number | undefined, digits: number): string =>
+	value === undefined ? "" : value.toFixed(digits);
 
 /**
  * ORDER IS THE MAINTAINER'S, and it is the reading order for BOTH surfaces --

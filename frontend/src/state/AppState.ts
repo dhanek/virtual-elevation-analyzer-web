@@ -140,8 +140,7 @@ export type ActivityDataLike =
 	| ActivityData;
 export type ActivityLapLike = LapData | ActivityLap;
 export type ActivityParsingStatisticsLike =
-	| ParsingStatistics
-	| ActivityParsingStatistics;
+	ParsingStatistics | ActivityParsingStatistics;
 
 export interface ActivityState {
 	selectedFile: File | null;

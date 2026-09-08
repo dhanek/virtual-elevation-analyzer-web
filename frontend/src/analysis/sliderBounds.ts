@@ -39,7 +39,8 @@ export interface SliderBounds {
  *  save paths persist. See F17-01. */
 export function displayCrrBounds(current?: number | null): SliderBounds {
 	const { crr_min: min, crr_max: max } = DEFAULT_PARAMETERS;
-	if (typeof current !== "number" || !Number.isFinite(current)) return { min, max };
+	if (typeof current !== "number" || !Number.isFinite(current))
+		return { min, max };
 	return { min: Math.min(min, current), max: Math.max(max, current) };
 }
 
@@ -51,6 +52,7 @@ export function displayCrrBounds(current?: number | null): SliderBounds {
  *  the two ranges are unrelated app configuration. See F17-05. */
 export function displayCdaBounds(current?: number | null): SliderBounds {
 	const { cda_min: min, cda_max: max } = DEFAULT_PARAMETERS;
-	if (typeof current !== "number" || !Number.isFinite(current)) return { min, max };
+	if (typeof current !== "number" || !Number.isFinite(current))
+		return { min, max };
 	return { min: Math.min(min, current), max: Math.max(max, current) };
 }

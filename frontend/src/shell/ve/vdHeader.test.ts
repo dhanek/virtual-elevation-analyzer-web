@@ -36,7 +36,10 @@ const timestamps = Array.from({ length: LENGTH }, (_, i) => i);
 const velocity = new Array(LENGTH).fill(10);
 const windSpeed = new Array(LENGTH).fill(9);
 
-function inputFor(trimStart: number, trimEnd: number): VirtualDistancePlotInput {
+function inputFor(
+	trimStart: number,
+	trimEnd: number,
+): VirtualDistancePlotInput {
 	return {
 		context: createPlotContext(LENGTH, trimStart, trimEnd),
 		timestamps,
@@ -149,7 +152,9 @@ describe("the single-lap VD header", () => {
 				totals: { airKm: 1, groundKm: 0.5, differencePercent: 100 },
 			},
 		]);
-		expect(document.getElementById("vdDiffValue")!.textContent).toBe("+100.00%");
+		expect(document.getElementById("vdDiffValue")!.textContent).toBe(
+			"+100.00%",
+		);
 		expect(
 			document
 				.getElementById("vdDiffValue")!
@@ -162,9 +167,7 @@ describe("the single-lap VD header", () => {
 		expect(readLines()).toEqual([
 			"VD (Air):0.225 km | VD (Ground):0.250 km | Difference:-10.00%",
 		]);
-		expect(
-			document.querySelector(".ve-metrics-compact__segment"),
-		).toBeNull();
+		expect(document.querySelector(".ve-metrics-compact__segment")).toBeNull();
 	});
 
 	it("says n/a only when there is nothing at all to integrate", () => {
@@ -215,10 +218,7 @@ describe("the multi-lap VD header", () => {
 			profileFor("Lap 2", LENGTH, LENGTH),
 		];
 		const normalized = {
-			timestamps: [
-				...timestamps,
-				...timestamps.map((t) => t + LENGTH + gap),
-			],
+			timestamps: [...timestamps, ...timestamps.map((t) => t + LENGTH + gap)],
 			velocity: [...velocity, ...velocity],
 		};
 

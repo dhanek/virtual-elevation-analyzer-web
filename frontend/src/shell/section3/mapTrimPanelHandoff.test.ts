@@ -231,7 +231,10 @@ function bindPanel(appState: AppState): void {
 		saveSettings: () => {},
 		onTrimMapUpdate: () => {},
 		mapCanFollow: () =>
-			veViewMatchesSelection(appState.currentAnalyzedLaps, appState.selectedLaps),
+			veViewMatchesSelection(
+				appState.currentAnalyzedLaps,
+				appState.selectedLaps,
+			),
 		triggerAutoRho: () => {},
 		getOffsetMetricWindows: () => [{ start: 0, end: LAST_INDEX }],
 		getSyncErrorSeries: () => ({

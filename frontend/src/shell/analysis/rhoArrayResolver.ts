@@ -38,7 +38,8 @@ export function resolveRhoArray(
 		return currentNormalized.airDensity;
 	}
 
-	const environmental = environmentalDataPresent ?? hasEnvironmentalData(fitData);
+	const environmental =
+		environmentalDataPresent ?? hasEnvironmentalData(fitData);
 	if (environmental) {
 		const calculated = calculateRhoArrayFromFitData(fitData);
 		if (calculated) {

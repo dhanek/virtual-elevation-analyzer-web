@@ -3,7 +3,11 @@ import { AppState } from "../../state/AppState";
 import { resolveActiveGpsLapRanges } from "./activeGpsLapRanges";
 import type { DetectedLap } from "../../utils/GpsLapDetection";
 
-function detectedLap(lapNumber: number, startIdx: number, endIdx: number): DetectedLap {
+function detectedLap(
+	lapNumber: number,
+	startIdx: number,
+	endIdx: number,
+): DetectedLap {
 	return { lapNumber, startIdx, endIdx } as DetectedLap;
 }
 

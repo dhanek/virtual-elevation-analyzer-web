@@ -303,8 +303,9 @@ describe("equivalence guard 2 — an air-speed ride is invariant to k (D-01)", (
 		expect(resolution.dataSource).toBe("air_speed");
 		expect(resolution.selectedWindSource).toBe("fit");
 		expect(
-			resolution.windSpeed.filter(speed => Number.isFinite(speed) && speed !== 0)
-				.length,
+			resolution.windSpeed.filter(
+				(speed) => Number.isFinite(speed) && speed !== 0,
+			).length,
 		).toBeGreaterThan(0);
 	}
 

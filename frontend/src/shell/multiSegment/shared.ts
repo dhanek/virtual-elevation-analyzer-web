@@ -5,18 +5,18 @@
  */
 
 export const MULTI_SEGMENT_COLORS = [
-    '#4363d8',
-    '#e6194b',
-    '#3cb44b',
-    '#f58231',
-    '#911eb4',
-    '#46f0f0',
-    '#f032e6',
-    '#bcf60c',
+	"#4363d8",
+	"#e6194b",
+	"#3cb44b",
+	"#f58231",
+	"#911eb4",
+	"#46f0f0",
+	"#f032e6",
+	"#bcf60c",
 ];
 
 export function getMultiSegmentColor(index: number): string {
-    return MULTI_SEGMENT_COLORS[index % MULTI_SEGMENT_COLORS.length];
+	return MULTI_SEGMENT_COLORS[index % MULTI_SEGMENT_COLORS.length];
 }
 
 /**
@@ -43,42 +43,51 @@ export function getMultiSegmentColor(index: number): string {
  * the target, so on repeated distances it takes the earliest one. Picking the
  * last `j` with `distances[j] <= target` instead would differ there.
  */
-export function interpolateAscending(targetDist: number, distances: number[], elevations: number[]): number {
-    const n = distances.length;
-    if (n === 0) return NaN;
-    if (targetDist <= distances[0]) return elevations[0];
-    if (targetDist >= distances[n - 1]) return elevations[n - 1];
+export function interpolateAscending(
+	targetDist: number,
+	distances: number[],
+	elevations: number[],
+): number {
+	const n = distances.length;
+	if (n === 0) return NaN;
+	if (targetDist <= distances[0]) return elevations[0];
+	if (targetDist >= distances[n - 1]) return elevations[n - 1];
 
-    // Smallest k in [1, n-1] with distances[k] >= targetDist. The guards above
-    // guarantee one exists, so this cannot fall through.
-    let lo = 1;
-    let hi = n - 1;
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (distances[mid] >= targetDist) hi = mid;
-        else lo = mid + 1;
-    }
+	// Smallest k in [1, n-1] with distances[k] >= targetDist. The guards above
+	// guarantee one exists, so this cannot fall through.
+	let lo = 1;
+	let hi = n - 1;
+	while (lo < hi) {
+		const mid = (lo + hi) >> 1;
+		if (distances[mid] >= targetDist) hi = mid;
+		else lo = mid + 1;
+	}
 
-    const j = lo - 1;
-    const span = distances[j + 1] - distances[j];
-    if (span === 0) return elevations[j];
-    const t = (targetDist - distances[j]) / span;
-    return elevations[j] + t * (elevations[j + 1] - elevations[j]);
+	const j = lo - 1;
+	const span = distances[j + 1] - distances[j];
+	if (span === 0) return elevations[j];
+	const t = (targetDist - distances[j]) / span;
+	return elevations[j] + t * (elevations[j + 1] - elevations[j]);
 }
 
 /**
  * Linear interpolation helper for elevation lookup at a target distance.
  */
-export function interpolateElevation(targetDist: number, distances: number[], elevations: number[]): number {
-    if (distances.length === 0) return NaN;
-    if (targetDist <= distances[0]) return elevations[0];
-    if (targetDist >= distances[distances.length - 1]) return elevations[elevations.length - 1];
+export function interpolateElevation(
+	targetDist: number,
+	distances: number[],
+	elevations: number[],
+): number {
+	if (distances.length === 0) return NaN;
+	if (targetDist <= distances[0]) return elevations[0];
+	if (targetDist >= distances[distances.length - 1])
+		return elevations[elevations.length - 1];
 
-    for (let j = 0; j < distances.length - 1; j++) {
-        if (distances[j] <= targetDist && distances[j + 1] >= targetDist) {
-            const t = (targetDist - distances[j]) / (distances[j + 1] - distances[j]);
-            return elevations[j] + t * (elevations[j + 1] - elevations[j]);
-        }
-    }
-    return NaN;
+	for (let j = 0; j < distances.length - 1; j++) {
+		if (distances[j] <= targetDist && distances[j + 1] >= targetDist) {
+			const t = (targetDist - distances[j]) / (distances[j + 1] - distances[j]);
+			return elevations[j] + t * (elevations[j + 1] - elevations[j]);
+		}
+	}
+	return NaN;
 }

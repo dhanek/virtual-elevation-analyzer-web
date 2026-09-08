@@ -860,9 +860,9 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 		// is the string this case used to REQUIRE, from `storageHandlers.ts:132`.
 		// Asserting its ABSENCE is what pins entry (u): restore the old guard and
 		// this line comes back and this assertion fails.
-		expect.soft(errorLines()).not.toContain(
-			"Cannot store: UI elements not found",
-		);
+		expect
+			.soft(errorLines())
+			.not.toContain("Cannot store: UI elements not found");
 		// Nor the `catch` at `:209-211` — a fix that threw past the guard would log
 		// this instead, and `saveResult` would still never be reached.
 		expect.soft(errorLines()).not.toContain("❌ Failed to store result:");
@@ -882,18 +882,18 @@ describe("N-1 on the synthetic fixture: the real Store Result / Export CSV chain
 		// snapshot cannot pass.
 		expect.soft(saveData.result).toBe(appState.currentVEResult);
 		expect.soft(saveData.windSource).toBe(appState.currentWindSource);
-		expect.soft(saveData.virtualDistances).toBe(
-			appState.currentVirtualDistances,
-		);
+		expect
+			.soft(saveData.virtualDistances)
+			.toBe(appState.currentVirtualDistances);
 		expect.soft(saveData.laps).toEqual(appState.currentAnalyzedLaps);
 		// The window is the WHOLE analysed selection, which is what a mode with no
 		// trim control has on screen — the same thing the GPS-lap branch computes
 		// at `storageHandlers.ts:119-120`. Pinned against the real filtered length
 		// so a fix that stored a truncated or single-sample window fails here.
 		expect.soft(saveData.trimStart).toBe(0);
-		expect.soft(saveData.trimEnd).toBe(
-			appState.currentFilteredData!.power.length - 1,
-		);
+		expect
+			.soft(saveData.trimEnd)
+			.toBe(appState.currentFilteredData!.power.length - 1);
 		// Not gps-lap. The fix must not have reached this by pretending to be one.
 		expect.soft(saveData.isGpsLapMode).toBe(false);
 		// The averages were taken over that window rather than over an empty slice.

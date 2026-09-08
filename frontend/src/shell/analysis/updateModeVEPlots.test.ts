@@ -322,7 +322,9 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 					),
 				).toBe(true);
 				expect(
-					Array.from(primary.windSpeed as number[]).some((v) => !Number.isNaN(v)),
+					Array.from(primary.windSpeed as number[]).some(
+						(v) => !Number.isNaN(v),
+					),
 				).toBe(true);
 
 				// Everything else is shared, so any difference between the two legs
@@ -419,7 +421,10 @@ describe("the summarize seam owns the AppState result writes (D-17a / N-1)", () 
 
 describe("rho reaches the calculator per segment (D-06)", () => {
 	it("passes the SEGMENT SLICE of the injected full-activity rho array", async () => {
-		const fullRho = Array.from({ length: SAMPLE_COUNT }, (_, i) => 1.0 + i / 1000);
+		const fullRho = Array.from(
+			{ length: SAMPLE_COUNT },
+			(_, i) => 1.0 + i / 1000,
+		);
 		const appState = stateFor("gpsLap");
 		const { callbacks } = spyCallbacks();
 

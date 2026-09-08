@@ -252,9 +252,13 @@ describe("Standard compare refreshes the active secondary tab", () => {
 			(trace: any) => trace.name === "Apparent (FIT Air)",
 		);
 		expect(fitTrace).toBeDefined();
-		expect(fitTrace.y.some((value: number | null) => value !== null)).toBe(true);
+		expect(fitTrace.y.some((value: number | null) => value !== null)).toBe(
+			true,
+		);
 		expect(
-			wind!.data.some((trace: any) => trace.name === "Apparent (Constant Wind)"),
+			wind!.data.some(
+				(trace: any) => trace.name === "Apparent (Constant Wind)",
+			),
 		).toBe(false);
 	});
 

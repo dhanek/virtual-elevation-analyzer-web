@@ -65,6 +65,12 @@ function pillState(): "idle" | "running" | "handoff" | "updated" | "absent" {
  * error, so this compiles only while `RecomputeMode` does NOT exist —
  * re-introducing the type makes the directive unused and fails `tsc`.
  */
+// PRETTIER MUST NOT WRAP THE LINE BELOW. `@ts-expect-error` applies to the NEXT
+// LINE, so a wrap moves the type reference off it: the directive then sits over
+// `export type ... =`, which has no error, and tsc reports an unused directive
+// while the real error goes unsuppressed. That is not a formatting nit, it is
+// this guard silently ceasing to guard anything.
+// prettier-ignore
 // @ts-expect-error - RecomputeMode must not exist; re-adding it breaks this line.
 export type _RecomputeModeMustNotExist = import("./recomputeRunner").RecomputeMode;
 
@@ -144,16 +150,32 @@ describe("recomputeRunner", () => {
 		const calls: number[] = [];
 
 		// Leading edge consumes the first.
-		scheduleRecompute({ run: () => { calls.push(0); } });
+		scheduleRecompute({
+			run: () => {
+				calls.push(0);
+			},
+		});
 		await vi.advanceTimersByTimeAsync(0);
 		expect(calls).toEqual([0]);
 
 		// Three more inside the SAME interval yield exactly one further run.
-		scheduleRecompute({ run: () => { calls.push(1); } });
+		scheduleRecompute({
+			run: () => {
+				calls.push(1);
+			},
+		});
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ run: () => { calls.push(2); } });
+		scheduleRecompute({
+			run: () => {
+				calls.push(2);
+			},
+		});
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ run: () => { calls.push(3); } });
+		scheduleRecompute({
+			run: () => {
+				calls.push(3);
+			},
+		});
 
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS * 2);
 
@@ -167,11 +189,23 @@ describe("recomputeRunner", () => {
 		// A drag that stops abruptly. The last event arrives mid-interval, so a
 		// pure leading-edge throttle would drop it and leave the plot showing
 		// the second-to-last value forever.
-		scheduleRecompute({ run: () => { values.push(1); } });
+		scheduleRecompute({
+			run: () => {
+				values.push(1);
+			},
+		});
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 2);
-		scheduleRecompute({ run: () => { values.push(2); } });
+		scheduleRecompute({
+			run: () => {
+				values.push(2);
+			},
+		});
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS / 4);
-		scheduleRecompute({ run: () => { values.push(999); } });
+		scheduleRecompute({
+			run: () => {
+				values.push(999);
+			},
+		});
 
 		// User lets go. Nothing more is scheduled.
 		await vi.advanceTimersByTimeAsync(RECOMPUTE_THROTTLE_MS * 5);

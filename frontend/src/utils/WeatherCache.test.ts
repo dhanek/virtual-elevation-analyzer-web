@@ -184,7 +184,10 @@ describe("bounding the weather cache", () => {
 		await store(cache, 47.2);
 		await store(cache, 47.3);
 
-		await cache.updateCachedEntry(metadataAt(47.2), { ...weather, temperature: 21 });
+		await cache.updateCachedEntry(metadataAt(47.2), {
+			...weather,
+			temperature: 21,
+		});
 
 		expect((await cache.getCacheStats()).count).toBe(3);
 		expect(await survives(cache, 47.1)).toBe(true);

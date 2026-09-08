@@ -236,8 +236,7 @@ export async function processFitFile(file: File): Promise<void> {
 						correctionResult.demRawNearestElevation;
 					deps.appState.demInterpolatedSmoothed5ptElevation =
 						demInterpolatedSmoothed5ptElevation;
-					deps.appState.activeDisplayProfile =
-						"dem-interpolated-smoothed-5pt";
+					deps.appState.activeDisplayProfile = "dem-interpolated-smoothed-5pt";
 					deps.appState.demProfilesAvailable = true;
 
 					log.debug(
@@ -343,7 +342,7 @@ export async function processFitFile(file: File): Promise<void> {
 							deps.appState.demInterpolatedSmoothed5ptElevation =
 								demInterpolatedSmoothed5ptElevation;
 							deps.appState.activeDisplayProfile =
-						"dem-interpolated-smoothed-5pt";
+								"dem-interpolated-smoothed-5pt";
 							deps.appState.demProfilesAvailable = true;
 							log.debug(
 								`Applied ${bestSource} DEM as actual elevation (error rate: ${(bestDEM.errorRate * 100).toFixed(1)}%)`,

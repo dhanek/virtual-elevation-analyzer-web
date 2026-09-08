@@ -106,7 +106,10 @@ describe("initial render", () => {
 	});
 
 	test("the markup is visible under constant wind and under compare", () => {
-		document.body.innerHTML = windHeightControlsMarkup(makeParams(), "constant");
+		document.body.innerHTML = windHeightControlsMarkup(
+			makeParams(),
+			"constant",
+		);
 		expect(controls().hidden).toBe(false);
 		document.body.innerHTML = windHeightControlsMarkup(makeParams(), "compare");
 		expect(controls().hidden).toBe(false);

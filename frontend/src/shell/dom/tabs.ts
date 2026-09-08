@@ -1,26 +1,26 @@
-import { log } from '../../utils/log'
-import { resizePlotlyGraphsIn } from './plotlyResize'
+import { log } from "../../utils/log";
+import { resizePlotlyGraphsIn } from "./plotlyResize";
 
 /**
  * Callbacks for rendering tab-specific content.
  * Each key matches a tab name from the data-tab attribute.
  */
 export interface TabRenderMap {
-    wind?: () => void
-    power?: () => void
-    vd?: () => void
-    ve?: () => void
+	wind?: () => void;
+	power?: () => void;
+	vd?: () => void;
+	ve?: () => void;
 }
 
 // Latest render callbacks. Kept in a module ref so repeated setupTabSwitching
 // calls (e.g. on every slider recompute) refresh the callbacks without binding
 // additional click handlers. Only one VE panel is live at a time.
-let currentRenderMap: TabRenderMap = {}
+let currentRenderMap: TabRenderMap = {};
 
 // Buttons that already have the single click handler bound. A WeakSet lets old
 // button nodes (discarded when the panel HTML is rebuilt) be garbage-collected,
 // so rebuilt panels get freshly bound while in-place recomputes do not.
-const boundButtons = new WeakSet<Element>()
+const boundButtons = new WeakSet<Element>();
 
 /**
  * Make one tab the active one, exactly as a click on its button would.
@@ -34,41 +34,45 @@ const boundButtons = new WeakSet<Element>()
  * active-but-undrawn.
  */
 export function activateTab(tabName: string): void {
-    // Update button active states (re-query in case the DOM changed)
-    document.querySelectorAll('.ve-tab-button').forEach(b => b.classList.remove('ve-tab-button--active'))
-    document.querySelector(`.ve-tab-button[data-tab="${tabName}"]`)?.classList.add('ve-tab-button--active')
+	// Update button active states (re-query in case the DOM changed)
+	document
+		.querySelectorAll(".ve-tab-button")
+		.forEach((b) => b.classList.remove("ve-tab-button--active"));
+	document
+		.querySelector(`.ve-tab-button[data-tab="${tabName}"]`)
+		?.classList.add("ve-tab-button--active");
 
-    // Update tab content active states
-    document.querySelectorAll('.ve-tab-content').forEach(content => {
-        content.classList.remove('ve-tab-content--active')
-    })
-    const pane = document.getElementById(`${tabName}-tab`)
-    pane?.classList.add('ve-tab-content--active')
+	// Update tab content active states
+	document.querySelectorAll(".ve-tab-content").forEach((content) => {
+		content.classList.remove("ve-tab-content--active");
+	});
+	const pane = document.getElementById(`${tabName}-tab`);
+	pane?.classList.add("ve-tab-content--active");
 
-    const showWindTab = !!document.getElementById('wind-tab')
-    const showVdTab = !!document.getElementById('vd-tab')
+	const showWindTab = !!document.getElementById("wind-tab");
+	const showVdTab = !!document.getElementById("vd-tab");
 
-    // Invoke tab-specific render callback from the latest renderMap if available
-    if (tabName === 'wind' && showWindTab && currentRenderMap.wind) {
-        log.debug('Tab switching: rendering wind tab')
-        currentRenderMap.wind()
-    } else if (tabName === 'power' && currentRenderMap.power) {
-        log.debug('Tab switching: rendering power tab')
-        currentRenderMap.power()
-    } else if (tabName === 'vd' && showVdTab && currentRenderMap.vd) {
-        log.debug('Tab switching: rendering virtual distance tab')
-        currentRenderMap.vd()
-    } else if (tabName === 've' && currentRenderMap.ve) {
-        log.debug('Tab switching: rendering VE tab')
-        currentRenderMap.ve()
-    }
+	// Invoke tab-specific render callback from the latest renderMap if available
+	if (tabName === "wind" && showWindTab && currentRenderMap.wind) {
+		log.debug("Tab switching: rendering wind tab");
+		currentRenderMap.wind();
+	} else if (tabName === "power" && currentRenderMap.power) {
+		log.debug("Tab switching: rendering power tab");
+		currentRenderMap.power();
+	} else if (tabName === "vd" && showVdTab && currentRenderMap.vd) {
+		log.debug("Tab switching: rendering virtual distance tab");
+		currentRenderMap.vd();
+	} else if (tabName === "ve" && currentRenderMap.ve) {
+		log.debug("Tab switching: rendering VE tab");
+		currentRenderMap.ve();
+	}
 
-    // The pane is visible now and its plots have been redrawn, so this is the
-    // first moment any of them can be measured against a real container width.
-    // Every plot outside the VE tab is drawn while its pane is `display: none`,
-    // where Plotly measures zero and pins its 700 px default; see
-    // `resizePlotlyGraphsIn`.
-    if (pane) resizePlotlyGraphsIn(pane)
+	// The pane is visible now and its plots have been redrawn, so this is the
+	// first moment any of them can be measured against a real container width.
+	// Every plot outside the VE tab is drawn while its pane is `display: none`,
+	// where Plotly measures zero and pins its 700 px default; see
+	// `resizePlotlyGraphsIn`.
+	if (pane) resizePlotlyGraphsIn(pane);
 }
 
 /**
@@ -81,17 +85,17 @@ export function activateTab(tabName: string): void {
  * state is a second thing to get out of step.
  */
 export function getActiveTabName(): string | null {
-    const pane = document.querySelector('.ve-tab-content--active')
-    const id = pane?.id
-    if (!id || !id.endsWith('-tab')) return null
-    return id.slice(0, -'-tab'.length)
+	const pane = document.querySelector(".ve-tab-content--active");
+	const id = pane?.id;
+	if (!id || !id.endsWith("-tab")) return null;
+	return id.slice(0, -"-tab".length);
 }
 
 function handleTabClick(e: Event): void {
-    const target = e.currentTarget as HTMLElement
-    const tabName = target.getAttribute('data-tab')
-    if (!tabName) return
-    activateTab(tabName)
+	const target = e.currentTarget as HTMLElement;
+	const tabName = target.getAttribute("data-tab");
+	if (!tabName) return;
+	activateTab(tabName);
 }
 
 /**
@@ -108,11 +112,11 @@ function handleTabClick(e: Event): void {
  * Idempotent: a button is bound exactly once. Safe to call on every render.
  */
 export function bindTabButtons(): void {
-    document.querySelectorAll('.ve-tab-button').forEach(button => {
-        if (boundButtons.has(button)) return
-        boundButtons.add(button)
-        button.addEventListener('click', handleTabClick)
-    })
+	document.querySelectorAll(".ve-tab-button").forEach((button) => {
+		if (boundButtons.has(button)) return;
+		boundButtons.add(button);
+		button.addEventListener("click", handleTabClick);
+	});
 }
 
 /**
@@ -124,7 +128,7 @@ export function bindTabButtons(): void {
  * wrong thing rather than nothing.
  */
 export function setTabRenderMap(renderMap: TabRenderMap = {}): void {
-    currentRenderMap = renderMap
+	currentRenderMap = renderMap;
 }
 
 /**
@@ -147,7 +151,7 @@ export function setTabRenderMap(renderMap: TabRenderMap = {}): void {
  * installed there.
  */
 export function resetTabRenderMapForNewPanel(): void {
-    currentRenderMap = {}
+	currentRenderMap = {};
 }
 
 /**
@@ -163,6 +167,6 @@ export function resetTabRenderMapForNewPanel(): void {
  * and the inline tab block in the standard VE render path.
  */
 export function setupTabSwitching(renderMap: TabRenderMap = {}): void {
-    setTabRenderMap(renderMap)
-    bindTabButtons()
+	setTabRenderMap(renderMap);
+	bindTabButtons();
 }

@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { ActivityDataLike } from '../../state/AppState';
-import type { AnalysisParameters } from '../../components/AnalysisParameters';
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ActivityDataLike } from "../../state/AppState";
+import type { AnalysisParameters } from "../../components/AnalysisParameters";
 
 /**
  * Typed loader for the SYNTHETIC out-and-back fixture.
@@ -66,138 +66,145 @@ import type { AnalysisParameters } from '../../components/AnalysisParameters';
  * jsdom side again with no test in `environment: 'node'` able to see it.
  */
 export const OUT_AND_BACK_RIDE_PATH = join(
-    dirname(fileURLToPath(import.meta.url)),
-    'out-and-back-ride.json',
+	dirname(fileURLToPath(import.meta.url)),
+	"out-and-back-ride.json",
 );
 
 export interface OutAndBackRideProvenance {
-    synthetic: true;
-    derivedFrom: string;
-    generator: string;
-    deterministic: true;
-    regenerateWith: string;
-    /**
-     * The caveat, in the data rather than in a comment, so it travels with
-     * every claim built on the fixture (threat T-07-07-03).
-     */
-    evidenceStrength: string;
-    whatThisDoesNotDischarge: string[];
-    derivation: string[];
-    sourceLaps: Array<{ lapNumber: number; sourceStartIdx: number; sourceEndIdx: number; length: number }>;
-    sectionShape: string;
-    inheritedAnonymisation: string;
-    rounding: {
-        coordinatesDecimals: number;
-        altitudeDecimals: number;
-        velocityDecimals: number;
-        powerDecimals: number;
-        otherDecimals: number;
-        rhoDecimals: number;
-    };
+	synthetic: true;
+	derivedFrom: string;
+	generator: string;
+	deterministic: true;
+	regenerateWith: string;
+	/**
+	 * The caveat, in the data rather than in a comment, so it travels with
+	 * every claim built on the fixture (threat T-07-07-03).
+	 */
+	evidenceStrength: string;
+	whatThisDoesNotDischarge: string[];
+	derivation: string[];
+	sourceLaps: Array<{
+		lapNumber: number;
+		sourceStartIdx: number;
+		sourceEndIdx: number;
+		length: number;
+	}>;
+	sectionShape: string;
+	inheritedAnonymisation: string;
+	rounding: {
+		coordinatesDecimals: number;
+		altitudeDecimals: number;
+		velocityDecimals: number;
+		powerDecimals: number;
+		otherDecimals: number;
+		rhoDecimals: number;
+	};
 }
 
 export interface OutAndBackRideLap {
-    start_time: number;
-    end_time: number;
+	start_time: number;
+	end_time: number;
 }
 
 export interface OutAndBackRideIndexRange {
-    startIdx: number;
-    endIdx: number;
+	startIdx: number;
+	endIdx: number;
 }
 
 /** @see the `sections` note in this module's header for the ten absent fields. */
 export interface OutAndBackRideSection {
-    sectionNumber: number;
-    outboundStartIdx: number;
-    outboundEndIdx: number;
-    inboundStartIdx: number;
-    inboundEndIdx: number;
+	sectionNumber: number;
+	outboundStartIdx: number;
+	outboundEndIdx: number;
+	inboundStartIdx: number;
+	inboundEndIdx: number;
 }
 
 /** The on-disk shape, exactly as `build-out-and-back-fixture.ts` emits it. */
 export interface OutAndBackRideJson {
-    _provenance: OutAndBackRideProvenance;
-    record_count: number;
-    timestamps: number[];
-    power: number[];
-    velocity: number[];
-    position_lat: number[];
-    position_long: number[];
-    altitude: number[];
-    distance: number[];
-    air_speed: number[];
-    wind_yaw: number[];
-    temperature: number[];
-    rhoArray: number[];
-    laps: OutAndBackRideLap[];
-    indexRanges: OutAndBackRideIndexRange[];
-    sections: OutAndBackRideSection[];
-    params: AnalysisParameters;
+	_provenance: OutAndBackRideProvenance;
+	record_count: number;
+	timestamps: number[];
+	power: number[];
+	velocity: number[];
+	position_lat: number[];
+	position_long: number[];
+	altitude: number[];
+	distance: number[];
+	air_speed: number[];
+	wind_yaw: number[];
+	temperature: number[];
+	rhoArray: number[];
+	laps: OutAndBackRideLap[];
+	indexRanges: OutAndBackRideIndexRange[];
+	sections: OutAndBackRideSection[];
+	params: AnalysisParameters;
 }
 
 export interface OutAndBackRide {
-    /**
-     * Satisfies `ActivityDataLike` well enough for `getNormalizedActivityArrays`.
-     * The arrays the fixture does not carry (`wind_speed`, `air_density_data`,
-     * `road_speed`, `battery_soc`, `heart_rate`, `cadence`) are zero-filled here
-     * rather than stored: the pipeline reads them, but none of them influences a
-     * VE number, and `heart_rate` / `cadence` / `battery_soc` must never be
-     * committed (threat T-07-02).
-     */
-    fitData: ActivityDataLike;
-    params: AnalysisParameters;
-    rhoArray: number[];
-    laps: OutAndBackRideLap[];
-    indexRanges: OutAndBackRideIndexRange[];
-    sections: OutAndBackRideSection[];
-    provenance: OutAndBackRideProvenance;
+	/**
+	 * Satisfies `ActivityDataLike` well enough for `getNormalizedActivityArrays`.
+	 * The arrays the fixture does not carry (`wind_speed`, `air_density_data`,
+	 * `road_speed`, `battery_soc`, `heart_rate`, `cadence`) are zero-filled here
+	 * rather than stored: the pipeline reads them, but none of them influences a
+	 * VE number, and `heart_rate` / `cadence` / `battery_soc` must never be
+	 * committed (threat T-07-02).
+	 */
+	fitData: ActivityDataLike;
+	params: AnalysisParameters;
+	rhoArray: number[];
+	laps: OutAndBackRideLap[];
+	indexRanges: OutAndBackRideIndexRange[];
+	sections: OutAndBackRideSection[];
+	provenance: OutAndBackRideProvenance;
 }
 
 export function isOutAndBackRidePresent(): boolean {
-    return existsSync(OUT_AND_BACK_RIDE_PATH);
+	return existsSync(OUT_AND_BACK_RIDE_PATH);
 }
 
 export function loadOutAndBackRide(): OutAndBackRide {
-    if (!isOutAndBackRidePresent()) {
-        throw new Error(
-            `Out-and-back fixture not found at ${OUT_AND_BACK_RIDE_PATH}. ` +
-            'Regenerate it with `cd frontend && npx vite-node scripts/build-out-and-back-fixture.ts` ' +
-            '— the derivation is deterministic, so the regenerated file is byte-identical to the committed one.',
-        );
-    }
+	if (!isOutAndBackRidePresent()) {
+		throw new Error(
+			`Out-and-back fixture not found at ${OUT_AND_BACK_RIDE_PATH}. ` +
+				"Regenerate it with `cd frontend && npx vite-node scripts/build-out-and-back-fixture.ts` " +
+				"— the derivation is deterministic, so the regenerated file is byte-identical to the committed one.",
+		);
+	}
 
-    const json = JSON.parse(readFileSync(OUT_AND_BACK_RIDE_PATH, 'utf8')) as OutAndBackRideJson;
+	const json = JSON.parse(
+		readFileSync(OUT_AND_BACK_RIDE_PATH, "utf8"),
+	) as OutAndBackRideJson;
 
-    const zeros = (): number[] => new Array<number>(json.record_count).fill(0);
+	const zeros = (): number[] => new Array<number>(json.record_count).fill(0);
 
-    const fitData = {
-        timestamps: json.timestamps,
-        position_lat: json.position_lat,
-        position_long: json.position_long,
-        altitude: json.altitude,
-        velocity: json.velocity,
-        power: json.power,
-        air_speed: json.air_speed,
-        distance: json.distance,
-        wind_speed: zeros(),
-        wind_yaw: json.wind_yaw,
-        air_density_data: zeros(),
-        road_speed: zeros(),
-        temperature: json.temperature,
-        battery_soc: zeros(),
-        heart_rate: zeros(),
-        cadence: zeros(),
-        record_count: json.record_count,
-    } as ActivityDataLike;
+	const fitData = {
+		timestamps: json.timestamps,
+		position_lat: json.position_lat,
+		position_long: json.position_long,
+		altitude: json.altitude,
+		velocity: json.velocity,
+		power: json.power,
+		air_speed: json.air_speed,
+		distance: json.distance,
+		wind_speed: zeros(),
+		wind_yaw: json.wind_yaw,
+		air_density_data: zeros(),
+		road_speed: zeros(),
+		temperature: json.temperature,
+		battery_soc: zeros(),
+		heart_rate: zeros(),
+		cadence: zeros(),
+		record_count: json.record_count,
+	} as ActivityDataLike;
 
-    return {
-        fitData,
-        params: json.params,
-        rhoArray: json.rhoArray,
-        laps: json.laps,
-        indexRanges: json.indexRanges,
-        sections: json.sections,
-        provenance: json._provenance,
-    };
+	return {
+		fitData,
+		params: json.params,
+		rhoArray: json.rhoArray,
+		laps: json.laps,
+		indexRanges: json.indexRanges,
+		sections: json.sections,
+		provenance: json._provenance,
+	};
 }

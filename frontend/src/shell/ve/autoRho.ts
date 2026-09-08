@@ -1,15 +1,35 @@
-import { AppState } from '../../state/AppState';
-import { AnalysisParametersComponent, AnalysisParameters } from '../../components/AnalysisParameters';
-import { log } from '../../utils/log';
-import { calculateTrimRegionMetadata, formatCoordinates, roundToNearest15Min } from '../../utils/GeoCalculations';
-import { weatherCacheInstance, type WeatherCacheEntry } from '../../utils/WeatherCache';
-import { WeatherAPI, WeatherAPIError } from '../../utils/WeatherAPI';
-import { AirDensityCalculator } from '../../../pkg/virtual_elevation_analyzer.js';
-import { showNotification } from '../dom/notifications';
-import { ShellServices } from '../analysis/types';
-import { refreshCrrTempReadout, syncCrrTempAmbientFromWeather } from './crrTempControls';
-import { refreshWindHeightReadout, syncWindHeightFromWeather, weatherMayFillWind } from './windHeightControls';
-import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallback';
+import { AppState } from "../../state/AppState";
+import {
+	AnalysisParametersComponent,
+	AnalysisParameters,
+} from "../../components/AnalysisParameters";
+import { log } from "../../utils/log";
+import {
+	calculateTrimRegionMetadata,
+	formatCoordinates,
+	roundToNearest15Min,
+} from "../../utils/GeoCalculations";
+import {
+	weatherCacheInstance,
+	type WeatherCacheEntry,
+} from "../../utils/WeatherCache";
+import { WeatherAPI, WeatherAPIError } from "../../utils/WeatherAPI";
+import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js";
+import { showNotification } from "../dom/notifications";
+import { ShellServices } from "../analysis/types";
+import {
+	refreshCrrTempReadout,
+	syncCrrTempAmbientFromWeather,
+} from "./crrTempControls";
+import {
+	refreshWindHeightReadout,
+	syncWindHeightFromWeather,
+	weatherMayFillWind,
+} from "./windHeightControls";
+import {
+	AUTO_RHO_FAILURE_MESSAGE,
+	resolveWeatherFailure,
+} from "./weatherFallback";
 
 /**
  * Calculate air density automatically using weather data.
@@ -20,445 +40,508 @@ import { AUTO_RHO_FAILURE_MESSAGE, resolveWeatherFailure } from './weatherFallba
  * @param services - Shell services (loading, etc.)
  */
 export function calculateAutoRho(
-    appState: AppState,
-    parametersComponent: AnalysisParametersComponent | null,
-    services: ShellServices
+	appState: AppState,
+	parametersComponent: AnalysisParametersComponent | null,
+	services: ShellServices,
 ): Promise<number | null> {
-    const flightKey = captureAutoRhoFlightKey(appState);
+	const flightKey = captureAutoRhoFlightKey(appState);
 
-    // Same inputs join the exact flight. Different activity/selection inputs
-    // replace the advertised flight with a serialized successor: the old
-    // request may finish its network work, but its ownership checks reject
-    // every state/UI write before the successor queries the current inputs.
-    if (appState.autoRhoPromise) {
-        if (appState.autoRhoFlightKey === flightKey) {
-            log.debug('⏭️  Auto-rho calculation already in progress, joining\n');
-            return appState.autoRhoPromise;
-        }
+	// Same inputs join the exact flight. Different activity/selection inputs
+	// replace the advertised flight with a serialized successor: the old
+	// request may finish its network work, but its ownership checks reject
+	// every state/UI write before the successor queries the current inputs.
+	if (appState.autoRhoPromise) {
+		if (appState.autoRhoFlightKey === flightKey) {
+			log.debug("⏭️  Auto-rho calculation already in progress, joining\n");
+			return appState.autoRhoPromise;
+		}
 
-        log.debug('⏭️  Auto-rho inputs changed, queueing current operation\n');
-        return startAutoRhoFlight(
-            appState,
-            parametersComponent,
-            services,
-            flightKey,
-            appState.autoRhoPromise
-        );
-    }
+		log.debug("⏭️  Auto-rho inputs changed, queueing current operation\n");
+		return startAutoRhoFlight(
+			appState,
+			parametersComponent,
+			services,
+			flightKey,
+			appState.autoRhoPromise,
+		);
+	}
 
-    // Preserve the defensive guard for legacy/test callers which may own the
-    // boolean without having registered a promise through this function.
-    if (appState.isCalculatingAutoRho) {
-        log.debug('⏭️  Auto-rho calculation already in progress, skipping\n');
-        return Promise.resolve(null);
-    }
+	// Preserve the defensive guard for legacy/test callers which may own the
+	// boolean without having registered a promise through this function.
+	if (appState.isCalculatingAutoRho) {
+		log.debug("⏭️  Auto-rho calculation already in progress, skipping\n");
+		return Promise.resolve(null);
+	}
 
-    return startAutoRhoFlight(
-        appState,
-        parametersComponent,
-        services,
-        flightKey,
-        null
-    );
+	return startAutoRhoFlight(
+		appState,
+		parametersComponent,
+		services,
+		flightKey,
+		null,
+	);
 }
 
 function startAutoRhoFlight(
-    appState: AppState,
-    parametersComponent: AnalysisParametersComponent | null,
-    services: ShellServices,
-    flightKey: string,
-    predecessor: Promise<number | null> | null
+	appState: AppState,
+	parametersComponent: AnalysisParametersComponent | null,
+	services: ShellServices,
+	flightKey: string,
+	predecessor: Promise<number | null> | null,
 ): Promise<number | null> {
-    appState.isCalculatingAutoRho = true;
+	appState.isCalculatingAutoRho = true;
 
-    let operation!: Promise<number | null>;
-    const start = predecessor
-        ? predecessor.catch(() => null)
-        : Promise.resolve<number | null>(null);
-    operation = start
-        .then(() =>
-            performAutoRho(
-                appState,
-                parametersComponent,
-                services,
-                flightKey
-            )
-        )
-        .finally(() => {
-            if (appState.autoRhoPromise === operation) {
-                appState.autoRhoPromise = null;
-                appState.autoRhoFlightKey = null;
-                appState.isCalculatingAutoRho = false;
-            }
-        });
-    appState.autoRhoPromise = operation;
-    appState.autoRhoFlightKey = flightKey;
-    return operation;
+	let operation!: Promise<number | null>;
+	const start = predecessor
+		? predecessor.catch(() => null)
+		: Promise.resolve<number | null>(null);
+	operation = start
+		.then(() =>
+			performAutoRho(appState, parametersComponent, services, flightKey),
+		)
+		.finally(() => {
+			if (appState.autoRhoPromise === operation) {
+				appState.autoRhoPromise = null;
+				appState.autoRhoFlightKey = null;
+				appState.isCalculatingAutoRho = false;
+			}
+		});
+	appState.autoRhoPromise = operation;
+	appState.autoRhoFlightKey = flightKey;
+	return operation;
 }
 
 function captureAutoRhoFlightKey(appState: AppState): string {
-    const mapStart = document.getElementById('mapTrimStartSlider') as HTMLInputElement | null;
-    const mapEnd = document.getElementById('mapTrimEndSlider') as HTMLInputElement | null;
-    const sectionStart = document.getElementById('trimStartSlider') as HTMLInputElement | null;
-    const sectionEnd = document.getElementById('trimEndSlider') as HTMLInputElement | null;
-    const start = mapStart?.value ?? sectionStart?.value ?? 'missing';
-    const end = mapEnd?.value ?? sectionEnd?.value ?? 'missing';
-    const autoEnabled = appState.currentParameters?.auto_calculate_rho ?? false;
-    return `${appState.autoRhoInputRevision ?? 0}:${start}:${end}:${autoEnabled ? 1 : 0}`;
+	const mapStart = document.getElementById(
+		"mapTrimStartSlider",
+	) as HTMLInputElement | null;
+	const mapEnd = document.getElementById(
+		"mapTrimEndSlider",
+	) as HTMLInputElement | null;
+	const sectionStart = document.getElementById(
+		"trimStartSlider",
+	) as HTMLInputElement | null;
+	const sectionEnd = document.getElementById(
+		"trimEndSlider",
+	) as HTMLInputElement | null;
+	const start = mapStart?.value ?? sectionStart?.value ?? "missing";
+	const end = mapEnd?.value ?? sectionEnd?.value ?? "missing";
+	const autoEnabled = appState.currentParameters?.auto_calculate_rho ?? false;
+	return `${appState.autoRhoInputRevision ?? 0}:${start}:${end}:${autoEnabled ? 1 : 0}`;
 }
 
 async function performAutoRho(
-    appState: AppState,
-    parametersComponent: AnalysisParametersComponent | null,
-    services: ShellServices,
-    flightKey: string
+	appState: AppState,
+	parametersComponent: AnalysisParametersComponent | null,
+	services: ShellServices,
+	flightKey: string,
 ): Promise<number | null> {
+	// `services.hideLoading()` is a global, non-refcounted toggle that also
+	// re-enables the Analyze button. Auto-rho runs from detached timers
+	// (fileLoadOrchestration, section3Orchestration, analyzeOrchestrator), so
+	// overlapping with another in-flight operation is normal — calling
+	// hideLoading() when we never called showLoading() would dismiss *their*
+	// overlay and re-enable the button mid-run. Track ownership instead: only
+	// the call that showed the overlay may hide it, and only once.
+	let loadingShown = false;
+	const hideLoadingIfOwned = (): void => {
+		if (!loadingShown) return;
+		loadingShown = false;
+		services.hideLoading();
+	};
+	const ownsCurrentInputs = (): boolean =>
+		captureAutoRhoFlightKey(appState) === flightKey;
+	const abandonStaleFlight = (): boolean => {
+		if (ownsCurrentInputs()) return false;
+		hideLoadingIfOwned();
+		log.debug("⏭️  Auto-rho inputs changed; discarding stale result\n");
+		return true;
+	};
+	if (abandonStaleFlight()) return null;
 
-    // `services.hideLoading()` is a global, non-refcounted toggle that also
-    // re-enables the Analyze button. Auto-rho runs from detached timers
-    // (fileLoadOrchestration, section3Orchestration, analyzeOrchestrator), so
-    // overlapping with another in-flight operation is normal — calling
-    // hideLoading() when we never called showLoading() would dismiss *their*
-    // overlay and re-enable the button mid-run. Track ownership instead: only
-    // the call that showed the overlay may hide it, and only once.
-    let loadingShown = false;
-    const hideLoadingIfOwned = (): void => {
-        if (!loadingShown) return;
-        loadingShown = false;
-        services.hideLoading();
-    };
-    const ownsCurrentInputs = (): boolean =>
-        captureAutoRhoFlightKey(appState) === flightKey;
-    const abandonStaleFlight = (): boolean => {
-        if (ownsCurrentInputs()) return false;
-        hideLoadingIfOwned();
-        log.debug('⏭️  Auto-rho inputs changed; discarding stale result\n');
-        return true;
-    };
-    if (abandonStaleFlight()) return null;
+	// WEATH-03 rung 3 guard: the public wrapper owns the structural `finally`,
+	// so no failure path can leave
+	// `isCalculatingAutoRho` stuck at true (which would permanently disable
+	// auto-rho for the session) — including a throw from inside a catch
+	// handler (`hideLoading` / `showNotification` both touch the DOM). The flag
+	// is cleared in exactly one place, that wrapper's `finally`, so a future early
+	// return cannot reintroduce the leak. Callers discard the return value, so
+	// returning null simply leaves the manual/prior rho in place and analysis
+	// continues.
+	try {
+		log.debug(
+			"\n╔═══════════════════════════════════════════════════════════════╗",
+		);
+		log.debug(
+			"║  🌦️  AUTO RHO CALCULATION STARTED                            ║",
+		);
+		log.debug(
+			"╚═══════════════════════════════════════════════════════════════╝\n",
+		);
 
-    // WEATH-03 rung 3 guard: the public wrapper owns the structural `finally`,
-    // so no failure path can leave
-    // `isCalculatingAutoRho` stuck at true (which would permanently disable
-    // auto-rho for the session) — including a throw from inside a catch
-    // handler (`hideLoading` / `showNotification` both touch the DOM). The flag
-    // is cleared in exactly one place, that wrapper's `finally`, so a future early
-    // return cannot reintroduce the leak. Callers discard the return value, so
-    // returning null simply leaves the manual/prior rho in place and analysis
-    // continues.
-    try {
-        log.debug('\n╔═══════════════════════════════════════════════════════════════╗');
-        log.debug('║  🌦️  AUTO RHO CALCULATION STARTED                            ║');
-        log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
+		if (!appState.currentFitData || !parametersComponent) {
+			log.warn(
+				"❌ Cannot calculate auto rho: missing FIT data or parameters component",
+			);
+			log.debug("  - appState.currentFitData:", !!appState.currentFitData);
+			log.debug("  - parametersComponent:", !!parametersComponent);
+			return null;
+		}
 
-        if (!appState.currentFitData || !parametersComponent) {
-            log.warn('❌ Cannot calculate auto rho: missing FIT data or parameters component');
-            log.debug('  - appState.currentFitData:', !!appState.currentFitData);
-            log.debug('  - parametersComponent:', !!parametersComponent);
-            return null;
-        }
+		const params = parametersComponent.getParameters();
 
-        const params = parametersComponent.getParameters();
+		// Check if auto-calculate is enabled
+		if (!params.auto_calculate_rho) {
+			log.debug("⏭️  Auto-calculate disabled, skipping\n");
+			return null;
+		}
 
-        // Check if auto-calculate is enabled
-        if (!params.auto_calculate_rho) {
-            log.debug('⏭️  Auto-calculate disabled, skipping\n');
-            return null;
-        }
+		log.debug("✅ Auto-calculate enabled, proceeding...\n");
 
-        log.debug('✅ Auto-calculate enabled, proceeding...\n');
+		// IMPORTANT: For auto-rho calculation, always use map trim sliders
+		// Map trim sliders are relative to filtered lap data, which is what we need
+		// Section 3 trim sliders are relative to full FIT data
+		let trimStartSlider = document.getElementById(
+			"mapTrimStartSlider",
+		) as HTMLInputElement;
+		let trimEndSlider = document.getElementById(
+			"mapTrimEndSlider",
+		) as HTMLInputElement;
 
-        // IMPORTANT: For auto-rho calculation, always use map trim sliders
-        // Map trim sliders are relative to filtered lap data, which is what we need
-        // Section 3 trim sliders are relative to full FIT data
-        let trimStartSlider = document.getElementById('mapTrimStartSlider') as HTMLInputElement;
-        let trimEndSlider = document.getElementById('mapTrimEndSlider') as HTMLInputElement;
+		// Fallback to section 3 sliders only if map sliders don't exist
+		if (!trimStartSlider || !trimEndSlider) {
+			trimStartSlider = document.getElementById(
+				"trimStartSlider",
+			) as HTMLInputElement;
+			trimEndSlider = document.getElementById(
+				"trimEndSlider",
+			) as HTMLInputElement;
+			log.debug("🔍 Map trim sliders not found, using section 3 sliders...");
+		} else {
+			log.debug("🔍 Using map trim sliders (relative to filtered lap data)...");
+		}
 
-        // Fallback to section 3 sliders only if map sliders don't exist
-        if (!trimStartSlider || !trimEndSlider) {
-            trimStartSlider = document.getElementById('trimStartSlider') as HTMLInputElement;
-            trimEndSlider = document.getElementById('trimEndSlider') as HTMLInputElement;
-            log.debug('🔍 Map trim sliders not found, using section 3 sliders...');
-        } else {
-            log.debug('🔍 Using map trim sliders (relative to filtered lap data)...');
-        }
+		log.debug("  - trimStartSlider exists:", !!trimStartSlider);
+		log.debug("  - trimEndSlider exists:", !!trimEndSlider);
 
-        log.debug('  - trimStartSlider exists:', !!trimStartSlider);
-        log.debug('  - trimEndSlider exists:', !!trimEndSlider);
+		if (!trimStartSlider || !trimEndSlider) {
+			log.warn("❌ No trim sliders found - cannot calculate auto rho");
+			log.debug("  This usually means the UI is not ready yet.");
+			log.debug("  Will retry when sliders are available.\n");
+			return null;
+		}
 
-        if (!trimStartSlider || !trimEndSlider) {
-            log.warn('❌ No trim sliders found - cannot calculate auto rho');
-            log.debug('  This usually means the UI is not ready yet.');
-            log.debug('  Will retry when sliders are available.\n');
-            return null;
-        }
+		const trimStart = parseInt(trimStartSlider.value);
+		const trimEnd = parseInt(trimEndSlider.value);
 
-        const trimStart = parseInt(trimStartSlider.value);
-        const trimEnd = parseInt(trimEndSlider.value);
+		log.debug("📊 Trim region values:", {
+			start: trimStart,
+			end: trimEnd,
+			dataPointsInRange: trimEnd - trimStart + 1,
+		});
+		log.debug("");
 
-        log.debug('📊 Trim region values:', {
-            start: trimStart,
-            end: trimEnd,
-            dataPointsInRange: trimEnd - trimStart + 1
-        });
-        log.debug('');
+		// Show loading state — from here on we own the overlay.
+		services.showLoading("Fetching weather data...");
+		loadingShown = true;
 
-        // Show loading state — from here on we own the overlay.
-        services.showLoading('Fetching weather data...');
-        loadingShown = true;
+		try {
+			// Calculate GPS metadata from trim region
+			// Use filtered lap data (only selected laps), not the full FIT data
+			if (!appState.filteredLapData) {
+				log.warn(
+					"❌ No filtered lap data available - cannot calculate auto rho",
+				);
+				log.debug("  This usually means laps have not been selected yet.\n");
+				hideLoadingIfOwned();
+				return null;
+			}
 
-        try {
-            // Calculate GPS metadata from trim region
-            // Use filtered lap data (only selected laps), not the full FIT data
-            if (!appState.filteredLapData) {
-                log.warn('❌ No filtered lap data available - cannot calculate auto rho');
-                log.debug('  This usually means laps have not been selected yet.\n');
-                hideLoadingIfOwned();
-                return null;
-            }
+			log.debug("🗺️  Calculating GPS metadata from trim region...");
+			log.debug(
+				"  Using filtered lap data with",
+				appState.filteredLapData.timestamps.length,
+				"data points",
+			);
 
-            log.debug('🗺️  Calculating GPS metadata from trim region...');
-            log.debug('  Using filtered lap data with', appState.filteredLapData.timestamps.length, 'data points');
+			const metadata = calculateTrimRegionMetadata(
+				appState.filteredLapData,
+				trimStart,
+				trimEnd,
+			);
 
-            const metadata = calculateTrimRegionMetadata(
-                appState.filteredLapData,
-                trimStart,
-                trimEnd
-            );
+			log.debug("═══════════════════════════════════════════════════════");
+			log.debug("📍 TRIM REGION METADATA");
+			log.debug("═══════════════════════════════════════════════════════");
+			log.debug(
+				"  Location:",
+				formatCoordinates(metadata.avgLat, metadata.avgLon),
+			);
+			log.debug("  Coordinates:", `${metadata.avgLat}, ${metadata.avgLon}`);
+			log.debug("  Date/Time:", metadata.middleDate.toISOString());
+			log.debug("  Valid GPS Points:", metadata.dataPointCount);
+			log.debug("  Trim Range:", `${trimStart} to ${trimEnd}`);
+			log.debug("═══════════════════════════════════════════════════════\n");
 
-            log.debug('═══════════════════════════════════════════════════════');
-            log.debug('📍 TRIM REGION METADATA');
-            log.debug('═══════════════════════════════════════════════════════');
-            log.debug('  Location:', formatCoordinates(metadata.avgLat, metadata.avgLon));
-            log.debug('  Coordinates:', `${metadata.avgLat}, ${metadata.avgLon}`);
-            log.debug('  Date/Time:', metadata.middleDate.toISOString());
-            log.debug('  Valid GPS Points:', metadata.dataPointCount);
-            log.debug('  Trim Range:', `${trimStart} to ${trimEnd}`);
-            log.debug('═══════════════════════════════════════════════════════\n');
+			// Generate query key (rounded to nearest 15-min slot to match API granularity)
+			const slot = roundToNearest15Min(metadata.middleDate);
+			const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, "0")}:${String(slot.slotMinute).padStart(2, "0")}`;
 
-            // Generate query key (rounded to nearest 15-min slot to match API granularity)
-            const slot = roundToNearest15Min(metadata.middleDate);
-            const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, '0')}:${String(slot.slotMinute).padStart(2, '0')}`;
+			// Check if query has actually changed. The key records the query
+			// whose result is currently loaded into `params`, so it is only
+			// assigned once the fetch has succeeded (see below) — a failed
+			// fetch must not mark its region as already loaded, or the user
+			// has to move the slider away and back to get a retry.
+			if (appState.lastWeatherQueryKey === queryKey) {
+				log.debug(
+					"⏭️  Query unchanged from last calculation, using cached rho",
+				);
+				log.debug("  Query key:", queryKey);
+				hideLoadingIfOwned();
+				return params.rho; // Return current rho value
+			}
 
-            // Check if query has actually changed. The key records the query
-            // whose result is currently loaded into `params`, so it is only
-            // assigned once the fetch has succeeded (see below) — a failed
-            // fetch must not mark its region as already loaded, or the user
-            // has to move the slider away and back to get a retry.
-            if (appState.lastWeatherQueryKey === queryKey) {
-                log.debug('⏭️  Query unchanged from last calculation, using cached rho');
-                log.debug('  Query key:', queryKey);
-                hideLoadingIfOwned();
-                return params.rho; // Return current rho value
-            }
+			log.debug("🔄 Query changed, fetching new weather data");
+			log.debug("  Previous:", appState.lastWeatherQueryKey || "none");
+			log.debug("  Current:", queryKey);
+			log.debug("");
 
-            log.debug('🔄 Query changed, fetching new weather data');
-            log.debug('  Previous:', appState.lastWeatherQueryKey || 'none');
-            log.debug('  Current:', queryKey);
-            log.debug('');
+			// Initialize weather services
+			//
+			// THE SHARED CACHE, not a new one. This line runs once per distinct
+			// trim window (the `lastWeatherQueryKey` guard above lets a repeat
+			// query out early), and each instance opens its own IndexedDB
+			// connection that nothing released — so a long session accumulated
+			// connections at the same rate the cache mints rows.
+			const weatherCache = weatherCacheInstance();
+			const weatherAPI = new WeatherAPI();
 
-            // Initialize weather services
-            //
-            // THE SHARED CACHE, not a new one. This line runs once per distinct
-            // trim window (the `lastWeatherQueryKey` guard above lets a repeat
-            // query out early), and each instance opens its own IndexedDB
-            // connection that nothing released — so a long session accumulated
-            // connections at the same rate the cache mints rows.
-            const weatherCache = weatherCacheInstance();
-            const weatherAPI = new WeatherAPI();
+			// Get weather data (from cache or API)
+			log.debug("🔄 Fetching weather data (checking cache first)...\n");
+			let weatherEntry: WeatherCacheEntry = await weatherCache.getWeatherData(
+				metadata,
+				weatherAPI,
+			);
+			if (abandonStaleFlight()) return null;
 
-            // Get weather data (from cache or API)
-            log.debug('🔄 Fetching weather data (checking cache first)...\n');
-            let weatherEntry: WeatherCacheEntry = await weatherCache.getWeatherData(metadata, weatherAPI);
-            if (abandonStaleFlight()) return null;
+			// Check if cached entry has wind data - if not, re-fetch from API
+			if (
+				weatherEntry.source === "cache" &&
+				(weatherEntry.data.windSpeed === undefined ||
+					weatherEntry.data.windDirection === undefined)
+			) {
+				log.debug(
+					"⚠️  Cached entry missing wind data, re-fetching from API...",
+				);
+				// Fetch directly from API to get complete data
+				const freshData = await weatherAPI.fetchWeatherData(metadata);
+				if (abandonStaleFlight()) return null;
+				weatherEntry = {
+					key: weatherEntry.key,
+					data: freshData,
+					cachedAt: Date.now(),
+					source: "api",
+				};
+				// Update cache with complete data
+				await weatherCache.updateCachedEntry(metadata, freshData);
+			}
 
-            // Check if cached entry has wind data - if not, re-fetch from API
-            if (weatherEntry.source === 'cache' &&
-                (weatherEntry.data.windSpeed === undefined || weatherEntry.data.windDirection === undefined)) {
-                log.debug('⚠️  Cached entry missing wind data, re-fetching from API...');
-                // Fetch directly from API to get complete data
-                const freshData = await weatherAPI.fetchWeatherData(metadata);
-                if (abandonStaleFlight()) return null;
-                weatherEntry = {
-                    key: weatherEntry.key,
-                    data: freshData,
-                    cachedAt: Date.now(),
-                    source: 'api'
-                };
-                // Update cache with complete data
-                await weatherCache.updateCachedEntry(metadata, freshData);
-            }
+			// Calculate air density using WASM
+			log.debug("═══════════════════════════════════════════════════════");
+			log.debug("🧮 CALCULATING AIR DENSITY");
+			log.debug("═══════════════════════════════════════════════════════");
+			log.debug("  Input:");
+			log.debug("    - Temperature:", weatherEntry.data.temperature, "°C");
+			log.debug("    - Pressure:", weatherEntry.data.pressure, "hPa");
+			log.debug("    - Dew Point:", weatherEntry.data.dewPoint, "°C");
 
-            // Calculate air density using WASM
-            log.debug('═══════════════════════════════════════════════════════');
-            log.debug('🧮 CALCULATING AIR DENSITY');
-            log.debug('═══════════════════════════════════════════════════════');
-            log.debug('  Input:');
-            log.debug('    - Temperature:', weatherEntry.data.temperature, '°C');
-            log.debug('    - Pressure:', weatherEntry.data.pressure, 'hPa');
-            log.debug('    - Dew Point:', weatherEntry.data.dewPoint, '°C');
+			const rhoRaw = AirDensityCalculator.calculate_air_density(
+				weatherEntry.data.temperature,
+				weatherEntry.data.pressure,
+				weatherEntry.data.dewPoint,
+			);
 
-            const rhoRaw = AirDensityCalculator.calculate_air_density(
-                weatherEntry.data.temperature,
-                weatherEntry.data.pressure,
-                weatherEntry.data.dewPoint
-            );
+			// Round to 4 decimal places for practical use
+			const rho = parseFloat(rhoRaw.toFixed(4));
 
-            // Round to 4 decimal places for practical use
-            const rho = parseFloat(rhoRaw.toFixed(4));
+			log.debug("  Output:");
+			log.debug("    - Air Density (ρ):", rho, "kg/m³");
+			log.debug("    - Wind Speed:", weatherEntry.data.windSpeed, "m/s");
+			log.debug("    - Wind Direction:", weatherEntry.data.windDirection, "°");
+			log.debug(
+				"    - Source:",
+				weatherEntry.source === "cache" ? "💾 Cache" : "⬇️ API",
+			);
+			log.debug("═══════════════════════════════════════════════════════\n");
 
-            log.debug('  Output:');
-            log.debug('    - Air Density (ρ):', rho, 'kg/m³');
-            log.debug('    - Wind Speed:', weatherEntry.data.windSpeed, 'm/s');
-            log.debug('    - Wind Direction:', weatherEntry.data.windDirection, '°');
-            log.debug('    - Source:', weatherEntry.source === 'cache' ? '💾 Cache' : '⬇️ API');
-            log.debug('═══════════════════════════════════════════════════════\n');
+			// Update parameters with calculated rho, wind data, and weather metadata
+			const updateParams: Partial<AnalysisParameters> = {
+				rho,
+				rho_source:
+					weatherEntry.source === "cache" ? "weather_cache" : "weather_api",
+				weather_metadata: {
+					temperature: weatherEntry.data.temperature,
+					dewPoint: weatherEntry.data.dewPoint,
+					pressure: weatherEntry.data.pressure,
+					windSpeed: weatherEntry.data.windSpeed ?? 0,
+					windDirection: weatherEntry.data.windDirection ?? 0,
+					location: { lat: metadata.avgLat, lon: metadata.avgLon },
+					timestamp: metadata.middleDate.toISOString(),
+					source: weatherEntry.source,
+				},
+			};
 
-            // Update parameters with calculated rho, wind data, and weather metadata
-            const updateParams: Partial<AnalysisParameters> = {
-                rho,
-                rho_source: weatherEntry.source === 'cache' ? 'weather_cache' : 'weather_api',
-                weather_metadata: {
-                    temperature: weatherEntry.data.temperature,
-                    dewPoint: weatherEntry.data.dewPoint,
-                    pressure: weatherEntry.data.pressure,
-                    windSpeed: weatherEntry.data.windSpeed ?? 0,
-                    windDirection: weatherEntry.data.windDirection ?? 0,
-                    location: { lat: metadata.avgLat, lon: metadata.avgLon },
-                    timestamp: metadata.middleDate.toISOString(),
-                    source: weatherEntry.source
-                }
-            };
+			// Only set wind parameters if they are valid numbers AND the wind is
+			// the API's to write (D-a). A hand-typed wind, or a legacy one whose
+			// provenance is unknown, is left exactly as stored: auto-rho re-runs
+			// on load, so overwriting here silently re-fits an analysis the user
+			// has already read. `weatherMayFillWind` is the single decision site.
+			const mayFillWind = weatherMayFillWind(
+				parametersComponent.getParameters(),
+			);
+			if (
+				mayFillWind &&
+				weatherEntry.data.windSpeed !== undefined &&
+				weatherEntry.data.windSpeed !== null
+			) {
+				updateParams.wind_speed = weatherEntry.data.windSpeed; // Always store in m/s
+			}
+			if (
+				mayFillWind &&
+				weatherEntry.data.windDirection !== undefined &&
+				weatherEntry.data.windDirection !== null
+			) {
+				updateParams.wind_direction = weatherEntry.data.windDirection;
+			}
 
-            // Only set wind parameters if they are valid numbers AND the wind is
-            // the API's to write (D-a). A hand-typed wind, or a legacy one whose
-            // provenance is unknown, is left exactly as stored: auto-rho re-runs
-            // on load, so overwriting here silently re-fits an analysis the user
-            // has already read. `weatherMayFillWind` is the single decision site.
-            const mayFillWind = weatherMayFillWind(parametersComponent.getParameters());
-            if (mayFillWind && weatherEntry.data.windSpeed !== undefined && weatherEntry.data.windSpeed !== null) {
-                updateParams.wind_speed = weatherEntry.data.windSpeed;  // Always store in m/s
-            }
-            if (mayFillWind && weatherEntry.data.windDirection !== undefined && weatherEntry.data.windDirection !== null) {
-                updateParams.wind_direction = weatherEntry.data.windDirection;
-            }
+			// Keep the Crr temperature correction in sync with the fresh
+			// ambient temperature (no-op when the correction is disabled).
+			// Re-read the parameters: the toggle may have changed during the
+			// async weather fetch.
+			Object.assign(
+				updateParams,
+				syncCrrTempAmbientFromWeather(
+					parametersComponent.getParameters(),
+					weatherEntry.data.temperature,
+				),
+			);
 
-            // Keep the Crr temperature correction in sync with the fresh
-            // ambient temperature (no-op when the correction is disabled).
-            // Re-read the parameters: the toggle may have changed during the
-            // async weather fetch.
-            Object.assign(
-                updateParams,
-                syncCrrTempAmbientFromWeather(
-                    parametersComponent.getParameters(),
-                    weatherEntry.data.temperature
-                )
-            );
+			// Seed the wind height factor, but only from a fill that actually
+			// produced a wind. The gate is on the wind field having been
+			// written above, NOT on the fetch having succeeded: when the API
+			// returns no wind speed the two assignments above leave the wind
+			// untouched, and stamping wind_entry: 'weather' on that path would
+			// claim a provenance for a number the API never wrote (T-08-11).
+			//
+			// The "unknown" case is decided inside the sync hook, which returns
+			// {} for it — one decision site, testable with no bind() call. It
+			// matters at *this* call site because auto-rho genuinely re-fires on
+			// load, from fileLoad/fileLoadOrchestration.ts and Standard's
+			// awaited initial render; neither is suppressed by
+			// isLoadingParameters, which only short-circuits
+			// handleParametersChange (analysis/analyzeOrchestrator.ts:171). So
+			// on any saved file with auto_calculate_rho: true this merge runs
+			// immediately after normalizeLoadedParameters has produced
+			// wind_entry: 'unknown'. Were that treated as a first fill, the
+			// sequence would re-seed k to 0.5 and silently re-fit an analysis
+			// the user has already read (D-07 / R-04, T-08-16).
+			//
+			// As with the Crr merge above, the parameters are re-read rather
+			// than reused: the user may have moved the k slider during the
+			// async weather fetch.
+			if (updateParams.wind_speed !== undefined) {
+				Object.assign(
+					updateParams,
+					syncWindHeightFromWeather(parametersComponent.getParameters()),
+				);
+			}
 
-            // Seed the wind height factor, but only from a fill that actually
-            // produced a wind. The gate is on the wind field having been
-            // written above, NOT on the fetch having succeeded: when the API
-            // returns no wind speed the two assignments above leave the wind
-            // untouched, and stamping wind_entry: 'weather' on that path would
-            // claim a provenance for a number the API never wrote (T-08-11).
-            //
-            // The "unknown" case is decided inside the sync hook, which returns
-            // {} for it — one decision site, testable with no bind() call. It
-            // matters at *this* call site because auto-rho genuinely re-fires on
-            // load, from fileLoad/fileLoadOrchestration.ts and Standard's
-            // awaited initial render; neither is suppressed by
-            // isLoadingParameters, which only short-circuits
-            // handleParametersChange (analysis/analyzeOrchestrator.ts:171). So
-            // on any saved file with auto_calculate_rho: true this merge runs
-            // immediately after normalizeLoadedParameters has produced
-            // wind_entry: 'unknown'. Were that treated as a first fill, the
-            // sequence would re-seed k to 0.5 and silently re-fit an analysis
-            // the user has already read (D-07 / R-04, T-08-16).
-            //
-            // As with the Crr merge above, the parameters are re-read rather
-            // than reused: the user may have moved the k slider during the
-            // async weather fetch.
-            if (updateParams.wind_speed !== undefined) {
-                Object.assign(
-                    updateParams,
-                    syncWindHeightFromWeather(parametersComponent.getParameters())
-                );
-            }
+			if (abandonStaleFlight()) return null;
+			parametersComponent.setParameters(updateParams);
+			refreshCrrTempReadout(parametersComponent.getParameters());
+			refreshWindHeightReadout(parametersComponent.getParameters());
 
-            if (abandonStaleFlight()) return null;
-            parametersComponent.setParameters(updateParams);
-            refreshCrrTempReadout(parametersComponent.getParameters());
-            refreshWindHeightReadout(parametersComponent.getParameters());
+			// The result is now loaded, so this query may be skipped next time.
+			appState.lastWeatherQueryKey = queryKey;
 
-            // The result is now loaded, so this query may be skipped next time.
-            appState.lastWeatherQueryKey = queryKey;
+			// Show success notification
+			const sourceText =
+				weatherEntry.source === "cache" ? "cached data" : "weather API";
+			showNotification(
+				`Air density calculated: ${rho.toFixed(3)} kg/m³ (from ${sourceText})`,
+				"success",
+			);
 
-            // Show success notification
-            const sourceText = weatherEntry.source === 'cache' ? 'cached data' : 'weather API';
-            showNotification(`Air density calculated: ${rho.toFixed(3)} kg/m³ (from ${sourceText})`, 'success');
+			log.debug(
+				"╔═══════════════════════════════════════════════════════════════╗",
+			);
+			log.debug(
+				"║  ✅ AUTO RHO CALCULATION COMPLETED SUCCESSFULLY              ║",
+			);
+			log.debug(
+				"║  Final ρ: " +
+					rho.toFixed(3) +
+					" kg/m³                                     ║",
+			);
+			log.debug(
+				"╚═══════════════════════════════════════════════════════════════╝\n",
+			);
 
-            log.debug('╔═══════════════════════════════════════════════════════════════╗');
-            log.debug('║  ✅ AUTO RHO CALCULATION COMPLETED SUCCESSFULLY              ║');
-            log.debug('║  Final ρ: ' + rho.toFixed(3) + ' kg/m³                                     ║');
-            log.debug('╚═══════════════════════════════════════════════════════════════╝\n');
+			hideLoadingIfOwned();
+			return rho;
+		} catch (error) {
+			hideLoadingIfOwned();
 
-            hideLoadingIfOwned();
-            return rho;
+			// An obsolete request must not clear provenance or notify against
+			// the activity/selection which replaced it.
+			if (!ownsCurrentInputs()) return null;
 
-        } catch (error) {
-            hideLoadingIfOwned();
+			// WEATH-03 rungs 3/4: degrade to the manual/prior rho.
+			// Diagnostics stay internal (log only); the user-facing text comes
+			// from the pure resolver so error internals cannot leak (T-06-07).
+			if (error instanceof WeatherAPIError) {
+				log.error("Weather API error:", error.message, error.code);
+			} else {
+				log.error("Failed to calculate auto rho:", error);
+			}
 
-            // An obsolete request must not clear provenance or notify against
-            // the activity/selection which replaced it.
-            if (!ownsCurrentInputs()) return null;
+			// The rho still sitting in `params` was fetched for a *different*
+			// trim region, so it no longer describes the current one. Keep the
+			// number (it remains the best available estimate, and the user can
+			// override it), but drop the provenance that claims it is live
+			// weather data for this region. Without this, the weather panel
+			// (AnalysisParameters.updateWeatherInfoDisplay) keeps rendering the
+			// previous region's temperature/location/timestamp as current, and
+			// `rho_source` keeps reporting 'weather_api'/'weather_cache' for a
+			// value the weather service never returned for this region.
+			invalidateStaleWeatherProvenance(parametersComponent);
 
-            // WEATH-03 rungs 3/4: degrade to the manual/prior rho.
-            // Diagnostics stay internal (log only); the user-facing text comes
-            // from the pure resolver so error internals cannot leak (T-06-07).
-            if (error instanceof WeatherAPIError) {
-                log.error('Weather API error:', error.message, error.code);
-            } else {
-                log.error('Failed to calculate auto rho:', error);
-            }
+			const resolution = resolveWeatherFailure(error);
+			showNotification(resolution.userMessage, resolution.severity);
 
-            // The rho still sitting in `params` was fetched for a *different*
-            // trim region, so it no longer describes the current one. Keep the
-            // number (it remains the best available estimate, and the user can
-            // override it), but drop the provenance that claims it is live
-            // weather data for this region. Without this, the weather panel
-            // (AnalysisParameters.updateWeatherInfoDisplay) keeps rendering the
-            // previous region's temperature/location/timestamp as current, and
-            // `rho_source` keeps reporting 'weather_api'/'weather_cache' for a
-            // value the weather service never returned for this region.
-            invalidateStaleWeatherProvenance(parametersComponent);
+			// Returning null keeps the existing (now un-attributed) rho —
+			// analysis continues.
+			return null;
+		}
+	} catch (error) {
+		// Only hides if we actually showed it: a throw anywhere above the
+		// showLoading() call now reaches this handler (the try opens earlier
+		// than it used to), and blindly toggling would dismiss a concurrent
+		// operation's overlay and re-enable the Analyze button mid-run.
+		hideLoadingIfOwned();
+		if (!ownsCurrentInputs()) return null;
+		log.error("Unexpected error in calculateAutoRho:", error);
 
-            const resolution = resolveWeatherFailure(error);
-            showNotification(resolution.userMessage, resolution.severity);
+		// Anything reaching here is a bug in the auto-rho path, not a weather
+		// outage: every weather call lives in the inner try above, so a
+		// WeatherAPIError cannot reach this handler. Report unconditionally as
+		// an error (matching the pre-06-05 behaviour) rather than routing
+		// through resolveWeatherFailure, which would silently de-escalate a
+		// future WeatherAPIError raised outside the inner try to a warning.
+		showNotification(AUTO_RHO_FAILURE_MESSAGE, "error");
 
-            // Returning null keeps the existing (now un-attributed) rho —
-            // analysis continues.
-            return null;
-        }
-
-    } catch (error) {
-        // Only hides if we actually showed it: a throw anywhere above the
-        // showLoading() call now reaches this handler (the try opens earlier
-        // than it used to), and blindly toggling would dismiss a concurrent
-        // operation's overlay and re-enable the Analyze button mid-run.
-        hideLoadingIfOwned();
-        if (!ownsCurrentInputs()) return null;
-        log.error('Unexpected error in calculateAutoRho:', error);
-
-        // Anything reaching here is a bug in the auto-rho path, not a weather
-        // outage: every weather call lives in the inner try above, so a
-        // WeatherAPIError cannot reach this handler. Report unconditionally as
-        // an error (matching the pre-06-05 behaviour) rather than routing
-        // through resolveWeatherFailure, which would silently de-escalate a
-        // future WeatherAPIError raised outside the inner try to a warning.
-        showNotification(AUTO_RHO_FAILURE_MESSAGE, 'error');
-
-        return null;
-    }
+		return null;
+	}
 }
 
 /**
@@ -488,12 +571,12 @@ async function performAutoRho(
  * `rho_source` and `weather_metadata`, and gains no code for the wind fields.
  */
 function invalidateStaleWeatherProvenance(
-    parametersComponent: AnalysisParametersComponent
+	parametersComponent: AnalysisParametersComponent,
 ): void {
-    if (parametersComponent.getParameters().rho_source === 'manual') return;
+	if (parametersComponent.getParameters().rho_source === "manual") return;
 
-    parametersComponent.setParameters({
-        rho_source: 'manual',
-        weather_metadata: undefined,
-    });
+	parametersComponent.setParameters({
+		rho_source: "manual",
+		weather_metadata: undefined,
+	});
 }
