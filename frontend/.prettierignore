@@ -3,4 +3,4 @@ dist
 pkg
 node_modules
 # Fixture data: large generated JSON whose diffs should stay reviewable as data.
-src/analysis/__fixtures__
+src/analysis/__fixtures__/*.json
