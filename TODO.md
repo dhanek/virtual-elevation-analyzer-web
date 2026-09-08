@@ -319,6 +319,78 @@ re-deriving it):
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
 
+- [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
+      deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
+      own investigation before it can be sized.
+      `gateMarkers.ts`, `bindGpsDetection.ts`, `bindOutAndBackDetection.ts`
+
+- [x] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
+      The analyze leg paints `updateMetricsDisplay` from ONE fit over the concatenated selection
+      (`initializeVEAnalysis`); the kick a macrotask later writes the MEAN of the per-lap fits
+      (D-09 entry g). For a multi-lap selection those are different quantities, so the header
+      visibly changes by itself even though both numbers are correct for what they measure.
+      Measured in the app 2026-08-31 on the reference ride, laps 10+12: RMSE 26.22 m → 8.10 m, R²
+      0.0002 → 0.0031. A single lap is exact after the rho fix, so this is the only remaining
+      first-paint jump on a fresh load.
+
+      Three ways out, and it needs a ruling: decompose the analyze leg per lap (correct, and the
+      most work), paint the spans empty and let the kick fill them (cheapest, adds a flicker), or
+      keep the combined figure and label it as such the way the VD header labels its combined line.
+      **Subsumed by the analyze-leg retirement.** See *Analyze owns selection; the producer owns
+      results* under **Done** (2026-09-05). With no analyze-time fit, the concatenated-selection
+      number is never painted, and the dated in-app check below confirms one settled value set.
+      `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
+      of the PR #7 review fixes, 2026-08-31*
+
+- [x] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
+      `standardInitialAutoRhoOwner` asymmetrically.** The return right after `await
+      initializeVEAnalysis(...)` (`stillOwnsPanel()` false) does not clear the field; the
+      structurally identical return after the auto-rho settle loop does. Traced and NOT
+      reproducible as a live bug: every way `stillOwnsPanel()` can go false there either
+      reassigns `standardInitialAutoRhoOwner` (a second `showVirtualElevationAnalysisInline`
+      render) or clears it along with `standardPanelOwner`/`autoRhoInputRevision`
+      (`tearDownVeAnalysisPanel`), and the sliders bind below this point, so no interactive panel
+      can carry the wedged value. Readability only: a reader comparing the two returns cannot
+      tell the asymmetry is deliberate. Fix by adding the same three-line clear to the earlier
+      return, or by hoisting a shared `clearInitialAutoRhoOwner()` helper the two returns both
+      call.
+      **Done 2026-09-07**, by the second route: `releaseInitialAutoRhoOwner()` is declared beside
+      `stillOwnsPanel` and is now the only writer that drops this render's claim — both post-await
+      early returns and the settle-loop's own success path call it, so the three sites read
+      identically and no reader has to decide whether a difference is deliberate. Behaviour is
+      unchanged on the two sites that already cleared; the earlier return now clears too, which
+      the item's own tracing showed no live path can observe.
+      `frontend/src/shell/ve/renderStandardVe.ts` (`showVirtualElevationAnalysisInline`, the
+      early return following `await initializeVEAnalysis`, versus the one following the
+      auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
+      maintainer 2026-09-04*
+
+- [ ] **[S] No dead-export detector runs in CI.** `npm run check` is prettier + tsc and
+      `npm run lint` is eslint; neither can see an export with no importer. That is why four
+      declarations survived the analyze-leg retirement long enough to need a hand-scoped `[L]`
+      sweep of their own, and why three comments were left dangling behind them once the sweep
+      landed. Wire `knip` (or `ts-prune`) over `frontend/src` into `npm run check`, with test
+      files counted as consumers so a pinned-but-dead export is still reported. Expect a first
+      run to surface a backlog — size that before wiring it into a gating script.
+      `package.json`, `frontend/src` · *origin: PR #21 review round 31, F31-07 — deferred by the
+      maintainer 2026-09-08*
+
+- [ ] **[S–M] Consolidate `interpolateElevation` into `interpolateAscending`.** The documented
+      reason for keeping two interpolators was the DESCENDING caller in
+      `calculateOutAndBackMeanElevation`'s mirrored-inbound branch. PR #21 removed that caller,
+      so `interpolateElevation` now has exactly ONE production call site
+      (`outAndBackPlots.ts:83`, the outbound branch) and it passes an ascending array. Folding
+      it into `interpolateAscending` removes a function and ~15 lines, and makes the last O(n)
+      scan in the out-and-back aggregation O(log n). Not free: the descending case in
+      `shared.test.ts` pins a real trap in an order-agnostic guard and must be kept or
+      deliberately retired with a reason, and `shared.test.ts`'s equivalence case is what
+      licenses the swap — run it before and after. Class 3 at the time it was raised (a shared
+      module with its own pinned suite), which is why it was not folded into PR #21.
+      `frontend/src/shell/multiSegment/shared.ts`,
+      `frontend/src/shell/multiSegment/shared.test.ts`,
+      `frontend/src/shell/outAndBack/outAndBackPlots.ts` · *origin: PR #21 review round 31,
+      F31-08 — deferred by the maintainer 2026-09-08*
+
 ---
 
 ## Done
@@ -367,8 +439,9 @@ changed and why.
       `OutAndBackVEProfile.outboundRange`/`inboundRange` and `LapVEProfile.range` are gone.
       Verified dead rather than assumed: excluding object-literal keys, `.outboundRange` and
       `.inboundRange` have **no reads at all** — all 20 uses were writes. `LapVEProfile.range`
-      needed more care, because `.range` is also a live field on `SegmentVeProfile` and a Plotly
-      axis key; the reads in `modeSegments.test.ts` are the segment type,
+      needed more care, because `.range` is also a live field on `ModeSegment` — reached through
+      a profile as `profile.segment.range`, which is what makes the `.range` grep noisy — and a
+      Plotly axis key; the reads in `modeSegments.test.ts` are the segment type,
       `renderGpsLap.ts:547` is a local parameter from `activeGpsLapRanges`, and
       `gpsLapPlots.ts:447,461` are axis ranges.
 
