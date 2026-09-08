@@ -431,10 +431,20 @@ changed and why.
       - [x] E4 The formatter's output is stable and the other gates are unchanged —
             `check`, `lint`, `test`, `build` all clean, and prettier is idempotent
             over its own output
-      - [ ] E5 The PR-side check fails a misindented block on the pull request
-            rather than on the deploy *(unticked deliberately: no workflow run has
-            executed .github/workflows/pr-check.yml. Ticked only by a real run, with
-            the run recorded as the evidence.)*
+      - [x] E5 The PR-side check fails a misindented block on the pull request
+            rather than on the deploy — **verified by two runs on PR #20, 2026-09-08**,
+            because a check never observed failing is not a check:
+            [run 34201718492](https://github.com/dhanek/virtual-elevation-analyzer-web/actions/runs/34201718492)
+            is green on the clean tree with `Check Frontend`, `Lint Frontend` and
+            `Test Frontend` all executed, and
+            [run 34201991724](https://github.com/dhanek/virtual-elevation-analyzer-web/actions/runs/34201991724)
+            **fails at `Check Frontend`** on a deliberate misindent, with `Lint` and
+            `Test` skipped behind it. The misindent went into
+            `src/analysis/__fixtures__/loadGoldenRide.ts` on purpose — one of the three
+            files `.prettierignore` was silently excluding before this item's own
+            blocking fix — so the failing run re-proves that fix end to end rather
+            than only the workflow. Both commits were then removed and the branch
+            reset to its reviewed tip.
 
       **Demonstrated before and after, with the item's own defect.** A block indented one level
       shallow relative to the `if` that opened it was inserted into
@@ -447,8 +457,12 @@ changed and why.
       everything written recently. Prettier's own 2-space default would have rewritten **234** of
       236 files; tabs rewrote **168**, and left the majority style in the majority. That reformat
       reached the tree in two commits, which is why no single commit shows 168: `fa35ade` moved
-      166 files, and the remaining two — the fixture loader modules — moved in `f68a443`, once
-      `.prettierignore` was narrowed to the generated JSON it was written for. Options that
+      166 files, and the remaining two — the fixture loader modules — moved in `f68a443`. Note
+      the order, which is the reverse of what it looks like: `f68a443` reformatted those two
+      while they were still ignored, and `.prettierignore` was narrowed to the generated JSON it
+      was written for two commits later, in `8ccf8f0`. Splitting it that way is what kept
+      `npm run check` at exit 0 on every commit — narrowing first would have left an
+      intermediate commit failing its own gate. Options that
       are prettier's defaults are stated explicitly in `.prettierrc.json` rather than omitted, so
       a later reader can tell which were chosen.
 
