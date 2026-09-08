@@ -319,100 +319,66 @@ re-deriving it):
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
 
-- [ ] **[S–M] `calculateOutAndBackMeanElevation` feeds a DESCENDING array to an interpolator
-      that assumes ascending, so every mirrored-inbound leg contributes a constant.**
-      `outAndBackPlots.ts:69-70` builds `mirroredDistances = inboundDistances.map(d => maxDist - d)`,
-      which is descending, and hands it to `interpolateElevation` as the reference. That
-      function's first guard is `targetDist <= distances[0]`, and on a descending array
-      `distances[0]` is the MAXIMUM — so the guard fires for essentially every target and it
-      returns `elevations[0]`, the first inbound elevation sample, at every reference distance.
-      The inbound half of the mean profile is therefore a flat line at one sample's value rather
-      than a curve.
-
-      Measured 2026-09-07 with a direct probe: `[4,3,2,1,0]` against `[100,110,120,130,140]`
-      returns 100 for targets 0, 1, 2, 3 and 4; the same data ascending returns
-      100/110/120/130/140. Pinned as it stands by
-      `frontend/src/shell/multiSegment/shared.test.ts` so the behaviour cannot change by
-      accident.
-
-      **Deliberately not fixed alongside the profiling item**, and this is the reason: the mean
-      elevation is what out-and-back RMSE is measured against, so correcting it MOVES PUBLISHED
-      NUMBERS. That is a ruling, not a refactor — and it does not belong inside a change whose
-      whole claim was that it left the numbers alone. Whoever takes it needs to decide what the
-      mirrored inbound leg is meant to contribute, then re-baseline the out-and-back fixture
-      expectations. `interpolateAscending` already exists for the corrected shape.
-      `frontend/src/shell/outAndBack/outAndBackPlots.ts:69-79`,
-      `frontend/src/shell/multiSegment/shared.ts` · *origin: found while profiling the
-      aggregation helpers, 2026-09-07*
-
-- [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
-      deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
-      own investigation before it can be sized.
-      `gateMarkers.ts`, `bindGpsDetection.ts`, `bindOutAndBackDetection.ts`
-
-- [x] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
-      The analyze leg paints `updateMetricsDisplay` from ONE fit over the concatenated selection
-      (`initializeVEAnalysis`); the kick a macrotask later writes the MEAN of the per-lap fits
-      (D-09 entry g). For a multi-lap selection those are different quantities, so the header
-      visibly changes by itself even though both numbers are correct for what they measure.
-      Measured in the app 2026-08-31 on the reference ride, laps 10+12: RMSE 26.22 m → 8.10 m, R²
-      0.0002 → 0.0031. A single lap is exact after the rho fix, so this is the only remaining
-      first-paint jump on a fresh load.
-
-      Three ways out, and it needs a ruling: decompose the analyze leg per lap (correct, and the
-      most work), paint the spans empty and let the kick fill them (cheapest, adds a flicker), or
-      keep the combined figure and label it as such the way the VD header labels its combined line.
-      **Subsumed by the analyze-leg retirement.** See *Analyze owns selection; the producer owns
-      results* under **Done** (2026-09-05). With no analyze-time fit, the concatenated-selection
-      number is never painted, and the dated in-app check below confirms one settled value set.
-      `frontend/src/shell/ve/renderStandardVe.ts` (`initializeVEAnalysis`) · *origin: in-app check
-      of the PR #7 review fixes, 2026-08-31*
-
-- [x] **[XS] `showVirtualElevationAnalysisInline`'s two post-await early returns clear
-      `standardInitialAutoRhoOwner` asymmetrically.** The return right after `await
-      initializeVEAnalysis(...)` (`stillOwnsPanel()` false) does not clear the field; the
-      structurally identical return after the auto-rho settle loop does. Traced and NOT
-      reproducible as a live bug: every way `stillOwnsPanel()` can go false there either
-      reassigns `standardInitialAutoRhoOwner` (a second `showVirtualElevationAnalysisInline`
-      render) or clears it along with `standardPanelOwner`/`autoRhoInputRevision`
-      (`tearDownVeAnalysisPanel`), and the sliders bind below this point, so no interactive panel
-      can carry the wedged value. Readability only: a reader comparing the two returns cannot
-      tell the asymmetry is deliberate. Fix by adding the same three-line clear to the earlier
-      return, or by hoisting a shared `clearInitialAutoRhoOwner()` helper the two returns both
-      call.
-      **Done 2026-09-07**, by the second route: `releaseInitialAutoRhoOwner()` is declared beside
-      `stillOwnsPanel` and is now the only writer that drops this render's claim — both post-await
-      early returns and the settle-loop's own success path call it, so the three sites read
-      identically and no reader has to decide whether a difference is deliberate. Behaviour is
-      unchanged on the two sites that already cleared; the earlier return now clears too, which
-      the item's own tracing showed no live path can observe.
-      `frontend/src/shell/ve/renderStandardVe.ts` (`showVirtualElevationAnalysisInline`, the
-      early return following `await initializeVEAnalysis`, versus the one following the
-      auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
-      maintainer 2026-09-04*
-
-- [ ] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
-      retirement, each with a comment saying so.** All four exist only because Standard's
-      analyze-time placeholder calculator once needed them; that calculator is gone (see
-      *Analyze owns selection; the producer owns results* under **Done**), so each is now
-      dead in production but still pinned by its own test cases:
-      `resolveSelectionRhoArray` (`frontend/src/shell/analysis/rhoArrayResolver.ts`, no
-      production caller, exercised by `selectionRhoArray.test.ts`); `resolvePlaceholderWindSpeed`
-      (`frontend/src/shell/ve/standardSegments.ts`, no production caller — this is the function
-      F20-07 named `resolveSelectionWindSpeedForCalculator`, since renamed); `LapVEProfile.range`
-      (`frontend/src/shell/gpsLap/types.ts`); and the `outboundRange`/`inboundRange` pair on
-      the out-and-back profile type (`frontend/src/shell/outAndBack/types.ts`). Not a quick
-      delete: removing the two type fields ripples through a dozen fixture builders and both
-      GPS-mode chain suites by the review's own estimate, which is larger than the dead code
-      itself — scope that fixture work before starting.
-      *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
-
 ---
 
 ## Done
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### The mirrored inbound leg, and the dead-declaration sweep — 2026-09-08
+
+- [x] **[S–M] `calculateOutAndBackMeanElevation` feeds a DESCENDING array to an interpolator
+      that assumes ascending, so every mirrored-inbound leg contributes a constant.** Fixed.
+      Mirroring with `maxInboundDist - d` puts the inbound leg into the outbound's frame, which
+      is right, and it also REVERSES the sort order, which nothing accounted for. Reversing both
+      arrays together restores ascending order while keeping each distance paired with its own
+      elevation sample — the pairing was never wrong, only the order, which is why this is a
+      re-sort and not a re-derivation.
+
+      **Measured on the case the mode exists for.** When both legs retrace the same ground the
+      inbound elevation series is the outbound one reversed, so averaging them must return the
+      shared profile unchanged. Before: the mean spanned **20.80 m** against the leg's true
+      **41.61 m** — exactly half, one real profile averaged with one constant. After: it returns
+      the profile. A third case guards against over-correcting into "just use the outbound leg":
+      a second section 10 m higher throughout must move the mean by 5 m, and does.
+
+      **NO PINNED EXPECTATION MOVED, and that is the finding behind the finding.** 98 files /
+      1172 tests passed unchanged across the fix. The only out-and-back RMSE assertions are
+      RELATIONAL — `withCompare.rmse` against `withoutCompare.rmse` — so both sides moved
+      together and neither noticed. Nothing ever pinned the mean profile or an absolute
+      out-and-back RMSE, which is exactly how a defect this large survived. Contrary to the
+      expectation set when the fix was authorised, **no fixture needed re-baselining**; the new
+      `outAndBackMeanElevation.test.ts` closes the gap that allowed it.
+      `frontend/src/shell/outAndBack/outAndBackPlots.ts` ·
+      `frontend/src/shell/outAndBack/outAndBackMeanElevation.test.ts` (new) ·
+      *origin: found while profiling the aggregation helpers, 2026-09-07*
+
+- [x] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
+      retirement, each with a comment saying so.** All four taken. Both type comments named the
+      same condition for taking them — *"it belongs to a type sweep of its own, and if no reader
+      has appeared by then, that sweep should take them"* — and no reader had appeared.
+
+      `resolveSelectionRhoArray` and `resolvePlaceholderWindSpeed` are deleted with their tests;
+      each survived only as its own definition, its own test, and one mention inside
+      `renderStandardVe.ts`'s comment recording what the retirement removed. `resolveRhoArray`
+      and `hasEnvironmentalData` stay — both have live callers.
+
+      `OutAndBackVEProfile.outboundRange`/`inboundRange` and `LapVEProfile.range` are gone.
+      Verified dead rather than assumed: excluding object-literal keys, `.outboundRange` and
+      `.inboundRange` have **no reads at all** — all 20 uses were writes. `LapVEProfile.range`
+      needed more care, because `.range` is also a live field on `SegmentVeProfile` and a Plotly
+      axis key; the reads in `modeSegments.test.ts` are the segment type,
+      `renderGpsLap.ts:547` is a local parameter from `activeGpsLapRanges`, and
+      `gpsLapPlots.ts:447,461` are axis ranges.
+
+      **The item's ripple estimate was right about the count and wrong about the cost.** It
+      reaches nine files, but every site is a two-line construction entry — wide rather than
+      deep. `tsc` caught the two sites grep alone would have missed: `renderGpsLap.ts` building
+      the profile from a local `range`, and the out-and-back profiler's own fixture.
+      `frontend/src/shell/analysis/rhoArrayResolver.ts` · `frontend/src/shell/ve/standardSegments.ts` ·
+      `frontend/src/shell/outAndBack/types.ts` · `frontend/src/shell/gpsLap/types.ts` ·
+      *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
 
 ### Formatting is machine-enforced — 2026-09-08
 
