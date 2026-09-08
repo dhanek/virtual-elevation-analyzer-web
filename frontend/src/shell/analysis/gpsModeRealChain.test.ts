@@ -1146,7 +1146,7 @@ describe.each(MODES)(
  * rule above is not optional just because its holder moved. These cases now
  * Analyze and then `settle()`, so the series under assertion is the one
  * `updateModeVEPlots` handed the physics. That pass slices with
- * `indices.map((i) => rhoArray[i])` (`:258`), which on a short channel yields
+ * `indices.map((i) => rhoArray[i])`, which on a short channel yields
  * `undefined` in every tail position, so this rewrite is what forced the guard
  * to be added there. The claim is unchanged and now covers the only pass there
  * is: rho reaching the calculator is complete or absent, never partial.

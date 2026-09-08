@@ -436,6 +436,17 @@ changed and why.
       `renderStandardVe.ts`'s comment recording what the retirement removed. `resolveRhoArray`
       and `hasEnvironmentalData` stay — both have live callers.
 
+      **"With their tests" nearly cost a live guard, and that is the useful thing here.**
+      `selectionRhoArray.test.ts` held TWO UNRELATED PROPERTIES AND SAID SO NOWHERE: the
+      resolver's own unit cases, which were correctly dead, and a source-level guard over every
+      analyze leg — *no analyze leg builds a calculator without a rho array* — which was live and
+      which a deletion aimed at the first took with it. Review caught it, not the suite: the
+      guard is an assertion about code that does NOT exist, so nothing failed when it went. It is
+      back as `calculatorRhoArray.test.ts`, widened to cover the update path
+      (`updateModeVEPlots.ts`) as well as the three render legs, and both it and the behavioural
+      half in `gpsModeRealChain.test.ts` now carry a cross-note naming what the other covers, so
+      a deletion aimed at one cannot silently take the other.
+
       `OutAndBackVEProfile.outboundRange`/`inboundRange` and `LapVEProfile.range` are gone.
       Verified dead rather than assumed: excluding object-literal keys, `.outboundRange` and
       `.inboundRange` have **no reads at all** — all 20 uses were writes. `LapVEProfile.range`
@@ -448,9 +459,18 @@ changed and why.
       **The item's ripple estimate was right about the count and wrong about the cost.** It
       reaches nine files, but every site is a two-line construction entry — wide rather than
       deep. `tsc` caught the two sites grep alone would have missed: `renderGpsLap.ts` building
-      the profile from a local `range`, and the out-and-back profiler's own fixture.
+      the profile from a local `range`, and the out-and-back profiler's own fixture. **It is not
+      the completeness argument it looks like, though.** `tsc` flags an object literal's excess
+      properties only where the literal is CONTEXTUALLY TYPED; a `.map(...)` result that reaches
+      its consumer structurally, with no annotation anywhere on the path, is invisible to it. A
+      third writer survived exactly that way, in `scripts/profile-gps-lap-render.ts`'s own lap
+      fixture, and was found by reading the diff rather than by the compiler. It is fixed by
+      annotating the map callback's return type `LapVEProfile`, which types the literal directly
+      and makes the site one `tsc` checks — the binding annotation that looks equivalent is not,
+      because `map<U>` infers `U` from the callback before the contextual type reaches it.
       `frontend/src/shell/analysis/rhoArrayResolver.ts` · `frontend/src/shell/ve/standardSegments.ts` ·
       `frontend/src/shell/outAndBack/types.ts` · `frontend/src/shell/gpsLap/types.ts` ·
+      `frontend/src/shell/analysis/calculatorRhoArray.test.ts` (new) ·
       *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
 
 ### Formatting is machine-enforced — 2026-09-08
@@ -1438,9 +1458,10 @@ the reference ride, which carries per-point air density), not only under vitest.
       **A/B in the app, lap 10 of the reference ride, MutationObserver on the header spans:** without the
       fix R² 0.0052 / RMSE 7.94 m / VE 16.17 m at the analyze paint, flipping to 0.0060 / 7.62 m /
       15.57 m a macrotask later; with it, 0.0060 / 7.62 m / 15.57 m written once and never changed.
-      `rhoArrayResolver.ts`, `renderStandardVe.ts:110` · test: `selectionRhoArray.test.ts`, whose
-      last case is source-level on purpose — the defect is an OMISSION, which no test of the leg's
-      own module can observe
+      `rhoArrayResolver.ts`, `renderStandardVe.ts:110` · test: `calculatorRhoArray.test.ts`, which
+      is source-level on purpose — the defect is an OMISSION, which no test of the leg's own
+      module can observe. The resolver's own unit cases are gone with the resolver; the
+      source-level guard is what survives, and it now covers the update path too
 
 - [x] **[XS] `closeResultsModal()` leaked the view's keydown handler.** The listener is on
       `document`, so removing the element did not remove it — and the exported close runs at the top
