@@ -225,9 +225,11 @@ export async function showOutAndBackVEAnalysis(
 	//     first-frame artefact.
 	//   - EXCEPT when every leg's fit throws: `updateModeVEPlots` hits
 	//     `profiles.length === 0`, calls `applyVeStatus(appState, "error")` and
-	//     returns before `renderMetrics` ever runs (`updateModeVEPlots.ts:360-363`
-	//     vs. `:380`). On that ride the over-counted `Sections: N` from this loop
-	//     is never corrected and sits next to the empty panel at status `"error"`.
+	//     returns before `renderMetrics` ever runs (the `profiles.length === 0`
+	//     early return in `updateModeVEPlots.ts`, vs. its
+	//     `applyVeStatus(appState, "ready")` path). On that ride the over-counted
+	//     `Sections: N` from this loop is never corrected and sits next to the
+	//     empty panel at status `"error"`.
 	//   - "No valid out-and-back sections to analyze" no longer fires for legs
 	//     whose fit throws: the check below sees the legs this loop selected, so
 	//     a ride where every fit throws puts the panel up and the producer then

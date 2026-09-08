@@ -219,7 +219,7 @@ export async function showGpsLapVEAnalysis(
 		// no updater rewrites it. That N is the count of laps this leg SELECTED.
 		// The producer applies one further rule this leg cannot: a lap whose fit
 		// throws is dropped by the `catch` in its segment loop
-		// (`updateModeVEPlots.ts:355-357`) and is on no plot, while it is
+		// (`updateModeVEPlots.ts`) and is on no plot, while it is
 		// still counted here. Detecting that from this side would mean running the
 		// calculator, which is exactly the pass this leg no longer has — only the
 		// producer knows which laps survived. So in that rare case the header
