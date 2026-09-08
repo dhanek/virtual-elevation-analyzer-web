@@ -43,6 +43,11 @@
 import { readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import { JSDOM } from "jsdom";
+// TYPE-ONLY, and it has to stay that way: the `src` modules are imported
+// dynamically inside `main()` so none of them evaluates before the DOM globals
+// exist. `import type` is erased at compile time and evaluates nothing, so it
+// does not reach that rule.
+import type { LapVEProfile } from "../src/shell/gpsLap/types";
 
 const WARMUP_ITERATIONS = 3;
 const MEASURED_ITERATIONS = 20;
@@ -376,19 +381,25 @@ async function main(): Promise<void> {
 					actualElevation: number[];
 					supplementarySeries: unknown;
 				}>
-			).map((p, i) => ({
+			).map((p, i): LapVEProfile => ({
 				lapNumber: i + 1,
 				distances: p.distancesKm,
 				virtualElevation: p.virtualElevation,
 				actualElevation: p.actualElevation,
 				supplementarySeries: p.supplementarySeries as any,
-				// The three nullable fields the UPDATE path leaves empty:
-				// it drops the index range by design (`types.ts:23`), and
-				// this pass runs without compare, so there is no second leg
-				// and no non-master elevation channel to carry.
-				range: null,
+				// The one nullable field on `LapVEProfile`: this pass runs
+				// without compare, so there is no second leg to carry.
+				//
+				// THE CALLBACK'S RETURN TYPE IS ANNOTATED DELIBERATELY, and it
+				// is the guard. Unannotated, this literal is not contextually
+				// typed, excess-property checking never runs, and a field since
+				// deleted from `LapVEProfile` survives here invisibly — which
+				// is exactly what happened to `range`. Annotating the BINDING
+				// instead does not work: `map<U>` infers `U` from this
+				// expression before the contextual type reaches it, and the
+				// literal's freshness is lost across that inference. Measured,
+				// not assumed.
 				virtualElevationCompare: null,
-				referenceElevation: null,
 				duration: 600,
 				totalDistance: p.distancesKm[p.distancesKm.length - 1] ?? 0,
 			}));
