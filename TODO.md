@@ -443,8 +443,12 @@ changed and why.
             `src/analysis/__fixtures__/loadGoldenRide.ts` on purpose — one of the three
             files `.prettierignore` was silently excluding before this item's own
             blocking fix — so the failing run re-proves that fix end to end rather
-            than only the workflow. Both commits were then removed and the branch
-            reset to its reviewed tip.
+            than only the workflow. The misindent reached the branch as ONE
+            temporary commit, `ee896df`, which was then removed by a `git reset`
+            back to `acde3bd` — its reviewed tip — and a force-push. Not by a
+            revert: `ee896df`'s own message promised a revert commit, and none was
+            authored. The reset is the part of this episode git cannot reconstruct
+            once `ee896df` is collected, which is why it is written down here.
 
       **Demonstrated before and after, with the item's own defect.** A block indented one level
       shallow relative to the `if` that opened it was inserted into
