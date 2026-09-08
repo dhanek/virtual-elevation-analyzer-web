@@ -52,10 +52,13 @@ describe("handleStoreResult refuses a stale result when the status is not ready"
 		async (status) => {
 			const appState = new AppState();
 			appState.selectedFile = {} as unknown as AppState["selectedFile"];
-			appState.currentParameters = {} as unknown as AppState["currentParameters"];
+			appState.currentParameters =
+				{} as unknown as AppState["currentParameters"];
 			// Stale from a PREVIOUS ready pass — this is what the first guard
 			// (`!appState.currentVEResult`) cannot see through.
-			appState.currentVEResult = { cda: 0.25 } as unknown as AppState["currentVEResult"];
+			appState.currentVEResult = {
+				cda: 0.25,
+			} as unknown as AppState["currentVEResult"];
 			// Also stale-but-populated, so this case is caught ONLY by the
 			// veStatus check below, not by the separate nullity/emptiness guard
 			// on currentFilteredData.

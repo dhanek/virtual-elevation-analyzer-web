@@ -1,7 +1,5 @@
 export type ElevationDisplayProfile =
-	| "fit-raw"
-	| "dem-raw-nearest"
-	| "dem-interpolated-smoothed-5pt";
+	"fit-raw" | "dem-raw-nearest" | "dem-interpolated-smoothed-5pt";
 
 export interface ElevationProfilesState {
 	fitRawElevation: number[] | null;

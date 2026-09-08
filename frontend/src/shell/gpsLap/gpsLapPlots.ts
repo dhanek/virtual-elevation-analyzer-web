@@ -3,17 +3,23 @@
  *
  * Verbatim lift from main.ts -- rendering logic for GPS-lap mode plots.
  */
-import type { LapVEProfile } from './types';
-import { anchorSeriesTo, residualsAgainst } from '../../plots/comparisonTraces';
-import { BELOW_AXIS_LEGEND_MARGIN_B, belowAxisLegend } from '../../plots/StandardPlotBuilders';
-import { log } from '../../utils/log';
+import type { LapVEProfile } from "./types";
+import { anchorSeriesTo, residualsAgainst } from "../../plots/comparisonTraces";
 import {
-    buildMultiSegmentWindFigure,
-    buildMultiSegmentPowerFigure,
-    buildMultiSegmentVirtualDistanceFigure,
-} from '../../plots/MultiSegmentPlotBuilders';
-import { formatLapDuration } from '../../utils/GpsLapDetection';
-import { lapVirtualDistanceRows, renderVirtualDistanceHeader } from '../ve/vdHeader';
+	BELOW_AXIS_LEGEND_MARGIN_B,
+	belowAxisLegend,
+} from "../../plots/StandardPlotBuilders";
+import { log } from "../../utils/log";
+import {
+	buildMultiSegmentWindFigure,
+	buildMultiSegmentPowerFigure,
+	buildMultiSegmentVirtualDistanceFigure,
+} from "../../plots/MultiSegmentPlotBuilders";
+import { formatLapDuration } from "../../utils/GpsLapDetection";
+import {
+	lapVirtualDistanceRows,
+	renderVirtualDistanceHeader,
+} from "../ve/vdHeader";
 
 // Plotly.js type declaration
 declare const Plotly: any;
@@ -23,15 +29,15 @@ declare const Plotly: any;
  * Scoped to the stacked VE graph only — stitched/standard plots are unaffected.
  */
 export const STACKED_LAP_COLORS = [
-    '#e41a1c',
-    '#377eb8',
-    '#4daf4a',
-    '#984ea3',
-    '#ff7f00',
-    '#ffff33',
-    '#a65628',
-    '#f781bf',
-    '#999999',
+	"#e41a1c",
+	"#377eb8",
+	"#4daf4a",
+	"#984ea3",
+	"#ff7f00",
+	"#ffff33",
+	"#a65628",
+	"#f781bf",
+	"#999999",
 ];
 
 /**
@@ -41,16 +47,18 @@ export const STACKED_LAP_COLORS = [
  * each.
  */
 export function stackedLapColor(index: number): string {
-    const wrapped = ((index % STACKED_LAP_COLORS.length) + STACKED_LAP_COLORS.length) % STACKED_LAP_COLORS.length;
-    return STACKED_LAP_COLORS[wrapped];
+	const wrapped =
+		((index % STACKED_LAP_COLORS.length) + STACKED_LAP_COLORS.length) %
+		STACKED_LAP_COLORS.length;
+	return STACKED_LAP_COLORS[wrapped];
 }
 
 /** True when `values` never steps backwards. */
 function isNonDecreasing(values: number[]): boolean {
-    for (let i = 1; i < values.length; i++) {
-        if (values[i] < values[i - 1]) return false;
-    }
-    return true;
+	for (let i = 1; i < values.length; i++) {
+		if (values[i] < values[i - 1]) return false;
+	}
+	return true;
 }
 
 /**
@@ -84,106 +92,111 @@ function isNonDecreasing(values: number[]): boolean {
  *     `gpsLapStatsInterpolation.test.ts`, because bad GPS does produce them.
  */
 function createBracketFinder(distances: number[]): (target: number) => number {
-    const n = distances.length;
-    const monotonicSamples = isNonDecreasing(distances);
-    let cursor = 0;
-    let lastTarget = Number.NEGATIVE_INFINITY;
+	const n = distances.length;
+	const monotonicSamples = isNonDecreasing(distances);
+	let cursor = 0;
+	let lastTarget = Number.NEGATIVE_INFINITY;
 
-    return function findBracket(target: number): number {
-        if (n < 2) return -1;
+	return function findBracket(target: number): number {
+		if (n < 2) return -1;
 
-        if (!monotonicSamples) {
-            for (let k = 0; k < n - 1; k++) {
-                if (distances[k] <= target && distances[k + 1] >= target) return k;
-            }
-            return -1;
-        }
+		if (!monotonicSamples) {
+			for (let k = 0; k < n - 1; k++) {
+				if (distances[k] <= target && distances[k + 1] >= target) return k;
+			}
+			return -1;
+		}
 
-        if (target < lastTarget) cursor = 0;
-        lastTarget = target;
+		if (target < lastTarget) cursor = 0;
+		lastTarget = target;
 
-        while (cursor < n - 2 && distances[cursor + 1] < target) cursor++;
+		while (cursor < n - 2 && distances[cursor + 1] < target) cursor++;
 
-        return distances[cursor] <= target && distances[cursor + 1] >= target
-            ? cursor
-            : -1;
-    };
+		return distances[cursor] <= target && distances[cursor + 1] >= target
+			? cursor
+			: -1;
+	};
 }
 
 /**
  * Calculate mean actual elevation profile across all laps
  */
-export function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): { distances: number[]; elevation: number[] } {
-    if (lapProfiles.length === 0) {
-        return { distances: [], elevation: [] };
-    }
+export function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): {
+	distances: number[];
+	elevation: number[];
+} {
+	if (lapProfiles.length === 0) {
+		return { distances: [], elevation: [] };
+	}
 
-    // Find maximum lap distance
-    let maxDistance = 0;
-    for (const lap of lapProfiles) {
-        const lapMax = lap.distances[lap.distances.length - 1];
-        if (lapMax > maxDistance) maxDistance = lapMax;
-    }
+	// Find maximum lap distance
+	let maxDistance = 0;
+	for (const lap of lapProfiles) {
+		const lapMax = lap.distances[lap.distances.length - 1];
+		if (lapMax > maxDistance) maxDistance = lapMax;
+	}
 
-    // Create reference distance array with ~10m intervals
-    const numPoints = Math.max(100, Math.floor(maxDistance * 100)); // 10m resolution
-    const referenceDistances: number[] = [];
-    for (let i = 0; i <= numPoints; i++) {
-        referenceDistances.push((i / numPoints) * maxDistance);
-    }
+	// Create reference distance array with ~10m intervals
+	const numPoints = Math.max(100, Math.floor(maxDistance * 100)); // 10m resolution
+	const referenceDistances: number[] = [];
+	for (let i = 0; i <= numPoints; i++) {
+		referenceDistances.push((i / numPoints) * maxDistance);
+	}
 
-    // Accumulate elevation values
-    const elevationSum = new Array(referenceDistances.length).fill(0);
-    const elevationCount = new Array(referenceDistances.length).fill(0);
+	// Accumulate elevation values
+	const elevationSum = new Array(referenceDistances.length).fill(0);
+	const elevationCount = new Array(referenceDistances.length).fill(0);
 
-    for (const lap of lapProfiles) {
-        // One cursor per lap: the reference distances are increasing, so the
-        // bracket for each successive target is at or after the previous one.
-        const findBracket = createBracketFinder(lap.distances);
-        const lapMaxDistance = lap.distances[lap.distances.length - 1];
+	for (const lap of lapProfiles) {
+		// One cursor per lap: the reference distances are increasing, so the
+		// bracket for each successive target is at or after the previous one.
+		const findBracket = createBracketFinder(lap.distances);
+		const lapMaxDistance = lap.distances[lap.distances.length - 1];
 
-        // Interpolate this lap's elevation onto the reference distances
-        for (let i = 0; i < referenceDistances.length; i++) {
-            const targetDist = referenceDistances[i];
+		// Interpolate this lap's elevation onto the reference distances
+		for (let i = 0; i < referenceDistances.length; i++) {
+			const targetDist = referenceDistances[i];
 
-            // Only interpolate within this lap's range
-            if (targetDist > lapMaxDistance) continue;
+			// Only interpolate within this lap's range
+			if (targetDist > lapMaxDistance) continue;
 
-            // Find bracketing points. No bracket -> index 0, which extrapolates
-            // backwards from the first two samples; that is what the original
-            // rescan did with its `lowIdx = 0` initialiser and it is load-bearing
-            // for laps that start after the reference grid does.
-            const bracket = findBracket(targetDist);
-            const lowIdx = bracket === -1 ? 0 : bracket;
+			// Find bracketing points. No bracket -> index 0, which extrapolates
+			// backwards from the first two samples; that is what the original
+			// rescan did with its `lowIdx = 0` initialiser and it is load-bearing
+			// for laps that start after the reference grid does.
+			const bracket = findBracket(targetDist);
+			const lowIdx = bracket === -1 ? 0 : bracket;
 
-            // Linear interpolation
-            const d0 = lap.distances[lowIdx];
-            const d1 = lap.distances[lowIdx + 1] || d0;
-            const e0 = lap.actualElevation[lowIdx];
-            const e1 = lap.actualElevation[lowIdx + 1] || e0;
+			// Linear interpolation
+			const d0 = lap.distances[lowIdx];
+			const d1 = lap.distances[lowIdx + 1] || d0;
+			const e0 = lap.actualElevation[lowIdx];
+			const e1 = lap.actualElevation[lowIdx + 1] || e0;
 
-            const t = (d1 !== d0) ? (targetDist - d0) / (d1 - d0) : 0;
-            const interpolatedElevation = e0 + t * (e1 - e0);
+			const t = d1 !== d0 ? (targetDist - d0) / (d1 - d0) : 0;
+			const interpolatedElevation = e0 + t * (e1 - e0);
 
-            if (!isNaN(interpolatedElevation)) {
-                elevationSum[i] += interpolatedElevation;
-                elevationCount[i]++;
-            }
-        }
-    }
+			if (!isNaN(interpolatedElevation)) {
+				elevationSum[i] += interpolatedElevation;
+				elevationCount[i]++;
+			}
+		}
+	}
 
-    // Calculate mean
-    const meanElevation: number[] = [];
-    for (let i = 0; i < referenceDistances.length; i++) {
-        if (elevationCount[i] > 0) {
-            meanElevation.push(elevationSum[i] / elevationCount[i]);
-        } else {
-            // Use previous value or 0
-            meanElevation.push(meanElevation.length > 0 ? meanElevation[meanElevation.length - 1] : 0);
-        }
-    }
+	// Calculate mean
+	const meanElevation: number[] = [];
+	for (let i = 0; i < referenceDistances.length; i++) {
+		if (elevationCount[i] > 0) {
+			meanElevation.push(elevationSum[i] / elevationCount[i]);
+		} else {
+			// Use previous value or 0
+			meanElevation.push(
+				meanElevation.length > 0 ? meanElevation[meanElevation.length - 1] : 0,
+			);
+		}
+	}
 
-    return { distances: referenceDistances, elevation: meanElevation };
+	return { distances: referenceDistances, elevation: meanElevation };
 }
 
 /**
@@ -200,24 +213,26 @@ export function calculateMeanElevationProfile(lapProfiles: LapVEProfile[]): { di
  *   behaviour worth reproducing exactly, not a bug to tidy.
  */
 function interpolateMeanElevationAt(
-    meanElevation: { distances: number[]; elevation: number[] },
-    distances: number[],
+	meanElevation: { distances: number[]; elevation: number[] },
+	distances: number[],
 ): number[] {
-    const findBracket = createBracketFinder(meanElevation.distances);
-    const interpolated: number[] = [];
-    for (let i = 0; i < distances.length; i++) {
-        const dist = distances[i];
-        let value = 0;
-        const k = findBracket(dist);
-        if (k !== -1) {
-            const t = (dist - meanElevation.distances[k]) /
-                      (meanElevation.distances[k + 1] - meanElevation.distances[k]);
-            value = meanElevation.elevation[k] + t *
-                    (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
-        }
-        interpolated.push(value);
-    }
-    return interpolated;
+	const findBracket = createBracketFinder(meanElevation.distances);
+	const interpolated: number[] = [];
+	for (let i = 0; i < distances.length; i++) {
+		const dist = distances[i];
+		let value = 0;
+		const k = findBracket(dist);
+		if (k !== -1) {
+			const t =
+				(dist - meanElevation.distances[k]) /
+				(meanElevation.distances[k + 1] - meanElevation.distances[k]);
+			value =
+				meanElevation.elevation[k] +
+				t * (meanElevation.elevation[k + 1] - meanElevation.elevation[k]);
+		}
+		interpolated.push(value);
+	}
+	return interpolated;
 }
 
 /**
@@ -229,11 +244,12 @@ function interpolateMeanElevationAt(
  * IEEE-754 result, because subtraction is exactly sign-symmetric.
  */
 function calibrateToMeanStart(
-    series: number[],
-    meanElevation: { distances: number[]; elevation: number[] },
+	series: number[],
+	meanElevation: { distances: number[]; elevation: number[] },
 ): number[] {
-    const startElevation = meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
-    return anchorSeriesTo(series, startElevation);
+	const startElevation =
+		meanElevation.elevation.length > 0 ? meanElevation.elevation[0] : 0;
+	return anchorSeriesTo(series, startElevation);
 }
 
 /**
@@ -245,37 +261,37 @@ function calibrateToMeanStart(
  * object to all three; see `renderGpsLapVEPlots`.
  */
 export interface GpsLapHeaderStats {
-    meanR2: number;
-    meanRMSE: number;
-    closingError: number;
-    /**
-     * The constant-wind leg's same three numbers, present iff the update ran
-     * under `compare` (D-07/D-20).
-     *
-     * SIDE BY SIDE, never averaged (07-04 ruling 2): an r2 averaged across two
-     * different wind models describes neither of them.
-     */
-    compare?: { meanR2: number; meanRMSE: number; closingError: number };
+	meanR2: number;
+	meanRMSE: number;
+	closingError: number;
+	/**
+	 * The constant-wind leg's same three numbers, present iff the update ran
+	 * under `compare` (D-07/D-20).
+	 *
+	 * SIDE BY SIDE, never averaged (07-04 ruling 2): an r2 averaged across two
+	 * different wind models describes neither of them.
+	 */
+	compare?: { meanR2: number; meanRMSE: number; closingError: number };
 }
 
 /** One leg's worth of GPS-lap statistics. */
 export interface GpsLapStatsCore {
-    meanR2: number;
-    meanRMSE: number;
-    avgVeGain: number;
-    avgActualGain: number;
-    closingError: number;
-    lapClosingErrors: number[];
+	meanR2: number;
+	meanRMSE: number;
+	avgVeGain: number;
+	avgActualGain: number;
+	closingError: number;
+	lapClosingErrors: number[];
 }
 
 export interface GpsLapStats extends GpsLapStatsCore {
-    /**
-     * The constant-wind leg, scored the same way, present iff EVERY lap carries
-     * a compare series. The top-level fields always describe the primary (FIT)
-     * leg and are numerically unchanged when compare is off — that is what makes
-     * the golden literals still meaningful here.
-     */
-    compare?: GpsLapStatsCore;
+	/**
+	 * The constant-wind leg, scored the same way, present iff EVERY lap carries
+	 * a compare series. The top-level fields always describe the primary (FIT)
+	 * leg and are numerically unchanged when compare is off — that is what makes
+	 * the golden literals still meaningful here.
+	 */
+	compare?: GpsLapStatsCore;
 }
 
 /**
@@ -285,178 +301,205 @@ export interface GpsLapStats extends GpsLapStatsCore {
  * disagree with it.
  */
 function scoreGpsLapLeg(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] },
-    veFor: (lap: LapVEProfile) => number[],
+	lapProfiles: LapVEProfile[],
+	meanElevation: { distances: number[]; elevation: number[] },
+	veFor: (lap: LapVEProfile) => number[],
 ): GpsLapStatsCore {
-    let totalR2 = 0;
-    let totalRMSE = 0;
-    let totalVeGain = 0;
-    let totalActualGain = 0;
-    const lapClosingErrors: number[] = [];  // Per-lap closing errors
+	let totalR2 = 0;
+	let totalRMSE = 0;
+	let totalVeGain = 0;
+	let totalActualGain = 0;
+	const lapClosingErrors: number[] = []; // Per-lap closing errors
 
-    for (const lap of lapProfiles) {
-        // Calculate R2 and RMSE for this lap against mean elevation
-        let sumSquaredResiduals = 0;
-        let sumSquaredTotal = 0;
-        const calibratedVE = calibrateToMeanStart(veFor(lap), meanElevation);
+	for (const lap of lapProfiles) {
+		// Calculate R2 and RMSE for this lap against mean elevation
+		let sumSquaredResiduals = 0;
+		let sumSquaredTotal = 0;
+		const calibratedVE = calibrateToMeanStart(veFor(lap), meanElevation);
 
-        // Calculate VE gain for this lap (end - start of calibrated VE)
-        // For GPS laps, this should be ~0 since we return to the same point
-        let lapVeChange = 0;
-        if (calibratedVE.length > 1) {
-            lapVeChange = calibratedVE[calibratedVE.length - 1] - calibratedVE[0];
-            totalVeGain += lapVeChange;
-        }
-        lapClosingErrors.push(lapVeChange);
+		// Calculate VE gain for this lap (end - start of calibrated VE)
+		// For GPS laps, this should be ~0 since we return to the same point
+		let lapVeChange = 0;
+		if (calibratedVE.length > 1) {
+			lapVeChange = calibratedVE[calibratedVE.length - 1] - calibratedVE[0];
+			totalVeGain += lapVeChange;
+		}
+		lapClosingErrors.push(lapVeChange);
 
-        // Calculate actual elevation gain for this lap
-        if (lap.actualElevation.length > 1) {
-            totalActualGain += lap.actualElevation[lap.actualElevation.length - 1] - lap.actualElevation[0];
-        }
+		// Calculate actual elevation gain for this lap
+		if (lap.actualElevation.length > 1) {
+			totalActualGain +=
+				lap.actualElevation[lap.actualElevation.length - 1] -
+				lap.actualElevation[0];
+		}
 
-        // Interpolate mean elevation at each lap distance point
-        const interpolated = interpolateMeanElevationAt(meanElevation, lap.distances);
-        let meanElevSum = 0;
-        let count = 0;
-        for (let i = 0; i < lap.distances.length; i++) {
-            const interpMeanElev = interpolated[i];
-            const residual = calibratedVE[i] - interpMeanElev;
-            sumSquaredResiduals += residual * residual;
-            meanElevSum += interpMeanElev;
-            count++;
-        }
+		// Interpolate mean elevation at each lap distance point
+		const interpolated = interpolateMeanElevationAt(
+			meanElevation,
+			lap.distances,
+		);
+		let meanElevSum = 0;
+		let count = 0;
+		for (let i = 0; i < lap.distances.length; i++) {
+			const interpMeanElev = interpolated[i];
+			const residual = calibratedVE[i] - interpMeanElev;
+			sumSquaredResiduals += residual * residual;
+			meanElevSum += interpMeanElev;
+			count++;
+		}
 
-        const meanMeanElev = count > 0 ? meanElevSum / count : 0;
-        // The R2 total, over the SAME interpolated series. It used to walk the
-        // reference grid a second time from index 0 -- its only output is R2,
-        // and R2 is clamped with Math.max(0, r2), so on the golden ride (every
-        // lap negative) this term is invisible.
-        // `gpsLapStatsInterpolation.test.ts` is what actually watches it.
-        for (let i = 0; i < lap.distances.length; i++) {
-            sumSquaredTotal += Math.pow(interpolated[i] - meanMeanElev, 2);
-        }
+		const meanMeanElev = count > 0 ? meanElevSum / count : 0;
+		// The R2 total, over the SAME interpolated series. It used to walk the
+		// reference grid a second time from index 0 -- its only output is R2,
+		// and R2 is clamped with Math.max(0, r2), so on the golden ride (every
+		// lap negative) this term is invisible.
+		// `gpsLapStatsInterpolation.test.ts` is what actually watches it.
+		for (let i = 0; i < lap.distances.length; i++) {
+			sumSquaredTotal += Math.pow(interpolated[i] - meanMeanElev, 2);
+		}
 
-        const r2 = sumSquaredTotal > 0 ? 1 - (sumSquaredResiduals / sumSquaredTotal) : 0;
-        const rmse = count > 0 ? Math.sqrt(sumSquaredResiduals / count) : 0;
+		const r2 =
+			sumSquaredTotal > 0 ? 1 - sumSquaredResiduals / sumSquaredTotal : 0;
+		const rmse = count > 0 ? Math.sqrt(sumSquaredResiduals / count) : 0;
 
-        totalR2 += Math.max(0, r2); // Clamp negative R2 to 0
-        totalRMSE += rmse;
-    }
+		totalR2 += Math.max(0, r2); // Clamp negative R2 to 0
+		totalRMSE += rmse;
+	}
 
-    // Also calculate mean elevation gain from the mean profile
-    let meanProfileGain = 0;
-    if (meanElevation.elevation.length > 1) {
-        meanProfileGain = meanElevation.elevation[meanElevation.elevation.length - 1] - meanElevation.elevation[0];
-    }
+	// Also calculate mean elevation gain from the mean profile
+	let meanProfileGain = 0;
+	if (meanElevation.elevation.length > 1) {
+		meanProfileGain =
+			meanElevation.elevation[meanElevation.elevation.length - 1] -
+			meanElevation.elevation[0];
+	}
 
-    // Calculate closing error as sum of absolute VE changes per lap
-    // For GPS laps, each lap should return to 0, so any deviation is an error
-    const closingError = lapClosingErrors.reduce((sum, err) => sum + Math.abs(err), 0);
+	// Calculate closing error as sum of absolute VE changes per lap
+	// For GPS laps, each lap should return to 0, so any deviation is an error
+	const closingError = lapClosingErrors.reduce(
+		(sum, err) => sum + Math.abs(err),
+		0,
+	);
 
-    return {
-        meanR2: totalR2 / lapProfiles.length,
-        meanRMSE: totalRMSE / lapProfiles.length,
-        avgVeGain: totalVeGain / lapProfiles.length,
-        avgActualGain: meanProfileGain,  // Use mean profile gain as the reference
-        closingError: closingError,
-        lapClosingErrors: lapClosingErrors
-    };
+	return {
+		meanR2: totalR2 / lapProfiles.length,
+		meanRMSE: totalRMSE / lapProfiles.length,
+		avgVeGain: totalVeGain / lapProfiles.length,
+		avgActualGain: meanProfileGain, // Use mean profile gain as the reference
+		closingError: closingError,
+		lapClosingErrors: lapClosingErrors,
+	};
 }
 
 /** Do ALL laps carry a compare leg? A partial set is a bug upstream. */
 export function everyLapHasCompareSeries(lapProfiles: LapVEProfile[]): boolean {
-    return (
-        lapProfiles.length > 0 &&
-        lapProfiles.every(lap => lap.virtualElevationCompare != null)
-    );
+	return (
+		lapProfiles.length > 0 &&
+		lapProfiles.every((lap) => lap.virtualElevationCompare != null)
+	);
 }
 
 /**
  * Calculate statistics for GPS lap VE analysis
  */
 export function calculateGpsLapStats(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+	lapProfiles: LapVEProfile[],
+	meanElevation: { distances: number[]; elevation: number[] },
 ): GpsLapStats {
-    if (lapProfiles.length === 0) {
-        return { meanR2: 0, meanRMSE: 0, avgVeGain: 0, avgActualGain: 0, closingError: 0, lapClosingErrors: [] };
-    }
+	if (lapProfiles.length === 0) {
+		return {
+			meanR2: 0,
+			meanRMSE: 0,
+			avgVeGain: 0,
+			avgActualGain: 0,
+			closingError: 0,
+			lapClosingErrors: [],
+		};
+	}
 
-    const primary = scoreGpsLapLeg(lapProfiles, meanElevation, lap => lap.virtualElevation);
-    if (!everyLapHasCompareSeries(lapProfiles)) {
-        return primary;
-    }
+	const primary = scoreGpsLapLeg(
+		lapProfiles,
+		meanElevation,
+		(lap) => lap.virtualElevation,
+	);
+	if (!everyLapHasCompareSeries(lapProfiles)) {
+		return primary;
+	}
 
-    return {
-        ...primary,
-        compare: scoreGpsLapLeg(
-            lapProfiles,
-            meanElevation,
-            lap => lap.virtualElevationCompare!,
-        ),
-    };
+	return {
+		...primary,
+		compare: scoreGpsLapLeg(
+			lapProfiles,
+			meanElevation,
+			(lap) => lap.virtualElevationCompare!,
+		),
+	};
 }
 
 /** The two layouts both stacked VE figures share. */
 function buildStackedLayouts(maxDist: number) {
-    return {
-        // Main VE plot layout
-        veLayout: {
-            title: 'Virtual Elevation by Lap',
-            xaxis: {
-                title: 'Distance from Gate (km)',
-                range: [0, maxDist]
-            },
-            yaxis: {
-                title: 'Elevation (m)'
-            },
-            legend: belowAxisLegend(),
-            margin: { t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B, l: 60, r: 20 },
-            hovermode: 'closest'
-        },
-        // Residual plot layout
-        residualLayout: {
-            title: 'VE Residuals (VE - Mean Elevation)',
-            xaxis: {
-                title: 'Distance from Gate (km)',
-                range: [0, maxDist]
-            },
-            yaxis: {
-                title: 'Residual (m)'
-            },
-            margin: { t: 40, b: 60, l: 60, r: 20 },
-            hovermode: 'closest',
-            shapes: [{
-                type: 'line',
-                x0: 0,
-                x1: maxDist,
-                y0: 0,
-                y1: 0,
-                line: { color: 'black', width: 1 }
-            }]
-        },
-    };
+	return {
+		// Main VE plot layout
+		veLayout: {
+			title: "Virtual Elevation by Lap",
+			xaxis: {
+				title: "Distance from Gate (km)",
+				range: [0, maxDist],
+			},
+			yaxis: {
+				title: "Elevation (m)",
+			},
+			legend: belowAxisLegend(),
+			margin: { t: 40, b: BELOW_AXIS_LEGEND_MARGIN_B, l: 60, r: 20 },
+			hovermode: "closest",
+		},
+		// Residual plot layout
+		residualLayout: {
+			title: "VE Residuals (VE - Mean Elevation)",
+			xaxis: {
+				title: "Distance from Gate (km)",
+				range: [0, maxDist],
+			},
+			yaxis: {
+				title: "Residual (m)",
+			},
+			margin: { t: 40, b: 60, l: 60, r: 20 },
+			hovermode: "closest",
+			shapes: [
+				{
+					type: "line",
+					x0: 0,
+					x1: maxDist,
+					y0: 0,
+					y1: 0,
+					line: { color: "black", width: 1 },
+				},
+			],
+		},
+	};
 }
 
 function maxLapDistance(lapProfiles: LapVEProfile[]): number {
-    let maxDist = 0;
-    for (const lap of lapProfiles) {
-        const lapMax = lap.distances[lap.distances.length - 1];
-        if (lapMax > maxDist) maxDist = lapMax;
-    }
-    return maxDist;
+	let maxDist = 0;
+	for (const lap of lapProfiles) {
+		const lapMax = lap.distances[lap.distances.length - 1];
+		if (lapMax > maxDist) maxDist = lapMax;
+	}
+	return maxDist;
 }
 
 /** The mean-elevation reference trace, identical in both figures. */
-function meanElevationTrace(meanElevation: { distances: number[]; elevation: number[] }) {
-    return {
-        x: meanElevation.distances,
-        y: meanElevation.elevation,
-        mode: 'lines',
-        name: 'Mean Elevation',
-        line: { color: 'black', dash: 'dash', width: 2 }
-    };
+function meanElevationTrace(meanElevation: {
+	distances: number[];
+	elevation: number[];
+}) {
+	return {
+		x: meanElevation.distances,
+		y: meanElevation.elevation,
+		mode: "lines",
+		name: "Mean Elevation",
+		line: { color: "black", dash: "dash", width: 2 },
+	};
 }
 
 /**
@@ -479,131 +522,141 @@ function meanElevationTrace(meanElevation: { distances: number[]; elevation: num
  * line is a layout shape, not a trace).
  */
 export function buildStackedComparisonFigures(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+	lapProfiles: LapVEProfile[],
+	meanElevation: { distances: number[]; elevation: number[] },
 ): {
-    ve: { data: any[]; layout: any };
-    residuals: { data: any[]; layout: any };
+	ve: { data: any[]; layout: any };
+	residuals: { data: any[]; layout: any };
 } {
-    const { veLayout, residualLayout } = buildStackedLayouts(maxLapDistance(lapProfiles));
+	const { veLayout, residualLayout } = buildStackedLayouts(
+		maxLapDistance(lapProfiles),
+	);
 
-    const veTraces: any[] = [];
-    const residualTraces: any[] = [];
+	const veTraces: any[] = [];
+	const residualTraces: any[] = [];
 
-    if (meanElevation.distances.length > 0) {
-        veTraces.push(meanElevationTrace(meanElevation));
-    }
+	if (meanElevation.distances.length > 0) {
+		veTraces.push(meanElevationTrace(meanElevation));
+	}
 
-    for (let i = 0; i < lapProfiles.length; i++) {
-        const lap = lapProfiles[i];
-        const color = stackedLapColor(i);
+	for (let i = 0; i < lapProfiles.length; i++) {
+		const lap = lapProfiles[i];
+		const color = stackedLapColor(i);
 
-        // Both legs are anchored to the mean profile's first point by the SAME
-        // rule the single-source plot uses, so switching the radio cannot move
-        // the FIT curve.
-        const fitVE = calibrateToMeanStart(lap.virtualElevation, meanElevation);
-        const constantVE = calibrateToMeanStart(
-            lap.virtualElevationCompare ?? [],
-            meanElevation,
-        );
-        const interpolated = interpolateMeanElevationAt(meanElevation, lap.distances);
+		// Both legs are anchored to the mean profile's first point by the SAME
+		// rule the single-source plot uses, so switching the radio cannot move
+		// the FIT curve.
+		const fitVE = calibrateToMeanStart(lap.virtualElevation, meanElevation);
+		const constantVE = calibrateToMeanStart(
+			lap.virtualElevationCompare ?? [],
+			meanElevation,
+		);
+		const interpolated = interpolateMeanElevationAt(
+			meanElevation,
+			lap.distances,
+		);
 
-        veTraces.push(
-            {
-                x: lap.distances,
-                y: fitVE,
-                mode: 'lines',
-                name: `Lap ${lap.lapNumber} (FIT)`,
-                line: { color: color, width: 3 }
-            },
-            {
-                x: lap.distances,
-                y: constantVE,
-                mode: 'lines',
-                name: `Lap ${lap.lapNumber} (Constant)`,
-                line: { color: color, dash: 'dash', width: 2 }
-            },
-        );
+		veTraces.push(
+			{
+				x: lap.distances,
+				y: fitVE,
+				mode: "lines",
+				name: `Lap ${lap.lapNumber} (FIT)`,
+				line: { color: color, width: 3 },
+			},
+			{
+				x: lap.distances,
+				y: constantVE,
+				mode: "lines",
+				name: `Lap ${lap.lapNumber} (Constant)`,
+				line: { color: color, dash: "dash", width: 2 },
+			},
+		);
 
-        residualTraces.push(
-            {
-                x: lap.distances,
-                y: residualsAgainst(fitVE, interpolated),
-                mode: 'lines',
-                name: `Lap ${lap.lapNumber} (FIT)`,
-                line: { color: color, width: 2 },
-                showlegend: false
-            },
-            {
-                x: lap.distances,
-                y: residualsAgainst(constantVE, interpolated),
-                mode: 'lines',
-                name: `Lap ${lap.lapNumber} (Constant)`,
-                line: { color: color, dash: 'dash', width: 2 },
-                showlegend: false
-            },
-        );
-    }
+		residualTraces.push(
+			{
+				x: lap.distances,
+				y: residualsAgainst(fitVE, interpolated),
+				mode: "lines",
+				name: `Lap ${lap.lapNumber} (FIT)`,
+				line: { color: color, width: 2 },
+				showlegend: false,
+			},
+			{
+				x: lap.distances,
+				y: residualsAgainst(constantVE, interpolated),
+				mode: "lines",
+				name: `Lap ${lap.lapNumber} (Constant)`,
+				line: { color: color, dash: "dash", width: 2 },
+				showlegend: false,
+			},
+		);
+	}
 
-    return {
-        ve: { data: veTraces, layout: veLayout },
-        residuals: { data: residualTraces, layout: residualLayout },
-    };
+	return {
+		ve: { data: veTraces, layout: veLayout },
+		residuals: { data: residualTraces, layout: residualLayout },
+	};
 }
 
 /** The single-source stacked figure — one solid trace per lap, as before. */
 function buildStackedSingleSourceFigures(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] }
+	lapProfiles: LapVEProfile[],
+	meanElevation: { distances: number[]; elevation: number[] },
 ): {
-    ve: { data: any[]; layout: any };
-    residuals: { data: any[]; layout: any };
+	ve: { data: any[]; layout: any };
+	residuals: { data: any[]; layout: any };
 } {
-    const { veLayout, residualLayout } = buildStackedLayouts(maxLapDistance(lapProfiles));
+	const { veLayout, residualLayout } = buildStackedLayouts(
+		maxLapDistance(lapProfiles),
+	);
 
-    const veTraces: any[] = [];
-    const residualTraces: any[] = [];
+	const veTraces: any[] = [];
+	const residualTraces: any[] = [];
 
-    // Add mean elevation trace (dashed black line)
-    if (meanElevation.distances.length > 0) {
-        veTraces.push(meanElevationTrace(meanElevation));
-    }
+	// Add mean elevation trace (dashed black line)
+	if (meanElevation.distances.length > 0) {
+		veTraces.push(meanElevationTrace(meanElevation));
+	}
 
-    // Add VE traces for each lap
-    for (let i = 0; i < lapProfiles.length; i++) {
-        const lap = lapProfiles[i];
-        const color = stackedLapColor(i);
+	// Add VE traces for each lap
+	for (let i = 0; i < lapProfiles.length; i++) {
+		const lap = lapProfiles[i];
+		const color = stackedLapColor(i);
 
-        // Calibrate VE to match mean elevation at start
-        const calibratedVE = calibrateToMeanStart(lap.virtualElevation, meanElevation);
+		// Calibrate VE to match mean elevation at start
+		const calibratedVE = calibrateToMeanStart(
+			lap.virtualElevation,
+			meanElevation,
+		);
 
-        // VE trace
-        veTraces.push({
-            x: lap.distances,
-            y: calibratedVE,
-            mode: 'lines',
-            name: `Lap ${lap.lapNumber}`,
-            line: { color: color, width: 3 }
-        });
+		// VE trace
+		veTraces.push({
+			x: lap.distances,
+			y: calibratedVE,
+			mode: "lines",
+			name: `Lap ${lap.lapNumber}`,
+			line: { color: color, width: 3 },
+		});
 
-        // Residual trace (VE - interpolated mean elevation)
-        residualTraces.push({
-            x: lap.distances,
-            y: residualsAgainst(
-                calibratedVE,
-                interpolateMeanElevationAt(meanElevation, lap.distances),
-            ),
-            mode: 'lines',
-            name: `Lap ${lap.lapNumber}`,
-            line: { color: color, width: 2 },
-            showlegend: false
-        });
-    }
+		// Residual trace (VE - interpolated mean elevation)
+		residualTraces.push({
+			x: lap.distances,
+			y: residualsAgainst(
+				calibratedVE,
+				interpolateMeanElevationAt(meanElevation, lap.distances),
+			),
+			mode: "lines",
+			name: `Lap ${lap.lapNumber}`,
+			line: { color: color, width: 2 },
+			showlegend: false,
+		});
+	}
 
-    return {
-        ve: { data: veTraces, layout: veLayout },
-        residuals: { data: residualTraces, layout: residualLayout },
-    };
+	return {
+		ve: { data: veTraces, layout: veLayout },
+		residuals: { data: residualTraces, layout: residualLayout },
+	};
 }
 
 /**
@@ -626,73 +679,83 @@ function buildStackedSingleSourceFigures(
  * anything else means the single-source figure this mode has always drawn.
  */
 export function renderGpsLapVEPlots(
-    lapProfiles: LapVEProfile[],
-    meanElevation: { distances: number[]; elevation: number[] },
-    stats: GpsLapHeaderStats
+	lapProfiles: LapVEProfile[],
+	meanElevation: { distances: number[]; elevation: number[] },
+	stats: GpsLapHeaderStats,
 ) {
-    const PlotlyGlobal = (window as any).Plotly;
-    if (!PlotlyGlobal) return;
+	const PlotlyGlobal = (window as any).Plotly;
+	if (!PlotlyGlobal) return;
 
-    const withCompare = lapProfiles.filter(lap => lap.virtualElevationCompare != null).length;
-    const isCompare = everyLapHasCompareSeries(lapProfiles);
-    if (withCompare > 0 && !isCompare) {
-        // Half a comparison is worse than none: the legend would claim a
-        // wind-model contrast that only some laps actually show. Fall back and
-        // say so, rather than rendering something misleading.
-        log.warn(
-            `GPS-lap compare: ${withCompare} of ${lapProfiles.length} laps carry a compare series; falling back to the single-source plot`,
-        );
-    }
+	const withCompare = lapProfiles.filter(
+		(lap) => lap.virtualElevationCompare != null,
+	).length;
+	const isCompare = everyLapHasCompareSeries(lapProfiles);
+	if (withCompare > 0 && !isCompare) {
+		// Half a comparison is worse than none: the legend would claim a
+		// wind-model contrast that only some laps actually show. Fall back and
+		// say so, rather than rendering something misleading.
+		log.warn(
+			`GPS-lap compare: ${withCompare} of ${lapProfiles.length} laps carry a compare series; falling back to the single-source plot`,
+		);
+	}
 
-    const figures = isCompare
-        ? buildStackedComparisonFigures(lapProfiles, meanElevation)
-        : buildStackedSingleSourceFigures(lapProfiles, meanElevation);
+	const figures = isCompare
+		? buildStackedComparisonFigures(lapProfiles, meanElevation)
+		: buildStackedSingleSourceFigures(lapProfiles, meanElevation);
 
-    // Render plots in-place. Plotly.react initializes the div on first call and
-    // diffs on subsequent calls, so slider-driven recomputes update smoothly
-    // without the full teardown/rebuild that Plotly.newPlot performs.
-    PlotlyGlobal.react('gpsLapVePlot', figures.ve.data, figures.ve.layout, { responsive: true });
-    PlotlyGlobal.react('gpsLapResidualPlot', figures.residuals.data, figures.residuals.layout, { responsive: true });
+	// Render plots in-place. Plotly.react initializes the div on first call and
+	// diffs on subsequent calls, so slider-driven recomputes update smoothly
+	// without the full teardown/rebuild that Plotly.newPlot performs.
+	PlotlyGlobal.react("gpsLapVePlot", figures.ve.data, figures.ve.layout, {
+		responsive: true,
+	});
+	PlotlyGlobal.react(
+		"gpsLapResidualPlot",
+		figures.residuals.data,
+		figures.residuals.layout,
+		{ responsive: true },
+	);
 
-    // Update statistics -- from the caller's single computation, never a second one.
-    // Under compare the spans carry BOTH legs as `fit / constant` (ruling 2): an
-    // averaged r2 would describe neither model. The marker span is what stops the
-    // pair being read as one number.
-    const r2Span = document.getElementById('gpsLapR2Value');
-    const rmseSpan = document.getElementById('gpsLapRmseValue');
-    const closingErrorSpan = document.getElementById('gpsLapClosingErrorValue');
-    const compareMarker = document.getElementById('gpsLapCompareMarker');
-    const pair = (fit: string, constant: string | null) =>
-        constant === null ? fit : `${fit} / ${constant}`;
-    const compare = stats.compare ?? null;
-    if (r2Span) {
-        r2Span.textContent = pair(
-            stats.meanR2.toFixed(4),
-            compare ? compare.meanR2.toFixed(4) : null,
-        );
-    }
-    if (rmseSpan) {
-        rmseSpan.textContent = pair(
-            stats.meanRMSE.toFixed(2) + 'm',
-            compare ? compare.meanRMSE.toFixed(2) + 'm' : null,
-        );
-    }
-    if (closingErrorSpan) {
-        closingErrorSpan.textContent = pair(
-            stats.closingError.toFixed(2) + 'm',
-            compare ? compare.closingError.toFixed(2) + 'm' : null,
-        );
-    }
-    if (compareMarker) {
-        compareMarker.textContent = compare ? ' (FIT / Constant)' : '';
-    }
+	// Update statistics -- from the caller's single computation, never a second one.
+	// Under compare the spans carry BOTH legs as `fit / constant` (ruling 2): an
+	// averaged r2 would describe neither model. The marker span is what stops the
+	// pair being read as one number.
+	const r2Span = document.getElementById("gpsLapR2Value");
+	const rmseSpan = document.getElementById("gpsLapRmseValue");
+	const closingErrorSpan = document.getElementById("gpsLapClosingErrorValue");
+	const compareMarker = document.getElementById("gpsLapCompareMarker");
+	const pair = (fit: string, constant: string | null) =>
+		constant === null ? fit : `${fit} / ${constant}`;
+	const compare = stats.compare ?? null;
+	if (r2Span) {
+		r2Span.textContent = pair(
+			stats.meanR2.toFixed(4),
+			compare ? compare.meanR2.toFixed(4) : null,
+		);
+	}
+	if (rmseSpan) {
+		rmseSpan.textContent = pair(
+			stats.meanRMSE.toFixed(2) + "m",
+			compare ? compare.meanRMSE.toFixed(2) + "m" : null,
+		);
+	}
+	if (closingErrorSpan) {
+		closingErrorSpan.textContent = pair(
+			stats.closingError.toFixed(2) + "m",
+			compare ? compare.closingError.toFixed(2) + "m" : null,
+		);
+	}
+	if (compareMarker) {
+		compareMarker.textContent = compare ? " (FIT / Constant)" : "";
+	}
 
-    // Populate lap summary table
-    const summaryTable = document.getElementById('gpsLapSummaryTable');
-    if (summaryTable) {
-        const rows = lapProfiles.map((lap) => {
-            const avgSpeed = lap.totalDistance / (lap.duration / 3600); // km/h
-            return `<tr class="ve-lap-summary__row">
+	// Populate lap summary table
+	const summaryTable = document.getElementById("gpsLapSummaryTable");
+	if (summaryTable) {
+		const rows = lapProfiles
+			.map((lap) => {
+				const avgSpeed = lap.totalDistance / (lap.duration / 3600); // km/h
+				return `<tr class="ve-lap-summary__row">
                     <td class="ve-lap-summary__cell ve-lap-summary__cell--label">
                         <span class="ve-lap-summary__swatch"></span>
                         Lap ${lap.lapNumber}
@@ -701,9 +764,10 @@ export function renderGpsLapVEPlots(
                     <td class="ve-lap-summary__cell">${lap.totalDistance.toFixed(2)} km</td>
                     <td class="ve-lap-summary__cell">${avgSpeed.toFixed(1)} km/h</td>
                 </tr>`;
-        }).join('');
+			})
+			.join("");
 
-        const tableHtml = `<table class="ve-lap-summary__table">
+		const tableHtml = `<table class="ve-lap-summary__table">
                 <thead>
                     <tr class="ve-lap-summary__row ve-lap-summary__row--head">
                         <th class="ve-lap-summary__cell ve-lap-summary__cell--label">Lap</th>
@@ -713,66 +777,76 @@ export function renderGpsLapVEPlots(
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody></table>`;
-        summaryTable.innerHTML = tableHtml;
+		summaryTable.innerHTML = tableHtml;
 
-        // Swatch backgrounds are runtime data (the shared stacked-lap Plotly
-        // palette), so they stay imperative per D-07's continuous-value
-        // exception rather than duplicating the palette as CSS modifiers.
-        summaryTable
-            .querySelectorAll<HTMLSpanElement>('.ve-lap-summary__swatch')
-            .forEach((swatch, i) => {
-                swatch.style.background = stackedLapColor(i);
-            });
-    }
+		// Swatch backgrounds are runtime data (the shared stacked-lap Plotly
+		// palette), so they stay imperative per D-07's continuous-value
+		// exception rather than duplicating the palette as CSS modifiers.
+		summaryTable
+			.querySelectorAll<HTMLSpanElement>(".ve-lap-summary__swatch")
+			.forEach((swatch, i) => {
+				swatch.style.background = stackedLapColor(i);
+			});
+	}
 }
 
 /**
  * Render stacked Wind plot for GPS lap mode
  */
 export function renderGpsLapWindPlot(lapProfiles: LapVEProfile[]) {
-    const PlotlyGlobal = (window as any).Plotly;
-    if (!PlotlyGlobal) return;
+	const PlotlyGlobal = (window as any).Plotly;
+	if (!PlotlyGlobal) return;
 
-    const plotDiv = document.getElementById('gpsLapWindPlot');
-    if (!plotDiv) return;
+	const plotDiv = document.getElementById("gpsLapWindPlot");
+	if (!plotDiv) return;
 
-    const figure = buildMultiSegmentWindFigure({
-        title: 'Apparent Wind Speed by Lap',
-        series: lapProfiles.map((lap, index) => ({
-            label: `Lap ${lap.lapNumber}`,
-            color: stackedLapColor(index),
-            metrics: lap.supplementarySeries,
-        })),
-    });
+	const figure = buildMultiSegmentWindFigure({
+		title: "Apparent Wind Speed by Lap",
+		series: lapProfiles.map((lap, index) => ({
+			label: `Lap ${lap.lapNumber}`,
+			color: stackedLapColor(index),
+			metrics: lap.supplementarySeries,
+		})),
+	});
 
-    // `react`, not `newPlot` (D4): these three redraw on every slider update
-    // while their tab is open, and `newPlot` tears the graph down and rebuilds
-    // it from scratch each time. `react` initializes an empty div on the first
-    // call exactly as `newPlot` does, then diffs -- which is what the VE and
-    // residual plots above have always done.
-    PlotlyGlobal.react('gpsLapWindPlot', figure.data, figure.layout, figure.config);
+	// `react`, not `newPlot` (D4): these three redraw on every slider update
+	// while their tab is open, and `newPlot` tears the graph down and rebuilds
+	// it from scratch each time. `react` initializes an empty div on the first
+	// call exactly as `newPlot` does, then diffs -- which is what the VE and
+	// residual plots above have always done.
+	PlotlyGlobal.react(
+		"gpsLapWindPlot",
+		figure.data,
+		figure.layout,
+		figure.config,
+	);
 }
 
 /**
  * Render stacked Power plot for GPS lap mode
  */
 export function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
-    const PlotlyGlobal = (window as any).Plotly;
-    if (!PlotlyGlobal) return;
+	const PlotlyGlobal = (window as any).Plotly;
+	if (!PlotlyGlobal) return;
 
-    const plotDiv = document.getElementById('gpsLapPowerPlot');
-    if (!plotDiv) return;
+	const plotDiv = document.getElementById("gpsLapPowerPlot");
+	if (!plotDiv) return;
 
-    const figure = buildMultiSegmentPowerFigure({
-        title: 'Power by Lap',
-        series: lapProfiles.map((lap, index) => ({
-            label: `Lap ${lap.lapNumber}`,
-            color: stackedLapColor(index),
-            metrics: lap.supplementarySeries,
-        })),
-    });
+	const figure = buildMultiSegmentPowerFigure({
+		title: "Power by Lap",
+		series: lapProfiles.map((lap, index) => ({
+			label: `Lap ${lap.lapNumber}`,
+			color: stackedLapColor(index),
+			metrics: lap.supplementarySeries,
+		})),
+	});
 
-    PlotlyGlobal.react('gpsLapPowerPlot', figure.data, figure.layout, figure.config);
+	PlotlyGlobal.react(
+		"gpsLapPowerPlot",
+		figure.data,
+		figure.layout,
+		figure.config,
+	);
 }
 
 /**
@@ -785,23 +859,23 @@ export function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
  * drifting apart the way Standard's did.
  */
 export function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
-    const PlotlyGlobal = (window as any).Plotly;
-    if (!PlotlyGlobal) return;
+	const PlotlyGlobal = (window as any).Plotly;
+	if (!PlotlyGlobal) return;
 
-    const plotDiv = document.getElementById('gpsLapVdPlot');
-    if (!plotDiv) return;
+	const plotDiv = document.getElementById("gpsLapVdPlot");
+	if (!plotDiv) return;
 
-    const series = lapProfiles.map((lap, index) => ({
-        label: `Lap ${lap.lapNumber}`,
-        color: stackedLapColor(index),
-        metrics: lap.supplementarySeries,
-    }));
+	const series = lapProfiles.map((lap, index) => ({
+		label: `Lap ${lap.lapNumber}`,
+		color: stackedLapColor(index),
+		metrics: lap.supplementarySeries,
+	}));
 
-    const figure = buildMultiSegmentVirtualDistanceFigure({
-        title: 'Virtual Distance Difference by Lap',
-        series,
-    });
+	const figure = buildMultiSegmentVirtualDistanceFigure({
+		title: "Virtual Distance Difference by Lap",
+		series,
+	});
 
-    PlotlyGlobal.react('gpsLapVdPlot', figure.data, figure.layout, figure.config);
-    renderVirtualDistanceHeader(lapVirtualDistanceRows(series));
+	PlotlyGlobal.react("gpsLapVdPlot", figure.data, figure.layout, figure.config);
+	renderVirtualDistanceHeader(lapVirtualDistanceRows(series));
 }

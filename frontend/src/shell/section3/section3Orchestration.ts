@@ -48,7 +48,6 @@ import { noteTrimWindowRequested } from "../analysis/bindModeControls";
 import { saveCurrentLapSettings } from "../analysis/storageHandlers";
 import { sameItems } from "../ve/veSelectionGuard";
 
-
 /**
  * "Re-run the active GPS detection with the gates where they are now",
  * published by whichever binder is currently bound.
@@ -654,7 +653,6 @@ function rerenderSection3(): void {
 					}
 				}
 			}
-
 		} catch (error) {
 			log.error("Error re-initializing the section 3 map:", error);
 		}

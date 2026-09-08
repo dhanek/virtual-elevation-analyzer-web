@@ -23,9 +23,7 @@ export interface TimeRange {
 }
 
 export type AnalysisSelectionEntry =
-	| ActivityLapLike
-	| DetectedLap
-	| OutAndBackSection;
+	ActivityLapLike | DetectedLap | OutAndBackSection;
 
 export interface PreparedAnalysisSelection {
 	mode: AnalysisModeId;

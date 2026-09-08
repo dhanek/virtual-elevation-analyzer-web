@@ -343,7 +343,6 @@ describe("the VE panel after an out-and-back gate re-detection", () => {
 	});
 });
 
-
 /**
  * THE SAME TWO GUARDS, IN THE MODE THAT NEVER HAD EITHER.
  *
@@ -379,11 +378,17 @@ describe("the VE panel in GPS-lap mode", () => {
 	 */
 	function configureWithFitLap(appState: AppState): void {
 		configure(appState);
-		appState.currentLaps = [{ start_time: 0, end_time: SAMPLE_COUNT - 1 }] as never;
+		appState.currentLaps = [
+			{ start_time: 0, end_time: SAMPLE_COUNT - 1 },
+		] as never;
 		appState.selectedLaps = [1];
 	}
 
-	function lap(lapNumber: number, startIdx: number, endIdx: number): DetectedLap {
+	function lap(
+		lapNumber: number,
+		startIdx: number,
+		endIdx: number,
+	): DetectedLap {
 		return {
 			lapNumber,
 			startIdx,
@@ -551,7 +556,11 @@ describe("the VE panel in GPS-lap mode", () => {
 		it("narrows the panel to the ticked laps instead of tearing it down", () => {
 			const appState = makeAppState();
 			configure(appState);
-			analyzedLaps(appState, [lap(1, 0, 80), lap(2, 81, 160), lap(3, 161, 240)]);
+			analyzedLaps(appState, [
+				lap(1, 0, 80),
+				lap(2, 81, 160),
+				lap(3, 161, 240),
+			]);
 
 			renderGpsLapCheckboxes([1, 2, 3], [1, 3]);
 			handleGpsLapSelectionChange();

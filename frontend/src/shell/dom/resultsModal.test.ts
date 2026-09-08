@@ -125,9 +125,7 @@ describe("the stored-results view", () => {
 			const target = RESULT_COLUMNS[2];
 
 			document
-				.querySelector<HTMLInputElement>(
-					`input[data-column="${target.id}"]`,
-				)!
+				.querySelector<HTMLInputElement>(`input[data-column="${target.id}"]`)!
 				.click();
 
 			const shown = headers().map((h) => h.textContent);
@@ -146,9 +144,7 @@ describe("the stored-results view", () => {
 			const target = RESULT_COLUMNS[2];
 
 			document
-				.querySelector<HTMLInputElement>(
-					`input[data-column="${target.id}"]`,
-				)!
+				.querySelector<HTMLInputElement>(`input[data-column="${target.id}"]`)!
 				.click();
 
 			expect(
@@ -158,9 +154,7 @@ describe("the stored-results view", () => {
 			document.body.innerHTML = "";
 			await open([record()]);
 
-			expect(headers().map((h) => h.textContent)).not.toContain(
-				target.header,
-			);
+			expect(headers().map((h) => h.textContent)).not.toContain(target.header);
 		});
 
 		/**
@@ -274,9 +268,9 @@ describe("the stored-results view", () => {
 		it("closes on a backdrop click but not on a click inside the dialog", async () => {
 			await open([record()]);
 
-			document.getElementById("resultsTable")!.dispatchEvent(
-				new MouseEvent("click", { bubbles: true }),
-			);
+			document
+				.getElementById("resultsTable")!
+				.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 			expect(document.getElementById("resultsModal")).not.toBeNull();
 
 			document.getElementById("resultsModalBackdrop")!.click();

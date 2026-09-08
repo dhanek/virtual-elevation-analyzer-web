@@ -71,7 +71,9 @@ describe("resolveSelectionRhoArray", () => {
 		// A short array under the calculator is a worse bug than a constant one:
 		// the Rust side would read past the end of the density series for every
 		// sample beyond it.
-		expect(resolveSelectionRhoArray(activity(density), [0, 1, 2], 4)).toBeNull();
+		expect(
+			resolveSelectionRhoArray(activity(density), [0, 1, 2], 4),
+		).toBeNull();
 	});
 
 	it("refuses a selection index the density series does not reach", () => {

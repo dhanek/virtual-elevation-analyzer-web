@@ -138,10 +138,7 @@ describe.skipIf(!built)("FIT lap extraction (real WASM)", () => {
 				6,
 			);
 			expect(DECOY_LAP_SUMMARY.avgPower).not.toBeCloseTo(SYNTHETIC_POWER_W, 6);
-			expect(DECOY_LAP_SUMMARY.avgSpeed).not.toBeCloseTo(
-				SYNTHETIC_SPEED_MS,
-				6,
-			);
+			expect(DECOY_LAP_SUMMARY.avgSpeed).not.toBeCloseTo(SYNTHETIC_SPEED_MS, 6);
 		});
 	});
 });

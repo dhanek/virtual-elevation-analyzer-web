@@ -21,9 +21,12 @@
  * `@ts-expect-error` case at the bottom, which FAILS TO COMPILE — and therefore
  * fails `npm run check` — the moment the field is reintroduced.
  */
-import { describe, expect, it } from 'vitest';
-import { createPlotContext } from './PlotContext';
-import { buildVirtualDistanceFigure, type VirtualDistancePlotInput } from './StandardPlotBuilders';
+import { describe, expect, it } from "vitest";
+import { createPlotContext } from "./PlotContext";
+import {
+	buildVirtualDistanceFigure,
+	type VirtualDistancePlotInput,
+} from "./StandardPlotBuilders";
 
 /** 1 Hz, ten samples, so dt is exactly 1 s at every step. */
 const TIMESTAMPS = Array.from({ length: 10 }, (_, i) => i);
@@ -31,78 +34,82 @@ const VELOCITY = new Array(10).fill(8);
 const WIND_SPEED = new Array(10).fill(10);
 
 function vdAirMainTrace(windSpeed: number[]): number[] {
-    const figure = buildVirtualDistanceFigure({
-        context: createPlotContext(TIMESTAMPS.length, 0, TIMESTAMPS.length - 1),
-        timestamps: TIMESTAMPS,
-        velocity: VELOCITY,
-        windSpeed,
-    });
-    // Trace 0 is 'VD from Air Speed' over the main (untrimmed) window.
-    return figure.data[0].y as number[];
+	const figure = buildVirtualDistanceFigure({
+		context: createPlotContext(TIMESTAMPS.length, 0, TIMESTAMPS.length - 1),
+		timestamps: TIMESTAMPS,
+		velocity: VELOCITY,
+		windSpeed,
+	});
+	// Trace 0 is 'VD from Air Speed' over the main (untrimmed) window.
+	return figure.data[0].y as number[];
 }
 
-describe('buildVirtualDistanceFigure applies NO calibration of its own (D-21)', () => {
-    it('integrates the given series in time and divides by 1000, with no multiplier', () => {
-        const vdAir = vdAirMainTrace(WIND_SPEED);
+describe("buildVirtualDistanceFigure applies NO calibration of its own (D-21)", () => {
+	it("integrates the given series in time and divides by 1000, with no multiplier", () => {
+		const vdAir = vdAirMainTrace(WIND_SPEED);
 
-        // Plain time integration: index i has accumulated i seconds at 10 m/s.
-        const expected = TIMESTAMPS.map(i => (i * 10) / 1000);
-        expect(vdAir).toHaveLength(expected.length);
-        vdAir.forEach((value, i) => {
-            expect(value).toBeCloseTo(expected[i], 12);
-        });
-    });
+		// Plain time integration: index i has accumulated i seconds at 10 m/s.
+		const expected = TIMESTAMPS.map((i) => (i * 10) / 1000);
+		expect(vdAir).toHaveLength(expected.length);
+		vdAir.forEach((value, i) => {
+			expect(value).toBeCloseTo(expected[i], 12);
+		});
+	});
 
-    it('scales linearly with the series it is handed — the ONLY way calibration can reach it', () => {
-        const plain = vdAirMainTrace(WIND_SPEED);
-        // A 5 % calibration is applied UPSTREAM, by resolveWindSeries, and shows
-        // up here as exactly 5 % more virtual air distance. If the builder also
-        // multiplied internally this would be 1.05^2 = 1.1025x instead.
-        const preCalibrated = vdAirMainTrace(WIND_SPEED.map(speed => speed * 1.05));
+	it("scales linearly with the series it is handed — the ONLY way calibration can reach it", () => {
+		const plain = vdAirMainTrace(WIND_SPEED);
+		// A 5 % calibration is applied UPSTREAM, by resolveWindSeries, and shows
+		// up here as exactly 5 % more virtual air distance. If the builder also
+		// multiplied internally this would be 1.05^2 = 1.1025x instead.
+		const preCalibrated = vdAirMainTrace(
+			WIND_SPEED.map((speed) => speed * 1.05),
+		);
 
-        preCalibrated.forEach((value, i) => {
-            expect(value).toBeCloseTo(plain[i] * 1.05, 12);
-        });
+		preCalibrated.forEach((value, i) => {
+			expect(value).toBeCloseTo(plain[i] * 1.05, 12);
+		});
 
-        const last = preCalibrated[preCalibrated.length - 1];
-        expect(last).toBeCloseTo((9 * 10 * 1.05) / 1000, 12);
-        // The double-application value, named explicitly so the mutation row is
-        // reproducible: re-introducing `1 + pct/100` inside the builder makes the
-        // assertion above fail with this number.
-        expect(last).not.toBeCloseTo((9 * 10 * 1.05 * 1.05) / 1000, 12);
-    });
+		const last = preCalibrated[preCalibrated.length - 1];
+		expect(last).toBeCloseTo((9 * 10 * 1.05) / 1000, 12);
+		// The double-application value, named explicitly so the mutation row is
+		// reproducible: re-introducing `1 + pct/100` inside the builder makes the
+		// assertion above fail with this number.
+		expect(last).not.toBeCloseTo((9 * 10 * 1.05 * 1.05) / 1000, 12);
+	});
 
-    it('treats a non-finite sample as zero rather than propagating NaN', () => {
-        const withDropout = [...WIND_SPEED];
-        withDropout[5] = Number.NaN;
+	it("treats a non-finite sample as zero rather than propagating NaN", () => {
+		const withDropout = [...WIND_SPEED];
+		withDropout[5] = Number.NaN;
 
-        const vdAir = vdAirMainTrace(withDropout);
-        expect(vdAir.every(value => Number.isFinite(value))).toBe(true);
-        // One second of the ten-metre-per-second series is lost.
-        expect(vdAir[vdAir.length - 1]).toBeCloseTo((9 * 10 - 10) / 1000, 12);
-    });
+		const vdAir = vdAirMainTrace(withDropout);
+		expect(vdAir.every((value) => Number.isFinite(value))).toBe(true);
+		// One second of the ten-metre-per-second series is lost.
+		expect(vdAir[vdAir.length - 1]).toBeCloseTo((9 * 10 - 10) / 1000, 12);
+	});
 });
 
-describe('VirtualDistancePlotInput has no calibration field (compile-level, D-21)', () => {
-    it('rejects airSpeedCalibrationPercent at the type boundary', () => {
-        const input: VirtualDistancePlotInput = {
-            context: createPlotContext(TIMESTAMPS.length, 0, TIMESTAMPS.length - 1),
-            timestamps: TIMESTAMPS,
-            velocity: VELOCITY,
-            windSpeed: WIND_SPEED,
-        };
+describe("VirtualDistancePlotInput has no calibration field (compile-level, D-21)", () => {
+	it("rejects airSpeedCalibrationPercent at the type boundary", () => {
+		const input: VirtualDistancePlotInput = {
+			context: createPlotContext(TIMESTAMPS.length, 0, TIMESTAMPS.length - 1),
+			timestamps: TIMESTAMPS,
+			velocity: VELOCITY,
+			windSpeed: WIND_SPEED,
+		};
 
-        const withCalibration = {
-            ...input,
-            // @ts-expect-error D-21: this field must not exist. If someone
-            // re-adds `airSpeedCalibrationPercent` to VirtualDistancePlotInput,
-            // the directive above becomes unused and `tsc` fails the build —
-            // which is the whole point of removing the field rather than
-            // passing 0.
-            airSpeedCalibrationPercent: 5,
-        } satisfies VirtualDistancePlotInput;
+		const withCalibration = {
+			...input,
+			// @ts-expect-error D-21: this field must not exist. If someone
+			// re-adds `airSpeedCalibrationPercent` to VirtualDistancePlotInput,
+			// the directive above becomes unused and `tsc` fails the build —
+			// which is the whole point of removing the field rather than
+			// passing 0.
+			airSpeedCalibrationPercent: 5,
+		} satisfies VirtualDistancePlotInput;
 
-        expect(Object.keys(input)).not.toContain('airSpeedCalibrationPercent');
-        expect(buildVirtualDistanceFigure(withCalibration).data.length).toBeGreaterThan(0);
-    });
+		expect(Object.keys(input)).not.toContain("airSpeedCalibrationPercent");
+		expect(
+			buildVirtualDistanceFigure(withCalibration).data.length,
+		).toBeGreaterThan(0);
+	});
 });

@@ -179,9 +179,15 @@ describe("deleting one stored result", () => {
 	 * passed the components in the wrong order, takes a neighbour with it.
 	 */
 	it("removes only the addressed row", async () => {
-		await storage.saveResult(record({ fileName: "a.fit", laps: [1], notes: "x" }));
-		await storage.saveResult(record({ fileName: "a.fit", laps: [2], notes: "x" }));
-		await storage.saveResult(record({ fileName: "b.fit", laps: [1], notes: "x" }));
+		await storage.saveResult(
+			record({ fileName: "a.fit", laps: [1], notes: "x" }),
+		);
+		await storage.saveResult(
+			record({ fileName: "a.fit", laps: [2], notes: "x" }),
+		);
+		await storage.saveResult(
+			record({ fileName: "b.fit", laps: [1], notes: "x" }),
+		);
 
 		expect(await storage.getAllResults()).toHaveLength(3);
 

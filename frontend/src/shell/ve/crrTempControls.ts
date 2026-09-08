@@ -130,14 +130,10 @@ export function refreshCrrTempReadout(params: AnalysisParameters | null): void {
  * this row as bound or skipped from what happened here rather than from a second
  * copy of these four element lookups.
  */
-export function bindCrrTempControls(
-	binding: CrrTempControlsBinding,
-): boolean {
+export function bindCrrTempControls(binding: CrrTempControlsBinding): boolean {
 	const toggle = document.getElementById("crrTempToggle") as HTMLInputElement;
 	const fields = document.getElementById("crrTempFields") as HTMLElement;
-	const ambient = document.getElementById(
-		"crrTempAmbient",
-	) as HTMLInputElement;
+	const ambient = document.getElementById("crrTempAmbient") as HTMLInputElement;
 	const sensitivity = document.getElementById(
 		"crrTempSensitivity",
 	) as HTMLSelectElement;

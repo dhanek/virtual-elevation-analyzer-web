@@ -55,14 +55,12 @@ describe("formatCrrTempReadout", () => {
 describe("crrTempControlsMarkup", () => {
 	test("renders unchecked toggle with hidden fields by default", () => {
 		document.body.innerHTML = crrTempControlsMarkup(makeParams());
-		const toggle = document.getElementById(
-			"crrTempToggle",
-		) as HTMLInputElement;
+		const toggle = document.getElementById("crrTempToggle") as HTMLInputElement;
 		const fields = document.getElementById("crrTempFields") as HTMLElement;
 		expect(toggle.checked).toBe(false);
-		expect(
-			fields.classList.contains("crr-temp-controls__fields--hidden"),
-		).toBe(true);
+		expect(fields.classList.contains("crr-temp-controls__fields--hidden")).toBe(
+			true,
+		);
 	});
 
 	test("keeps the label short and moves the explanation into an info tooltip", () => {
@@ -84,9 +82,7 @@ describe("crrTempControlsMarkup", () => {
 				tire_sensitivity: "stiff",
 			}),
 		);
-		const toggle = document.getElementById(
-			"crrTempToggle",
-		) as HTMLInputElement;
+		const toggle = document.getElementById("crrTempToggle") as HTMLInputElement;
 		const ambient = document.getElementById(
 			"crrTempAmbient",
 		) as HTMLInputElement;
@@ -128,9 +124,7 @@ describe("bindCrrTempControls", () => {
 	});
 
 	test("enabling the toggle sets the parameter and triggers a recompute", () => {
-		const toggle = document.getElementById(
-			"crrTempToggle",
-		) as HTMLInputElement;
+		const toggle = document.getElementById("crrTempToggle") as HTMLInputElement;
 		toggle.checked = true;
 		toggle.dispatchEvent(new Event("change"));
 
@@ -139,9 +133,9 @@ describe("bindCrrTempControls", () => {
 		);
 		expect(onChange).toHaveBeenCalled();
 		const fields = document.getElementById("crrTempFields") as HTMLElement;
-		expect(
-			fields.classList.contains("crr-temp-controls__fields--hidden"),
-		).toBe(false);
+		expect(fields.classList.contains("crr-temp-controls__fields--hidden")).toBe(
+			false,
+		);
 	});
 
 	test("enabling the toggle prefills ambient temp from weather metadata", () => {
@@ -161,9 +155,7 @@ describe("bindCrrTempControls", () => {
 			crrTempControlsMarkup(params);
 		bind();
 
-		const toggle = document.getElementById(
-			"crrTempToggle",
-		) as HTMLInputElement;
+		const toggle = document.getElementById("crrTempToggle") as HTMLInputElement;
 		toggle.checked = true;
 		toggle.dispatchEvent(new Event("change"));
 

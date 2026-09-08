@@ -255,12 +255,14 @@ function renderHostPage(): void {
 let appState: AppState;
 
 /** The STITCHED standard panel, through its real production entry point. */
-async function renderStitched(options: {
-	parametersComponent?: AnalysisParametersComponent | null;
-	mapVisualization?: any;
-	parameterStorage?: ParameterStorage;
-	analyzedLaps?: number[];
-} = {}): Promise<void> {
+async function renderStitched(
+	options: {
+		parametersComponent?: AnalysisParametersComponent | null;
+		mapVisualization?: any;
+		parameterStorage?: ParameterStorage;
+		analyzedLaps?: number[];
+	} = {},
+): Promise<void> {
 	const fit = makeFitData();
 	appState.isGpsLapModeActive = false;
 	appState.currentGpsLapIndexRanges = null;
@@ -393,7 +395,8 @@ function lastVeSlope(): number {
 	for (let i = draws.length - 1; i >= 0; i--) {
 		if (draws[i].id !== "vePlot") continue;
 		const trace = draws[i].data.find((t) => t.name === "Virtual Elevation");
-		if (!trace) throw new Error("the VE plot carries no 'Virtual Elevation' trace");
+		if (!trace)
+			throw new Error("the VE plot carries no 'Virtual Elevation' trace");
 		return trace.y[1] - trace.y[0];
 	}
 	throw new Error("the VE plot was never drawn");
@@ -533,7 +536,9 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 		// other, which is exactly how a blank panel happens.
 		expect(vdButtonHidden()).toBe(true);
 		expect(tabStrip()).toEqual(["ve", "wind", "power"]);
-		expect((document.getElementById("vd-tab") as HTMLElement).hidden).toBe(true);
+		expect((document.getElementById("vd-tab") as HTMLElement).hidden).toBe(
+			true,
+		);
 
 		// The guard moved them, and it moved them to something PAINTED.
 		expect(activeTabId()).toBe("ve-tab");
@@ -893,7 +898,9 @@ describe("standard: asynchronous render ownership", () => {
 		await renderA;
 		await settle();
 
-		expect((document.getElementById("cdaSlider") as HTMLInputElement).value).toBe("0.42");
+		expect(
+			(document.getElementById("cdaSlider") as HTMLInputElement).value,
+		).toBe("0.42");
 		expect(appState.currentAnalyzedLaps).toEqual([2]);
 		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
 	});
@@ -916,7 +923,9 @@ describe("standard: asynchronous render ownership", () => {
 		resolveSettings(null);
 		await render;
 
-		expect(document.getElementById("veAnalysisContent")?.children).toHaveLength(0);
+		expect(document.getElementById("veAnalysisContent")?.children).toHaveLength(
+			0,
+		);
 		expect(document.getElementById("storeResult")).toBeNull();
 	});
 });
@@ -976,8 +985,12 @@ describe("standard: the first auto-rho result is atomic", () => {
 
 		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
 		expect(calculatorInputs).toHaveLength(2);
-		expect(calculatorInputs.every((input) => input.rho === weatherRho)).toBe(true);
-		expect(calculatorInputs.every((input) => input.cda === DRAGGED_CDA)).toBe(true);
+		expect(calculatorInputs.every((input) => input.rho === weatherRho)).toBe(
+			true,
+		);
+		expect(calculatorInputs.every((input) => input.cda === DRAGGED_CDA)).toBe(
+			true,
+		);
 		expect(appState.veStatus).toBe("ready");
 		expect(storeButton().disabled).toBe(false);
 
@@ -1015,7 +1028,9 @@ describe("standard: the first auto-rho result is atomic", () => {
 
 		expect(draws.filter((draw) => draw.id === "vePlot")).toHaveLength(1);
 		expect(calculatorInputs).toHaveLength(2);
-		expect(calculatorInputs.every((input) => input.rho === fallbackRho)).toBe(true);
+		expect(calculatorInputs.every((input) => input.rho === fallbackRho)).toBe(
+			true,
+		);
 	});
 
 	it("keeps the gate closed when trim changes before its debounce advertises a successor", async () => {
@@ -1197,8 +1212,8 @@ describe("standard: plots redraw by diffing, not by teardown", () => {
 		await renderStitched();
 		await settle();
 
-		expect(drawMethods.filter(draw => draw.method === "newPlot")).toEqual([]);
-		expect(drawMethods.map(draw => draw.id)).toEqual(
+		expect(drawMethods.filter((draw) => draw.method === "newPlot")).toEqual([]);
+		expect(drawMethods.map((draw) => draw.id)).toEqual(
 			expect.arrayContaining([
 				"vePlot",
 				"veResidualsPlot",
@@ -1217,7 +1232,7 @@ describe("standard: plots redraw by diffing, not by teardown", () => {
 		await dragCda(0.3);
 
 		expect(drawMethods.length).toBeGreaterThan(0);
-		expect(drawMethods.filter(draw => draw.method === "newPlot")).toEqual([]);
+		expect(drawMethods.filter((draw) => draw.method === "newPlot")).toEqual([]);
 	});
 });
 
@@ -1245,7 +1260,7 @@ describe("standard: the time/distance x-axis switch", () => {
 	}
 
 	function lastDraw(id: string) {
-		const matching = draws.filter(draw => draw.id === id);
+		const matching = draws.filter((draw) => draw.id === id);
 		return matching[matching.length - 1];
 	}
 
@@ -1257,14 +1272,18 @@ describe("standard: the time/distance x-axis switch", () => {
 		// The time axis IS the sample index, so the last x is one less than the
 		// series length rather than a distance.
 		expect(Math.max(...ve.data[0].x)).toBeGreaterThan(50);
-		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Time (seconds)");
+		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe(
+			"Time (seconds)",
+		);
 	});
 
 	it("shows the control once a draw has seen a usable distance channel", async () => {
 		await renderStitched();
 		await settle();
 
-		const group = document.querySelector<HTMLElement>("#ve-tab .plot-x-axis-toggle");
+		const group = document.querySelector<HTMLElement>(
+			"#ve-tab .plot-x-axis-toggle",
+		);
 		expect(group).not.toBeNull();
 		expect(group!.hidden).toBe(false);
 	});
@@ -1335,7 +1354,9 @@ describe("standard: the time/distance x-axis switch", () => {
 		toggleButton("time").click();
 		await settle();
 
-		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Time (seconds)");
+		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe(
+			"Time (seconds)",
+		);
 		expect(Math.max(...lastDraw("vePlot").data[0].x)).toBeGreaterThan(50);
 	});
 
@@ -1351,7 +1372,9 @@ describe("standard: the time/distance x-axis switch", () => {
 
 		await dragCda(0.3);
 
-		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe("Distance (km)");
+		expect(lastDraw("veResidualsPlot").layout.xaxis.title).toBe(
+			"Distance (km)",
+		);
 	});
 });
 

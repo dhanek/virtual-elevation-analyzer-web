@@ -76,8 +76,11 @@ class FakeMap {
 	// Recorded, not ignored: whether this is called AT ALL on a first load is
 	// the whole of F2-01. A no-op stub cannot tell a drawn region from a
 	// skipped one.
-	public trimRegionFits: Array<{ start: number; end: number; latCount: number }> =
-		[];
+	public trimRegionFits: Array<{
+		start: number;
+		end: number;
+		latCount: number;
+	}> = [];
 	fitBoundsToTrimRegion(
 		start: number,
 		end: number,
@@ -137,7 +140,11 @@ const calculatorCalls = vi.hoisted(
 );
 
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
-	createVeCalculator: (input: { cda: number; crr: number; timestamps: number[] }) => {
+	createVeCalculator: (input: {
+		cda: number;
+		crr: number;
+		timestamps: number[];
+	}) => {
 		calculatorCalls.push({ cda: input.cda, crr: input.crr });
 		const n = input.timestamps.length;
 		return {
@@ -303,7 +310,9 @@ function makeAppState(): AppState {
  */
 function makeUpdateAnalyzeButton(appState: AppState) {
 	return vi.fn(() => {
-		const btn = document.getElementById("analyzeBtn") as HTMLButtonElement | null;
+		const btn = document.getElementById(
+			"analyzeBtn",
+		) as HTMLButtonElement | null;
 		if (!btn) return;
 		btn.disabled = appState.selectedLaps.length === 0;
 	});
@@ -400,7 +409,9 @@ describe("Section 3 re-render after a GPS analysis mode switch", () => {
 		// behind the awaited map work inside the same try, and this rejection
 		// swallowed the entire re-binding.
 		mapInitializeBehaviour = () =>
-			Promise.reject(new Error("Map container is being reused by another instance"));
+			Promise.reject(
+				new Error("Map container is being reused by another instance"),
+			);
 
 		await selectLapAnalyseThenSwitchToNone(appState);
 
@@ -608,7 +619,9 @@ async function analyzeGpsLap(appState: AppState): Promise<void> {
 
 /** A real user gesture on the real slider the panel rendered. */
 async function dragCda(value: number): Promise<void> {
-	const slider = document.getElementById("cdaSlider") as HTMLInputElement | null;
+	const slider = document.getElementById(
+		"cdaSlider",
+	) as HTMLInputElement | null;
 	if (!slider) throw new Error("#cdaSlider is not in the rendered panel");
 	slider.value = value.toString();
 	slider.dispatchEvent(new Event("input", { bubbles: true }));
@@ -854,7 +867,7 @@ describe("GPS-02: the VE panel after a Section 3 mode change", () => {
 		// — this case is about the teardown reaching them, not about what the
 		// fake stamps.
 		const content = document.getElementById("veAnalysisContent")!;
-		content.querySelectorAll(".ve-plot-container__plot").forEach(node => {
+		content.querySelectorAll(".ve-plot-container__plot").forEach((node) => {
 			node.classList.add("js-plotly-plot");
 		});
 		const plotted = content.querySelectorAll(".js-plotly-plot").length;
@@ -1158,7 +1171,10 @@ describe("the VE panel after a Section 3 selection change", () => {
 	 * (`activeOutAndBackSections.ts`). That the funnel then draws it is
 	 * `outAndBackFixtureChain.test.ts`' subject, not this file's.
 	 */
-	function analyzedOutAndBackPanel(appState: AppState, sections: number[]): void {
+	function analyzedOutAndBackPanel(
+		appState: AppState,
+		sections: number[],
+	): void {
 		const section = (n: number) => ({
 			sectionNumber: n,
 			outboundStartIdx: (n - 1) * 40,
@@ -1284,7 +1300,9 @@ describe("the VE panel after a Section 3 selection change", () => {
 
 		// Stands in for a detection the user has already seen. Anything at all,
 		// as long as a re-detection would have to replace it.
-		appState.gpsDetectedLaps = [{ lapNumber: 1, startIdx: 0, endIdx: 99 }] as never;
+		appState.gpsDetectedLaps = [
+			{ lapNumber: 1, startIdx: 0, endIdx: 99 },
+		] as never;
 		// `runGpsLapDetection` bails without a FIT lap list to scope itself to
 		// (`section3Orchestration.ts:701`); `currentFitResult.laps` is a
 		// different field and does not populate it.
@@ -1298,7 +1316,8 @@ describe("the VE panel after a Section 3 selection change", () => {
 		// widen the selection: unticking the only checked lap would empty it and
 		// take the separate no-selection branch instead.
 		const boxes = document.querySelectorAll<HTMLInputElement>(".lap-checkbox");
-		if (boxes.length < 2) throw new Error("the rendered template has too few lap checkboxes");
+		if (boxes.length < 2)
+			throw new Error("the rendered template has too few lap checkboxes");
 		boxes[1].checked = true;
 		updateSelectedLaps();
 		await settle();

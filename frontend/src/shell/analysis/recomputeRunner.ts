@@ -228,7 +228,8 @@ export function scheduleRecompute(request: RecomputeRequest): void {
 	// `interval - (a large negative number)` and stall the plot for as long as
 	// the jump, which for an NTP step can be minutes. Treat it as "the interval
 	// has certainly elapsed" and run.
-	const intervalElapsed = sinceLastRun < 0 || sinceLastRun >= RECOMPUTE_THROTTLE_MS;
+	const intervalElapsed =
+		sinceLastRun < 0 || sinceLastRun >= RECOMPUTE_THROTTLE_MS;
 
 	// ZERO, not a synchronous call, for the leading edge.
 	//

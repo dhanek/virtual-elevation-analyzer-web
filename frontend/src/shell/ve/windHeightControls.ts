@@ -142,7 +142,9 @@ export function formatWindHeightReadout(params: AnalysisParameters): string {
  * True when the readout carries either prompt, so the binder can toggle the
  * CSS modifier without string-matching the readout text.
  */
-export function windHeightReadoutIsWarning(params: AnalysisParameters): boolean {
+export function windHeightReadoutIsWarning(
+	params: AnalysisParameters,
+): boolean {
 	return windHeightPrompt(params) !== null;
 }
 

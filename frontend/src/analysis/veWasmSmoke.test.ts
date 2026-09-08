@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { beforeAll, describe, expect, it, test } from 'vitest';
-import { initSync } from '@wasm/virtual_elevation_analyzer.js';
-import { createVeCalculator } from './VeCalculatorFactory';
-import { DEFAULT_PARAMETERS } from '../components/AnalysisParameters';
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { beforeAll, describe, expect, it, test } from "vitest";
+import { initSync } from "@wasm/virtual_elevation_analyzer.js";
+import { createVeCalculator } from "./VeCalculatorFactory";
+import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
 
 /**
  * D-11 proof: real VE math executes inside a plain vitest `environment: 'node'`
@@ -29,7 +29,7 @@ import { DEFAULT_PARAMETERS } from '../components/AnalysisParameters';
  */
 
 const WASM_PATH = fileURLToPath(
-    new URL('../../pkg/virtual_elevation_analyzer_bg.wasm', import.meta.url),
+	new URL("../../pkg/virtual_elevation_analyzer_bg.wasm", import.meta.url),
 );
 
 const built = existsSync(WASM_PATH);
@@ -42,84 +42,93 @@ const built = existsSync(WASM_PATH);
  * who has never run `./build.sh` is not blocked; under CI, `deploy.yml` runs
  * "Build WASM" before "Test Frontend", so a missing artifact is a real failure.
  */
-test('wasm artifact is present in CI', () => {
-    if (process.env.CI) {
-        expect(built).toBe(true);
-    }
+test("wasm artifact is present in CI", () => {
+	if (process.env.CI) {
+		expect(built).toBe(true);
+	}
 });
 
 /** Deterministic synthetic ride — no fixture dependency; that arrives in 07-01 Task 3. */
 const POINT_COUNT = 120;
 
 function buildSyntheticRide() {
-    const timestamps: number[] = [];
-    const power: number[] = [];
-    const velocity: number[] = [];
-    const positionLat: number[] = [];
-    const positionLong: number[] = [];
-    const altitude: number[] = [];
-    const distance: number[] = [];
-    const windSpeed: number[] = [];
+	const timestamps: number[] = [];
+	const power: number[] = [];
+	const velocity: number[] = [];
+	const positionLat: number[] = [];
+	const positionLong: number[] = [];
+	const altitude: number[] = [];
+	const distance: number[] = [];
+	const windSpeed: number[] = [];
 
-    for (let i = 0; i < POINT_COUNT; i++) {
-        timestamps.push(i);
-        power.push(250);
-        velocity.push(10);
-        positionLat.push(50 + i * 0.0001);
-        positionLong.push(8 + i * 0.0001);
-        altitude.push(100);
-        distance.push(i * 10);
-        windSpeed.push(10);
-    }
+	for (let i = 0; i < POINT_COUNT; i++) {
+		timestamps.push(i);
+		power.push(250);
+		velocity.push(10);
+		positionLat.push(50 + i * 0.0001);
+		positionLong.push(8 + i * 0.0001);
+		altitude.push(100);
+		distance.push(i * 10);
+		windSpeed.push(10);
+	}
 
-    return { timestamps, power, velocity, positionLat, positionLong, altitude, distance, windSpeed };
+	return {
+		timestamps,
+		power,
+		velocity,
+		positionLat,
+		positionLong,
+		altitude,
+		distance,
+		windSpeed,
+	};
 }
 
-describe.skipIf(!built)('real WASM through createVeCalculator', () => {
-    beforeAll(() => {
-        initSync({ module: readFileSync(WASM_PATH) });
-    });
+describe.skipIf(!built)("real WASM through createVeCalculator", () => {
+	beforeAll(() => {
+		initSync({ module: readFileSync(WASM_PATH) });
+	});
 
-    it('computes a finite VE profile for a synthetic ride', () => {
-        const ride = buildSyntheticRide();
+	it("computes a finite VE profile for a synthetic ride", () => {
+		const ride = buildSyntheticRide();
 
-        const calculator = createVeCalculator({
-            ...ride,
-            params: { ...DEFAULT_PARAMETERS },
-            cda: 0.3,
-            crr: 0.005,
-        });
+		const calculator = createVeCalculator({
+			...ride,
+			params: { ...DEFAULT_PARAMETERS },
+			cda: 0.3,
+			crr: 0.005,
+		});
 
-        const result = calculator.calculate_virtual_elevation(0.3, 0.005, 0, 0);
+		const result = calculator.calculate_virtual_elevation(0.3, 0.005, 0, 0);
 
-        expect(result.virtual_elevation.length).toBe(POINT_COUNT);
-        expect(Number.isFinite(result.r2)).toBe(true);
-        expect(Number.isFinite(result.rmse)).toBe(true);
-        expect(Number.isFinite(result.ve_elevation_diff)).toBe(true);
-        expect(Number.isFinite(result.actual_elevation_diff)).toBe(true);
-    });
+		expect(result.virtual_elevation.length).toBe(POINT_COUNT);
+		expect(Number.isFinite(result.r2)).toBe(true);
+		expect(Number.isFinite(result.rmse)).toBe(true);
+		expect(Number.isFinite(result.ve_elevation_diff)).toBe(true);
+		expect(Number.isFinite(result.actual_elevation_diff)).toBe(true);
+	});
 
-    it('is deterministic across two identical runs', () => {
-        const ride = buildSyntheticRide();
+	it("is deterministic across two identical runs", () => {
+		const ride = buildSyntheticRide();
 
-        const first = createVeCalculator({
-            ...ride,
-            params: { ...DEFAULT_PARAMETERS },
-            cda: 0.3,
-            crr: 0.005,
-        }).calculate_virtual_elevation(0.3, 0.005, 0, 0);
+		const first = createVeCalculator({
+			...ride,
+			params: { ...DEFAULT_PARAMETERS },
+			cda: 0.3,
+			crr: 0.005,
+		}).calculate_virtual_elevation(0.3, 0.005, 0, 0);
 
-        const second = createVeCalculator({
-            ...ride,
-            params: { ...DEFAULT_PARAMETERS },
-            cda: 0.3,
-            crr: 0.005,
-        }).calculate_virtual_elevation(0.3, 0.005, 0, 0);
+		const second = createVeCalculator({
+			...ride,
+			params: { ...DEFAULT_PARAMETERS },
+			cda: 0.3,
+			crr: 0.005,
+		}).calculate_virtual_elevation(0.3, 0.005, 0, 0);
 
-        expect(second.r2).toBeCloseTo(first.r2, 12);
-        expect(second.rmse).toBeCloseTo(first.rmse, 12);
-        expect(Array.from(second.virtual_elevation)).toEqual(
-            Array.from(first.virtual_elevation),
-        );
-    });
+		expect(second.r2).toBeCloseTo(first.r2, 12);
+		expect(second.rmse).toBeCloseTo(first.rmse, 12);
+		expect(Array.from(second.virtual_elevation)).toEqual(
+			Array.from(first.virtual_elevation),
+		);
+	});
 });

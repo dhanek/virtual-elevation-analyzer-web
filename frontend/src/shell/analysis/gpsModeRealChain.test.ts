@@ -40,13 +40,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** Every `createVeCalculator` call the chain made, in order. */
 const calculatorCalls = vi.hoisted(
-	() => [] as Array<{
-		cda: number;
-		crr: number;
-		altitude: number[];
-		rhoArray: number[] | null;
-		timestamps: number;
-	}>,
+	() =>
+		[] as Array<{
+			cda: number;
+			crr: number;
+			altitude: number[];
+			rhoArray: number[] | null;
+			timestamps: number;
+		}>,
 );
 
 vi.mock("../../analysis/VeCalculatorFactory", () => ({
@@ -1121,7 +1122,6 @@ describe.each(MODES)(
 		});
 	},
 );
-
 
 /**
  * THE AIR-DENSITY SERIES AND THE SEGMENT IT IS SLICED FOR.

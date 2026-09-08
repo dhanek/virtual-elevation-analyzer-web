@@ -25,7 +25,10 @@ import {
 import { formatCoveredLapCount } from "./bindStandardSliders";
 
 function sourceOf(relativePath: string): string {
-	return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+	return readFileSync(
+		fileURLToPath(new URL(relativePath, import.meta.url)),
+		"utf8",
+	);
 }
 
 function parse(markup: string): HTMLElement {
@@ -49,8 +52,12 @@ describe("airSpeedOffsetControlMarkup", () => {
 
 	it("opens on the stored offset, not the mode default", () => {
 		const host = parse(airSpeedOffsetControlMarkup(-4, 2));
-		const slider = host.querySelector("#airSpeedOffsetSlider") as HTMLInputElement;
-		const number = host.querySelector("#airSpeedOffsetValue") as HTMLInputElement;
+		const slider = host.querySelector(
+			"#airSpeedOffsetSlider",
+		) as HTMLInputElement;
+		const number = host.querySelector(
+			"#airSpeedOffsetValue",
+		) as HTMLInputElement;
 
 		expect(slider.value).toBe("-4");
 		expect(number.value).toBe("-4");
@@ -66,7 +73,9 @@ describe("airSpeedOffsetControlMarkup", () => {
 
 	it("carries the range the handler clamps to", () => {
 		const host = parse(airSpeedOffsetControlMarkup(0, 0));
-		const slider = host.querySelector("#airSpeedOffsetSlider") as HTMLInputElement;
+		const slider = host.querySelector(
+			"#airSpeedOffsetSlider",
+		) as HTMLInputElement;
 
 		expect(slider.min).toBe("-10");
 		expect(slider.max).toBe("10");

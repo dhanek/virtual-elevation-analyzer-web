@@ -35,7 +35,9 @@ describe("windHeightControlsMarkup", () => {
 
 		expect(host.querySelector(".wind-height-controls__row")).not.toBeNull();
 		expect(host.querySelector(".wind-height-controls__row label")).toBeNull();
-		expect(host.querySelector("label.wind-height-controls__label")).not.toBeNull();
+		expect(
+			host.querySelector("label.wind-height-controls__label"),
+		).not.toBeNull();
 	});
 });
 
@@ -48,9 +50,7 @@ describe("formatWindHeightReadout", () => {
 		// IN-02: the guard rejected null/undefined/NaN but not the infinities,
 		// so a non-finite wind reached toFixed and printed "Infinity m/s".
 		for (const raw of [Infinity, -Infinity]) {
-			expect(formatWindHeightReadout(makeParams({ wind_speed: raw }))).toBe(
-				"",
-			);
+			expect(formatWindHeightReadout(makeParams({ wind_speed: raw }))).toBe("");
 		}
 	});
 

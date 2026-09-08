@@ -16,7 +16,10 @@ const baseInput = {
 	formatPower: (w: number) => `${w}W`,
 };
 
-function lapCardCount(html: string, predicate: (card: string) => boolean): number {
+function lapCardCount(
+	html: string,
+	predicate: (card: string) => boolean,
+): number {
 	// Split into FIT-lap card chunks and count those matching predicate.
 	const cards = html.split('class="lap-checkbox-item').slice(1);
 	return cards.filter(predicate).length;
@@ -33,7 +36,9 @@ describe("renderSection3Template lap selection reflection", () => {
 
 		const lap1 = html.slice(html.indexOf('data-lap="1"'));
 		const lap1Card = lap1.slice(0, lap1.indexOf('data-lap="2"'));
-		expect(lap1Card).not.toContain('type="checkbox" class="lap-checkbox" id="lap-1" checked');
+		expect(lap1Card).not.toContain(
+			'type="checkbox" class="lap-checkbox" id="lap-1" checked',
+		);
 	});
 
 	it("renders all FIT laps unchecked when nothing is selected", () => {

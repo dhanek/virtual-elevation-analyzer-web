@@ -1,10 +1,10 @@
-import { log } from '../../utils/log'
+import { log } from "../../utils/log";
 
 /**
  * Plotly's graph-div marker class. Plotly stamps it on every element it has
  * plotted into, so it is the honest test for "this div is a live graph".
  */
-const PLOTLY_GRAPH_SELECTOR = '.js-plotly-plot'
+const PLOTLY_GRAPH_SELECTOR = ".js-plotly-plot";
 
 /**
  * Release every Plotly graph inside a container that is being taken off screen.
@@ -31,17 +31,19 @@ const PLOTLY_GRAPH_SELECTOR = '.js-plotly-plot'
  * not purge.
  */
 export function purgePlotlyGraphsIn(root: HTMLElement): void {
-    const Plotly = (window as unknown as {
-        Plotly?: { purge?: (gd: Element) => unknown }
-    }).Plotly
-    const purge = Plotly?.purge
-    if (!purge) return
+	const Plotly = (
+		window as unknown as {
+			Plotly?: { purge?: (gd: Element) => unknown };
+		}
+	).Plotly;
+	const purge = Plotly?.purge;
+	if (!purge) return;
 
-    root.querySelectorAll(PLOTLY_GRAPH_SELECTOR).forEach(graph => {
-        try {
-            purge.call(Plotly, graph)
-        } catch (error) {
-            log.debug('Plotly purge failed for a graph', error)
-        }
-    })
+	root.querySelectorAll(PLOTLY_GRAPH_SELECTOR).forEach((graph) => {
+		try {
+			purge.call(Plotly, graph);
+		} catch (error) {
+			log.debug("Plotly purge failed for a graph", error);
+		}
+	});
 }

@@ -17,7 +17,10 @@ interface PendingStandardAutoRho {
 
 const pendingByState = new WeakMap<AppState, PendingStandardAutoRho>();
 
-function finishPending(appState: AppState, pending: PendingStandardAutoRho): void {
+function finishPending(
+	appState: AppState,
+	pending: PendingStandardAutoRho,
+): void {
 	if (pendingByState.get(appState) === pending) pendingByState.delete(appState);
 	if (appState.standardPendingAutoRhoDebounce?.promise === pending.promise) {
 		appState.standardPendingAutoRhoDebounce = null;
@@ -89,7 +92,8 @@ export function scheduleStandardAutoRho(
 		pending!.activeRuns += 1;
 		try {
 			const stillOwnsPanel =
-				pending!.owner === null || appState.standardPanelOwner === pending!.owner;
+				pending!.owner === null ||
+				appState.standardPanelOwner === pending!.owner;
 			if (stillOwnsPanel && appState.currentParameters?.auto_calculate_rho) {
 				await calculateAutoRho(
 					appState,

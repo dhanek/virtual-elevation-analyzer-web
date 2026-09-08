@@ -82,9 +82,9 @@ describe("interpolateAscending", () => {
 		// takes the first bracket it finds; this must not produce Infinity.
 		const withDuplicate = [0, 1, 1, 2];
 		const elevs = [10, 20, 30, 40];
-		expect(
-			Number.isFinite(interpolateAscending(1, withDuplicate, elevs)),
-		).toBe(true);
+		expect(Number.isFinite(interpolateAscending(1, withDuplicate, elevs))).toBe(
+			true,
+		);
 	});
 
 	it("agrees with interpolateElevation over a long realistic ramp", () => {

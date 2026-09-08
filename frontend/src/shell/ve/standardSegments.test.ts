@@ -43,7 +43,7 @@ describe("mapTrimToSegments", () => {
 		);
 
 		expect(mapped).toHaveLength(3);
-		expect(mapped.map(s => s.trim)).toEqual([
+		expect(mapped.map((s) => s.trim)).toEqual([
 			{ start: 0, end: 9 },
 			{ start: 0, end: 9 },
 			{ start: 0, end: 9 },
@@ -55,7 +55,12 @@ describe("mapTrimToSegments", () => {
 		// (18..27) at local offset 2. Subtracting cumulative SEGMENT lengths
 		// instead would place it at 20 - 20 = 0, one lap too early by two
 		// samples -- the exact off-by-one this routing exists to prevent.
-		const mapped = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, SELECTED_INDICES, 20, 27);
+		const mapped = mapTrimToSegments(
+			SHARED_BOUNDARY_SEGMENTS,
+			SELECTED_INDICES,
+			20,
+			27,
+		);
 
 		expect(mapped).toHaveLength(1);
 		expect(mapped[0].key).toBe("lap3");
@@ -63,10 +68,15 @@ describe("mapTrimToSegments", () => {
 	});
 
 	it("clips a window that starts mid-lap and ends mid-lap", () => {
-		const mapped = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, SELECTED_INDICES, 5, 22);
+		const mapped = mapTrimToSegments(
+			SHARED_BOUNDARY_SEGMENTS,
+			SELECTED_INDICES,
+			5,
+			22,
+		);
 
-		expect(mapped.map(s => s.key)).toEqual(["lap1", "lap2", "lap3"]);
-		expect(mapped.map(s => s.trim)).toEqual([
+		expect(mapped.map((s) => s.key)).toEqual(["lap1", "lap2", "lap3"]);
+		expect(mapped.map((s) => s.trim)).toEqual([
 			{ start: 5, end: 9 },
 			{ start: 0, end: 9 },
 			{ start: 0, end: 4 },
@@ -79,28 +89,48 @@ describe("mapTrimToSegments", () => {
 		// and rmse = 0 and drag the mean of the per-lap fits toward zero.
 		expect(MIN_TRIMMED_SEGMENT_SAMPLES).toBe(3);
 
-		const mapped = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, SELECTED_INDICES, 0, 10);
+		const mapped = mapTrimToSegments(
+			SHARED_BOUNDARY_SEGMENTS,
+			SELECTED_INDICES,
+			0,
+			10,
+		);
 
-		expect(mapped.map(s => s.key)).toEqual(["lap1"]);
-		expect(mapped.map(s => s.trim)).toEqual([{ start: 0, end: 9 }]);
+		expect(mapped.map((s) => s.key)).toEqual(["lap1"]);
+		expect(mapped.map((s) => s.trim)).toEqual([{ start: 0, end: 9 }]);
 	});
 
 	it("drops every segment outside the window and keeps none by accident", () => {
-		const mapped = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, SELECTED_INDICES, 0, 4);
-		expect(mapped.map(s => s.key)).toEqual(["lap1"]);
+		const mapped = mapTrimToSegments(
+			SHARED_BOUNDARY_SEGMENTS,
+			SELECTED_INDICES,
+			0,
+			4,
+		);
+		expect(mapped.map((s) => s.key)).toEqual(["lap1"]);
 	});
 
 	it("leaves segments untrimmed when there is no usable index mapping", () => {
 		const mapped = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, [], 3, 7);
 		expect(mapped).toHaveLength(3);
-		expect(mapped.every(s => s.trim === undefined)).toBe(true);
+		expect(mapped.every((s) => s.trim === undefined)).toBe(true);
 	});
 
 	it("tolerates reversed or out-of-range slider values", () => {
-		const reversed = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, SELECTED_INDICES, 27, 0);
-		const clamped = mapTrimToSegments(SHARED_BOUNDARY_SEGMENTS, SELECTED_INDICES, -5, 9999);
+		const reversed = mapTrimToSegments(
+			SHARED_BOUNDARY_SEGMENTS,
+			SELECTED_INDICES,
+			27,
+			0,
+		);
+		const clamped = mapTrimToSegments(
+			SHARED_BOUNDARY_SEGMENTS,
+			SELECTED_INDICES,
+			-5,
+			9999,
+		);
 
-		expect(reversed.map(s => s.trim)).toEqual(clamped.map(s => s.trim));
+		expect(reversed.map((s) => s.trim)).toEqual(clamped.map((s) => s.trim));
 		expect(clamped).toHaveLength(3);
 	});
 });
@@ -120,7 +150,7 @@ function profile(
 		indices,
 		distancesKm: indices.map((_, i) => i / 1000),
 		timeIndices: indices.map((_, i) => i),
-		virtualElevation: indices.map(index => index),
+		virtualElevation: indices.map((index) => index),
 		virtualElevationCompare: null,
 		resultCompare: null,
 		actualElevation: indices.map(() => 100),
@@ -273,9 +303,9 @@ describe("stitchStandardProfiles: the cumulative distance axis", () => {
 			),
 		).toBe(false);
 
-		expect(
-			hasUsableDistance(stitchStandardProfiles([], normalized)),
-		).toBe(false);
+		expect(hasUsableDistance(stitchStandardProfiles([], normalized))).toBe(
+			false,
+		);
 	});
 });
 
@@ -307,7 +337,10 @@ describe("stitchStandardProfiles", () => {
 	});
 
 	it("defaults an untrimmed segment to its whole extent", () => {
-		const stitched = stitchStandardProfiles([profile("lap1", 0, 9)], normalized);
+		const stitched = stitchStandardProfiles(
+			[profile("lap1", 0, 9)],
+			normalized,
+		);
 
 		expect(stitched.trimStart).toBe(0);
 		expect(stitched.trimEnd).toBe(9);

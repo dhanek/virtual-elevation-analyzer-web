@@ -24,7 +24,6 @@ import {
 } from "./outAndBackPlots";
 import { setupTabSwitching } from "../dom/tabs";
 
-
 /**
  * Reassemble the primitive's FLAT segment list into the per-section shape the
  * out-and-back plots and stat helpers expect.
@@ -136,8 +135,10 @@ export function createOutAndBackUpdateCallbacks(
 			// Store Result persists (see outAndBackMode.summarize).
 			const meanR2 =
 				profiles.length > 0
-					? profiles.reduce((sum, profile) => sum + (profile.result.r2 ?? 0), 0) /
-						profiles.length
+					? profiles.reduce(
+							(sum, profile) => sum + (profile.result.r2 ?? 0),
+							0,
+						) / profiles.length
 					: 0;
 
 			return {

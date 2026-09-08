@@ -168,7 +168,11 @@ const MODES: readonly ModeUnderTest[] = [
 				hideLoading: () => {},
 				showError: () => {},
 			};
-			return setupOutAndBackSliderSync(services, parameterStorage, async () => ({}));
+			return setupOutAndBackSliderSync(
+				services,
+				parameterStorage,
+				async () => ({}),
+			);
 		},
 	},
 ];
@@ -218,9 +222,7 @@ describe.each(MODES)(
 			// row must be reported skipped, not silently dropped. If this ever
 			// starts passing with a non-empty `bound`, the report is lying and
 			// every assertion above it is vacuous.
-			const warn = vi
-				.spyOn(console, "warn")
-				.mockImplementation(() => {});
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 			document.body.innerHTML = `<div id="veAnalysisSection"></div>`;
 			const stripped = bind(makeAppState());
 

@@ -70,9 +70,7 @@ describe("the app-footer results entry point", () => {
 		);
 
 		expect(document.getElementById("resultsEmpty")!.hidden).toBe(false);
-		expect(
-			document.querySelectorAll("#resultsTable tbody tr"),
-		).toHaveLength(0);
+		expect(document.querySelectorAll("#resultsTable tbody tr")).toHaveLength(0);
 	});
 
 	/**
@@ -81,8 +79,6 @@ describe("the app-footer results entry point", () => {
 	 * as a type error. Binding must not throw the whole app init on that.
 	 */
 	it("is a no-op when the button is not in the page", () => {
-		expect(() =>
-			bindShowAllResultsButton(null, emptyStore()),
-		).not.toThrow();
+		expect(() => bindShowAllResultsButton(null, emptyStore())).not.toThrow();
 	});
 });

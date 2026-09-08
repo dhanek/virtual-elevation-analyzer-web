@@ -39,7 +39,9 @@ function paintPanel(): void {
 }
 
 function groups(): HTMLElement[] {
-	return Array.from(document.querySelectorAll<HTMLElement>(".plot-x-axis-toggle"));
+	return Array.from(
+		document.querySelectorAll<HTMLElement>(".plot-x-axis-toggle"),
+	);
 }
 
 function buttons(axis: "time" | "distance"): HTMLButtonElement[] {
@@ -55,7 +57,7 @@ function activeAxes(): string[] {
 		document.querySelectorAll<HTMLButtonElement>(
 			".plot-x-axis-toggle__btn--active",
 		),
-	).map(button => button.dataset.axis!);
+	).map((button) => button.dataset.axis!);
 }
 
 describe("the Standard time/distance x-axis toggle", () => {
@@ -78,11 +80,11 @@ describe("the Standard time/distance x-axis toggle", () => {
 		// exists, so it must be in the DOM at bind time and merely hidden --
 		// gating the markup itself would leave it unbound for the panel's life.
 		expect(groups()).toHaveLength(2);
-		expect(groups().every(group => group.hidden)).toBe(true);
+		expect(groups().every((group) => group.hidden)).toBe(true);
 
 		syncPlotXAxisAvailability(true);
 
-		expect(groups().every(group => group.hidden)).toBe(false);
+		expect(groups().every((group) => group.hidden)).toBe(false);
 	});
 
 	it("refuses to switch to distance while distance is unavailable", () => {
@@ -134,7 +136,7 @@ describe("the Standard time/distance x-axis toggle", () => {
 		syncPlotXAxisAvailability(false);
 
 		expect(getPlotXAxis()).toBe("time");
-		expect(groups().every(group => group.hidden)).toBe(true);
+		expect(groups().every((group) => group.hidden)).toBe(true);
 	});
 
 	it("returns to time when the panel is rebuilt", () => {
