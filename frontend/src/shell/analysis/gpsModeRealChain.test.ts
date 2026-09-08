@@ -1134,11 +1134,12 @@ describe.each(MODES)(
  * pushed `undefined` into a `number[]` and NaN rho crossed the WASM boundary
  * for the rest of that segment.
  *
- * The Standard leg had already been given this guard, with the rule written
- * down at `rhoArrayResolver.ts:86` — "a short or hole-punched array under the
- * calculator is a worse bug than a constant one". These two legs are that rule
- * applied where it was missed, so the assertion is not "rho is right" but
- * "rho is either complete or absent, never partial".
+ * THE RULE, and this file is where it is written down now: A SHORT OR
+ * HOLE-PUNCHED ARRAY UNDER THE CALCULATOR IS A WORSE BUG THAN A CONSTANT ONE.
+ * It was inherited from the Standard leg's analyze-time guard, which the
+ * analyze-leg retirement removed along with the resolver that carried it.
+ * These two legs are that rule applied where it was missed, so the assertion is
+ * not "rho is right" but "rho is either complete or absent, never partial".
  *
  * WHAT CHANGED, and it MATTERS MORE HERE THAN ANYWHERE ELSE IN THIS FILE. The
  * GPS-lap analyze leg is retired, so the guard it carried went with it — and the
