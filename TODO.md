@@ -420,6 +420,18 @@ changed and why.
       both `npm run check` and `npm run lint`.** `prettier --check` now runs as the FIRST clause
       of `npm run check`, so formatting drift fails before `tsc` is even reached.
 
+      Criteria (concretised 2026-09-08, PR #20 review round 26):
+      - [x] E1 A machine formatting check runs as part of `npm run check`
+      - [x] E2 A block indented one level shallow relative to the `if` that opened it
+            makes `npm run check` exit non-zero and name the file, in ANY first-party
+            TypeScript source file *(confirmed wide, 2026-09-08: the narrow reading
+            would let the item close while its own defect survives in three source
+            files that `.prettierignore` excluded)*
+      - [x] E3 The repo-wide reformat carries no behavioural change
+      - [x] E4 The formatter's output is stable and the other gates are unchanged —
+            `check`, `lint`, `test`, `build` all clean, and prettier is idempotent
+            over its own output
+
       **Demonstrated before and after, with the item's own defect.** A block indented one level
       shallow relative to the `if` that opened it was inserted into
       `interpolateAscending`: before, `npm run check`, `npm run lint` and the suite all exited 0;
@@ -429,14 +441,21 @@ changed and why.
       **`useTabs: true`, and the choice was measured rather than defaulted.** 149 of 236
       TypeScript files were tab-indented against 87 space-indented, and the tab side includes
       everything written recently. Prettier's own 2-space default would have rewritten **234** of
-      236 files; tabs rewrote **166**, and left the majority style in the majority. Options that
+      236 files; tabs rewrote **168**, and left the majority style in the majority. That reformat
+      reached the tree in two commits, which is why no single commit shows 168: `fa35ade` moved
+      166 files, and the remaining two — the fixture loader modules — moved in `f68a443`, once
+      `.prettierignore` was narrowed to the generated JSON it was written for. Options that
       are prettier's defaults are stated explicitly in `.prettierrc.json` rather than omitted, so
       a later reader can tell which were chosen.
 
-      **Three commits, deliberately.** Tooling (the dependency — prettier already resolved here
-      transitively, which `npm run check` must not rest on — plus config and ignore file), then
-      the mechanical reformat on its own so it can be listed in `.git-blame-ignore-revs`, then
-      the wiring. That order means `npm run check` never names a command the tree would fail.
+      **Three commits, deliberately.** Tooling (the dependency — prettier was neither declared
+      nor resolved anywhere on `origin/main`, whose `package-lock.json` contains no `prettier`
+      entry at all, so the commit adds the dependency rather than pinning down a transitive one
+      — plus config and ignore file), then the mechanical reformat on its own so it can be
+      listed in `.git-blame-ignore-revs`, then the wiring. That order means `npm run check`
+      never names a command the tree would fail. Commit `9853d28`'s own message still carries
+      the earlier, wrong reason and is deliberately left unrewritten: rewording it would change
+      `fa35ade`'s SHA, which `.git-blame-ignore-revs` hard-codes.
 
       **One file needed a hand, and it is the interesting part.** In `recomputeRunner.test.ts`
       prettier WRAPPED
