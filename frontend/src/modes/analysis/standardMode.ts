@@ -1,5 +1,6 @@
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { AppState, LapIndexRange } from "../../state/AppState";
+import type { TimeRange } from "./types";
 import { collectSelectionIndices } from "./selectionIndices";
 import {
 	buildCombinedSegmentResult,
@@ -79,7 +80,7 @@ function selectionForLaps(
 		selectedItems: entries.map((entry) => entry.lapNumber),
 		selectedEntries,
 		indexRanges: null,
-		timeRanges: selectedEntries.map((lap) => ({
+		timeRanges: selectedEntries.map((lap): TimeRange => ({
 			start: lap.start_time,
 			end: lap.end_time,
 		})),

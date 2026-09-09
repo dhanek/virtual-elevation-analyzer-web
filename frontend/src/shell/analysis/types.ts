@@ -13,7 +13,3 @@ export interface ShellServices {
 	hideLoading: () => void;
 	showError: (message: string) => void;
 }
-
-export interface ShellAnalysisContext extends ShellServices {
-	waitForPlotly: () => Promise<void>;
-}

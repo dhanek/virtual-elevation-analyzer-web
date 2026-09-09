@@ -4,6 +4,7 @@
  * Verbatim lift from main.ts -- rendering logic for out-and-back mode plots.
  */
 import type { OutAndBackVEProfile } from "./types";
+import type { OutAndBackSectionLegs } from "../../modes/analysis/segmentVirtualDistance";
 import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import {
 	getMultiSegmentColor,
@@ -264,7 +265,7 @@ export function renderOutAndBackVdPlot(profiles: OutAndBackVEProfile[]) {
 	Plotly.react("oabVdPlot", figure.data, figure.layout, figure.config);
 	renderVirtualDistanceHeader(
 		sectionVirtualDistanceRows(
-			profiles.map((profile) => ({
+			profiles.map((profile): OutAndBackSectionLegs => ({
 				label: `Section ${profile.sectionNumber}`,
 				outbound: profile.outboundSeries,
 				inbound: profile.inboundSeries,
