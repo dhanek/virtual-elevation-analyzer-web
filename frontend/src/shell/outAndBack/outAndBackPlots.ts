@@ -8,7 +8,6 @@ import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplemen
 import {
 	getMultiSegmentColor,
 	interpolateAscending,
-	interpolateElevation,
 } from "../multiSegment/shared";
 import {
 	buildMultiSegmentWindFigure,
@@ -79,8 +78,12 @@ export function calculateOutAndBackMeanElevation(
 				)
 					continue;
 
-				// Linear interpolation
-				const elevAtDist = interpolateElevation(
+				// The outbound leg is recorded from gate A, so `outboundDistances`
+				// is already ascending — `buildRelativeDistanceSeries` maps the
+				// FIT cumulative odometer, which never decreases. No mirroring,
+				// so no re-sort: this is the branch the inbound one had to be
+				// corrected to match.
+				const elevAtDist = interpolateAscending(
 					targetDist,
 					profile.outboundDistances,
 					profile.outboundActualElevation,
@@ -106,9 +109,11 @@ export function calculateOutAndBackMeanElevation(
 			// (distance from gate A), which is what the average needs. But it also
 			// REVERSES THE ORDER: the inbound leg is recorded from gate B, so the
 			// mirrored distances run high to low. An interpolator that brackets a
-			// target needs them ascending, and `interpolateElevation`'s first guard
-			// is `targetDist <= distances[0]` — on a descending array that is the
+			// target needs them ascending, and the interpolator's first guard is
+			// `targetDist <= distances[0]` — on a descending array that is the
 			// MAXIMUM, so it fired for every target and returned `elevations[0]`.
+			// (That guard is unchanged in `interpolateAscending`, which is why
+			// `shared.test.ts` still pins the descending case as a live trap.)
 			// The inbound leg contributed ONE CONSTANT at every reference distance,
 			// which dragged the mean halfway to a flat line and corrupted every
 			// RMSE measured against it.

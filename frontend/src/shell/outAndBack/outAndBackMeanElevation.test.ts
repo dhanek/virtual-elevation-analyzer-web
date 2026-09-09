@@ -8,10 +8,12 @@
  *
  * Mirroring makes the distance array DESCENDING while the elevation array stays
  * in recording order. The pairing is still correct point for point — only the
- * sort order is reversed — but `interpolateElevation`'s first guard is
+ * sort order is reversed — but the interpolator's first guard is
  * `targetDist <= distances[0]`, and on a descending array `distances[0]` is the
  * MAXIMUM. So the guard fired for every target and the inbound leg contributed
- * `elevations[0]` — one constant — at every reference distance.
+ * `elevations[0]` — one constant — at every reference distance. That guard is
+ * unchanged in `interpolateAscending`, the one interpolator left, so the trap is
+ * still reachable by a future caller and `shared.test.ts` still pins it.
  *
  * The physical case that makes this visible is the one out-and-back is for: the
  * two legs cover the same ground, so the inbound elevation profile is the
