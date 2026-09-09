@@ -95,12 +95,22 @@ describe("no site re-introduces its own Crr fallback literal", () => {
 	 * `resolveAppliedCrr` call is where the computed half lives now — or re-add
 	 * `const FALLBACK_CRR = 0.008;` to `requestModeUpdate.ts`, and this fails
 	 * naming the file and the line.
+	 *
+	 * TWO CORRECTIONS TO THE PATTERN, both made when un-exporting internal
+	 * symbols exposed them. It was anchored `^\s*(const|let|var)`, so an
+	 * `export const` was invisible to it — a fallback declared and exported
+	 * would have walked straight past. And it accepted `[0-9.]+`, so it fired on
+	 * `const CRR_TEMP_ANCHOR_C = 22`, a TEMPERATURE in degrees C that is not a
+	 * Crr value at all and only matched because its name contains "crr". A Crr
+	 * fallback is `0.00x`, so the literal is now `0\.\d+`, which is the bar
+	 * `asOperator` above already sets. The false positive had been masked by the
+	 * `export` keyword rather than by the pattern being right.
 	 */
 	it("leaves no numeric crr fallback outside the shared module", () => {
 		const offenders: string[] = [];
 		const asOperator = /(\?\?|\|\|)\s*0\.\d+/;
 		const asDeclaration =
-			/^\s*(const|let|var)\s+[A-Za-z_]*[Cc][Rr][Rr][A-Za-z_]*\s*(:\s*[A-Za-z]+\s*)?=\s*[0-9.]+/;
+			/^\s*(export\s+)?(const|let|var)\s+[A-Za-z_]*[Cc][Rr][Rr][A-Za-z_]*\s*(:\s*[A-Za-z]+\s*)?=\s*0\.\d+/;
 		for (const file of sourceFiles(join(__dirname, ".."))) {
 			const text = readFileSync(file, "utf8");
 			text.split("\n").forEach((line, i) => {
