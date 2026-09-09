@@ -209,8 +209,8 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
-- [ ] **[S–M] 74 exports are used only inside their own file.** `npm run knip` reports them;
-      `npm run check` does not gate on them, because taking 74 `export` keywords off in one pass
+- [ ] **[S–M] 72 exports are used only inside their own file.** `npm run knip` reports them;
+      `npm run check` does not gate on them, because taking 72 `export` keywords off in one pass
       is a large mechanical diff and several sit beside comments explaining why the declaration
       exists. Each is a safe, `tsc`-verified edit on its own — drop `export`, and the compiler
       proves nothing imported it. Worth doing in one sitting, after which `check` can gate on
@@ -428,13 +428,14 @@ changed and why.
 - [x] **[S] No dead-export detector runs in CI.** `knip` is wired. **Sized before wiring, as the
       item required, and the size changed the design:** a first run reported 3 unused files, 51
       unused exports and 28 unused exported types — 82, not the [S] the item assumed, and not
-      gateable as-is. Splitting them made it tractable: **74** were exported but used inside
+      gateable as-is. Splitting them made it tractable: **74** (72 after PR #22's deletions
+      landed) were exported but used inside
       their own file (mechanical `export` removal), **5** referenced nowhere, **3** files with no
       importer.
 
       So `npm run check` gates on `--include files` — the category this took to zero — and
       `npm run knip` reports the rest. Gating on a clean category is a real gate; baselining 75
-      findings to claim a green one is not. The 74 over-exported symbols are recorded below as
+      findings to claim a green one is not. The remaining over-exported symbols are recorded below as
       what remains.
 
       Deleted: three barrel files with zero importers, a dead `ShellAnalysisContext`, and a
