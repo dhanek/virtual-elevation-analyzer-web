@@ -96,26 +96,51 @@ describe("no site re-introduces its own Crr fallback literal", () => {
 	 * `const FALLBACK_CRR = 0.008;` to `requestModeUpdate.ts`, and this fails
 	 * naming the file and the line.
 	 *
-	 * TWO CORRECTIONS TO THE PATTERN, both made when un-exporting internal
-	 * symbols exposed them. It was anchored `^\s*(const|let|var)`, so an
-	 * `export const` was invisible to it — a fallback declared and exported
-	 * would have walked straight past. And it accepted `[0-9.]+`, so it fired on
+	 * TWO CORRECTIONS, both made when un-exporting internal symbols exposed them.
+	 *
+	 * BLIND SPOT: it was anchored `^\s*(const|let|var)`, so an `export const`
+	 * was invisible — a fallback declared and exported walked straight past the
+	 * guard built to catch it.
+	 *
+	 * FALSE POSITIVE: it accepted `[0-9.]+`, so it fired on
 	 * `const CRR_TEMP_ANCHOR_C = 22`, a TEMPERATURE in degrees C that is not a
-	 * Crr value at all and only matched because its name contains "crr". A Crr
-	 * fallback is `0.00x`, so the literal is now `0\.\d+`, which is the bar
-	 * `asOperator` above already sets. The false positive had been masked by the
-	 * `export` keyword rather than by the pattern being right.
+	 * Crr value and matched only because its name contains "crr".
+	 *
+	 * THE SECOND FIX IS ON THE VALUE, NOT ITS SPELLING, and that is deliberate.
+	 * Narrowing the literal to `0\.\d+` fixed the false positive and introduced
+	 * two blind spots in its place — `.008` (which the ORIGINAL pattern caught)
+	 * and `8e-3`. Both are legal TypeScript and both are Crr-sized. Any pattern
+	 * describing how a number is WRITTEN will keep losing this race, so the
+	 * literal is matched broadly and then parsed: what disqualifies
+	 * `CRR_TEMP_ANCHOR_C` is that 22 is not a plausible Crr, and no spelling of
+	 * 22 ever will be.
 	 */
 	it("leaves no numeric crr fallback outside the shared module", () => {
 		const offenders: string[] = [];
-		const asOperator = /(\?\?|\|\|)\s*0\.\d+/;
-		const asDeclaration =
-			/^\s*(export\s+)?(const|let|var)\s+[A-Za-z_]*[Cc][Rr][Rr][A-Za-z_]*\s*(:\s*[A-Za-z]+\s*)?=\s*0\.\d+/;
+		/** Any numeric literal, however spelled: `0.008`, `.008`, `8e-3`. */
+		const NUMBER = String.raw`\d*\.?\d+(?:e-?\d+)?`;
+		const asOperator = new RegExp(String.raw`(\?\?|\|\|)\s*(${NUMBER})`);
+		const asDeclaration = new RegExp(
+			String.raw`^\s*(?:export\s+)?(?:const|let|var)\s+[A-Za-z_]*[Cc][Rr][Rr][A-Za-z_]*\s*(?::\s*[A-Za-z]+\s*)?=\s*(${NUMBER})`,
+		);
+		/**
+		 * A Crr is a rolling-resistance coefficient: greater than zero and well
+		 * under 1. The upper bound rejects `CRR_TEMP_ANCHOR_C = 22`; the lower
+		 * one rejects `crr: oldRecord.crr ?? 0`, a null-coalesce in a storage
+		 * migration rather than a physics constant — which the original
+		 * `0\.\d+` excluded by accident of spelling and this must exclude on
+		 * purpose.
+		 */
+		const isCrrSized = (value: string) => {
+			const n = Number(value);
+			return n > 0 && n < 1;
+		};
 		for (const file of sourceFiles(join(__dirname, ".."))) {
 			const text = readFileSync(file, "utf8");
 			text.split("\n").forEach((line, i) => {
 				if (!/crr/i.test(line)) return;
-				if (asOperator.test(line) || asDeclaration.test(line)) {
+				const hit = asOperator.exec(line) ?? asDeclaration.exec(line);
+				if (hit && isCrrSized(hit[hit.length - 1])) {
 					offenders.push(`${file.split("/src/")[1]}:${i + 1}  ${line.trim()}`);
 				}
 			});
