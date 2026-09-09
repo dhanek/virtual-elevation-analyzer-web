@@ -319,32 +319,6 @@ re-deriving it):
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
 
-- [ ] **[S–M] `calculateOutAndBackMeanElevation` feeds a DESCENDING array to an interpolator
-      that assumes ascending, so every mirrored-inbound leg contributes a constant.**
-      `outAndBackPlots.ts:69-70` builds `mirroredDistances = inboundDistances.map(d => maxDist - d)`,
-      which is descending, and hands it to `interpolateElevation` as the reference. That
-      function's first guard is `targetDist <= distances[0]`, and on a descending array
-      `distances[0]` is the MAXIMUM — so the guard fires for essentially every target and it
-      returns `elevations[0]`, the first inbound elevation sample, at every reference distance.
-      The inbound half of the mean profile is therefore a flat line at one sample's value rather
-      than a curve.
-
-      Measured 2026-09-07 with a direct probe: `[4,3,2,1,0]` against `[100,110,120,130,140]`
-      returns 100 for targets 0, 1, 2, 3 and 4; the same data ascending returns
-      100/110/120/130/140. Pinned as it stands by
-      `frontend/src/shell/multiSegment/shared.test.ts` so the behaviour cannot change by
-      accident.
-
-      **Deliberately not fixed alongside the profiling item**, and this is the reason: the mean
-      elevation is what out-and-back RMSE is measured against, so correcting it MOVES PUBLISHED
-      NUMBERS. That is a ruling, not a refactor — and it does not belong inside a change whose
-      whole claim was that it left the numbers alone. Whoever takes it needs to decide what the
-      mirrored inbound leg is meant to contribute, then re-baseline the out-and-back fixture
-      expectations. `interpolateAscending` already exists for the corrected shape.
-      `frontend/src/shell/outAndBack/outAndBackPlots.ts:69-79`,
-      `frontend/src/shell/multiSegment/shared.ts` · *origin: found while profiling the
-      aggregation helpers, 2026-09-07*
-
 - [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
       deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
       own investigation before it can be sized.
@@ -391,21 +365,50 @@ re-deriving it):
       auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
       maintainer 2026-09-04*
 
-- [ ] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
-      retirement, each with a comment saying so.** All four exist only because Standard's
-      analyze-time placeholder calculator once needed them; that calculator is gone (see
-      *Analyze owns selection; the producer owns results* under **Done**), so each is now
-      dead in production but still pinned by its own test cases:
-      `resolveSelectionRhoArray` (`frontend/src/shell/analysis/rhoArrayResolver.ts`, no
-      production caller, exercised by `selectionRhoArray.test.ts`); `resolvePlaceholderWindSpeed`
-      (`frontend/src/shell/ve/standardSegments.ts`, no production caller — this is the function
-      F20-07 named `resolveSelectionWindSpeedForCalculator`, since renamed); `LapVEProfile.range`
-      (`frontend/src/shell/gpsLap/types.ts`); and the `outboundRange`/`inboundRange` pair on
-      the out-and-back profile type (`frontend/src/shell/outAndBack/types.ts`). Not a quick
-      delete: removing the two type fields ripples through a dozen fixture builders and both
-      GPS-mode chain suites by the review's own estimate, which is larger than the dead code
-      itself — scope that fixture work before starting.
-      *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
+- [ ] **[S] No dead-export detector runs in CI.** `npm run check` is prettier + tsc and
+      `npm run lint` is eslint; neither can see an export with no importer. That is why four
+      declarations survived the analyze-leg retirement long enough to need a hand-scoped `[L]`
+      sweep of their own, and why three comments were left dangling behind them once the sweep
+      landed. Wire `knip` (or `ts-prune`) over `frontend/src` into `npm run check`, with test
+      files counted as consumers so a pinned-but-dead export is still reported. Expect a first
+      run to surface a backlog — size that before wiring it into a gating script.
+      `package.json`, `frontend/src` · *origin: PR #21 review round 31, F31-07 — deferred by the
+      maintainer 2026-09-08*
+
+- [ ] **[M] An object literal with no annotation anywhere on its path escapes `tsc`'s
+      excess-property check, so a field deleted from a type can survive in a live writer.**
+      Excess-property checking fires only where a literal is assigned to an annotated target.
+      In `xs.map((x) => ({ … }))` with no annotation on the callback, the parameter, or the
+      receiving variable, the literal's type is INFERRED and the extra field is simply part of
+      it — `tsc` reports nothing, and the field travels to a typed consumer that never declared
+      it. This is exactly how `range` survived the analyze-leg retirement's fifteen-file sweep
+      (PR #21, F32-02) and was found only by reading, not by any check.
+      **This is NOT the `knip`/`ts-prune` item above.** A dead-export detector finds declarations
+      with no importer; this is the opposite shape — a LIVE literal carrying a field its type no
+      longer has. Neither detector sees the other's class, so wiring knip does not close this.
+      The work is a sweep: enumerate the unannotated `.map(… => ({…}))` sites (~19 recorded at
+      round 33; a looser single-line grep counts 25 outside tests), decide for each whether it
+      reaches a typed consumer, and annotate those that do — `xs.map((x): T => ({ … }))` is
+      enough to arm the check. Then consider whether a lint rule or a convention can hold the
+      line, since annotating today's sites does not stop tomorrow's.
+      `frontend/src`, `frontend/scripts` · *origin: PR #21 review round 33, F33-02 — deferred by
+      the maintainer 2026-09-08*
+
+- [ ] **[S–M] Consolidate `interpolateElevation` into `interpolateAscending`.** The documented
+      reason for keeping two interpolators was the DESCENDING caller in
+      `calculateOutAndBackMeanElevation`'s mirrored-inbound branch. PR #21 removed that caller,
+      so `interpolateElevation` now has exactly ONE production call site
+      (`outAndBackPlots.ts:83`, the outbound branch) and it passes an ascending array. Folding
+      it into `interpolateAscending` removes a function and ~15 lines, and makes the last O(n)
+      scan in the out-and-back aggregation O(log n). Not free: the descending case in
+      `shared.test.ts` pins a real trap in an order-agnostic guard and must be kept or
+      deliberately retired with a reason, and `shared.test.ts`'s equivalence case is what
+      licenses the swap — run it before and after. Class 3 at the time it was raised (a shared
+      module with its own pinned suite), which is why it was not folded into PR #21.
+      `frontend/src/shell/multiSegment/shared.ts`,
+      `frontend/src/shell/multiSegment/shared.test.ts`,
+      `frontend/src/shell/outAndBack/outAndBackPlots.ts` · *origin: PR #21 review round 31,
+      F31-08 — deferred by the maintainer 2026-09-08*
 
 ---
 
@@ -413,6 +416,81 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### The mirrored inbound leg, and the dead-declaration sweep — 2026-09-08
+
+- [x] **[S–M] `calculateOutAndBackMeanElevation` feeds a DESCENDING array to an interpolator
+      that assumes ascending, so every mirrored-inbound leg contributes a constant.** Fixed.
+      Mirroring with `maxInboundDist - d` puts the inbound leg into the outbound's frame, which
+      is right, and it also REVERSES the sort order, which nothing accounted for. Reversing both
+      arrays together restores ascending order while keeping each distance paired with its own
+      elevation sample — the pairing was never wrong, only the order, which is why this is a
+      re-sort and not a re-derivation.
+
+      **Measured on the case the mode exists for.** When both legs retrace the same ground the
+      inbound elevation series is the outbound one reversed, so averaging them must return the
+      shared profile unchanged. Before: the mean spanned **20.80 m** against the leg's true
+      **41.61 m** — exactly half, one real profile averaged with one constant. After: it returns
+      the profile. A third case guards against over-correcting into "just use the outbound leg":
+      a second section 10 m higher throughout must move the mean by 5 m, and does.
+
+      **NO PINNED EXPECTATION MOVED, and that is the finding behind the finding.** 98 files /
+      1172 tests passed unchanged across the fix. The only out-and-back RMSE assertions are
+      RELATIONAL — `withCompare.rmse` against `withoutCompare.rmse` — so both sides moved
+      together and neither noticed. Nothing ever pinned the mean profile or an absolute
+      out-and-back RMSE, which is exactly how a defect this large survived. Contrary to the
+      expectation set when the fix was authorised, **no fixture needed re-baselining**; the new
+      `outAndBackMeanElevation.test.ts` closes the gap that allowed it.
+      `frontend/src/shell/outAndBack/outAndBackPlots.ts` ·
+      `frontend/src/shell/outAndBack/outAndBackMeanElevation.test.ts` (new) ·
+      *origin: found while profiling the aggregation helpers, 2026-09-07*
+
+- [x] **[L] Dead-declaration sweep: four exports/fields kept deliberately past the analyze-leg
+      retirement, each with a comment saying so.** All four taken. Both type comments named the
+      same condition for taking them — *"it belongs to a type sweep of its own, and if no reader
+      has appeared by then, that sweep should take them"* — and no reader had appeared.
+
+      `resolveSelectionRhoArray` and `resolvePlaceholderWindSpeed` are deleted with their tests;
+      each survived only as its own definition, its own test, and one mention inside
+      `renderStandardVe.ts`'s comment recording what the retirement removed. `resolveRhoArray`
+      and `hasEnvironmentalData` stay — both have live callers.
+
+      **"With their tests" nearly cost a live guard, and that is the useful thing here.**
+      `selectionRhoArray.test.ts` held TWO UNRELATED PROPERTIES AND SAID SO NOWHERE: the
+      resolver's own unit cases, which were correctly dead, and a source-level guard over every
+      analyze leg — *no analyze leg builds a calculator without a rho array* — which was live and
+      which a deletion aimed at the first took with it. Review caught it, not the suite: the
+      guard is an assertion about code that does NOT exist, so nothing failed when it went. It is
+      back as `calculatorRhoArray.test.ts`, widened to cover the update path
+      (`updateModeVEPlots.ts`) as well as the three render legs, and both it and the behavioural
+      half in `gpsModeRealChain.test.ts` now carry a cross-note naming what the other covers, so
+      a deletion aimed at one cannot silently take the other.
+
+      `OutAndBackVEProfile.outboundRange`/`inboundRange` and `LapVEProfile.range` are gone.
+      Verified dead rather than assumed: excluding object-literal keys, `.outboundRange` and
+      `.inboundRange` have **no reads at all** — all 20 uses were writes. `LapVEProfile.range`
+      needed more care, because `.range` is also a live field on `ModeSegment` — reached through
+      a profile as `profile.segment.range`, which is what makes the `.range` grep noisy — and a
+      Plotly axis key; the reads in `modeSegments.test.ts` are the segment type,
+      `renderGpsLap.ts:547` is a local parameter from `activeGpsLapRanges`, and
+      `gpsLapPlots.ts:447,461` are axis ranges.
+
+      **The item's ripple estimate was right about the count and wrong about the cost.** It
+      reaches nine files, but every site is a two-line construction entry — wide rather than
+      deep. `tsc` caught the two sites grep alone would have missed: `renderGpsLap.ts` building
+      the profile from a local `range`, and the out-and-back profiler's own fixture. **It is not
+      the completeness argument it looks like, though.** `tsc` flags an object literal's excess
+      properties only where the literal is CONTEXTUALLY TYPED; a `.map(...)` result that reaches
+      its consumer structurally, with no annotation anywhere on the path, is invisible to it. A
+      third writer survived exactly that way, in `scripts/profile-gps-lap-render.ts`'s own lap
+      fixture, and was found by reading the diff rather than by the compiler. It is fixed by
+      annotating the map callback's return type `LapVEProfile`, which types the literal directly
+      and makes the site one `tsc` checks — the binding annotation that looks equivalent is not,
+      because `map<U>` infers `U` from the callback before the contextual type reaches it.
+      `frontend/src/shell/analysis/rhoArrayResolver.ts` · `frontend/src/shell/ve/standardSegments.ts` ·
+      `frontend/src/shell/outAndBack/types.ts` · `frontend/src/shell/gpsLap/types.ts` ·
+      `frontend/src/shell/analysis/calculatorRhoArray.test.ts` (new) ·
+      *origin: PR #14 review round 20, F20-07 — deferred by the maintainer 2026-09-04*
 
 ### Formatting is machine-enforced — 2026-09-08
 
@@ -1399,9 +1477,10 @@ the reference ride, which carries per-point air density), not only under vitest.
       **A/B in the app, lap 10 of the reference ride, MutationObserver on the header spans:** without the
       fix R² 0.0052 / RMSE 7.94 m / VE 16.17 m at the analyze paint, flipping to 0.0060 / 7.62 m /
       15.57 m a macrotask later; with it, 0.0060 / 7.62 m / 15.57 m written once and never changed.
-      `rhoArrayResolver.ts`, `renderStandardVe.ts:110` · test: `selectionRhoArray.test.ts`, whose
-      last case is source-level on purpose — the defect is an OMISSION, which no test of the leg's
-      own module can observe
+      `rhoArrayResolver.ts`, `renderStandardVe.ts:110` · test: `calculatorRhoArray.test.ts`, which
+      is source-level on purpose — the defect is an OMISSION, which no test of the leg's own
+      module can observe. The resolver's own unit cases are gone with the resolver; the
+      source-level guard is what survives, and it now covers the update path too
 
 - [x] **[XS] `closeResultsModal()` leaked the view's keydown handler.** The listener is on
       `document`, so removing the element did not remove it — and the exported close runs at the top

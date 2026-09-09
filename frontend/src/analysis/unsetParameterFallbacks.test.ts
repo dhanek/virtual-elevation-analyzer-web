@@ -13,7 +13,8 @@
  * one that actually stops the defect returning, because the defect is an
  * OMISSION — a site that quietly reintroduces its own literal — which no test of
  * this module's own exports can observe. Same reasoning as
- * `selectionRhoArray.test.ts`'s last case.
+ * `calculatorRhoArray.test.ts`'s source scan, under "no analyze leg builds a
+ * calculator without a rho array".
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";

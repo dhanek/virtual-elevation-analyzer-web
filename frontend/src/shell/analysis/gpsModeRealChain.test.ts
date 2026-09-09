@@ -319,8 +319,6 @@ const legSeries = (scale: number) => ({
 
 const sectionProfile = {
 	sectionNumber: 1,
-	outboundRange: { startIdx: 0, endIdx: HALF - 1 },
-	inboundRange: { startIdx: HALF, endIdx: LAST_INDEX },
 	outboundDistances: [0, 1, 2],
 	outboundVE: [0, 1, 2],
 	outboundActualElevation: [0, 1, 2],
@@ -1136,21 +1134,32 @@ describe.each(MODES)(
  * pushed `undefined` into a `number[]` and NaN rho crossed the WASM boundary
  * for the rest of that segment.
  *
- * The Standard leg had already been given this guard, with the rule written
- * down at `rhoArrayResolver.ts:86` — "a short or hole-punched array under the
- * calculator is a worse bug than a constant one". These two legs are that rule
- * applied where it was missed, so the assertion is not "rho is right" but
- * "rho is either complete or absent, never partial".
+ * THE RULE, and this file is where it is written down now: A SHORT OR
+ * HOLE-PUNCHED ARRAY UNDER THE CALCULATOR IS A WORSE BUG THAN A CONSTANT ONE.
+ * It was inherited from the Standard leg's analyze-time guard, which the
+ * analyze-leg retirement removed along with the resolver that carried it.
+ * These two legs are that rule applied where it was missed, so the assertion is
+ * not "rho is right" but "rho is either complete or absent, never partial".
  *
  * WHAT CHANGED, and it MATTERS MORE HERE THAN ANYWHERE ELSE IN THIS FILE. The
  * GPS-lap analyze leg is retired, so the guard it carried went with it — and the
  * rule above is not optional just because its holder moved. These cases now
  * Analyze and then `settle()`, so the series under assertion is the one
  * `updateModeVEPlots` handed the physics. That pass slices with
- * `indices.map((i) => rhoArray[i])` (`:258`), which on a short channel yields
+ * `indices.map((i) => rhoArray[i])`, which on a short channel yields
  * `undefined` in every tail position, so this rewrite is what forced the guard
  * to be added there. The claim is unchanged and now covers the only pass there
  * is: rho reaching the calculator is complete or absent, never partial.
+ *
+ * WHAT THE OTHER FILE COVERS, so a deletion aimed at one cannot take the other.
+ * These cases are BEHAVIOURAL: they drive the real chain and inspect the values
+ * that reach the physics, which is why `null` versus a hole-punched array is
+ * visible here and nowhere else. The PRESENCE half — that every
+ * `createVeCalculator` call is given a `rhoArray:` at all, in every leg and in
+ * `updateModeVEPlots.ts` — is asserted source-level in
+ * `calculatorRhoArray.test.ts`. That guard supersedes only the presence
+ * property these cases held implicitly; it cannot see a runtime value, so it
+ * does not subsume anything below.
  */
 describe.each(MODES)(
 	"$name: the air-density slice under the calculator",

@@ -82,7 +82,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
  * guards is an ADDITION nobody would think to look for: a future mode, or a
  * revert of one of these three commits, quietly reintroducing an analyze-time
  * write. No test of any module's own exports can observe a caller that should
- * not exist. Same reasoning as `selectionRhoArray.test.ts`'s last case and
+ * not exist. Same reasoning as `calculatorRhoArray.test.ts`'s source scan and
  * `unsetParameterFallbacks.test.ts`'s.
  *
  * The scan skips `.test.ts`, so the historical mentions in the chain suites'

@@ -244,12 +244,14 @@ export async function updateModeVEPlots(
 		// converts it without padding, so a device that stopped emitting air
 		// density mid-ride yields a series SHORTER than the ride.
 		//
-		// The rule is `rhoArrayResolver.ts:86`'s, verbatim: a short or
-		// hole-punched array under the calculator is a worse bug than a constant
-		// one. It was enforced in the three ANALYZE legs and never here, because
-		// this pass was the second producer and the legs were the ones being
-		// audited. Retiring the legs makes this the only pass there is, so the
-		// guard belongs to it.
+		// The rule is stated in full in `gpsModeRealChain.test.ts`, under "the
+		// air-density slice under the calculator", which is where it lives now
+		// that `resolveSelectionRhoArray` and its statement of it are gone: a
+		// short or hole-punched array under the calculator is a worse bug than a
+		// constant one. It was enforced in the three ANALYZE legs and never
+		// here, because this pass was the second producer and the legs were the
+		// ones being audited. Retiring the legs makes this the only pass there
+		// is, so the guard belongs to it.
 		//
 		// A LENGTH/RANGE CHECK, AND ONLY THAT — the same scope the legs' version
 		// had. An interior NaN in an otherwise-full-length channel still reaches

@@ -58,14 +58,6 @@ function toOutAndBackProfiles(
 
 		result.push({
 			sectionNumber: section.sectionNumber,
-			// NOT COMPUTED ON THIS PATH (WR-04), and now not read on any path.
-			// The two range fields existed for the analyze-time seed of
-			// `currentFilteredData`; that seed is retired, so this pass's
-			// `summarize` — working off the profiles themselves — is the field's
-			// only writer and these two carry nothing. The `profileRange` helper
-			// that used to fill them in was dead surface. Why kept: `types.ts`.
-			outboundRange: null,
-			inboundRange: null,
 			outboundDistances: outbound?.distancesKm ?? [],
 			outboundVE: outbound?.virtualElevation ?? [],
 			// Carried straight through from the primitive, PER LEG: non-null iff

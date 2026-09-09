@@ -86,43 +86,6 @@ export function resolveSelectionWindSeries(
 }
 
 /**
- * Which wind series a calculator over the whole SELECTION should be handed
- * (D-05, the last inline copy).
- *
- * NO PRODUCTION CALLER, as of Standard's analyze-leg retirement. It existed for
- * the placeholder calculator `initializeVEAnalysis` built before the sliders were
- * bound: that render's plots already read `resolveSelectionWindSeries` while its
- * calculator read the RAW FIT channel, so the placeholder fit and the wind
- * plotted under it described different winds whenever an offset or a calibration
- * was set. The calculator is deleted, so the divergence is gone rather than
- * fixed. KEPT because the rule it encodes — resolved under FIT, NaN fill under
- * constant, raw on a length mismatch — is still pinned by its own cases.
- *
- * @param windSource   The selected source, already narrowed to fit/constant.
- * @param rawWindSpeed The selection's FIT channel as recorded.
- * @param resolved     `resolveSelectionWindSeries` over the same selection.
- */
-export function resolvePlaceholderWindSpeed(
-	windSource: "fit" | "constant",
-	rawWindSpeed: number[],
-	resolved: number[],
-): number[] {
-	// Constant wind has no per-sample channel: the calculator derives it from
-	// the params, and a filled array would be a second, disagreeing source.
-	if (windSource !== "fit") {
-		return new Array<number>(rawWindSpeed.length).fill(NaN);
-	}
-	// `resolveSelectionWindSeries` yields [] with no loaded fitData, and slices
-	// to the selection otherwise. Anything but an exact length match means the
-	// two are not in the same index space, and a short array under the
-	// calculator is a worse bug than an un-offset one.
-	if (resolved.length !== rawWindSpeed.length) {
-		return rawWindSpeed;
-	}
-	return resolved;
-}
-
-/**
  * Map the global trim window onto each segment, dropping segments the window
  * does not meaningfully cover.
  *
