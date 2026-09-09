@@ -394,28 +394,54 @@ re-deriving it):
       `frontend/src`, `frontend/scripts` · *origin: PR #21 review round 33, F33-02 — deferred by
       the maintainer 2026-09-08*
 
-- [ ] **[S–M] Consolidate `interpolateElevation` into `interpolateAscending`.** The documented
-      reason for keeping two interpolators was the DESCENDING caller in
-      `calculateOutAndBackMeanElevation`'s mirrored-inbound branch. PR #21 removed that caller,
-      so `interpolateElevation` now has exactly ONE production call site
-      (`outAndBackPlots.ts:83`, the outbound branch) and it passes an ascending array. Folding
-      it into `interpolateAscending` removes a function and ~15 lines, and makes the last O(n)
-      scan in the out-and-back aggregation O(log n). Not free: the descending case in
-      `shared.test.ts` pins a real trap in an order-agnostic guard and must be kept or
-      deliberately retired with a reason, and `shared.test.ts`'s equivalence case is what
-      licenses the swap — run it before and after. Class 3 at the time it was raised (a shared
-      module with its own pinned suite), which is why it was not folded into PR #21.
-      `frontend/src/shell/multiSegment/shared.ts`,
-      `frontend/src/shell/multiSegment/shared.test.ts`,
-      `frontend/src/shell/outAndBack/outAndBackPlots.ts` · *origin: PR #21 review round 31,
-      F31-08 — deferred by the maintainer 2026-09-08*
-
 ---
 
 ## Done
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### One interpolator, not two — 2026-09-09
+
+- [x] **[S–M] Consolidate `interpolateElevation` into `interpolateAscending`.** Done.
+      `interpolateElevation` existed as a second function for exactly one reason: the DESCENDING
+      caller in `calculateOutAndBackMeanElevation`'s mirrored-inbound branch depended on what its
+      linear scan did with a reversed array. PR #21 corrected that caller to re-sort, leaving one
+      production call site — the outbound branch — passing an ascending array. It is folded in
+      and deleted.
+
+      **The precondition was verified, not assumed.** `outboundDistances` comes from
+      `buildRelativeDistanceSeries`, which maps the FIT cumulative odometer minus its start, so
+      it is monotonically NON-decreasing. Non-decreasing matters: a stalled ride records two
+      samples at one distance, and the surviving lower-bound search takes the first bracket
+      exactly as the linear scan did, which is what made the fold behaviour-preserving rather
+      than merely close. The equivalence cases were run green BEFORE the swap — that is what
+      licensed it — and then retired with the function they compared against.
+
+      **The descending case is kept, and its reason inverted.** It was written to pin behaviour a
+      real caller depended on; it survives because no caller may depend on it any more. The guards
+      are order-agnostic, so a descending array is answered wrongly rather than rejected, and
+      `interpolateAscending` inherited that guard shape unchanged. Deleting the case would retire
+      the only thing documenting a trap that is still reachable.
+
+      Two comments naming the deleted function were re-pointed in the same commit rather than
+      left to a review round — that citation class cost PR #21 four rounds.
+
+      98 files / 1163 tests (was 1165; the two retired equivalence cases). `check`, `lint`,
+      `build` clean.
+
+      **The O(log n) claim is structural, and the profiler does not settle it.** The last O(n)
+      scan in the out-and-back aggregation is now O(log n) because its one call site —
+      `calculateOutAndBackMeanElevation`'s outbound branch in `outAndBackPlots.ts` — now calls
+      the binary search in `interpolateAscending`. That is read off the code, not measured.
+      `npm run profile:out-and-back` cannot observe it: the script imports and calls only
+      `calculateOutAndBackStats`, which takes `meanElevation` as a PARAMETER, so
+      `calculateOutAndBackMeanElevation` is never on its measured path.
+      `frontend/src/shell/multiSegment/shared.ts` ·
+      `frontend/src/shell/multiSegment/shared.test.ts` ·
+      `frontend/src/shell/outAndBack/outAndBackPlots.ts` ·
+      `frontend/src/shell/outAndBack/outAndBackMeanElevation.test.ts` ·
+      *origin: PR #21 review round 31, F31-08 — deferred by the maintainer 2026-09-08*
 
 ### The mirrored inbound leg, and the dead-declaration sweep — 2026-09-08
 

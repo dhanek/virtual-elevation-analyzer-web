@@ -20,32 +20,29 @@ export function getMultiSegmentColor(index: number): string {
 }
 
 /**
- * The same interpolation as `interpolateElevation`, for an ASCENDING reference,
- * in O(log n) instead of O(n).
+ * Linear interpolation of an elevation series onto a target distance, in
+ * O(log n).
  *
- * WHY A SECOND FUNCTION STILL EXISTS. The original reason is GONE: the
- * DESCENDING caller it named — `calculateOutAndBackMeanElevation`'s
- * mirrored-inbound branch, which fired `interpolateElevation`'s
- * `targetDist <= distances[0]` guard against the array's MAXIMUM and got
- * `elevations[0]` for every target — was corrected, and that branch now calls
- * this function on a re-sorted array (`outAndBackPlots.ts:119-134`). What is
- * left is only that `interpolateElevation` remains, order-agnostic in its
- * guards, with a caller of its own. Folding the two together is `TODO.md`'s
- * *Consolidate `interpolateElevation` into `interpolateAscending`* item, not a
- * thing to do here.
+ * PRECONDITION: `distances` is sorted ascending. NOTHING HERE VALIDATES IT, and
+ * an O(n) check per call would give back exactly what the binary search buys —
+ * so the precondition is the caller's, and `shared.test.ts` pins what happens
+ * when a caller breaks it: the `targetDist <= distances[0]` guard fires against
+ * the array's MAXIMUM and every target gets `elevations[0]`. That is not
+ * hypothetical. `calculateOutAndBackMeanElevation`'s mirrored-inbound branch did
+ * exactly that for the life of the out-and-back mode, contributing one constant
+ * where a curve belonged, until PR #21 corrected it to re-sort before calling.
  *
- * PRECONDITION: `distances` is sorted ascending. Unchanged, and still
- * unvalidated — an O(n) check per call would give back exactly what the binary
- * search buys. Two shapes of caller meet it now: `meanElevation.distances`,
- * which `calculateOutAndBackMeanElevation` builds as a uniform ramp, and the
- * mirrored-inbound branch's reversed mirror of the RECORDED FIT distance
- * channel, whose ascendingness is inherited from the mirroring rather than
- * constructed here.
+ * THIS WAS TWO FUNCTIONS until that caller was fixed. The other was a linear
+ * scan kept solely because the descending caller depended on its behaviour;
+ * with the caller corrected it had one call site left, passing an ascending
+ * array, and folding it in here made the last O(n) scan in the out-and-back
+ * aggregation O(log n).
  *
- * The search is a LOWER BOUND, and that is what makes it equivalent rather than
- * merely close: the linear scan returns the FIRST bracket whose ends straddle
- * the target, so on repeated distances it takes the earliest one. Picking the
- * last `j` with `distances[j] <= target` instead would differ there.
+ * The search is a LOWER BOUND, and that is what made the fold behaviour-
+ * preserving rather than merely close: the linear scan returned the FIRST
+ * bracket whose ends straddled the target, so on repeated distances — a stalled
+ * ride records two samples at one distance — it took the earliest one. Picking
+ * the last `j` with `distances[j] <= target` would differ there.
  */
 export function interpolateAscending(
 	targetDist: number,
@@ -72,26 +69,4 @@ export function interpolateAscending(
 	if (span === 0) return elevations[j];
 	const t = (targetDist - distances[j]) / span;
 	return elevations[j] + t * (elevations[j + 1] - elevations[j]);
-}
-
-/**
- * Linear interpolation helper for elevation lookup at a target distance.
- */
-export function interpolateElevation(
-	targetDist: number,
-	distances: number[],
-	elevations: number[],
-): number {
-	if (distances.length === 0) return NaN;
-	if (targetDist <= distances[0]) return elevations[0];
-	if (targetDist >= distances[distances.length - 1])
-		return elevations[elevations.length - 1];
-
-	for (let j = 0; j < distances.length - 1; j++) {
-		if (distances[j] <= targetDist && distances[j + 1] >= targetDist) {
-			const t = (targetDist - distances[j]) / (distances[j + 1] - distances[j]);
-			return elevations[j] + t * (elevations[j + 1] - elevations[j]);
-		}
-	}
-	return NaN;
 }
