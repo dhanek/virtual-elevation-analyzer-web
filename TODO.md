@@ -375,6 +375,25 @@ re-deriving it):
       `package.json`, `frontend/src` · *origin: PR #21 review round 31, F31-07 — deferred by the
       maintainer 2026-09-08*
 
+- [ ] **[M] An object literal with no annotation anywhere on its path escapes `tsc`'s
+      excess-property check, so a field deleted from a type can survive in a live writer.**
+      Excess-property checking fires only where a literal is assigned to an annotated target.
+      In `xs.map((x) => ({ … }))` with no annotation on the callback, the parameter, or the
+      receiving variable, the literal's type is INFERRED and the extra field is simply part of
+      it — `tsc` reports nothing, and the field travels to a typed consumer that never declared
+      it. This is exactly how `range` survived the analyze-leg retirement's fifteen-file sweep
+      (PR #21, F32-02) and was found only by reading, not by any check.
+      **This is NOT the `knip`/`ts-prune` item above.** A dead-export detector finds declarations
+      with no importer; this is the opposite shape — a LIVE literal carrying a field its type no
+      longer has. Neither detector sees the other's class, so wiring knip does not close this.
+      The work is a sweep: enumerate the unannotated `.map(… => ({…}))` sites (~19 recorded at
+      round 33; a looser single-line grep counts 25 outside tests), decide for each whether it
+      reaches a typed consumer, and annotate those that do — `xs.map((x): T => ({ … }))` is
+      enough to arm the check. Then consider whether a lint rule or a convention can hold the
+      line, since annotating today's sites does not stop tomorrow's.
+      `frontend/src`, `frontend/scripts` · *origin: PR #21 review round 33, F33-02 — deferred by
+      the maintainer 2026-09-08*
+
 - [ ] **[S–M] Consolidate `interpolateElevation` into `interpolateAscending`.** The documented
       reason for keeping two interpolators was the DESCENDING caller in
       `calculateOutAndBackMeanElevation`'s mirrored-inbound branch. PR #21 removed that caller,
