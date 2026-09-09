@@ -428,9 +428,19 @@ changed and why.
       left to a review round — that citation class cost PR #21 four rounds.
 
       98 files / 1163 tests (was 1165; the two retired equivalence cases). `check`, `lint`,
-      `build` clean, and the last O(n) scan in the out-and-back aggregation is now O(log n).
+      `build` clean.
+
+      **The O(log n) claim is structural, and the profiler does not settle it.** The last O(n)
+      scan in the out-and-back aggregation is now O(log n) because its one call site —
+      `calculateOutAndBackMeanElevation`'s outbound branch in `outAndBackPlots.ts` — now calls
+      the binary search in `interpolateAscending`. That is read off the code, not measured.
+      `npm run profile:out-and-back` cannot observe it: the script imports and calls only
+      `calculateOutAndBackStats`, which takes `meanElevation` as a PARAMETER, so
+      `calculateOutAndBackMeanElevation` is never on its measured path.
       `frontend/src/shell/multiSegment/shared.ts` ·
+      `frontend/src/shell/multiSegment/shared.test.ts` ·
       `frontend/src/shell/outAndBack/outAndBackPlots.ts` ·
+      `frontend/src/shell/outAndBack/outAndBackMeanElevation.test.ts` ·
       *origin: PR #21 review round 31, F31-08 — deferred by the maintainer 2026-09-08*
 
 ### The mirrored inbound leg, and the dead-declaration sweep — 2026-09-08
