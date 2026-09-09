@@ -142,19 +142,40 @@ function sourceFiles(dir: string): string[] {
 const UNANNOTATED_MAP_LITERAL =
 	/\.map\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\(\{/g;
 
+/**
+ * The unannotated sites in one file's text, as `file:line`. The offender case
+ * and the prettier-broken-shape case both go through this one function, so a
+ * fixture proving the scan sees a broken site is proving it about the code that
+ * actually runs over `src/` and `scripts/` — not about a copy of it.
+ */
+function unannotatedSites(file: string, src: string): string[] {
+	const sites: string[] = [];
+	UNANNOTATED_MAP_LITERAL.lastIndex = 0;
+	let match: RegExpExecArray | null;
+	while ((match = UNANNOTATED_MAP_LITERAL.exec(src)) !== null) {
+		const line = src.slice(0, match.index).split("\n").length;
+		if (!isAllowed(file, siteText(src, match))) sites.push(`${file}:${line}`);
+	}
+	return sites;
+}
+
+/**
+ * Prettier's own output when the parameter list is too wide to hug `.map(`: the
+ * callback sits on its own line, so the site's `.map(` and its `=> ({` are on
+ * different physical lines and a per-line scan can never join them. The
+ * annotated twin is the same shape carrying `: T` on the callback.
+ */
+const PRETTIER_BROKEN =
+	"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number) => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
+const PRETTIER_BROKEN_ANNOTATED =
+	"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number): T => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
+
 describe("map callbacks building object literals annotate their return type", () => {
 	it("has no unannotated site in production source", () => {
 		const offenders: string[] = [];
 		for (const root of ROOTS) {
 			for (const file of sourceFiles(root)) {
-				const src = readFileSync(file, "utf8");
-				UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-				let match: RegExpExecArray | null;
-				while ((match = UNANNOTATED_MAP_LITERAL.exec(src)) !== null) {
-					const line = src.slice(0, match.index).split("\n").length;
-					const site = `${file}:${line}`;
-					if (!isAllowed(file, siteText(src, match))) offenders.push(site);
-				}
+				offenders.push(...unannotatedSites(file, readFileSync(file, "utf8")));
 			}
 		}
 
@@ -193,13 +214,12 @@ describe("map callbacks building object literals annotate their return type", ()
 		const unannotated = "\treturn xs.map((x) => ({ a: x }));";
 		const annotated = "\treturn xs.map((x): T => ({ a: x }));";
 		const bare = "\treturn xs.map(x => ({ a: x }));";
-		// The shape prettier itself produces when the parameter list is too wide
-		// to hug `.map(`. A per-line scan cannot see it; this is the assertion
-		// that would have caught that (PR #23, F37-01).
-		const broken =
-			"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number) => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
-		const brokenAnnotated =
-			"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number): T => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
+		// The two assertions on the prettier-broken shape establish one property
+		// and only one: the PATTERN itself spans newlines, which is the
+		// precondition for scanning whole files rather than lines. They say
+		// nothing about the scan — the scan's own guard is the case below,
+		// "reports a site prettier has broken across lines" (PR #23, F37-01,
+		// F38-01).
 
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
 		expect(UNANNOTATED_MAP_LITERAL.test(unannotated)).toBe(true);
@@ -208,8 +228,22 @@ describe("map callbacks building object literals annotate their return type", ()
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
 		expect(UNANNOTATED_MAP_LITERAL.test(annotated)).toBe(false);
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-		expect(UNANNOTATED_MAP_LITERAL.test(broken)).toBe(true);
+		expect(UNANNOTATED_MAP_LITERAL.test(PRETTIER_BROKEN)).toBe(true);
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-		expect(UNANNOTATED_MAP_LITERAL.test(brokenAnnotated)).toBe(false);
+		expect(UNANNOTATED_MAP_LITERAL.test(PRETTIER_BROKEN_ANNOTATED)).toBe(false);
+	});
+
+	it("reports a site prettier has broken across lines", () => {
+		// The regression guard for the whole-file scan itself (PR #23, F37-01,
+		// F38-01). A per-line scan cannot cross the newline prettier inserts, so
+		// reverting `unannotatedSites` to a line-by-line pass makes this case fail.
+		// It goes through the same `unannotatedSites` the offender case uses; a
+		// second copy of the loop here would guard nothing.
+		expect(unannotatedSites("src/fake-fixture.ts", PRETTIER_BROKEN)).toEqual([
+			"src/fake-fixture.ts:1",
+		]);
+		expect(
+			unannotatedSites("src/fake-fixture.ts", PRETTIER_BROKEN_ANNOTATED),
+		).toEqual([]);
 	});
 });
