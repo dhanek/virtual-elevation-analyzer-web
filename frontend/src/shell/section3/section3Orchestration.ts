@@ -3,6 +3,8 @@ import {
 	clampTrimWindow,
 	MIN_TRIM_WINDOW_SAMPLES,
 } from "../../analysis/trimBounds";
+import type { LapIndexRange } from "../../state/AppState";
+import type { TimeRange } from "../../modes/analysis/types";
 import {
 	ParameterStorage,
 	type LapSettings,
@@ -1049,10 +1051,12 @@ export function handleGpsLapSelectionChange(): void {
 			deps.appState.gpsSelectedLaps.includes(lap.lapNumber),
 		);
 		if (selected.length === 0) return false;
-		deps.appState.currentGpsLapIndexRanges = selected.map((lap) => ({
-			startIdx: lap.startIdx,
-			endIdx: lap.endIdx,
-		}));
+		deps.appState.currentGpsLapIndexRanges = selected.map(
+			(lap): LapIndexRange => ({
+				startIdx: lap.startIdx,
+				endIdx: lap.endIdx,
+			}),
+		);
 		// IN LOCKSTEP. `gpsLapNumberAt` (`gpsLapMode.ts:17`) indexes this by the
 		// RANGE ordinal, so a ranges list that moved without it would label every
 		// lap after the removed one with its neighbour's number.
@@ -1557,7 +1561,7 @@ export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> 
 		deps.appState.currentFitResult.parsing_statistics?.has_gps_data ?? false;
 
 	// Get time ranges for selected laps
-	const selectedLapTimeRanges = selectedLapData.map((lap) => ({
+	const selectedLapTimeRanges = selectedLapData.map((lap): TimeRange => ({
 		start: lap.start_time,
 		end: lap.end_time,
 	}));

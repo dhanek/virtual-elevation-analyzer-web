@@ -72,7 +72,7 @@ export const gpsLapMode: AnalysisModeHandler = {
 		const selectedEntries = appState.gpsDetectedLaps.filter((lap) =>
 			selectedItems.includes(lap.lapNumber),
 		);
-		const indexRanges = selectedEntries.map((lap) => ({
+		const indexRanges = selectedEntries.map((lap): LapIndexRange => ({
 			startIdx: lap.startIdx,
 			endIdx: lap.endIdx,
 		}));

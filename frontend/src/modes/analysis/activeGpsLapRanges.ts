@@ -51,5 +51,8 @@ export function resolveActiveGpsLapRanges(appState: AppState): LapIndexRange[] {
 
 	return appState.gpsDetectedLaps
 		.filter((lap) => appState.gpsSelectedLaps.includes(lap.lapNumber))
-		.map((lap) => ({ startIdx: lap.startIdx, endIdx: lap.endIdx }));
+		.map((lap): LapIndexRange => ({
+			startIdx: lap.startIdx,
+			endIdx: lap.endIdx,
+		}));
 }

@@ -204,7 +204,10 @@ export function renderCombinedVirtualDistanceHeader(
  * comes from.
  */
 function toRows(distances: SegmentVirtualDistance[]): VirtualDistanceRow[] {
-	return distances.map(({ label, ...totals }) => ({ label, totals }));
+	return distances.map(({ label, ...totals }): VirtualDistanceRow => ({
+		label,
+		totals,
+	}));
 }
 
 /**
