@@ -388,21 +388,38 @@ changed and why.
       point of taking this item, and what the sizing in the previous entry deferred. Proven to
       fail: a new unused export makes it exit 1 naming the symbol and its line.
 
-      **The sweep exposed two flaws in an unrelated guard**, and that is the part worth keeping.
+      **The sweep exposed three flaws in an unrelated guard**, and that is the part worth keeping.
       `unsetParameterFallbacks.test.ts`'s declaration pattern was anchored
       `^\s*(const|let|var)`, so `export const FALLBACK_CRR = 0.008;` was invisible to a guard
       whose whole job is to catch that declaration — exporting one was enough to hide it. And it
       accepted `[0-9.]+`, so it fired on `const CRR_TEMP_ANCHOR_C = 22`, a temperature in degrees
       C matching only because its name contains "crr". The false positive had been masked by the
-      `export` keyword rather than by the pattern being right. Both corrected and mutation-tested
-      in both directions.
+      `export` keyword rather than by the pattern being right. And it took only the first match on
+      a line — `exec` returns one match and `??` stops at the first pattern that matched at all —
+      so a Crr fallback hid behind any earlier coalesce, and a declaration hid behind any `??` on
+      its own line; it now scans every match of both patterns. All three corrected and
+      mutation-tested in both directions, and `CRR_FALLBACK_MATRIX` came out of it: the nine shapes
+      this guard has been wrong about, pinned in one run.
 
       A re-export block in `StandardPlotBuilders.ts` also narrows from three symbols to one: it
       existed "so every existing import site keeps working", and every site but `vdHeader.ts` has
       since moved to importing from `analysis/VirtualDistance` directly.
 
-      99 files / 1167 tests unchanged; `check`, `lint` and `build` clean, and `npm run knip`
-      reports nothing.
+      99 files / 1176 tests: the file count unchanged, the nine matrix rows added by the guard
+      fix; `check`, `lint` and `build` clean, and `npm run knip` reports zero issues — the three
+      lines it still prints are non-fatal configuration hints.
+
+      Criteria (derived PR #24 review round 40, confirmed 2026-09-09):
+      - [x] C1 Every symbol knip reports as used only inside its own file loses
+            `export`; the declaration and its comment stay
+      - [x] C2 The sweep runs to a fixed point — `npm run knip` reports no ISSUES
+      - [x] C3 `npm run check` gates on `exports` and `types`, not only `files`
+      - [x] C4 The widened gate is proven to FAIL, not merely to pass — a new unused
+            export and a new unused exported type each make it exit 1, naming symbol
+            and line
+      - [x] C5 Visibility-only: no behavioural change (tsc x2, lint, build, and the
+            suite giving the same file and test counts as the base)
+
       `frontend/package.json` · `frontend/src/analysis/unsetParameterFallbacks.test.ts` ·
       *origin: sizing done while wiring the dead-export detector, 2026-09-09*
 

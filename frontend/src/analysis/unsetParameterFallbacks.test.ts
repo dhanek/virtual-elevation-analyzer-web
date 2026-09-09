@@ -14,7 +14,10 @@
  * OMISSION — a site that quietly reintroduces its own literal — which no test of
  * this module's own exports can observe. Same reasoning as
  * `calculatorRhoArray.test.ts`'s source scan, under "no analyze leg builds a
- * calculator without a rho array".
+ * calculator without a rho array". A third part, `CRR_FALLBACK_MATRIX` and the
+ * block that walks it, pins every shape this guard has been wrong about in one
+ * run, so a fix aimed at one row cannot quietly cost another — which is what
+ * each of the previous two attempts did.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -218,7 +221,7 @@ const CRR_FALLBACK_MATRIX: ReadonlyArray<{ line: string; fires: boolean }> = [
 	{ line: "const FALLBACK_CRR = 8e-3;", fires: true },
 	// The `export` blind spot `bbdf51f` closed; it must stay closed.
 	{ line: "export const FALLBACK_CRR = 0.008;", fires: true },
-	// The false positive `84bc362` fixed: 22 degrees C fails `isCrrSized`.
+	// The false positive the value check fixed: 22 degrees C fails `isCrrSized`.
 	{ line: "const CRR_TEMP_ANCHOR_C = 22;", fires: false },
 	// The documented lower-bound exclusion: a storage migration, not a fallback.
 	{ line: "crr: oldRecord.crr ?? 0", fires: false },
