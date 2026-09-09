@@ -12,7 +12,7 @@ export function toggleDemDisplayProfile(
 	return next;
 }
 
-export function setDemDisplayProfileEnabled(
+function setDemDisplayProfileEnabled(
 	appState: AppState,
 	enabled: boolean,
 ): ElevationDisplayProfile {
@@ -23,9 +23,7 @@ export function setDemDisplayProfileEnabled(
 	return next;
 }
 
-export function isDemDisplayProfileEnabled(
-	profile: ElevationDisplayProfile,
-): boolean {
+function isDemDisplayProfileEnabled(profile: ElevationDisplayProfile): boolean {
 	return profile === "dem-interpolated-smoothed-5pt";
 }
 

@@ -21,7 +21,7 @@ const MIN_VALID_LONGITUDE = -180;
 const MAX_VALID_LONGITUDE = 180;
 
 // Detection mode types - extensible for future modes
-export type LapDetectionMode =
+type LapDetectionMode =
 	| "GPS based lap splitting" // Same direction crossings
 	| "GPS gate one way" // Future: single direction gate
 	| "GPS based out and back"; // Future: out and back detection
@@ -798,7 +798,7 @@ export class OutAndBackDetector {
 /**
  * Default values for GPS lap detection configuration
  */
-export const DEFAULT_LAP_DETECTION_CONFIG = {
+const DEFAULT_LAP_DETECTION_CONFIG = {
 	proximityThreshold: DEFAULT_PROXIMITY_THRESHOLD_METERS,
 	bearingWindowSize: DEFAULT_BEARING_WINDOW_POINTS,
 	angleThreshold: DEFAULT_SAME_DIRECTION_ANGLE_THRESHOLD_DEGREES,

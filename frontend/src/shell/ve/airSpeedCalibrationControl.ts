@@ -37,7 +37,7 @@ import {
 } from "./windSourceVisibility";
 
 /** The block's own id, so the visibility sync and tests can name it. */
-export const AIR_SPEED_CALIBRATION_CONTROLS_ID = "airSpeedCalibrationControls";
+const AIR_SPEED_CALIBRATION_CONTROLS_ID = "airSpeedCalibrationControls";
 
 /**
  * `currentValue` is the already-formatted percent string the three modes each

@@ -13,9 +13,7 @@ export interface SegmentExtractionInput {
 	allWindSpeed: number[];
 }
 
-export function createSelectedSlice(
-	input: SegmentExtractionInput,
-): SelectedSlice {
+function createSelectedSlice(input: SegmentExtractionInput): SelectedSlice {
 	const timestamps: number[] = [];
 	const power: number[] = [];
 	const velocity: number[] = [];

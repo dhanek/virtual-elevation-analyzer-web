@@ -69,7 +69,7 @@ export interface StandardVeCallbacks {
 /**
  * Initialize the Virtual Elevation analysis plots.
  */
-export async function initializeVEAnalysis(
+async function initializeVEAnalysis(
 	appState: AppState,
 	analysisInput: AnalysisInput,
 	selectedIndices: number[],

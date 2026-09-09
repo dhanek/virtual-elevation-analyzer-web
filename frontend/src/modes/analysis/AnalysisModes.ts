@@ -13,7 +13,7 @@ const ANALYSIS_MODES: Record<AnalysisModeId, AnalysisModeHandler> = {
 	outAndBack: outAndBackMode,
 };
 
-export function getAnalysisModeId(
+function getAnalysisModeId(
 	lapDetectionMode: string | null | undefined,
 ): AnalysisModeId {
 	switch (lapDetectionMode) {

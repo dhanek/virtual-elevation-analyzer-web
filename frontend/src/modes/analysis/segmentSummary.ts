@@ -125,7 +125,7 @@ export function buildFilteredDataFromProfiles(
  * smallest thing this concatenation actually needs, and it keeps the trim
  * decision at the one call site above that knows about trim windows.
  */
-export function buildFilteredDataFromIndexGroups(
+function buildFilteredDataFromIndexGroups(
 	appState: AppState,
 	indexGroups: number[][],
 ): {

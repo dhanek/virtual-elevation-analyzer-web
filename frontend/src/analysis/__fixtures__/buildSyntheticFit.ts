@@ -133,7 +133,7 @@ class FitWriter {
 /** FIT timestamps count seconds since 1989-12-31T00:00:00Z. */
 const FIT_EPOCH_OFFSET = 631_065_600;
 /** The activity's first timestamp, as written on the wire (FIT epoch). */
-export const FIT_START_TIME = 1_156_886_040;
+const FIT_START_TIME = 1_156_886_040;
 /** The same instant as the parser reports it, in Unix seconds. */
 export const UNIX_START_TIME = FIT_START_TIME + FIT_EPOCH_OFFSET;
 export const SYNTHETIC_RECORD_COUNT = 60;
