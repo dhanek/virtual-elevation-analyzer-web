@@ -45,6 +45,11 @@ const ROOTS = ["src", "scripts"];
  * PR #21 spent four review rounds on line-number citations decaying under edits
  * that grew a comment. A key that moves with the code cannot go stale silently.
  *
+ * A key is matched against the match's SPANNING LINES with runs of whitespace
+ * collapsed to one space (see `siteText`), not against a single physical line.
+ * So a key written in prettier's one-line form still matches a site prettier has
+ * broken across lines to fit the parameter list.
+ *
  * The list is the reason this guard is not simply "annotate every `.map`". The
  * defect class is a literal flowing into a DECLARED type while carrying a field
  * that type no longer has; a purely local shape cannot be in that class.
@@ -73,20 +78,34 @@ const ALLOWED: ReadonlyArray<{ file: string; callback: string; why: string }> =
 		},
 		{
 			file: "scripts/build-golden-fixture.ts",
-			callback: ".map(",
+			callback: ".map((lap) => ({",
 			why: "fixture JSON shapes, written to disk rather than to a typed consumer",
 		},
 		{
 			file: "scripts/build-out-and-back-fixture.ts",
-			callback: ".map(",
+			callback: ".map((section) => ({",
 			why: "fixture JSON shapes, written to disk rather than to a typed consumer",
 		},
 	];
 
-function isAllowed(file: string, line: string): boolean {
+function isAllowed(file: string, siteText: string): boolean {
 	return ALLOWED.some(
-		(entry) => entry.file === file && line.includes(entry.callback),
+		(entry) => entry.file === file && siteText.includes(entry.callback),
 	);
+}
+
+/**
+ * The physical lines a match spans, with runs of whitespace collapsed to one
+ * space: from the start of the line the match begins on, through the end of the
+ * line it ends on. That collapsed text is what an allow-list key is matched
+ * against, and both the offender case and the staleness case use this one rule,
+ * so an entry can never be live for one and stale for the other.
+ */
+function siteText(src: string, match: RegExpExecArray): string {
+	const start = src.lastIndexOf("\n", match.index) + 1;
+	const nextNewline = src.indexOf("\n", match.index + match[0].length);
+	const end = nextNewline === -1 ? src.length : nextNewline;
+	return src.slice(start, end).replace(/\s+/g, " ");
 }
 
 function sourceFiles(dir: string): string[] {
@@ -108,9 +127,17 @@ function sourceFiles(dir: string): string[] {
  * A `.map(` callback opening an object literal, with no `): Type =>` between
  * the parameter list and the arrow. Deliberately textual: the alternative is a
  * TypeScript AST pass, and this guard has to run in the unit suite beside the
- * code it guards. The cost of being textual is that it cannot see a callback
- * spread over unusual formatting; prettier normalises that, and `npm run check`
- * enforces prettier.
+ * code it guards.
+ *
+ * It is run over the WHOLE FILE TEXT, not line by line, because prettier is what
+ * CREATES the multi-line form: when the parameter list is too wide to hug
+ * `.map(`, prettier breaks the callback onto its own line, and a per-line scan's
+ * `\s*` can never cross that newline. `npm run check` being green is no help —
+ * it is prettier that put the site out of reach. `renderSection3Template.ts` is
+ * the live case: a per-line scan calls that file clean.
+ *
+ * A whole-file scan has no line number of its own, so the reported line is
+ * derived from the match offset: the newline count in `src.slice(0, index)`.
  */
 const UNANNOTATED_MAP_LITERAL =
 	/\.map\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\(\{/g;
@@ -121,13 +148,13 @@ describe("map callbacks building object literals annotate their return type", ()
 		for (const root of ROOTS) {
 			for (const file of sourceFiles(root)) {
 				const src = readFileSync(file, "utf8");
-				const lines = src.split("\n");
-				lines.forEach((line, i) => {
-					UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-					if (!UNANNOTATED_MAP_LITERAL.test(line)) return;
-					const site = `${file}:${i + 1}`;
-					if (!isAllowed(file, line)) offenders.push(site);
-				});
+				UNANNOTATED_MAP_LITERAL.lastIndex = 0;
+				let match: RegExpExecArray | null;
+				while ((match = UNANNOTATED_MAP_LITERAL.exec(src)) !== null) {
+					const line = src.slice(0, match.index).split("\n").length;
+					const site = `${file}:${line}`;
+					if (!isAllowed(file, siteText(src, match))) offenders.push(site);
+				}
 			}
 		}
 
@@ -144,12 +171,15 @@ describe("map callbacks building object literals annotate their return type", ()
 			} catch {
 				return true;
 			}
-			return !src.split("\n").some((line) => {
-				UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-				return (
-					line.includes(entry.callback) && UNANNOTATED_MAP_LITERAL.test(line)
-				);
-			});
+			// The same whole-file rule the offender case uses, so an entry keyed to
+			// a site prettier broke across lines is not called stale.
+			const texts: string[] = [];
+			UNANNOTATED_MAP_LITERAL.lastIndex = 0;
+			let match: RegExpExecArray | null;
+			while ((match = UNANNOTATED_MAP_LITERAL.exec(src)) !== null) {
+				texts.push(siteText(src, match));
+			}
+			return !texts.some((text) => text.includes(entry.callback));
 		});
 
 		expect(stale.map((entry) => `${entry.file} :: ${entry.callback}`)).toEqual(
@@ -163,6 +193,13 @@ describe("map callbacks building object literals annotate their return type", ()
 		const unannotated = "\treturn xs.map((x) => ({ a: x }));";
 		const annotated = "\treturn xs.map((x): T => ({ a: x }));";
 		const bare = "\treturn xs.map(x => ({ a: x }));";
+		// The shape prettier itself produces when the parameter list is too wide
+		// to hug `.map(`. A per-line scan cannot see it; this is the assertion
+		// that would have caught that (PR #23, F37-01).
+		const broken =
+			"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number) => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
+		const brokenAnnotated =
+			"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number): T => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
 
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
 		expect(UNANNOTATED_MAP_LITERAL.test(unannotated)).toBe(true);
@@ -170,5 +207,9 @@ describe("map callbacks building object literals annotate their return type", ()
 		expect(UNANNOTATED_MAP_LITERAL.test(bare)).toBe(true);
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
 		expect(UNANNOTATED_MAP_LITERAL.test(annotated)).toBe(false);
+		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
+		expect(UNANNOTATED_MAP_LITERAL.test(broken)).toBe(true);
+		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
+		expect(UNANNOTATED_MAP_LITERAL.test(brokenAnnotated)).toBe(false);
 	});
 });

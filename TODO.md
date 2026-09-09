@@ -462,7 +462,7 @@ changed and why.
       contextual type reaches it. So sites that LOOK checked because their function declares
       `: T[]` were not — the item had assumed those were safe.
 
-      14 sites reaching a declared type are annotated. The other 8 build purely local shapes with
+      18 sites reaching a declared type are annotated. The other 8 build purely local shapes with
       no declared type to rot against, so an annotation would have to invent one; they are
       allow-listed with what each builds. A blanket "annotate every `.map`" guard would have
       forced meaningless annotations, which is why it is not that.
