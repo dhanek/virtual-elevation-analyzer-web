@@ -12,6 +12,7 @@ import {
 	displayCdaBounds,
 	displayCrrBounds,
 } from "../../analysis/sliderBounds";
+import type { OffsetMetricWindow } from "../analysis/bindModeControls";
 import {
 	resolveDisplayCda,
 	resolveDisplayCrr,
@@ -543,10 +544,12 @@ export function setupGpsLapSliderHandlers(
 		// trim window. The binder displays the NaN-skipping mean over them, so
 		// Standard's displayed number is unchanged and the GPS modes gain one.
 		getOffsetMetricWindows: () =>
-			ranges().map((range: { startIdx: number; endIdx: number }) => ({
-				start: range.startIdx,
-				end: range.endIdx,
-			})),
+			ranges().map(
+				(range: { startIdx: number; endIdx: number }): OffsetMetricWindow => ({
+					start: range.startIdx,
+					end: range.endIdx,
+				}),
+			),
 		getSyncErrorSeries: () => syncErrorSeries(appState),
 		// Every mode keeps its own segment source for the auto calibration: the
 		// difference between the three is DATA, not control flow, so it is an

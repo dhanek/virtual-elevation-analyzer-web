@@ -20,6 +20,7 @@
  * Export CSV persist THOSE. See `segmentVirtualDistance.ts`.
  */
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
+import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import type { SegmentVirtualDistance } from "../../analysis/VirtualDistance";
 import type { AppState, WindSource } from "../../state/AppState";
 import type { VEAnalysisResult } from "../../utils/ResultsStorage";
@@ -203,10 +204,12 @@ export function writeSegmentModeResultState(
 	inputs: ResolvedUpdateInputs,
 	analyzedItems: number[],
 	virtualDistances: SegmentVirtualDistance[] = stackedVirtualDistances(
-		profiles.map((profile) => ({
-			label: profile.segment.label,
-			metrics: profile.supplementarySeries,
-		})),
+		profiles.map(
+			(profile): { label: string; metrics: SegmentSupplementarySeries } => ({
+				label: profile.segment.label,
+				metrics: profile.supplementarySeries,
+			}),
+		),
 	),
 ): void {
 	appState.currentVEResult = buildCombinedSegmentResult(profiles, aggregate);

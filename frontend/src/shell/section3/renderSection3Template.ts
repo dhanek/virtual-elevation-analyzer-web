@@ -58,7 +58,7 @@ export function renderSection3Template(input: Section3TemplateInput): string {
 	// Reflect the retained selection so changing GPS mode (which re-renders this
 	// template) keeps the user's chosen laps checked.
 	const lapItems: SelectableCardItem[] = laps.map(
-		(lap: any, index: number) => ({
+		(lap: any, index: number): SelectableCardItem => ({
 			id: `lap-${index + 1}`,
 			label: `Lap ${index + 1}`,
 			details: `${formatDuration(lap.total_elapsed_time)} \u2022 ${formatDistance(lap.total_distance)} \u2022 ${lap.avg_power > 0 ? formatPower(lap.avg_power) : "N/A"}`,

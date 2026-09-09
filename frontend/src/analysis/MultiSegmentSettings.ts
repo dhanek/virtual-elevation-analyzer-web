@@ -207,7 +207,7 @@ export function buildAutoCalibrationSegmentsFromRanges(
 			}),
 		)
 		.filter((segment) => segment.timestamps.length > 1)
-		.map((segment) => ({
+		.map((segment): AutoCalibrationSegment => ({
 			timestamps: segment.timestamps,
 			groundSpeed: segment.velocity,
 			apparentSpeed: segment.windSpeed,

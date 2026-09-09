@@ -12,6 +12,7 @@ import {
 	displayCdaBounds,
 	displayCrrBounds,
 } from "../../analysis/sliderBounds";
+import type { OffsetMetricWindow } from "../analysis/bindModeControls";
 import {
 	resolveDisplayCda,
 	resolveDisplayCrr,
@@ -785,7 +786,10 @@ export function setupOutAndBackSliderSync(
 		// N-3: one sync-error window per section leg — outbound and inbound are
 		// separate windows, as they are everywhere else in this mode.
 		getOffsetMetricWindows: () =>
-			ranges().map((range) => ({ start: range.startIdx, end: range.endIdx })),
+			ranges().map((range): OffsetMetricWindow => ({
+				start: range.startIdx,
+				end: range.endIdx,
+			})),
 		getSyncErrorSeries: () => syncErrorSeries(appState),
 		getAutoCalibrationPercent: () =>
 			calculateAutoAirSpeedCalibrationPercent(

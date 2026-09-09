@@ -49,13 +49,6 @@ export {
 	integrateVirtualDistance,
 	virtualDistanceDifferencePercent,
 } from "../analysis/VirtualDistance";
-export type {
-	VirtualDistanceIntegration,
-	VirtualDistanceTotals,
-	VirtualDistanceWindow,
-	SegmentVirtualDistance,
-} from "../analysis/VirtualDistance";
-
 export type PlotTrace = Record<string, unknown>;
 export type PlotLayout = Record<string, unknown>;
 export type PlotConfig = Record<string, unknown>;

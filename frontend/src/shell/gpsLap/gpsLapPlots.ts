@@ -4,6 +4,7 @@
  * Verbatim lift from main.ts -- rendering logic for GPS-lap mode plots.
  */
 import type { LapVEProfile } from "./types";
+import type { MultiSegmentSeries } from "../../plots/MultiSegmentPlotBuilders";
 import { anchorSeriesTo, residualsAgainst } from "../../plots/comparisonTraces";
 import {
 	BELOW_AXIS_LEGEND_MARGIN_B,
@@ -802,7 +803,7 @@ export function renderGpsLapWindPlot(lapProfiles: LapVEProfile[]) {
 
 	const figure = buildMultiSegmentWindFigure({
 		title: "Apparent Wind Speed by Lap",
-		series: lapProfiles.map((lap, index) => ({
+		series: lapProfiles.map((lap, index): MultiSegmentSeries => ({
 			label: `Lap ${lap.lapNumber}`,
 			color: stackedLapColor(index),
 			metrics: lap.supplementarySeries,
@@ -834,7 +835,7 @@ export function renderGpsLapPowerPlot(lapProfiles: LapVEProfile[]) {
 
 	const figure = buildMultiSegmentPowerFigure({
 		title: "Power by Lap",
-		series: lapProfiles.map((lap, index) => ({
+		series: lapProfiles.map((lap, index): MultiSegmentSeries => ({
 			label: `Lap ${lap.lapNumber}`,
 			color: stackedLapColor(index),
 			metrics: lap.supplementarySeries,
@@ -865,7 +866,7 @@ export function renderGpsLapVdPlot(lapProfiles: LapVEProfile[]) {
 	const plotDiv = document.getElementById("gpsLapVdPlot");
 	if (!plotDiv) return;
 
-	const series = lapProfiles.map((lap, index) => ({
+	const series = lapProfiles.map((lap, index): MultiSegmentSeries => ({
 		label: `Lap ${lap.lapNumber}`,
 		color: stackedLapColor(index),
 		metrics: lap.supplementarySeries,

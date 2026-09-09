@@ -154,7 +154,7 @@ function sectionLegs(
 	sections: OutAndBackSection[],
 	profiles: SegmentVeProfile[],
 ): OutAndBackSectionLegs[] {
-	return sections.map((section) => ({
+	return sections.map((section): OutAndBackSectionLegs => ({
 		label: `Section ${section.sectionNumber}`,
 		outbound:
 			profiles.find((profile) =>

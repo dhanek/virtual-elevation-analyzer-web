@@ -209,6 +209,15 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
+- [ ] **[S–M] 72 exports are used only inside their own file.** `npm run knip` reports them;
+      `npm run check` does not gate on them, because taking 72 `export` keywords off in one pass
+      is a large mechanical diff and several sit beside comments explaining why the declaration
+      exists. Each is a safe, `tsc`-verified edit on its own — drop `export`, and the compiler
+      proves nothing imported it. Worth doing in one sitting, after which `check` can gate on
+      `exports` and `types` as well as `files` and the class is closed for good.
+      Run `npm run knip` for the current list. `frontend/` ·
+      *origin: sizing done while wiring the dead-export detector, 2026-09-09*
+
 - [ ] **[S] Scrub the ride filename from `main`'s history — after PR #8 lands, not before.**
       The current file no longer names the ride (see *Conventions*), but the name is still in **25
       commits** on `main`, spanning `3b05de7` (2026-08-31) to `dcdcaac` (2026-09-03) — in `TODO.md`
@@ -365,34 +374,6 @@ re-deriving it):
       auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
       maintainer 2026-09-04*
 
-- [ ] **[S] No dead-export detector runs in CI.** `npm run check` is prettier + tsc and
-      `npm run lint` is eslint; neither can see an export with no importer. That is why four
-      declarations survived the analyze-leg retirement long enough to need a hand-scoped `[L]`
-      sweep of their own, and why three comments were left dangling behind them once the sweep
-      landed. Wire `knip` (or `ts-prune`) over `frontend/src` into `npm run check`, with test
-      files counted as consumers so a pinned-but-dead export is still reported. Expect a first
-      run to surface a backlog — size that before wiring it into a gating script.
-      `package.json`, `frontend/src` · *origin: PR #21 review round 31, F31-07 — deferred by the
-      maintainer 2026-09-08*
-
-- [ ] **[M] An object literal with no annotation anywhere on its path escapes `tsc`'s
-      excess-property check, so a field deleted from a type can survive in a live writer.**
-      Excess-property checking fires only where a literal is assigned to an annotated target.
-      In `xs.map((x) => ({ … }))` with no annotation on the callback, the parameter, or the
-      receiving variable, the literal's type is INFERRED and the extra field is simply part of
-      it — `tsc` reports nothing, and the field travels to a typed consumer that never declared
-      it. This is exactly how `range` survived the analyze-leg retirement's fifteen-file sweep
-      (PR #21, F32-02) and was found only by reading, not by any check.
-      **This is NOT the `knip`/`ts-prune` item above.** A dead-export detector finds declarations
-      with no importer; this is the opposite shape — a LIVE literal carrying a field its type no
-      longer has. Neither detector sees the other's class, so wiring knip does not close this.
-      The work is a sweep: enumerate the unannotated `.map(… => ({…}))` sites (~19 recorded at
-      round 33; a looser single-line grep counts 25 outside tests), decide for each whether it
-      reaches a typed consumer, and annotate those that do — `xs.map((x): T => ({ … }))` is
-      enough to arm the check. Then consider whether a lint rule or a convention can hold the
-      line, since annotating today's sites does not stop tomorrow's.
-      `frontend/src`, `frontend/scripts` · *origin: PR #21 review round 33, F33-02 — deferred by
-      the maintainer 2026-09-08*
 
 ---
 
@@ -442,6 +423,55 @@ changed and why.
       `frontend/src/shell/outAndBack/outAndBackPlots.ts` ·
       `frontend/src/shell/outAndBack/outAndBackMeanElevation.test.ts` ·
       *origin: PR #21 review round 31, F31-08 — deferred by the maintainer 2026-09-08*
+### Two detectors for what neither tsc nor eslint could see — 2026-09-09
+
+- [x] **[S] No dead-export detector runs in CI.** `knip` is wired. **Sized before wiring, as the
+      item required, and the size changed the design:** a first run reported 3 unused files, 51
+      unused exports and 28 unused exported types — 82, not the [S] the item assumed, and not
+      gateable as-is. Splitting them made it tractable: **74** (72 after PR #22's deletions
+      landed) were exported but used inside
+      their own file (mechanical `export` removal), **5** referenced nowhere, **3** files with no
+      importer.
+
+      So `npm run check` gates on `--include files` — the category this took to zero — and
+      `npm run knip` reports the rest. Gating on a clean category is a real gate; baselining 75
+      findings to claim a green one is not. The remaining over-exported symbols are recorded below as
+      what remains.
+
+      Deleted: three barrel files with zero importers, a dead `ShellAnalysisContext`, and a
+      re-export block in `StandardPlotBuilders.ts` for four types that live in
+      `VirtualDistance.ts`. **`tsc` caught what knip did not** — `VirtualDistanceTotals` sat in
+      that same block and is live, so removing the block broke `vdHeader.ts`. Knip had flagged
+      only the other four; the over-broad deletion was mine, and the import now points at the
+      origin module.
+
+      The gate is proven to FAIL: an orphaned file makes `npm run check` exit 1 naming it.
+
+- [x] **[M] An object literal with no annotation anywhere on its path escapes `tsc`'s
+      excess-property check.** Closed, and the item understated it. **Measured rather than
+      reasoned**, all four forms under `--strict`:
+
+      | form | excess property caught? |
+      |---|---|
+      | annotated function RETURN TYPE + `.map` | **no** |
+      | annotated BINDING + `.map` | **no** |
+      | annotated CALLBACK return `(x): T =>` | **yes** |
+      | direct literal | yes |
+
+      `Array<T>.map<U>` infers `U` from the callback's own return expression before any
+      contextual type reaches it. So sites that LOOK checked because their function declares
+      `: T[]` were not — the item had assumed those were safe.
+
+      18 sites reaching a declared type are annotated. The other 8 build purely local shapes with
+      no declared type to rot against, so an annotation would have to invent one; they are
+      allow-listed with what each builds. A blanket "annotate every `.map`" guard would have
+      forced meaningless annotations, which is why it is not that.
+
+      **The allow-list is keyed on callback TEXT, not line numbers.** The first version was
+      line-keyed and broke the moment prettier reflowed a file — the same decay PR #21 spent four
+      review rounds on. A second case asserts no entry has gone stale.
+      `frontend/src/tooling/mapLiteralAnnotation.test.ts` (new) ·
+      *origin: PR #21 review rounds 31 and 33, F31-07 and F33-02*
 
 ### The mirrored inbound leg, and the dead-declaration sweep — 2026-09-08
 

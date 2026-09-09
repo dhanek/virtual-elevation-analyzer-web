@@ -109,7 +109,7 @@ export function supplementaryTotals(
 export function stackedVirtualDistances(
 	segments: { label: string; metrics: SegmentSupplementarySeries }[],
 ): SegmentVirtualDistance[] {
-	return segments.map((segment) => ({
+	return segments.map((segment): SegmentVirtualDistance => ({
 		label: segment.label,
 		...supplementaryTotals(segment.metrics),
 	}));
