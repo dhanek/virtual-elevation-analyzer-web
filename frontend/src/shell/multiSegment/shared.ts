@@ -23,20 +23,24 @@ export function getMultiSegmentColor(index: number): string {
  * The same interpolation as `interpolateElevation`, for an ASCENDING reference,
  * in O(log n) instead of O(n).
  *
- * WHY A SECOND FUNCTION RATHER THAN A FASTER FIRST ONE. `interpolateElevation`
- * is handed a DESCENDING array by `calculateOutAndBackMeanElevation`'s
- * mirrored-inbound branch, where its `targetDist <= distances[0]` guard fires
- * against the array's MAXIMUM and it returns `elevations[0]` for every target.
- * That is pinned by a test and is a numbers question of its own; making the
- * shared function order-aware would change the mean-elevation profile RMSE is
- * measured against, inside a change that set out to make it faster. So the fast
- * path takes the precondition it can actually meet, and the old function keeps
- * every one of its callers and every one of its quirks.
+ * WHY A SECOND FUNCTION STILL EXISTS. The original reason is GONE: the
+ * DESCENDING caller it named — `calculateOutAndBackMeanElevation`'s
+ * mirrored-inbound branch, which fired `interpolateElevation`'s
+ * `targetDist <= distances[0]` guard against the array's MAXIMUM and got
+ * `elevations[0]` for every target — was corrected, and that branch now calls
+ * this function on a re-sorted array (`outAndBackPlots.ts:119-134`). What is
+ * left is only that `interpolateElevation` remains, order-agnostic in its
+ * guards, with a caller of its own. Folding the two together is `TODO.md`'s
+ * *Consolidate `interpolateElevation` into `interpolateAscending`* item, not a
+ * thing to do here.
  *
- * PRECONDITION: `distances` is sorted ascending. Callers pass
- * `meanElevation.distances`, which `calculateOutAndBackMeanElevation` builds as
- * a uniform ramp. Nothing here validates it — an O(n) check per call would give
- * back exactly what the binary search buys.
+ * PRECONDITION: `distances` is sorted ascending. Unchanged, and still
+ * unvalidated — an O(n) check per call would give back exactly what the binary
+ * search buys. Two shapes of caller meet it now: `meanElevation.distances`,
+ * which `calculateOutAndBackMeanElevation` builds as a uniform ramp, and the
+ * mirrored-inbound branch's reversed mirror of the RECORDED FIT distance
+ * channel, whose ascendingness is inherited from the mirroring rather than
+ * constructed here.
  *
  * The search is a LOWER BOUND, and that is what makes it equivalent rather than
  * merely close: the linear scan returns the FIRST bracket whose ends straddle

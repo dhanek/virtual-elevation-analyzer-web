@@ -99,18 +99,38 @@ export function calculateOutAndBackMeanElevation(
 		) {
 			const maxInboundDist =
 				profile.inboundDistances[profile.inboundDistances.length - 1];
-			const mirroredDistances = profile.inboundDistances.map(
-				(d) => maxInboundDist - d,
-			);
+
+			// MIRRORED AND THEN RE-SORTED, and the second half is the fix.
+			//
+			// `maxInboundDist - d` puts the inbound leg into the outbound's frame
+			// (distance from gate A), which is what the average needs. But it also
+			// REVERSES THE ORDER: the inbound leg is recorded from gate B, so the
+			// mirrored distances run high to low. An interpolator that brackets a
+			// target needs them ascending, and `interpolateElevation`'s first guard
+			// is `targetDist <= distances[0]` — on a descending array that is the
+			// MAXIMUM, so it fired for every target and returned `elevations[0]`.
+			// The inbound leg contributed ONE CONSTANT at every reference distance,
+			// which dragged the mean halfway to a flat line and corrupted every
+			// RMSE measured against it.
+			//
+			// Reversing both arrays together restores ascending order while keeping
+			// each distance paired with its own elevation sample; the pairing was
+			// never wrong, only the sort order.
+			const mirroredDistances = profile.inboundDistances
+				.map((d) => maxInboundDist - d)
+				.reverse();
+			const mirroredElevation = profile.inboundActualElevation
+				.slice()
+				.reverse();
 
 			for (let i = 0; i < referenceDistances.length; i++) {
 				const targetDist = referenceDistances[i];
 				if (targetDist > maxInboundDist) continue;
 
-				const elevAtDist = interpolateElevation(
+				const elevAtDist = interpolateAscending(
 					targetDist,
 					mirroredDistances,
-					profile.inboundActualElevation,
+					mirroredElevation,
 				);
 				if (!isNaN(elevAtDist)) {
 					elevationSum[i] += elevAtDist;

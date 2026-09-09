@@ -47,8 +47,6 @@ function leg(): SegmentSupplementarySeries {
 function section(sectionNumber: number, compare: boolean): OutAndBackVEProfile {
 	return {
 		sectionNumber,
-		outboundRange: { startIdx: 0, endIdx: 2 },
-		inboundRange: { startIdx: 0, endIdx: 2 },
 		outboundDistances: [0, 0.5, 1],
 		outboundVE: [0, 1, 2],
 		outboundVECompare: compare ? [0, 1.1, 2.1] : null,

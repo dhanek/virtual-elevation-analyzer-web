@@ -44,7 +44,6 @@ function makeLap(index: number, withCompare: boolean): LapVEProfile {
 		(_, i) => 100 + Math.sin(i / 6) * 3,
 	);
 	return {
-		range: { startIdx: 0, endIdx: 2 },
 		lapNumber: index + 1,
 		distances,
 		virtualElevation: Array.from(

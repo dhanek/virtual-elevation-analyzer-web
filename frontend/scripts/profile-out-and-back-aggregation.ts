@@ -81,8 +81,6 @@ function makeProfile(
 	const distances = ramp(samplesPerLeg, 0, LEG_DISTANCE_KM);
 	return {
 		sectionNumber,
-		outboundRange: { startIdx: 0, endIdx: samplesPerLeg - 1 },
-		inboundRange: { startIdx: samplesPerLeg, endIdx: 2 * samplesPerLeg - 1 },
 		outboundDistances: distances,
 		outboundVE: veSeries(samplesPerLeg, 1.5),
 		outboundVECompare: withCompare ? veSeries(samplesPerLeg, 1.7) : null,

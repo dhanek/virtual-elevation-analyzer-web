@@ -4,14 +4,16 @@
  * claim below rests on executed behaviour rather than on reading.
  *
  * THE TWO ARE NOT INTERCHANGEABLE, and that is deliberate. `interpolateElevation`
- * is given a DESCENDING array by one caller
+ * WAS given a DESCENDING array by one caller
  * (`calculateOutAndBackMeanElevation`'s mirrored-inbound branch), where its
- * `targetDist <= distances[0]` guard fires against the array's MAXIMUM and it
- * returns `elevations[0]` for every target. That behaviour is pinned here as it
- * stands, not corrected: it changes the mean-elevation profile RMSE is measured
- * against, so it is a numbers change and belongs to its own item, not to a
- * performance pass. `interpolateAscending` therefore documents an ascending
- * PRECONDITION rather than trying to serve both.
+ * `targetDist <= distances[0]` guard fired against the array's MAXIMUM and it
+ * returned `elevations[0]` for every target. That was a numbers change and so
+ * became its own item; the item was taken, and the caller was corrected — it
+ * now re-sorts and calls `interpolateAscending`. The descending behaviour is
+ * still pinned below, but for a different reason than when these cases were
+ * written: it is a real trap in an order-agnostic guard, not a thing any caller
+ * depends on. `interpolateAscending` documents an ascending PRECONDITION rather
+ * than trying to serve both.
  */
 import { describe, expect, it } from "vitest";
 import { interpolateAscending, interpolateElevation } from "./shared";
@@ -38,9 +40,13 @@ describe("interpolateElevation", () => {
 	});
 
 	it("returns the FIRST elevation for every target when given a descending array", () => {
-		// Pinned as it stands. The mirrored-inbound caller hits exactly this, so
-		// the mean profile takes a constant from that leg rather than a curve.
-		// See the TODO item; do not "fix" this here.
+		// NO CALLER HITS THIS ANY MORE. The mirrored-inbound branch was the one
+		// that did — it took a constant from that leg instead of a curve — and
+		// it was fixed on this branch by re-sorting and calling
+		// `interpolateAscending`. The case stays so a future caller cannot
+		// re-acquire the trap silently: the guards here are order-agnostic, so
+		// a descending array is accepted and answered wrongly rather than
+		// rejected.
 		const descending = [4, 3, 2, 1, 0];
 		expect(interpolateElevation(0, descending, elevations)).toBe(100);
 		expect(interpolateElevation(2, descending, elevations)).toBe(100);
