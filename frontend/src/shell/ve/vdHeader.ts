@@ -42,11 +42,13 @@
  */
 import {
 	computeVirtualDistanceWindowTotals,
-	type VirtualDistanceTotals,
 	type VirtualDistancePlotInput,
 } from "../../plots/StandardPlotBuilders";
 import type { SegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
-import type { SegmentVirtualDistance } from "../../analysis/VirtualDistance";
+import type {
+	SegmentVirtualDistance,
+	VirtualDistanceTotals,
+} from "../../analysis/VirtualDistance";
 import {
 	sectionVirtualDistances,
 	stackedVirtualDistances,
