@@ -128,7 +128,7 @@ export async function handleFileSelection(file: File): Promise<void> {
 	deps.hideError();
 }
 
-export function displayFileInfo(file: File): void {
+function displayFileInfo(file: File): void {
 	const deps = getDependencies();
 
 	const fileSize = formatFileSize(file.size);
@@ -144,7 +144,7 @@ export function displayFileInfo(file: File): void {
 }
 
 // Process FIT file
-export async function processFitFile(file: File): Promise<void> {
+async function processFitFile(file: File): Promise<void> {
 	const deps = getDependencies();
 
 	try {
@@ -422,7 +422,7 @@ export async function processFitFile(file: File): Promise<void> {
 }
 
 // Display CSV results (similar to displayResults but for CSV)
-export async function displayCsvResults(
+async function displayCsvResults(
 	csvData: GibliCsvData,
 	result: any,
 ): Promise<void> {
@@ -483,16 +483,13 @@ export async function displayCsvResults(
 }
 
 // Initialize section 3 for CSV data
-export function initializeSection3Csv(
-	_csvData: GibliCsvData,
-	_result: any,
-): void {
+function initializeSection3Csv(_csvData: GibliCsvData, _result: any): void {
 	// CSV data is normalized into appState.currentFitData during file loading.
 	initializeSection3();
 }
 
 // Process CSV file
-export async function processCsvFile(file: File): Promise<void> {
+async function processCsvFile(file: File): Promise<void> {
 	const deps = getDependencies();
 
 	try {

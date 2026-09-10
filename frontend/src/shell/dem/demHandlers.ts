@@ -328,7 +328,7 @@ export function formatDistance(meters: number): string {
 	return `${meters.toFixed(0)} m`;
 }
 
-export function formatSpeed(ms: number): string {
+function formatSpeed(ms: number): string {
 	const kmh = ms * 3.6;
 	return `${kmh.toFixed(1)} km/h`;
 }

@@ -28,11 +28,11 @@ import {
 } from "./windSourceVisibility";
 
 /** The block's own id, so the visibility sync and tests can name it. */
-export const AIR_SPEED_OFFSET_CONTROLS_ID = "airSpeedOffsetControls";
+const AIR_SPEED_OFFSET_CONTROLS_ID = "airSpeedOffsetControls";
 
-export const AIR_SPEED_OFFSET_MIN_SECONDS = -10;
-export const AIR_SPEED_OFFSET_MAX_SECONDS = 10;
-export const AIR_SPEED_OFFSET_STEP_SECONDS = 1;
+const AIR_SPEED_OFFSET_MIN_SECONDS = -10;
+const AIR_SPEED_OFFSET_MAX_SECONDS = 10;
+const AIR_SPEED_OFFSET_STEP_SECONDS = 1;
 
 /**
  * Resolve the offset the control opens on: the stored parameter when the record

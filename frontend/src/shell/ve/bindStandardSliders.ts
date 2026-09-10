@@ -73,7 +73,7 @@ export function formatCoveredLapCount(
  * `renderMetrics` -- the MEAN of the per-lap fits (D-19 Option B), which one fit
  * over N laps is not. `[S-M]`, retired with that fit.
  */
-export function updateMetricsDisplay(
+function updateMetricsDisplay(
 	r2: number,
 	rmse: number,
 	veGain: number,

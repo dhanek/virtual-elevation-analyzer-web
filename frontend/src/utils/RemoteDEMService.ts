@@ -5,7 +5,7 @@
 import { DEMSourceType } from "./RemoteDEMConfig";
 import { log } from "./log";
 
-export interface RouteBbox {
+interface RouteBbox {
 	south: number;
 	north: number;
 	west: number;
@@ -84,7 +84,7 @@ function enforceMinimumBbox(bbox: RouteBbox): RouteBbox {
 	return out;
 }
 
-export function computeBboxFromRoute(
+function computeBboxFromRoute(
 	lats: number[],
 	lons: number[],
 	paddingDeg: number = 0.005,
@@ -125,7 +125,7 @@ export function computeBboxFromRoute(
 const OPENTOPO_BASE_URL = "https://portal.opentopography.org/API/globaldem";
 const DEFAULT_DATASET_ORDER = ["COP30", "NASADEM", "SRTMGL1"];
 
-export class OpenTopographyClient {
+class OpenTopographyClient {
 	async fetchDEM(
 		bbox: RouteBbox,
 		apiKey: string,
@@ -238,7 +238,7 @@ function selectZoomForBbox(
 	return 6;
 }
 
-export class AWSTerrainTilesClient {
+class AWSTerrainTilesClient {
 	async fetchDEM(
 		bbox: RouteBbox,
 		requestedZoom?: number,

@@ -606,7 +606,7 @@ function syncErrorSeries(appState: AppState): {
  * export survives as the shell's name for it so existing callers are untouched
  * — but there is only ONE implementation.
  */
-export function getGpsLapNumberForRange(
+function getGpsLapNumberForRange(
 	appState: AppState,
 	range: { startIdx: number; endIdx: number },
 	fallbackLapNumber: number,

@@ -176,7 +176,7 @@ export function renderVirtualDistanceHeader(rows: VirtualDistanceRow[]): void {
  * -- it is not the distance of anything the rider rode (see the module note), so
  * it must never appear as if it were a per-lap figure.
  */
-export function renderCombinedVirtualDistanceHeader(
+function renderCombinedVirtualDistanceHeader(
 	totals: VirtualDistanceTotals,
 	segmentCount: number,
 ): void {

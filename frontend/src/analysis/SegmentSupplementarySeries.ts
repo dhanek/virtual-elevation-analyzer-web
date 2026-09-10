@@ -110,7 +110,7 @@ export function calculateConstantApparentWindSeries(
 	});
 }
 
-export function calculateRiderBearings(
+function calculateRiderBearings(
 	positionLat: number[],
 	positionLong: number[],
 ): number[] {

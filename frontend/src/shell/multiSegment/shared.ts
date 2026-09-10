@@ -4,7 +4,7 @@
  * Used by both GPS-lap and out-and-back shell modules.
  */
 
-export const MULTI_SEGMENT_COLORS = [
+const MULTI_SEGMENT_COLORS = [
 	"#4363d8",
 	"#e6194b",
 	"#3cb44b",

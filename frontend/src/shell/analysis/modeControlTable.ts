@@ -72,7 +72,7 @@ export type ModeUpdateReason =
 	| "segmentSelection";
 
 /** The DOM identity of one row. Absent ids mean the row is not element-driven. */
-export interface ModeControlElements {
+interface ModeControlElements {
 	rangeId?: string;
 	numberId?: string;
 	buttonId?: string;

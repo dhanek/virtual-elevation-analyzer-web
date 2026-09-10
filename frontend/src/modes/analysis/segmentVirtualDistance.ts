@@ -90,7 +90,7 @@ export function standardVirtualDistances(
 }
 
 /** The endpoint of one segment's cumulative air/ground curves, in km. */
-export function supplementaryTotals(
+function supplementaryTotals(
 	metrics: SegmentSupplementarySeries,
 ): VirtualDistanceTotals {
 	const airKm = lastOrZero(metrics.virtualDistanceAirKm);

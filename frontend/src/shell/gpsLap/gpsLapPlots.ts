@@ -276,7 +276,7 @@ export interface GpsLapHeaderStats {
 }
 
 /** One leg's worth of GPS-lap statistics. */
-export interface GpsLapStatsCore {
+interface GpsLapStatsCore {
 	meanR2: number;
 	meanRMSE: number;
 	avgVeGain: number;
@@ -393,7 +393,7 @@ function scoreGpsLapLeg(
 }
 
 /** Do ALL laps carry a compare leg? A partial set is a bug upstream. */
-export function everyLapHasCompareSeries(lapProfiles: LapVEProfile[]): boolean {
+function everyLapHasCompareSeries(lapProfiles: LapVEProfile[]): boolean {
 	return (
 		lapProfiles.length > 0 &&
 		lapProfiles.every((lap) => lap.virtualElevationCompare != null)

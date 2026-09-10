@@ -27,7 +27,7 @@ import { factorToPercent } from "../analysis/WindHeightTransfer";
 import type { StoredVEResult } from "./ResultsStorage";
 
 /** `[VDSegments, VDAirKm, VDGroundKm, VDDiffPercent]`, already formatted. */
-export type VirtualDistanceCells = readonly [string, string, string, string];
+type VirtualDistanceCells = readonly [string, string, string, string];
 
 export interface ResultColumn {
 	/** Stable identity, independent of the displayed header. */

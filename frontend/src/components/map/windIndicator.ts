@@ -17,7 +17,7 @@
 import { log } from "../../utils/log";
 import { degreeToCardinal } from "./geo";
 
-export function windIndicatorMarkup(
+function windIndicatorMarkup(
 	displaySpeed: number,
 	windSpeedUnit: "m/s" | "km/h",
 	windDirection: number,

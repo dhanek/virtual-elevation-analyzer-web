@@ -22,7 +22,7 @@ import type { VeStatus } from "./veStatus";
 
 export type WindSource = "constant" | "fit" | "compare" | "none";
 export type ActivitySource = "fit" | "csv";
-export type ActivityArray = number[] | Float64Array;
+type ActivityArray = number[] | Float64Array;
 
 export interface ActivityData {
 	timestamps: ActivityArray;
@@ -47,7 +47,7 @@ export interface ActivityData {
 	cda_reference?: number[];
 }
 
-export interface ActivityLap {
+interface ActivityLap {
 	start_time: number;
 	end_time: number;
 	total_elapsed_time: number;
@@ -62,7 +62,7 @@ export interface ActivityLap {
 	lap_number?: number;
 }
 
-export interface ActivityParsingStatistics {
+interface ActivityParsingStatistics {
 	has_power_data: boolean;
 	has_gps_data: boolean;
 	has_altitude_data?: boolean;
@@ -139,7 +139,7 @@ export type ActivityDataLike =
 	  })
 	| ActivityData;
 export type ActivityLapLike = LapData | ActivityLap;
-export type ActivityParsingStatisticsLike =
+type ActivityParsingStatisticsLike =
 	ParsingStatistics | ActivityParsingStatistics;
 
 export interface ActivityState {

@@ -65,7 +65,7 @@ export function resetModeUpdateRequests(): void {
  * whether to fire its synthetic slider dispatch (N-4). Both callers now share
  * this one definition rather than each carrying a copy of the class names.
  */
-export function isVeSectionVisible(): boolean {
+function isVeSectionVisible(): boolean {
 	if (typeof document === "undefined") {
 		return false;
 	}

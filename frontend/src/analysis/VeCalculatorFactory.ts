@@ -106,7 +106,7 @@ export function createVeCalculator(
 	);
 }
 
-export function toFloat64ArrayCached(values: ArrayLike<number>): Float64Array {
+function toFloat64ArrayCached(values: ArrayLike<number>): Float64Array {
 	if (values instanceof Float64Array) {
 		return values;
 	}

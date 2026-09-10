@@ -12,7 +12,7 @@ import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache
 import type { ActivityDataLike } from "../../state/AppState";
 import { log } from "../../utils/log";
 
-export function hasEnvironmentalData(fitData: ActivityDataLike): boolean {
+function hasEnvironmentalData(fitData: ActivityDataLike): boolean {
 	return !!(fitData.temperature && fitData.humidity && fitData.pressure);
 }
 

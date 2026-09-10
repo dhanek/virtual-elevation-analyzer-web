@@ -70,7 +70,7 @@ export const OUT_AND_BACK_RIDE_PATH = join(
 	"out-and-back-ride.json",
 );
 
-export interface OutAndBackRideProvenance {
+interface OutAndBackRideProvenance {
 	synthetic: true;
 	derivedFrom: string;
 	generator: string;
@@ -101,18 +101,18 @@ export interface OutAndBackRideProvenance {
 	};
 }
 
-export interface OutAndBackRideLap {
+interface OutAndBackRideLap {
 	start_time: number;
 	end_time: number;
 }
 
-export interface OutAndBackRideIndexRange {
+interface OutAndBackRideIndexRange {
 	startIdx: number;
 	endIdx: number;
 }
 
 /** @see the `sections` note in this module's header for the ten absent fields. */
-export interface OutAndBackRideSection {
+interface OutAndBackRideSection {
 	sectionNumber: number;
 	outboundStartIdx: number;
 	outboundEndIdx: number;

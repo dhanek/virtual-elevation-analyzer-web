@@ -22,8 +22,7 @@ export interface TimeRange {
 	end: number;
 }
 
-export type AnalysisSelectionEntry =
-	ActivityLapLike | DetectedLap | OutAndBackSection;
+type AnalysisSelectionEntry = ActivityLapLike | DetectedLap | OutAndBackSection;
 
 export interface PreparedAnalysisSelection {
 	mode: AnalysisModeId;
@@ -204,7 +203,7 @@ export interface SegmentVeProfile {
  * pre-phase behaviour that is NOT on the D-09 change list and is deliberately
  * left alone — it consumes this block, it does not motivate its shape.
  */
-export interface ModeCompareStats {
+interface ModeCompareStats {
 	r2: number;
 	rmse: number;
 	veGain: number;
