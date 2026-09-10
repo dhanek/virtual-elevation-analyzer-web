@@ -77,6 +77,13 @@ export interface SaveResultData {
 	 * wrong one.
 	 */
 	virtualDistances?: SegmentVirtualDistance[];
+	/**
+	 * The weather each independently-integrated segment was ACTUALLY analysed
+	 * at, in analysis order. Optional for the same reason as the line above: a
+	 * caller that has not gone through the update pass carries none rather than
+	 * a wrong one.
+	 */
+	segmentWeather?: SegmentWeatherRecord[] | null;
 	timestamp: Date;
 	recordingDate: string; // yyyy-mm-dd format from FIT file
 	avgPower: number;
@@ -129,6 +136,21 @@ export interface StoredVEResult {
 	 * load and export, just with these three columns empty.
 	 */
 	virtualDistances?: SegmentVirtualDistance[];
+	/**
+	 * The weather each independently-integrated segment was ACTUALLY analysed
+	 * at, in analysis order.
+	 *
+	 * `rho`, `windSpeed` and `windDirection` above describe the selection as a
+	 * whole — one sample at the trim region's midpoint. Once each lap resolves
+	 * its own weather that single figure stops being what the physics used, and
+	 * a record claiming otherwise would be a quiet lie about a number the user
+	 * may later compare runs on. These rows are the honest version.
+	 *
+	 * ABSENT on every record written before per-lap weather, and absent when
+	 * every segment ran on the selection-level values — so its presence means
+	 * the laps genuinely differed, and every read of it is guarded.
+	 */
+	segmentWeather?: SegmentWeatherRecord[];
 	avgPower: number;
 	avgSpeed: number;
 	avgTemperature?: number;
@@ -149,6 +171,36 @@ export interface StoredVEResult {
 export const CSV_HEADERS: readonly string[] = RESULT_COLUMNS.map(
 	(column) => column.header,
 );
+
+/** One lap's resolved weather, as stored. */
+export interface SegmentWeatherRecord {
+	label: string;
+	rho: number;
+	windSpeed: number;
+	windDirection: number;
+}
+
+/**
+ * Per-lap weather as CSV cells, following the `virtualDistances` shape below
+ * rather than inventing a second convention: one column per quantity, one value
+ * per segment, ';'-separated in analysis order, with a segment-name column
+ * stating the mapping.
+ *
+ * A record with no per-lap weather yields four empty cells — either it predates
+ * the feature or every lap used the selection value, and in both cases the
+ * existing Rho/WindSpeed/WindDirection columns already say everything true.
+ */
+export function segmentWeatherCsvCells(
+	rows: SegmentWeatherRecord[] | undefined,
+): [string, string, string, string] {
+	const entries = rows ?? [];
+	return [
+		entries.map((entry) => entry.label).join(";"),
+		entries.map((entry) => entry.rho.toFixed(4)).join(";"),
+		entries.map((entry) => entry.windSpeed.toFixed(2)).join(";"),
+		entries.map((entry) => entry.windDirection.toFixed(0)).join(";"),
+	];
+}
 
 /**
  * How N virtual distances fit a format shaped for one value per analysis.
@@ -211,9 +263,10 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
 		// handed to the four columns that read them, rather than each column
 		// recomputing the group.
 		const vd = virtualDistanceCsvCells(result.virtualDistances);
+		const lw = segmentWeatherCsvCells(result.segmentWeather);
 		csv +=
 			RESULT_COLUMNS.map((column) =>
-				toCsvCell(column, column.cell(result, vd)),
+				toCsvCell(column, column.cell(result, vd, lw)),
 			).join(",") + "\n";
 	}
 

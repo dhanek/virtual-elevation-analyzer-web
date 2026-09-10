@@ -405,6 +405,7 @@ export async function handleStoreResult(
 			// `currentVEResult`. Multi-lap Standard used to persist nothing but
 			// the combined result's zeros here.
 			virtualDistances: appState.currentVirtualDistances,
+			segmentWeather: appState.currentSegmentWeather,
 			timestamp: new Date(),
 			recordingDate: recordingDate,
 			avgPower: avgPower,

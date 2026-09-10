@@ -13,6 +13,10 @@ import {
 	weatherCacheInstance,
 	type WeatherCacheEntry,
 } from "../../utils/WeatherCache";
+import {
+	fetchWeatherSeries,
+	trimRegionTimeSpan,
+} from "../analysis/weatherSeries";
 import { WeatherAPI, WeatherAPIError } from "../../utils/WeatherAPI";
 import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js";
 import { showNotification } from "../dom/notifications";
@@ -462,6 +466,38 @@ async function performAutoRho(
 			parametersComponent.setParameters(updateParams);
 			refreshCrrTempReadout(parametersComponent.getParameters());
 			refreshWindHeightReadout(parametersComponent.getParameters());
+
+			// PER-LAP WEATHER. The scalars written above describe the selection
+			// as a whole and stay the fallback; this series is what lets each
+			// lap be analysed at its OWN instant instead of the midpoint's.
+			//
+			// It runs AFTER the parameters are set, deliberately: it is an
+			// enhancement, and a failure to build it must leave a completed,
+			// usable auto-rho behind rather than undoing one. `fetchWeatherSeries`
+			// already swallows per-slot failures, so an empty series here simply
+			// means the plot path keeps using the scalars.
+			const selectionSpan = trimRegionTimeSpan(
+				appState.filteredLapData,
+				trimStart,
+				trimEnd,
+			);
+			if (selectionSpan) {
+				appState.weatherSeries = await fetchWeatherSeries(
+					metadata,
+					selectionSpan.start,
+					selectionSpan.end,
+					weatherCache,
+					weatherAPI,
+				);
+				log.debug(
+					`🕐 Per-lap weather: ${appState.weatherSeries.length} slot(s) ` +
+						`covering ${selectionSpan.start.toISOString()} - ` +
+						`${selectionSpan.end.toISOString()}`,
+				);
+			} else {
+				appState.weatherSeries = null;
+			}
+			if (abandonStaleFlight()) return null;
 
 			// The result is now loaded, so this query may be skipped next time.
 			appState.lastWeatherQueryKey = queryKey;

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AppState } from "../../state/AppState";
+import type { TrimRegionMetadata } from "../../utils/GeoCalculations";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
 import { WeatherAPIError } from "../../utils/WeatherAPI";
 import type { ShellServices } from "../analysis/types";
@@ -187,6 +188,31 @@ async function succeedOnT1(h: Harness, temperature = 21.4): Promise<void> {
 	expect(rho).toBe(1.1984);
 }
 
+/**
+ * How many times the SELECTION-level weather lookup ran.
+ *
+ * `autoRho` now makes two kinds of lookup: one for the trim region's midpoint,
+ * which is what produces `params.rho`/`wind_speed`, and one per 15-minute slot
+ * spanning the selection, which feeds per-lap weather. Both go through
+ * `getWeatherData`, so a raw call count no longer answers "did the flight run
+ * once?" — the question every case below is actually asking.
+ *
+ * Slot lookups always sit exactly on a 15-minute boundary; the fixture's trim
+ * midpoint (10:05:30) does not. That is what separates them.
+ */
+function selectionLookups(): number {
+	return mocks.getWeatherData.mock.calls.filter(
+		([md]) => (md as TrimRegionMetadata).middleDate.getTime() % 900_000 !== 0,
+	).length;
+}
+
+/** Lookups for the per-lap slot series, which DO land on boundaries. */
+function slotLookups(): Date[] {
+	return mocks.getWeatherData.mock.calls
+		.map(([md]) => (md as TrimRegionMetadata).middleDate)
+		.filter((d) => d.getTime() % 900_000 === 0);
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
 	mocks.calculateAirDensity.mockReturnValue(1.2);
@@ -208,9 +234,7 @@ describe("calculateAutoRho — successful fetch", () => {
 			h.parametersComponent,
 			h.services,
 		);
-		await vi.waitFor(() =>
-			expect(mocks.getWeatherData).toHaveBeenCalledTimes(1),
-		);
+		await vi.waitFor(() => expect(selectionLookups()).toBe(1));
 
 		const second = calculateAutoRho(
 			h.appState,
@@ -220,14 +244,14 @@ describe("calculateAutoRho — successful fetch", () => {
 
 		expect(second).toBe(first);
 		expect(h.appState.isCalculatingAutoRho).toBe(true);
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+		expect(selectionLookups()).toBe(1);
 
 		resolveWeather(weatherEntry(21.4));
 		await expect(Promise.all([first, second])).resolves.toEqual([1.2, 1.2]);
 
 		expect(h.appState.isCalculatingAutoRho).toBe(false);
 		expect(h.appState.autoRhoPromise).toBeNull();
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+		expect(selectionLookups()).toBe(1);
 	});
 
 	test("an activity/selection change rejects stale writes and serializes a fresh operation", async () => {
@@ -248,9 +272,7 @@ describe("calculateAutoRho — successful fetch", () => {
 			h.parametersComponent,
 			h.services,
 		);
-		await vi.waitFor(() =>
-			expect(mocks.getWeatherData).toHaveBeenCalledTimes(1),
-		);
+		await vi.waitFor(() => expect(selectionLookups()).toBe(1));
 
 		h.appState.currentFitData = makeFilteredLapData() as never;
 		h.appState.filteredLapData = makeFilteredLapData();
@@ -273,20 +295,18 @@ describe("calculateAutoRho — successful fetch", () => {
 
 		expect(currentOperation).not.toBe(oldOperation);
 		expect(joinedCurrentOperation).toBe(currentOperation);
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+		expect(selectionLookups()).toBe(1);
 
 		resolveOldWeather(weatherEntry(8.5));
 		await expect(oldOperation).resolves.toBeNull();
-		await vi.waitFor(() =>
-			expect(mocks.getWeatherData).toHaveBeenCalledTimes(2),
-		);
+		await vi.waitFor(() => expect(selectionLookups()).toBe(2));
 		expect(h.appState.isCalculatingAutoRho).toBe(true);
 		expect(h.appState.autoRhoPromise).toBe(currentOperation);
 
 		resolveCurrentWeather(weatherEntry(29.5));
 		await expect(currentOperation).resolves.toBe(1.2);
 
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(2);
+		expect(selectionLookups()).toBe(2);
 		expect(
 			h.parametersComponent.getParameters().weather_metadata?.temperature,
 		).toBe(29.5);
@@ -701,7 +721,7 @@ describe("calculateAutoRho — unchanged query short-circuits", () => {
 	test("a repeat call for the same trim region reuses the stored rho", async () => {
 		const h = setupHarness();
 		await succeedOnT1(h);
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+		expect(selectionLookups()).toBe(1);
 
 		const rho = await calculateAutoRho(
 			h.appState,
@@ -710,7 +730,7 @@ describe("calculateAutoRho — unchanged query short-circuits", () => {
 		);
 
 		expect(rho).toBe(1.1984);
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+		expect(selectionLookups()).toBe(1);
 		expect(h.appState.isCalculatingAutoRho).toBe(false);
 	});
 
@@ -726,7 +746,7 @@ describe("calculateAutoRho — unchanged query short-circuits", () => {
 		);
 
 		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(1);
+		expect(selectionLookups()).toBe(1);
 
 		// The network comes back. Same region, no slider move.
 		mocks.getWeatherData.mockResolvedValueOnce(weatherEntry(21.4));
@@ -738,7 +758,7 @@ describe("calculateAutoRho — unchanged query short-circuits", () => {
 			h.services,
 		);
 
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(2);
+		expect(selectionLookups()).toBe(2);
 		expect(rho).toBe(1.1984);
 		expect(h.parametersComponent.getParameters().rho_source).toBe(
 			"weather_api",
@@ -779,7 +799,7 @@ describe("calculateAutoRho — the wind height factor (D-06)", () => {
 		expect(params.wind_height_factor).toBe(0.65);
 		expect(params.wind_entry).toBe("weather");
 		// The refill did land — this is a refill, not a skipped call.
-		expect(mocks.getWeatherData).toHaveBeenCalledTimes(2);
+		expect(selectionLookups()).toBe(2);
 	});
 
 	test("a response carrying no wind does not claim weather provenance", async () => {
@@ -854,5 +874,57 @@ describe("calculateAutoRho — the wind height factor (D-06)", () => {
 		// The rest of the fill still applied as normal.
 		expect(params.rho).toBe(1.1984);
 		expect(params.wind_speed).toBe(3.5);
+	});
+});
+
+describe("calculateAutoRho — the per-lap weather series", () => {
+	test("fetches every 15-minute slot spanning the selection", async () => {
+		const h = setupHarness();
+		setTrim({ start: 0, end: REGION_POINTS - 1 });
+		mocks.getWeatherData.mockResolvedValue(weatherEntry(21.4));
+		mocks.calculateAirDensity.mockReturnValue(1.19837);
+
+		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+		// The fixture runs 10:00 to 10:11, so the slots that bracket it are
+		// 10:00 and 10:15 — the second one is OUTSIDE the ride, and must still
+		// be fetched or the last lap has nothing to interpolate forward to.
+		expect(slotLookups().map((d) => d.toISOString())).toEqual([
+			"2026-06-01T10:00:00.000Z",
+			"2026-06-01T10:15:00.000Z",
+		]);
+		expect(h.appState.weatherSeries).toHaveLength(2);
+	});
+
+	test("leaves the selection-level rho untouched by the series", async () => {
+		// The series is an ENHANCEMENT. `params.rho` must still be the trim
+		// midpoint's value, because that is what the panel shows and what a
+		// single-segment analysis falls back to.
+		const h = setupHarness();
+		await succeedOnT1(h);
+
+		expect(h.parametersComponent.getParameters().rho).toBe(1.1984);
+		expect(selectionLookups()).toBe(1);
+	});
+
+	test("a series failure leaves a completed auto-rho behind", async () => {
+		// Ordering guard: the series is built AFTER the parameters are written,
+		// so a slot outage degrades per-lap weather without undoing the rho the
+		// user can already see. Killed by moving the fetch earlier or by letting
+		// it throw.
+		const h = setupHarness();
+		setTrim(T1);
+		mocks.getWeatherData.mockResolvedValueOnce(weatherEntry(21.4));
+		mocks.calculateAirDensity.mockReturnValue(1.19837);
+		mocks.getWeatherData.mockRejectedValue(new Error("slot outage"));
+
+		const rho = await calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		expect(rho).toBe(1.1984);
+		expect(h.appState.weatherSeries).toEqual([]);
 	});
 });

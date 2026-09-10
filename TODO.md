@@ -38,7 +38,7 @@ dependency column below says what actually has to wait.
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure **root-caused and fixed 2026-09-04** (it was Standard's two Crr fallbacks, not the resolver). Smoothing confirmed working in both GPS modes by the maintainer, 2026-09-04 — **bundle C carries no debt** |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure (the widened Crr range not reaching existing files) **fixed 2026-09-04** by separating slider travel from the stored optimizer bounds |
-| **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done; (b) retired by **D-d** 2026-09-10; endpoint rung and cache key both shipped 2026-09-10 — **WEATH-01 itself is all that remains** |
+| ~~**F**~~ | ~~Weather — the deferred WEATH-01 feature~~ | — | **Done** 2026-09-10 — (a) bounded cache, (b) retired by **D-d**, endpoint rung, cache key, and WEATH-01 itself (rescoped to per-lap weather by measurement) |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
@@ -63,8 +63,9 @@ in two: the `historical-forecast` endpoint **[S]**, and **establishing a ground-
 **[L]** as the long pole, because WEATH-01's GO rested on an accuracy claim the probe put in
 question. **D-d settled that on 2026-09-10**: the ground-truth item is retired as not-needed
 (Open-Meteo is used as-is, k calibrates its impact), which un-gated both remaining items. The
-endpoint rung and the cache-key item both shipped the same day, so **WEATH-01 itself is now the
-only open item in bundle F**. The one piece of B
+endpoint rung, the cache-key item and WEATH-01 itself all shipped the same day, so **bundle F is
+closed**. WEATH-01 was rescoped by measurement rather than built as written — see its Done entry.
+The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -226,8 +227,14 @@ rather than parsed ride dates, so that is indicative, not measured.*
       `frontend/src/utils/WeatherCache.ts:178-188`, `autoRho.ts:150-157`
       *origin: brainstorm for condition (a), 2026-09-02 — maintainer ruled bound-only*
 
-- [ ] **[L–XL] WEATH-01 itself**, once (a) is settled — it is — and both items above are (the
-      endpoint one is, as of 2026-09-10; the cache key is not):
+- [x] **[L–XL] WEATH-01 itself** — **Done 2026-09-10, rescoped by measurement.** See *Per-lap
+      weather* under **Done**. Delivered as [M], not [L–XL], and NOT as written: the item asked for
+      per-quarter-hour sampling of rho and wind, and measuring first showed the rho half moves
+      0.02–0.29% across a whole ride while only 8% of laps are even longer than one 15-minute slot.
+      The error was somewhere else — ONE sample, at the selection midpoint, applied to laps
+      recorded hours apart. Original wording follows.
+
+      Once (a) is settled — it is — and both items above are (both are, as of 2026-09-10):
       **its justification is now resolution, not accuracy.** D-d removed the accuracy claim the
       original GO rested on, and the endpoint rung delivers the 15-minute data the feature needs.
       What WEATH-01 buys is per-quarter-hour sampling where the ladder can serve it — worth ~0.25
@@ -423,6 +430,93 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Per-lap weather — 2026-09-10
+
+**The item this closes:** *Bundle F · [L–XL] WEATH-01 itself* — the last open item in bundle F.
+
+**Three measurements reshaped it before any code was written.** The item asked for
+per-quarter-hour sampling of rho and wind, wired into the auto-rho/VE path.
+
+1. **The rho half is not worth building.** Across a 2–3 hour ride window air density moves
+   **0.02–0.29%** (max 0.0035 kg/m³) while wind moves **0.10–1.20 m/s**. CdA scales inversely with
+   rho, so per-quarter-hour rho buys at most ~0.3% on a three-hour ride and far less on a lap.
+2. **Sub-15-minute resolution helps almost nobody.** Median lap across the local rides is **2.8
+   minutes**; only **23 of 272 laps (8%)** are longer than a single 15-minute slot. For the other
+   92%, quarter-hour sampling yields one sample and changes nothing.
+3. **The real defect was never the sampling rate.** `autoRho` took ONE sample, at the trim region's
+   MIDDLE timestamp, and applied it to every selected lap. A multi-lap selection spans the gaps
+   between its laps, so laps recorded hours apart were analysed at one instant's weather — and the
+   wind moved up to 1.20 m/s across those gaps.
+
+So the feature shipped is per-LAP weather, not per-quarter-hour weather. Maintainer chose this
+scope after seeing the three numbers above.
+
+**What it does.** Each independently-integrated segment resolves its own rho/wind at its own
+midpoint, interpolated between the two 15-minute slots bracketing it — a lap at 15:05 takes 2/3 of
+the 15:00 slot and 1/3 of the 15:15 one.
+
+**No Rust change, and the reason is worth recording** because the item assumed otherwise. The
+item's "the per-sample plumbing exists end-to-end" is half true: `rho_array` exists, but the
+weather-derived wind is a SCALAR `params.wind_speed`/`wind_direction` projected onto rider heading
+inside Rust (`virtual_elevation.rs:287`), so a per-SAMPLE wind would have needed a signature change
+and a WASM rebuild. Per-LAP wind needs neither: under D-19 Option B, Standard already emits one
+segment per lap and each gets its own calculator run (`standardSegments.ts:9`), so per-lap weather
+is a `params` override per segment and nothing below changes.
+
+**WIND IS A VECTOR — the one way this could have been silently, badly wrong.** Interpolating a
+bearing as a scalar averages 350° and 10° to 180°: a headwind becomes a tailwind. Measured on real
+15-minute data, **0.3% of consecutive slot pairs cross 0/360**, and on those the naive mean is
+exactly **180° out**. Rare enough to survive casual testing, catastrophic when it lands. Wind is
+resolved through its u/v components; temperature, dew point and pressure interpolate linearly.
+
+Two consequences of vector interpolation are pinned by tests rather than left to surprise a reader:
+the magnitude SHRINKS when the wind veers (two 5 m/s winds 20° apart average to 5·cos10° = 4.924,
+and two opposing ones to calm), and the result is a chord across the circle, not an arc along it
+(340°→20° at t=0.25 gives 349.686°, not the 350.0° angular interpolation would give). **The first
+test fixture written here asserted the scalar answers and failed — the implementation was right and
+the expectations were wrong.**
+
+**Async/sync split.** `updateModeVEPlots` recomputes on every slider move and cannot await, so the
+slot series is fetched ONCE by `autoRho` when the selection changes (`appState.weatherSeries`) and
+read synchronously by the plot path. The fetch runs AFTER the parameters are written, deliberately:
+a slot outage degrades per-lap weather without undoing a completed auto-rho, and a failed slot is
+dropped rather than fatal — `interpolateAt` spans the gap, and an empty series falls back to the
+selection-level constant, which is what the app did before.
+
+**Guards.** A FIT `air_speed`/`wind_speed` channel still wins — a measurement of the air the rider
+actually met is not overridden with a model. Selection-level `params.rho`/`wind_speed` are
+unchanged, so the panel still shows what it always did and a single-segment analysis is unaffected.
+`MAX_WEATHER_SLOTS = 48` caps a corrupt-timestamp span at 12 hours.
+
+**Storage is per-lap, on maintainer instruction.** Once laps differ, one stored rho/wind is no
+longer what the physics used, and a record claiming otherwise would be a quiet lie about a figure
+the user may later compare runs on. `segmentWeather` follows the existing `virtualDistances` shape
+exactly — four columns (`LapWeatherSegments`, `LapRho`, `LapWindSpeed`, `LapWindDirection`),
+';'-separated in analysis order, with a segment-name column stating the mapping. The
+selection-level `Rho`/`WindSpeed`/`WindDir` columns stay beside them: both are true and they answer
+different questions. Absent on old records AND when every lap used the selection value, so its
+presence means the laps genuinely differed.
+
+**Tests** (+41: 19 in `segmentWeather.test.ts`, 7 in `weatherSeries.test.ts`, 3 in
+`autoRho.test.ts`, 2 in `resultColumns.test.ts`, plus re-expressed assertions). `autoRho.test.ts`
+counted raw `getWeatherData` calls to mean "did the flight run once?"; that question now needs
+separating from slot lookups, so the counts are expressed as `selectionLookups()` — filtered on not
+sitting on a 15-minute boundary — rather than bumped to a larger magic number.
+
+**Verification.** `npm run test` 1219 passed / 101 files; `check` and `lint` exit 0. Driven in the
+running app on 2026-09-10 against the live API and the real IndexedDB, over a 2h05m selection:
+
+| | slots | network calls |
+|---|---|---|
+| first analysis, cold cache | 10 | 10 |
+| same selection again | 10 | **0** |
+| trim nudged by a few minutes | 10 | **0** |
+
+Three 3-minute laps at 12:10, 13:05 and 14:05 in that selection resolved to wind **3.68 / 3.55 /
+3.81 m/s** at **55° / 50° / 35°** — a 20° direction swing the previous single-sample code collapsed
+into one value. A FIT-sourced wind correctly returned no override. **Not exercised:** loading a FIT
+file through the UI and reading the numbers off the panel.
 
 ### One key builder, three decimals wide — 2026-09-10
 
