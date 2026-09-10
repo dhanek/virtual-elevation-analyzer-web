@@ -49,14 +49,25 @@ const sharedCacheDouble = {
 	updateCachedEntry: mocks.updateCachedEntry,
 };
 
-vi.mock("../../utils/WeatherCache", () => ({
-	WeatherCache: class {
-		getWeatherData = mocks.getWeatherData;
-		updateCachedEntry = mocks.updateCachedEntry;
-	},
-	weatherCacheInstance: () => sharedCacheDouble,
-	resetWeatherCacheInstance: () => {},
-}));
+vi.mock("../../utils/WeatherCache", async () => {
+	// `buildWeatherQueryKey` is taken REAL, not doubled. It is what decides
+	// whether the `lastWeatherQueryKey` guard treats two trim windows as the
+	// same query, so a stub would quietly decide the very thing these tests
+	// observe through `getWeatherData` call counts. Only the store is doubled.
+	const actual = await vi.importActual<
+		typeof import("../../utils/WeatherCache")
+	>("../../utils/WeatherCache");
+	return {
+		WeatherCache: class {
+			getWeatherData = mocks.getWeatherData;
+			updateCachedEntry = mocks.updateCachedEntry;
+		},
+		weatherCacheInstance: () => sharedCacheDouble,
+		resetWeatherCacheInstance: () => {},
+		buildWeatherQueryKey: actual.buildWeatherQueryKey,
+		WEATHER_KEY_DECIMALS: actual.WEATHER_KEY_DECIMALS,
+	};
+});
 
 vi.mock("../../../pkg/virtual_elevation_analyzer.js", () => ({
 	AirDensityCalculator: { calculate_air_density: mocks.calculateAirDensity },

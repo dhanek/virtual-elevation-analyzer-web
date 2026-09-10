@@ -38,7 +38,7 @@ dependency column below says what actually has to wait.
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure **root-caused and fixed 2026-09-04** (it was Standard's two Crr fallbacks, not the resolver). Smoothing confirmed working in both GPS modes by the maintainer, 2026-09-04 — **bundle C carries no debt** |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure (the widened Crr range not reaching existing files) **fixed 2026-09-04** by separating slider travel from the stored optimizer bounds |
-| **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done 2026-09-02; (b) retired by **D-d** 2026-09-10; endpoint rung shipped, cache key is the only item left before WEATH-01 |
+| **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done; (b) retired by **D-d** 2026-09-10; endpoint rung and cache key both shipped 2026-09-10 — **WEATH-01 itself is all that remains** |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
@@ -63,8 +63,8 @@ in two: the `historical-forecast` endpoint **[S]**, and **establishing a ground-
 **[L]** as the long pole, because WEATH-01's GO rested on an accuracy claim the probe put in
 question. **D-d settled that on 2026-09-10**: the ground-truth item is retired as not-needed
 (Open-Meteo is used as-is, k calibrates its impact), which un-gated both remaining items. The
-endpoint rung shipped the same day, so **the cache-key item [S–M] is the only thing left before
-WEATH-01 itself**. The one piece of B
+endpoint rung and the cache-key item both shipped the same day, so **WEATH-01 itself is now the
+only open item in bundle F**. The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -207,7 +207,8 @@ rather than parsed ride dates, so that is indicative, not measured.*
       *So WEATH-01's GO is not merely unmet — its stated justification is now in question.*
       *origin: condition (b) spike, 2026-09-02*
 
-- [ ] **[S–M] The cache key is ~0.1 m wide and the data behind it is kilometres wide.**
+- [x] **[S–M] The cache key is ~0.1 m wide and the data behind it is kilometres wide.**
+      **Done 2026-09-10.** See *One key builder, three decimals wide* under **Done**.
       **Un-gated 2026-09-10 by D-d** — the gate below was "coarsening injects spatial error into
       the budget (b) has to re-measure", and with no re-measurement there is no budget to
       contaminate. Now the smallest open item in this bundle, and the only one left before
@@ -422,6 +423,62 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### One key builder, three decimals wide — 2026-09-10
+
+**The item this closes:** *Bundle F · [S–M] The cache key is ~0.1 m wide and the data behind it is
+kilometres wide*, un-gated the same day by **D-d**.
+
+**The measurement that sized it.** Across the local rides, a ONE-POINT trim-slider nudge moves the
+centroid **0.1–2.5 m** and a 1% trim move shifts it **4–212 m**, against a key that resolved 0.11 m.
+Simulating a 100-step drag of the trim handle over each ride's first 30%: at 6 decimals **all 100
+positions were distinct keys** — the cache never hit, it only grew, which is why the size cap from
+condition (a) was load-bearing rather than a backstop.
+
+**The width, and why it is not an accuracy trade.** Open-Meteo snaps a query to its own model grid
+and returns **byte-identical** data for points 500 m apart — verified directly on 2026-09-10, four
+coordinates spanning ~500 m all resolving to grid cell `52.54, 13.44` with identical temperature and
+wind. So coarsening the key discards precision the API had already discarded. **3 decimals** (~111 m
+cell, ≤78 m worst case) was the maintainer's choice over 2 decimals (~1.1 km).
+
+Pooled over 23 rides, that same 100-step drag: **2300 → 368 requests, 84% fewer.** (2 decimals would
+have been 97% fewer; 3 was chosen as the conservative width.)
+
+**The API query is deliberately NOT rounded.** Only the key is. Rounding the query would change
+nothing observable, for the reason above, and leaving it alone keeps the request byte-identical to
+what a cache-less path would send.
+
+**What the consolidation found.** The key was built by two inline format literals — one in
+`WeatherCache.generateCacheKeyString`, one inline in `autoRho` — and they were **not equivalent**:
+the cache emitted an unpadded hour (`9:15`), autoRho a padded one (`09:15`), so the two disagreed
+for any ride before 10:00 UTC. Neither consumed the other's string, which is precisely why the
+divergence survived. Both now call one exported `buildWeatherQueryKey`, so `autoRho`'s in-session
+`lastWeatherQueryKey` guard is coarsened too — the TODO item noted it did not absorb slider moves
+either, and sharing the builder fixes both rather than one.
+
+`buildCacheKey` stores the ROUNDED coordinates in `key.lat`/`key.lon`, not just in the string, so
+the `location` index and the primary key cannot drift apart.
+
+**A limitation, recorded with its own test so nobody files it as a defect.** Snapping to a grid buys
+a high hit rate, never a guaranteed one: two points **40 m** apart land in different cells when a
+boundary runs between them (47.123456 → 47.123, 47.123812 → 47.124). The first fixture written for
+this actually asserted the wrong thing and failed for that reason; the corrected pair now tests both
+the inside-cell hit and the boundary miss.
+
+**Existing cache rows become unreachable** — the key format changed, so 6-decimal rows no longer
+match. They age out through the FIFO cap from condition (a). No `dbVersion` bump, no migration,
+consistent with (a)'s deliberate choice. The visible cost is one re-fetch per file on first use.
+
+**Tests** (`WeatherCache.test.ts` 12 → 18 cases). Written first, confirmed red (4 of 6 failing — the
+two over-coarsening guards correctly pass both before and after, which is what makes them guards).
+`autoRho.test.ts` mocks the whole `WeatherCache` module; its double now takes `buildWeatherQueryKey`
+**real** via `importActual`, because a stubbed key would silently decide the very thing those tests
+observe through call counts.
+
+**Verification.** `npm run test` 1188 passed / 99 files; `check` and `lint` exit 0. Driven in the
+running app on 2026-09-10 against the real IndexedDB store: a simulated 40-step slider drag cost
+**2 API calls instead of 40** — 2 rather than 1 because the drag crossed one cell boundary, the
+documented behaviour above. Key format confirmed as `52.546_13.430_2026-08-04_10:00`, hour padded.
 
 ### The historical-forecast rung — 2026-09-10
 

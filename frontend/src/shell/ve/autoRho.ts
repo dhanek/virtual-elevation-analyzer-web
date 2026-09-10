@@ -7,9 +7,9 @@ import { log } from "../../utils/log";
 import {
 	calculateTrimRegionMetadata,
 	formatCoordinates,
-	roundToNearest15Min,
 } from "../../utils/GeoCalculations";
 import {
+	buildWeatherQueryKey,
 	weatherCacheInstance,
 	type WeatherCacheEntry,
 } from "../../utils/WeatherCache";
@@ -283,9 +283,11 @@ async function performAutoRho(
 			log.debug("  Trim Range:", `${trimStart} to ${trimEnd}`);
 			log.debug("═══════════════════════════════════════════════════════\n");
 
-			// Generate query key (rounded to nearest 15-min slot to match API granularity)
-			const slot = roundToNearest15Min(metadata.middleDate);
-			const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, "0")}:${String(slot.slotMinute).padStart(2, "0")}`;
+			// The SAME key the IndexedDB cache uses — one builder, so this guard
+			// and the cache cannot disagree about what "the same query" means.
+			// Both are coarsened to WEATHER_KEY_DECIMALS, which is what lets a
+			// slider nudge short-circuit here instead of reaching the network.
+			const queryKey = buildWeatherQueryKey(metadata);
 
 			// Check if query has actually changed. The key records the query
 			// whose result is currently loaded into `params`, so it is only
