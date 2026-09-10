@@ -32,7 +32,7 @@ Read:        the *.test.ts files under frontend/src that call readFileSync/readd
              src/shell/analysis/calculatorRhoArray.test.ts,
              src/state/veStatus.test.ts, src/analysis/sliderBounds.test.ts
 Fails when:  the check's pattern is narrowed to kill one false positive and silently stops
-             matching other spellings (F17-06, bbdf51f: `0\.\d+` lost `.008` and `8e-3`);
+             matching other spellings (F17-06: narrowing to `0\.\d+` lost `.008` and `8e-3`);
              or the check is applied per line while the formatter breaks its subject across
              lines (F37-01); or it takes only the first match on a line while the defect sits
              in a later one (F40-01: `exec` returns one match and `??` stops at the first
@@ -57,8 +57,9 @@ Fails when:  the cited file moves and the citation silently points at unrelated 
              to the wrong line. Commit SHAs on an unmerged branch decay the same way: a
              rebase or a squash merge orphans them (F41-03). Naming the mechanism instead of
              the location is what does not decay.
-Seen in:     F33-01, and the two `main` commits after 9acfb78 that re-pointed and then
-             dropped citations the same branch's own deletions had invalidated.
+Seen in:     F33-01 — PR #21's branch re-pointed five citations its own deletions had
+             invalidated, then had to drop three of them because the re-pointing commit
+             had broken them in turn. Both commits reached `main` as a single squash.
 ```
 
 ### Object literals escaping excess-property checking

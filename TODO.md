@@ -382,7 +382,7 @@ changed and why.
 
       **Run to a fixed point, not once.** Removing an export changes knip's reachability, so a
       second pass surfaced `isVeSectionVisible`, which the first could not see. The loop ran until
-      knip reported nothing.
+      knip reported no issues.
 
       **`npm run check` now gates on EVERY knip issue type**, not just `files` — which was the
       point of taking this item, and what the sizing in the previous entry deferred. Proven to
@@ -418,7 +418,8 @@ changed and why.
             export and a new unused exported type each make it exit 1, naming symbol
             and line
       - [x] C5 Visibility-only: no behavioural change (tsc x2, lint, build, and the
-            suite giving the same file and test counts as the base)
+            export sweep itself changing no test; the branch's nine extra rows over
+            the base are the Crr-guard matrix)
 
       `frontend/package.json` · `frontend/src/analysis/unsetParameterFallbacks.test.ts` ·
       *origin: sizing done while wiring the dead-export detector, 2026-09-09*
