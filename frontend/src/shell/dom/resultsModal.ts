@@ -19,6 +19,7 @@
  */
 import { RESULT_COLUMNS } from "../../utils/resultColumns";
 import {
+	segmentWeatherCsvCells,
 	virtualDistanceCsvCells,
 	type StoredVEResult,
 } from "../../utils/ResultsStorage";
@@ -273,10 +274,11 @@ export async function openResultsModal(deps: ResultsModalDeps): Promise<void> {
 		// Computed ONCE per row and handed to the four columns that read it,
 		// matching what the CSV writer does.
 		const vd = virtualDistanceCsvCells(result.virtualDistances);
+		const lw = segmentWeatherCsvCells(result.segmentWeather);
 
 		for (const column of columns) {
 			const td = document.createElement("td");
-			td.textContent = column.cell(result, vd);
+			td.textContent = column.cell(result, vd, lw);
 			tr.appendChild(td);
 		}
 

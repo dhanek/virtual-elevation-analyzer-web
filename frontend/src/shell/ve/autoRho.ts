@@ -7,12 +7,16 @@ import { log } from "../../utils/log";
 import {
 	calculateTrimRegionMetadata,
 	formatCoordinates,
-	roundToNearest15Min,
 } from "../../utils/GeoCalculations";
 import {
+	buildWeatherQueryKey,
 	weatherCacheInstance,
 	type WeatherCacheEntry,
 } from "../../utils/WeatherCache";
+import {
+	fetchWeatherSeries,
+	trimRegionTimeSpan,
+} from "../analysis/weatherSeries";
 import { WeatherAPI, WeatherAPIError } from "../../utils/WeatherAPI";
 import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js";
 import { showNotification } from "../dom/notifications";
@@ -283,9 +287,11 @@ async function performAutoRho(
 			log.debug("  Trim Range:", `${trimStart} to ${trimEnd}`);
 			log.debug("═══════════════════════════════════════════════════════\n");
 
-			// Generate query key (rounded to nearest 15-min slot to match API granularity)
-			const slot = roundToNearest15Min(metadata.middleDate);
-			const queryKey = `${metadata.avgLat.toFixed(6)}_${metadata.avgLon.toFixed(6)}_${slot.date}_${String(slot.slotHour).padStart(2, "0")}:${String(slot.slotMinute).padStart(2, "0")}`;
+			// The SAME key the IndexedDB cache uses — one builder, so this guard
+			// and the cache cannot disagree about what "the same query" means.
+			// Both are coarsened to WEATHER_KEY_DECIMALS, which is what lets a
+			// slider nudge short-circuit here instead of reaching the network.
+			const queryKey = buildWeatherQueryKey(metadata);
 
 			// Check if query has actually changed. The key records the query
 			// whose result is currently loaded into `params`, so it is only
@@ -460,6 +466,38 @@ async function performAutoRho(
 			parametersComponent.setParameters(updateParams);
 			refreshCrrTempReadout(parametersComponent.getParameters());
 			refreshWindHeightReadout(parametersComponent.getParameters());
+
+			// PER-LAP WEATHER. The scalars written above describe the selection
+			// as a whole and stay the fallback; this series is what lets each
+			// lap be analysed at its OWN instant instead of the midpoint's.
+			//
+			// It runs AFTER the parameters are set, deliberately: it is an
+			// enhancement, and a failure to build it must leave a completed,
+			// usable auto-rho behind rather than undoing one. `fetchWeatherSeries`
+			// already swallows per-slot failures, so an empty series here simply
+			// means the plot path keeps using the scalars.
+			const selectionSpan = trimRegionTimeSpan(
+				appState.filteredLapData,
+				trimStart,
+				trimEnd,
+			);
+			if (selectionSpan) {
+				appState.weatherSeries = await fetchWeatherSeries(
+					metadata,
+					selectionSpan.start,
+					selectionSpan.end,
+					weatherCache,
+					weatherAPI,
+				);
+				log.debug(
+					`🕐 Per-lap weather: ${appState.weatherSeries.length} slot(s) ` +
+						`covering ${selectionSpan.start.toISOString()} - ` +
+						`${selectionSpan.end.toISOString()}`,
+				);
+			} else {
+				appState.weatherSeries = null;
+			}
+			if (abandonStaleFlight()) return null;
 
 			// The result is now loaded, so this query may be skipped next time.
 			appState.lastWeatherQueryKey = queryKey;

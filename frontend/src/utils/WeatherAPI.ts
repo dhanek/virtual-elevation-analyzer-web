@@ -37,6 +37,12 @@ export class WeatherAPIError extends Error {
 
 export class WeatherAPI {
 	private readonly forecastBaseUrl = "https://api.open-meteo.com/v1/forecast";
+	// Operational-model archive. Unlike `archive-api` it serves a `minutely_15`
+	// block for old dates — measured 2026-09-02: for a 149-day-old ride this
+	// endpoint returned 96/96 non-null 15-minute slots where `archive-api`
+	// returned no `minutely_15` block at all.
+	private readonly historicalForecastBaseUrl =
+		"https://historical-forecast-api.open-meteo.com/v1/forecast";
 	private readonly archiveBaseUrl =
 		"https://archive-api.open-meteo.com/v1/archive";
 	// Forecast API supports start_date/end_date for up to ~82 days in the past
@@ -44,8 +50,22 @@ export class WeatherAPI {
 	private readonly forecastMaxDays = 82;
 
 	/**
-	 * Fetch weather data for a specific location and time
-	 * Automatically selects Forecast API (recent days) or Archive API (older data)
+	 * Fetch weather data for a specific location and time.
+	 *
+	 * Three rungs, in order, each falling through only on an ALL-NULL response:
+	 *
+	 *   1. Forecast          15min  — rides inside the ~82-day window
+	 *   2. historical-forecast 15min — every ride; the only 15-minute source
+	 *                                  for dates the Forecast API has aged out
+	 *   3. Archive           hourly — terminal rung, returns data or throws
+	 *
+	 * Rung 2 exists because rung 3 has no 15-minute data to give: `archive-api`
+	 * serves ERA5 hourly and omits `minutely_15` entirely for old dates. Before
+	 * it was added, every ride past the window silently dropped to hourly.
+	 *
+	 * Only an all-null body advances the ladder. A transport or HTTP failure on
+	 * any rung is surfaced immediately, so an outage cannot be mistaken for a
+	 * data gap and silently re-queried against the next host.
 	 *
 	 * @param metadata - Trim region metadata containing GPS coordinates and timestamp
 	 * @returns Weather data (temperature, dew point, pressure)
@@ -57,14 +77,12 @@ export class WeatherAPI {
 		const query = this.buildQuery(metadata);
 		const daysDiff = this.calculateDaysDifference(metadata.middleDate);
 
-		// Try Forecast API first (supports minutely_15), fall back to Archive API
-		// Forecast API accepts dates up to ~82 days back but may return all-null data
-		// for dates older than ~69 days. Archive API is the reliable fallback.
-		const useForecastAPI = daysDiff <= this.forecastMaxDays;
-
-		if (useForecastAPI) {
-			// allowNullFallback=true: an all-null Forecast response resolves to
-			// null instead of throwing, so this rung can degrade silently.
+		// Rung 1. The Forecast API accepts dates up to ~82 days back but may
+		// return all-null data beyond ~69 days, so the window is necessary but
+		// not sufficient — the null check below is what actually decides.
+		// allowNullFallback=true: an all-null response resolves to null instead
+		// of throwing, so this rung can degrade silently.
+		if (daysDiff <= this.forecastMaxDays) {
 			const result = await this.fetchFromAPI(
 				"Forecast",
 				this.forecastBaseUrl,
@@ -75,20 +93,36 @@ export class WeatherAPI {
 			);
 			if (result) return result;
 
-			// WEATH-03 rung 2: Forecast API returned all-null data (typical for
-			// dates older than ~69 days) — degrade to the Archive API rather
-			// than surfacing a failure. Only if Archive also fails does the
-			// caller reach rung 3 (manual rho + warning) via resolveWeatherFailure.
 			log.debug(
-				"⚠️ Forecast API returned null data, falling back to Archive API",
+				"⚠️ Forecast API returned null data, falling back to historical-forecast",
 			);
 		}
 
-		// Archive API: the 'hourly' path never returns null — extractHourlyData
-		// either returns a WeatherResponse or throws a coded WeatherAPIError,
-		// so the non-null assertion is sound. (`allowNullFallback` is not
-		// consulted here at all: it is only read on the '15min' path, see the
-		// `resolution === '15min'` branch in fetchFromAPI below.)
+		// Rung 2. Keeps 15-minute resolution for rides the Forecast API cannot
+		// serve — both those past the window and those in the ~69–82 day grey
+		// zone that reached this line with nulls.
+		const historical = await this.fetchFromAPI(
+			"HistoricalForecast",
+			this.historicalForecastBaseUrl,
+			query,
+			daysDiff,
+			"15min",
+			true,
+		);
+		if (historical) return historical;
+
+		// WEATH-03 rung 2 (unchanged in intent): degrade to the Archive API
+		// rather than surfacing a failure. Only if Archive also fails does the
+		// caller reach rung 3 (manual rho + warning) via resolveWeatherFailure.
+		log.debug(
+			"⚠️ historical-forecast returned null data, falling back to Archive API",
+		);
+
+		// Rung 3. Archive API: the 'hourly' path never returns null —
+		// extractHourlyData either returns a WeatherResponse or throws a coded
+		// WeatherAPIError, so the non-null assertion is sound. (`allowNullFallback`
+		// is not consulted here at all: it is only read on the '15min' path, see
+		// the `resolution === '15min'` branch in fetchFromAPI below.)
 		return (await this.fetchFromAPI(
 			"Archive",
 			this.archiveBaseUrl,
@@ -181,12 +215,13 @@ export class WeatherAPI {
 						);
 						return null;
 					} else {
-						// Defensive, currently unreachable: the only '15min'
-						// call site (fetchWeatherData, the Forecast rung)
-						// always passes allowNullFallback = true, so this
-						// branch has no live caller. Kept so a future '15min'
-						// caller that opts out of the null fallback fails
-						// loudly rather than returning null.
+						// Defensive, currently unreachable: both '15min' call
+						// sites (fetchWeatherData's Forecast and
+						// historical-forecast rungs) pass
+						// allowNullFallback = true, so this branch has no live
+						// caller. Kept so a future '15min' caller that opts out
+						// of the null fallback fails loudly rather than
+						// returning null.
 						throw new WeatherAPIError(
 							"Weather data is all null in API response",
 							"NULL_DATA",

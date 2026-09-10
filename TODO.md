@@ -38,7 +38,7 @@ dependency column below says what actually has to wait.
 | ~~**C**~~ | ~~Elevation resolver, and the test that should have caught it~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure **root-caused and fixed 2026-09-04** (it was Standard's two Crr fallbacks, not the resolver). Smoothing confirmed working in both GPS modes by the maintainer, 2026-09-04 — **bundle C carries no debt** |
 | ~~**D**~~ | ~~Plot rendering and tab layout~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**E**~~ | ~~Cheap sweep~~ | — | **Done** 2026-08-30, committed — checked in the app 2026-09-03; its one failure (the widened Crr range not reaching existing files) **fixed 2026-09-04** by separating slider travel from the stored optimizer bounds |
-| **F** | Weather — the deferred WEATH-01 feature | L–XL | (a) done 2026-09-02; (b) split by the spike, GO now in question |
+| ~~**F**~~ | ~~Weather — the deferred WEATH-01 feature~~ | — | **Done** 2026-09-10 — (a) bounded cache, (b) retired by **D-d**, endpoint rung, cache key, and WEATH-01 itself (rescoped to per-lap weather by measurement) |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | — | Standalone work | varies | — |
@@ -59,9 +59,13 @@ Section 3's selection and map behaviour only.
 
 Suggested order from here: the standalone items. A, B, C, D, E, G and H are done. **F** has had
 its condition (a) closed (2026-09-02). What was condition (b) was probed on 2026-09-02 and split
-in two: adding the `historical-forecast` endpoint is now **[S]** and gated, while the long pole is
-**establishing a ground-truth reference** — WEATH-01's GO rested on an accuracy claim the probe put
-in question. The one piece of B
+in two: the `historical-forecast` endpoint **[S]**, and **establishing a ground-truth reference**
+**[L]** as the long pole, because WEATH-01's GO rested on an accuracy claim the probe put in
+question. **D-d settled that on 2026-09-10**: the ground-truth item is retired as not-needed
+(Open-Meteo is used as-is, k calibrates its impact), which un-gated both remaining items. The
+endpoint rung, the cache-key item and WEATH-01 itself all shipped the same day, so **bundle F is
+closed**. WEATH-01 was rescoped by measurement rather than built as written — see its Done entry.
+The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
 
@@ -78,6 +82,27 @@ These block work below. None of them is a coding question.
       correct, and the wind being replaced was the defect. Maintainer ruling: **a reload of a
       previously analysed file must restore the exact conditions it was analysed under** — the
       wind, its provenance, and k. Shipped in bundle A.
+
+- [x] **D-d · Does Bundle F need a ground-truth wind reference at all?**
+      **Decided 2026-09-10: no.** The premise behind the [L] ground-truth item was that neither
+      Open-Meteo endpoint is truth, so the 0.3 m/s bar could not be judged by comparing them to
+      each other. That reasoning is still correct, and the maintainer ruled it does not matter:
+      **Open-Meteo is the best source available, it is used as-is, and the rider height factor k
+      is the in-app knob that calibrates its impact.** A measured air-speed reference is NOT a
+      substitute source — most FIT files carry no air-speed channel at all, and the ones that do
+      already take the sensor path (`WindSourceResolver.ts:62-66` prefers `air_speed` over the
+      API whenever a file has it), so nothing was owed there either.
+
+      **What the ruling does and does not buy**, recorded so a later round does not re-open it as
+      a defect: k multiplies wind magnitude (`windSpeed * windHeightFactor`), so it absorbs a
+      constant SCALE error in the API wind. It does not absorb a wind DIRECTION error, and it does
+      not absorb a time-varying one. The 0.816 m/s between the two endpoints contains both. The
+      ruling is that this residual is accepted, not that it is zero.
+
+      **Consequence:** the [L] ground-truth item is retired as not-needed rather than done, and the
+      two items it gated are unblocked. Accuracy is no longer the criterion for choosing an
+      endpoint — coverage and resolution are.
+      *origin: maintainer ruling, 2026-09-10*
 
 - [x] **D-c · Does the Crr slider step follow the widened range?** **Decided 2026-08-30: no.**
       Range opens to **0.0015 – 0.030**, `step` stays **0.0001** — 285 slider positions, finer than
@@ -143,17 +168,34 @@ but sound.
 file dates spanning roughly a year, so most rides would fall outside it. Those are file mtimes
 rather than parsed ride dates, so that is indicative, not measured.*
 
-- [ ] **[S] Add `historical-forecast-api.open-meteo.com` as the 15-minute source for rides past
-      the forecast window.** One host in `WeatherAPI.ts` and one in the `connect-src` of
-      `index.html:13`, plus a rung between the existing Forecast and Archive rungs.
-      **Gated on the ground-truth item below, and not shippable before it.** It is NOT a free
-      coverage win, and an earlier framing of it as one was too generous: it also swaps ERA5 for
-      an operational model archive on every old ride, moving the wind by 0.816 m/s MAE **in an
-      unknown direction**. Coverage improves; accuracy is unquantified until there is a reference.
+- [x] **[S] Add `historical-forecast-api.open-meteo.com` as the 15-minute source for rides past
+      the forecast window.** **Done 2026-09-10.** See *The historical-forecast rung* under **Done**.
+      **Un-gated by D-d**: it was held behind the ground-truth item because it swaps ERA5 for an
+      operational model archive on every old ride, moving the wind by 0.816 m/s MAE **in an unknown
+      direction** — a real objection, and one the ruling answers rather than refutes. With
+      Open-Meteo accepted as-is and k as the calibration knob, accuracy is no longer the criterion.
+      What remains is coverage and resolution, and there the 2026-09-02 measurement already
+      settled it: for a 149-day-old ride `archive-api` returns **no `minutely_15` block at all**
+      while `historical-forecast-api` returns **96/96 non-null**.
       `WeatherAPI.ts:39-43,60-80`, `index.html:13`
 
-- [ ] **[L] Establish a ground-truth reference before WEATH-01's GO stands.**
-      **This, not the endpoint, is the long pole.** Condition (b) asks for a re-measurement
+- [x] **[L] Establish a ground-truth reference before WEATH-01's GO stands.**
+      **RETIRED 2026-09-10 as not-needed — not done.** See **D-d** under *Decisions needed*. The
+      analysis below stays as the record of why the question was asked and is still technically
+      correct; the maintainer ruled the question does not need answering, because Open-Meteo is
+      used as-is and k calibrates its impact in the app.
+
+      One finding from the 2026-09-10 survey is worth keeping even though the work stopped:
+      **11 rides in the maintainer's local collection carry a measured `air_speed` channel** from
+      an ELEMNT ACE (raw mm/s), each sweeping all 12 of 12 thirty-degree heading bins, so a wind
+      vector and the pitot scale error are jointly recoverable from a ride by ordinary least
+      squares on `hw_obs = (c−1)·v_ground + A·cos θ + B·sin θ`. The per-ride scale error is real
+      and varies by mount — c ≈ 0.885–1.003 across the set. If the velodrome auto-calibration item
+      below ever needs prior art with a known answer, that is where it is. **This is not a route
+      to replacing the weather API** (D-d), and the app already prefers `air_speed` when a file
+      has it.
+
+      *Original analysis follows.* **This, not the endpoint, is the long pole.** Condition (b) asks for a re-measurement
       against a 0.3 m/s bar, and that bar **cannot be met by comparing two models to each other**
       — which is all the 0.816 above is. Neither endpoint is truth: ERA5 (Archive) is a reanalysis
       that assimilates observations, and `historical-forecast` is an operational model archive.
@@ -166,8 +208,12 @@ rather than parsed ride dates, so that is indicative, not measured.*
       *So WEATH-01's GO is not merely unmet — its stated justification is now in question.*
       *origin: condition (b) spike, 2026-09-02*
 
-- [ ] **[S–M] The cache key is ~0.1 m wide and the data behind it is kilometres wide.**
-      Gated on the ground-truth item above, not on the endpoint one. `buildCacheKey` keys on the
+- [x] **[S–M] The cache key is ~0.1 m wide and the data behind it is kilometres wide.**
+      **Done 2026-09-10.** See *One key builder, three decimals wide* under **Done**.
+      **Un-gated 2026-09-10 by D-d** — the gate below was "coarsening injects spatial error into
+      the budget (b) has to re-measure", and with no re-measurement there is no budget to
+      contaminate. Now the smallest open item in this bundle, and the only one left before
+      WEATH-01 itself. `buildCacheKey` keys on the
       trim region's centroid at 6 decimals while both endpoints serve a model grid of ~1–11 km
       (forecast) or 0.25° ≈ 28 km (ERA5 archive), at 15-minute slots. So the cache essentially
       never hits across trim windows:
@@ -181,7 +227,19 @@ rather than parsed ride dates, so that is indicative, not measured.*
       `frontend/src/utils/WeatherCache.ts:178-188`, `autoRho.ts:150-157`
       *origin: brainstorm for condition (a), 2026-09-02 — maintainer ruled bound-only*
 
-- [ ] **[L–XL] WEATH-01 itself**, once (a) is settled — it is — and both items above are:
+- [x] **[L–XL] WEATH-01 itself** — **Done 2026-09-10, rescoped by measurement.** See *Per-lap
+      weather* under **Done**. Delivered as [M], not [L–XL], and NOT as written: the item asked for
+      per-quarter-hour sampling of rho and wind, and measuring first showed the rho half moves
+      0.02–0.29% across a whole ride while only 8% of laps are even longer than one 15-minute slot.
+      The error was somewhere else — ONE sample, at the selection midpoint, applied to laps
+      recorded hours apart. Original wording follows.
+
+      Once (a) is settled — it is — and both items above are (both are, as of 2026-09-10):
+      **its justification is now resolution, not accuracy.** D-d removed the accuracy claim the
+      original GO rested on, and the endpoint rung delivers the 15-minute data the feature needs.
+      What WEATH-01 buys is per-quarter-hour sampling where the ladder can serve it — worth ~0.25
+      m/s at the mean and 0.08 at the median by the 2026-09-02 measurement, with the p95 of 1.170
+      saying the payoff concentrates in gusty conditions.
       per-quarter-hour sampling with
       interpolation, wired into the production auto-rho/VE path. Research is already done and the
       per-sample plumbing (`rho_array`, `wind_speed: Vec<f64>`) exists end-to-end, so this
@@ -372,6 +430,228 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Per-lap weather — 2026-09-10
+
+**The item this closes:** *Bundle F · [L–XL] WEATH-01 itself* — the last open item in bundle F.
+
+**Three measurements reshaped it before any code was written.** The item asked for
+per-quarter-hour sampling of rho and wind, wired into the auto-rho/VE path.
+
+1. **The rho half is not worth building.** Across a 2–3 hour ride window air density moves
+   **0.02–0.29%** (max 0.0035 kg/m³) while wind moves **0.10–1.20 m/s**. CdA scales inversely with
+   rho, so per-quarter-hour rho buys at most ~0.3% on a three-hour ride and far less on a lap.
+2. **Sub-15-minute resolution helps almost nobody.** Median lap across the local rides is **2.8
+   minutes**; only **23 of 272 laps (8%)** are longer than a single 15-minute slot. For the other
+   92%, quarter-hour sampling yields one sample and changes nothing.
+3. **The real defect was never the sampling rate.** `autoRho` took ONE sample, at the trim region's
+   MIDDLE timestamp, and applied it to every selected lap. A multi-lap selection spans the gaps
+   between its laps, so laps recorded hours apart were analysed at one instant's weather — and the
+   wind moved up to 1.20 m/s across those gaps.
+
+So the feature shipped is per-LAP weather, not per-quarter-hour weather. Maintainer chose this
+scope after seeing the three numbers above.
+
+**What it does.** Each independently-integrated segment resolves its own rho/wind at its own
+midpoint, interpolated between the two 15-minute slots bracketing it — a lap at 15:05 takes 2/3 of
+the 15:00 slot and 1/3 of the 15:15 one.
+
+**No Rust change, and the reason is worth recording** because the item assumed otherwise. The
+item's "the per-sample plumbing exists end-to-end" is half true: `rho_array` exists, but the
+weather-derived wind is a SCALAR `params.wind_speed`/`wind_direction` projected onto rider heading
+inside Rust (`virtual_elevation.rs:287`), so a per-SAMPLE wind would have needed a signature change
+and a WASM rebuild. Per-LAP wind needs neither: under D-19 Option B, Standard already emits one
+segment per lap and each gets its own calculator run (`standardSegments.ts:9`), so per-lap weather
+is a `params` override per segment and nothing below changes.
+
+**WIND IS A VECTOR — the one way this could have been silently, badly wrong.** Interpolating a
+bearing as a scalar averages 350° and 10° to 180°: a headwind becomes a tailwind. Measured on real
+15-minute data, **0.3% of consecutive slot pairs cross 0/360**, and on those the naive mean is
+exactly **180° out**. Rare enough to survive casual testing, catastrophic when it lands. Wind is
+resolved through its u/v components; temperature, dew point and pressure interpolate linearly.
+
+Two consequences of vector interpolation are pinned by tests rather than left to surprise a reader:
+the magnitude SHRINKS when the wind veers (two 5 m/s winds 20° apart average to 5·cos10° = 4.924,
+and two opposing ones to calm), and the result is a chord across the circle, not an arc along it
+(340°→20° at t=0.25 gives 349.686°, not the 350.0° angular interpolation would give). **The first
+test fixture written here asserted the scalar answers and failed — the implementation was right and
+the expectations were wrong.**
+
+**Async/sync split.** `updateModeVEPlots` recomputes on every slider move and cannot await, so the
+slot series is fetched ONCE by `autoRho` when the selection changes (`appState.weatherSeries`) and
+read synchronously by the plot path. The fetch runs AFTER the parameters are written, deliberately:
+a slot outage degrades per-lap weather without undoing a completed auto-rho, and a failed slot is
+dropped rather than fatal — `interpolateAt` spans the gap, and an empty series falls back to the
+selection-level constant, which is what the app did before.
+
+**Guards.** A FIT `air_speed`/`wind_speed` channel still wins — a measurement of the air the rider
+actually met is not overridden with a model. Selection-level `params.rho`/`wind_speed` are
+unchanged, so the panel still shows what it always did and a single-segment analysis is unaffected.
+`MAX_WEATHER_SLOTS = 48` caps a corrupt-timestamp span at 12 hours.
+
+**Storage is per-lap, on maintainer instruction.** Once laps differ, one stored rho/wind is no
+longer what the physics used, and a record claiming otherwise would be a quiet lie about a figure
+the user may later compare runs on. `segmentWeather` follows the existing `virtualDistances` shape
+exactly — four columns (`LapWeatherSegments`, `LapRho`, `LapWindSpeed`, `LapWindDirection`),
+';'-separated in analysis order, with a segment-name column stating the mapping. The
+selection-level `Rho`/`WindSpeed`/`WindDir` columns stay beside them: both are true and they answer
+different questions. Absent on old records AND when every lap used the selection value, so its
+presence means the laps genuinely differed.
+
+**Tests** (+41: 19 in `segmentWeather.test.ts`, 7 in `weatherSeries.test.ts`, 3 in
+`autoRho.test.ts`, 2 in `resultColumns.test.ts`, plus re-expressed assertions). `autoRho.test.ts`
+counted raw `getWeatherData` calls to mean "did the flight run once?"; that question now needs
+separating from slot lookups, so the counts are expressed as `selectionLookups()` — filtered on not
+sitting on a 15-minute boundary — rather than bumped to a larger magic number.
+
+**Verification.** `npm run test` 1219 passed / 101 files; `check` and `lint` exit 0. Driven in the
+running app on 2026-09-10 against the live API and the real IndexedDB, over a 2h05m selection:
+
+| | slots | network calls |
+|---|---|---|
+| first analysis, cold cache | 10 | 10 |
+| same selection again | 10 | **0** |
+| trim nudged by a few minutes | 10 | **0** |
+
+Three 3-minute laps at 12:10, 13:05 and 14:05 in that selection resolved to wind **3.68 / 3.55 /
+3.81 m/s** at **55° / 50° / 35°** — a 20° direction swing the previous single-sample code collapsed
+into one value. A FIT-sourced wind correctly returned no override. **Not exercised:** loading a FIT
+file through the UI and reading the numbers off the panel.
+
+### One key builder, three decimals wide — 2026-09-10
+
+**The item this closes:** *Bundle F · [S–M] The cache key is ~0.1 m wide and the data behind it is
+kilometres wide*, un-gated the same day by **D-d**.
+
+**The measurement that sized it.** Across the local rides, a ONE-POINT trim-slider nudge moves the
+centroid **0.1–2.5 m** and a 1% trim move shifts it **4–212 m**, against a key that resolved 0.11 m.
+Simulating a 100-step drag of the trim handle over each ride's first 30%: at 6 decimals **all 100
+positions were distinct keys** — the cache never hit, it only grew, which is why the size cap from
+condition (a) was load-bearing rather than a backstop.
+
+**The width, and why it is not an accuracy trade.** Open-Meteo snaps a query to its own model grid
+and returns **byte-identical** data for points 500 m apart — verified directly on 2026-09-10, four
+coordinates spanning ~500 m all resolving to grid cell `52.54, 13.44` with identical temperature and
+wind. So coarsening the key discards precision the API had already discarded. **3 decimals** (~111 m
+cell, ≤78 m worst case) was the maintainer's choice over 2 decimals (~1.1 km).
+
+Pooled over 23 rides, that same 100-step drag: **2300 → 368 requests, 84% fewer.** (2 decimals would
+have been 97% fewer; 3 was chosen as the conservative width.)
+
+**The API query is deliberately NOT rounded.** Only the key is. Rounding the query would change
+nothing observable, for the reason above, and leaving it alone keeps the request byte-identical to
+what a cache-less path would send.
+
+**What the consolidation found.** The key was built by two inline format literals — one in
+`WeatherCache.generateCacheKeyString`, one inline in `autoRho` — and they were **not equivalent**:
+the cache emitted an unpadded hour (`9:15`), autoRho a padded one (`09:15`), so the two disagreed
+for any ride before 10:00 UTC. Neither consumed the other's string, which is precisely why the
+divergence survived. Both now call one exported `buildWeatherQueryKey`, so `autoRho`'s in-session
+`lastWeatherQueryKey` guard is coarsened too — the TODO item noted it did not absorb slider moves
+either, and sharing the builder fixes both rather than one.
+
+`buildCacheKey` stores the ROUNDED coordinates in `key.lat`/`key.lon`, not just in the string, so
+the `location` index and the primary key cannot drift apart.
+
+**A limitation, recorded with its own test so nobody files it as a defect.** Snapping to a grid buys
+a high hit rate, never a guaranteed one: two points **40 m** apart land in different cells when a
+boundary runs between them (47.123456 → 47.123, 47.123812 → 47.124). The first fixture written for
+this actually asserted the wrong thing and failed for that reason; the corrected pair now tests both
+the inside-cell hit and the boundary miss.
+
+**Existing cache rows become unreachable** — the key format changed, so 6-decimal rows no longer
+match. They age out through the FIFO cap from condition (a). No `dbVersion` bump, no migration,
+consistent with (a)'s deliberate choice. The visible cost is one re-fetch per file on first use.
+
+**Tests** (`WeatherCache.test.ts` 12 → 18 cases). Written first, confirmed red (4 of 6 failing — the
+two over-coarsening guards correctly pass both before and after, which is what makes them guards).
+`autoRho.test.ts` mocks the whole `WeatherCache` module; its double now takes `buildWeatherQueryKey`
+**real** via `importActual`, because a stubbed key would silently decide the very thing those tests
+observe through call counts.
+
+**Verification.** `npm run test` 1188 passed / 99 files; `check` and `lint` exit 0. Driven in the
+running app on 2026-09-10 against the real IndexedDB store: a simulated 40-step slider drag cost
+**2 API calls instead of 40** — 2 rather than 1 because the drag crossed one cell boundary, the
+documented behaviour above. Key format confirmed as `52.546_13.430_2026-08-04_10:00`, hour padded.
+
+### The historical-forecast rung — 2026-09-10
+
+**The item this closes:** *Bundle F · [S] Add `historical-forecast-api.open-meteo.com` as the
+15-minute source for rides past the forecast window*, un-gated the same day by **D-d**.
+
+**What changed.** The WEATH-03 fallback ladder in `WeatherAPI.ts` grew a middle rung:
+
+```
+before:  Forecast 15min  →  Archive hourly
+after:   Forecast 15min  →  historical-forecast 15min  →  Archive hourly
+```
+
+- `historicalForecastBaseUrl` added beside the two existing base URLs.
+- Rides **past `forecastMaxDays`** now reach the new rung first instead of dropping straight to
+  hourly Archive. They keep 15-minute resolution, which Archive cannot serve at all for old dates.
+- Rides **inside** the window that get an all-null Forecast body — the documented ~69–82 day grey
+  zone — also take the new rung before Archive.
+- Archive is unchanged and still terminal: it returns data or throws, so `resolveWeatherFailure`
+  and rung 3 (manual rho + warning) are untouched.
+- `connect-src` in `index.html:13` gained the one host. Without it the fetch fails silently under
+  CSP, with no console error — the failure mode that makes this a two-file change rather than one.
+
+**What did NOT change:** `buildApiUrl`, `extractMinutely15Data`, `extractHourlyData`, the query
+builder, `WeatherCache` and `autoRho`. The new rung reuses `fetchFromAPI` with a different base URL
+and `"15min"`, which is why the item was [S] and stayed [S].
+
+**A property worth stating because the code now depends on it:** only an ALL-NULL body advances the
+ladder. A transport or HTTP failure on any rung is surfaced immediately rather than re-queried
+against the next host, so an outage can never be mistaken for a data gap. That was already true of
+the Forecast rung; it is now asserted for the new one.
+
+**Tests** (`WeatherAPI.test.ts`, 9 → 15). Written before the implementation and confirmed red
+against the two-rung ladder — 9 failing, 6 passing — then green:
+
+- an old ride reaches historical-forecast at 15 minutes, not Archive, in one call
+- a grey-zone all-null Forecast body lands on historical-forecast, not Archive
+- an all-null historical-forecast body degrades to Archive hourly
+- all three rungs run, in order, when both 15-minute rungs return nulls
+- every rung queries the same day and location; only Archive omits `minutely_15`
+- a hard 500 on the middle rung surfaces rather than falling through
+- the two terminal-failure cases now run three rungs
+
+**One trap caught while writing the tests, recorded because it would have silently voided them:**
+`"historical-forecast-api.open-meteo.com/v1/forecast"` **contains** `"api.open-meteo.com/v1/forecast"`
+as a substring. The existing host constants were bare hosts, so every `toContain(FORECAST_HOST)` /
+`not.toContain(...)` assertion distinguishing the two rungs would have passed regardless of which
+host was actually called. All three constants are now pinned with the `https://` scheme, and a
+guard test asserts the three are mutually non-containing so the next person cannot un-pin them
+without a failure.
+
+**Verification.** `npm run test` 1181 passed / 99 files; `npm run check` and `npm run lint` both
+exit 0. Driven in the running app on 2026-09-10 (dev server, `VITE_LOG_LEVEL=debug`) by importing
+the real module in the page and instrumenting `window.fetch`, so the rung ORDER was observed rather
+than inferred, under the page's own CSP:
+
+| ride age | hosts called, in order | resolution |
+|---|---|---|
+| 135 days | `historical-forecast-api` | 15min |
+| 90 days | `historical-forecast-api` | 15min |
+| 75 days (grey zone) | `api.open-meteo.com` → `historical-forecast-api` | 15min → 15min |
+| 21 days | `api.open-meteo.com` | 15min |
+
+All responses `ok: true`, so the `connect-src` entry is confirmed live and not merely present.
+Slot alignment on the new endpoint was cross-checked against its own hourly series (the 15-minute
+value at 14:00 equals the hourly value at 14:00), ruling out an off-by-one in the `minutely_15`
+time array. **Not exercised:** loading a FIT file through the UI, which this change does not touch,
+and which Leaflet's behaviour under automation makes unreliable to check this way.
+
+**Impact on real files, measured 2026-09-10** — every local ride older than 82 days, ERA5 vs
+operational archive at the ride's own hour and location (n=14 distinct ride-days):
+
+- mean |Δwind| **0.70 m/s**, max **2.88 m/s**, mean |Δdirection| **22°**
+
+That first figure sits close to the 0.816 recorded on 2026-09-02, so the earlier measurement
+replicates. Two things it makes concrete, both accepted under **D-d** rather than refuted by it:
+the change is **not neutral** for previously-analysed old rides — nothing recomputes, so a stored
+result and a fresh one can differ — and the 22° mean direction shift is the part of the residual
+**k cannot absorb**, since k scales wind magnitude only.
 
 ### The knip gate widens to every issue type — 2026-09-09
 

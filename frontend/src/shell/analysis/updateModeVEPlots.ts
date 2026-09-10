@@ -55,6 +55,9 @@ import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
 import { resolveElevationProfile } from "./elevationProfileResolver";
 import { resolveRhoArray } from "./rhoArrayResolver";
+import { segmentWeatherOverride } from "./weatherSeries";
+import type { SegmentWeatherRecord } from "../../utils/ResultsStorage";
+import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js";
 
 /** Segments shorter than this are skipped, matching both reference paths. */
 const MIN_SEGMENT_SAMPLES = 10;
@@ -198,6 +201,9 @@ export async function updateModeVEPlots(
 	};
 
 	const segments = args.segments ?? handler.getUpdateSegments(appState);
+
+	/** Per-lap weather actually applied, in analysis order, for Store Result. */
+	const segmentWeatherRows: SegmentWeatherRecord[] = [];
 	const profiles: SegmentVeProfile[] = [];
 
 	for (const segment of segments) {
@@ -269,6 +275,26 @@ export async function updateModeVEPlots(
 			}
 		}
 
+		// PER-LAP WEATHER. `params` describes the selection as a whole; a
+		// multi-lap selection spans the gaps between its laps, so one wind for
+		// all of them is wrong by however much the wind moved in between —
+		// measured at up to 1.20 m/s across a three-hour ride. Each segment is
+		// analysed at its own midpoint instead, interpolated from the slot
+		// series `autoRho` fetched.
+		//
+		// Null means "nothing better than the selection value is available"
+		// (no series, FIT-sourced wind, unusable timestamps), and the segment
+		// then runs on `params` exactly as it did before this existed.
+		const weatherOverride = segmentWeatherOverride(
+			appState.weatherSeries,
+			slice.timestamps,
+			wind.selectedWindSource,
+			AirDensityCalculator.calculate_air_density,
+		);
+		const segmentParams = weatherOverride
+			? { ...params, ...weatherOverride }
+			: params;
+
 		try {
 			const supplementarySeries = buildSegmentSupplementarySeries({
 				timestamps: slice.timestamps,
@@ -278,7 +304,7 @@ export async function updateModeVEPlots(
 				positionLong: slice.positionLong,
 				distance: slice.distance,
 				windSpeed: slice.windSpeed,
-				params,
+				params: segmentParams,
 				selectedWindSource: wind.selectedWindSource,
 			});
 
@@ -292,10 +318,22 @@ export async function updateModeVEPlots(
 				distance: slice.distance,
 				windSpeed: slice.windSpeed,
 				rhoArray: segmentRho,
-				params,
+				params: segmentParams,
 				cda: args.cda,
 				crr: appliedCrr,
 			});
+
+			// Recorded only for segments that actually reach a calculator, so
+			// the stored rows describe what was computed rather than what was
+			// selected — the same rule `lapsCovered` follows.
+			if (weatherOverride) {
+				segmentWeatherRows.push({
+					label: segment.label,
+					rho: weatherOverride.rho,
+					windSpeed: weatherOverride.wind_speed,
+					windDirection: weatherOverride.wind_direction,
+				});
+			}
 
 			const trimStart = segment.trim?.start ?? 0;
 			const trimEnd = segment.trim?.end ?? slice.timestamps.length - 1;
@@ -395,6 +433,13 @@ export async function updateModeVEPlots(
 	if (isTabActive("vd-tab")) {
 		await callbacks.renderVd(profiles);
 	}
+
+	// Published for Store Result. Empty means every segment ran on the
+	// selection-level rho/wind, which is what `params` already records — so the
+	// stored row carries per-lap columns ONLY when they say something the
+	// existing columns do not.
+	appState.currentSegmentWeather =
+		segmentWeatherRows.length > 0 ? segmentWeatherRows : null;
 
 	log.debug(
 		`VE plots updated with ${profiles.length} segments, CdA=${args.cda.toFixed(3)}, Crr=${args.crr.toFixed(4)}`,
