@@ -34,9 +34,9 @@ function resolveGoldenRidePath(): string {
 		: resolve(process.cwd(), "src/analysis/__fixtures__/golden-ride.json");
 }
 
-export const GOLDEN_RIDE_PATH = resolveGoldenRidePath();
+const GOLDEN_RIDE_PATH = resolveGoldenRidePath();
 
-export interface GoldenRideAnonymisation {
+interface GoldenRideAnonymisation {
 	note: string;
 	steps: string[];
 	coordinateTransform: {
@@ -66,17 +66,17 @@ export interface GoldenRideAnonymisation {
 	reproducibility: string;
 }
 
-export interface GoldenRideLap {
+interface GoldenRideLap {
 	start_time: number;
 	end_time: number;
 }
 
-export interface GoldenRideIndexRange {
+interface GoldenRideIndexRange {
 	startIdx: number;
 	endIdx: number;
 }
 
-export interface GoldenRideSection {
+interface GoldenRideSection {
 	sectionNumber: number;
 	outboundStartIdx: number;
 	outboundEndIdx: number;
@@ -85,7 +85,7 @@ export interface GoldenRideSection {
 }
 
 /** The on-disk shape, exactly as `build-golden-fixture.ts` emits it. */
-export interface GoldenRideJson {
+interface GoldenRideJson {
 	_anonymisation: GoldenRideAnonymisation;
 	record_count: number;
 	timestamps: number[];

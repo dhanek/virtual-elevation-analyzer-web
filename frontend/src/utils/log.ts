@@ -1,4 +1,4 @@
-export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
+type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 	debug: 10,
@@ -51,7 +51,7 @@ function write(
 	}
 }
 
-export function createLogger(scope?: string) {
+function createLogger(scope?: string) {
 	return {
 		debug: (...args: unknown[]) => write("debug", scope, args),
 		info: (...args: unknown[]) => write("info", scope, args),

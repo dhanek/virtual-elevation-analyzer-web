@@ -209,15 +209,6 @@ re-deriving it):
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
-- [ ] **[S–M] 72 exports are used only inside their own file.** `npm run knip` reports them;
-      `npm run check` does not gate on them, because taking 72 `export` keywords off in one pass
-      is a large mechanical diff and several sit beside comments explaining why the declaration
-      exists. Each is a safe, `tsc`-verified edit on its own — drop `export`, and the compiler
-      proves nothing imported it. Worth doing in one sitting, after which `check` can gate on
-      `exports` and `types` as well as `files` and the class is closed for good.
-      Run `npm run knip` for the current list. `frontend/` ·
-      *origin: sizing done while wiring the dead-export detector, 2026-09-09*
-
 - [ ] **[S] Scrub the ride filename from `main`'s history — after PR #8 lands, not before.**
       The current file no longer names the ride (see *Conventions*), but the name is still in **25
       commits** on `main`, spanning `3b05de7` (2026-08-31) to `dcdcaac` (2026-09-03) — in `TODO.md`
@@ -381,6 +372,57 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### The knip gate widens to every issue type — 2026-09-09
+
+- [x] **[S–M] 72 exports are used only inside their own file.** Taken, and the hedge that filed
+      it was wrong: there was nothing to decide. Dropping `export` from a symbol used inside its
+      own file keeps the declaration AND its comment — only the visibility changes — and `tsc`
+      fails loudly if anything imported it. So it is one mechanical pass, not 72 judgement calls.
+
+      **Run to a fixed point, not once.** Removing an export changes knip's reachability, so a
+      second pass surfaced `isVeSectionVisible`, which the first could not see. The loop ran until
+      knip reported no issues.
+
+      **`npm run check` now gates on EVERY knip issue type**, not just `files` — which was the
+      point of taking this item, and what the sizing in the previous entry deferred. Proven to
+      fail: a new unused export makes it exit 1 naming the symbol and its line.
+
+      **The sweep exposed three flaws in an unrelated guard**, and that is the part worth keeping.
+      `unsetParameterFallbacks.test.ts`'s declaration pattern was anchored
+      `^\s*(const|let|var)`, so `export const FALLBACK_CRR = 0.008;` was invisible to a guard
+      whose whole job is to catch that declaration — exporting one was enough to hide it. And it
+      accepted `[0-9.]+`, so it fired on `const CRR_TEMP_ANCHOR_C = 22`, a temperature in degrees
+      C matching only because its name contains "crr". The false positive had been masked by the
+      `export` keyword rather than by the pattern being right. And it took only the first match on
+      a line — `exec` returns one match and `??` stops at the first pattern that matched at all —
+      so a Crr fallback hid behind any earlier coalesce, and a declaration hid behind any `??` on
+      its own line; it now scans every match of both patterns. All three corrected and
+      mutation-tested in both directions, and `CRR_FALLBACK_MATRIX` came out of it: the nine shapes
+      this guard has been wrong about, pinned in one run.
+
+      A re-export block in `StandardPlotBuilders.ts` also narrows from three symbols to one: it
+      existed "so every existing import site keeps working", and every site but `vdHeader.ts` has
+      since moved to importing from `analysis/VirtualDistance` directly.
+
+      99 files / 1176 tests: the file count unchanged, the nine matrix rows added by the guard
+      fix; `check`, `lint` and `build` clean, and `npm run knip` reports zero issues — the three
+      lines it still prints are non-fatal configuration hints.
+
+      Criteria (derived PR #24 review round 40, confirmed 2026-09-09):
+      - [x] C1 Every symbol knip reports as used only inside its own file loses
+            `export`; the declaration and its comment stay
+      - [x] C2 The sweep runs to a fixed point — `npm run knip` reports no ISSUES
+      - [x] C3 `npm run check` gates on `exports` and `types`, not only `files`
+      - [x] C4 The widened gate is proven to FAIL, not merely to pass — a new unused
+            export and a new unused exported type each make it exit 1, naming symbol
+            and line
+      - [x] C5 Visibility-only: no behavioural change (tsc x2, lint, build, and the
+            export sweep itself changing no test; the branch's nine extra rows over
+            the base are the Crr-guard matrix)
+
+      `frontend/package.json` · `frontend/src/analysis/unsetParameterFallbacks.test.ts` ·
+      *origin: sizing done while wiring the dead-export detector, 2026-09-09*
 
 ### One interpolator, not two — 2026-09-09
 

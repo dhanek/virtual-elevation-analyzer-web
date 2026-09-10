@@ -25,7 +25,7 @@ function linearInterpolate(
  * @param targetTimestamps - Target uniform 1Hz timestamps (seconds)
  * @returns Interpolated values at target timestamps
  */
-export function interpolateToUniform(
+function interpolateToUniform(
 	sourceTimestamps: number[],
 	sourceValues: number[],
 	targetTimestamps: number[],
@@ -92,7 +92,7 @@ export function interpolateToUniform(
  * @param endTime - End time in seconds
  * @returns Array of timestamps at 1-second intervals
  */
-export function generateUniformTimestamps(
+function generateUniformTimestamps(
 	startTime: number,
 	endTime: number,
 ): number[] {

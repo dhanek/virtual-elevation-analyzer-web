@@ -748,7 +748,7 @@ export function isGpsLapSelectionMode(
 /**
  * Get the time range of currently selected data (from selected FIT laps)
  */
-export function getSelectedDataTimeRange(): {
+function getSelectedDataTimeRange(): {
 	startTime: number;
 	endTime: number;
 	duration: number;
@@ -792,7 +792,7 @@ export function getSelectedDataTimeRange(): {
 /**
  * Find the data index at a given time offset from start
  */
-export function findDataIndexAtTimeOffset(
+function findDataIndexAtTimeOffset(
 	timeOffset: number,
 	startTime: number,
 ): number | null {
@@ -964,7 +964,7 @@ export async function runGpsLapDetection(
 /**
  * Update the GPS detected laps UI list
  */
-export function updateGpsDetectedLapsUI(): void {
+function updateGpsDetectedLapsUI(): void {
 	const deps = getDependencies();
 
 	const lapsInfo = document.getElementById("gpsDetectedLapsInfo");
@@ -1206,7 +1206,7 @@ export async function runOutAndBackDetection(
 /**
  * Update the Out and Back sections UI list
  */
-export function updateOutAndBackSectionsUI(): void {
+function updateOutAndBackSectionsUI(): void {
 	const deps = getDependencies();
 
 	const sectionsInfo = document.getElementById("outAndBackSectionsInfo");
@@ -1318,7 +1318,7 @@ export function handleOutAndBackSectionSelectionChange(): void {
 	deps.updateAnalyzeButton();
 }
 
-export function initializeMapTrimControls(dataLength: number): void {
+function initializeMapTrimControls(dataLength: number): void {
 	const mapTrimStartSlider = document.getElementById(
 		"mapTrimStartSlider",
 	) as HTMLInputElement;
@@ -1529,7 +1529,7 @@ function drawTrimRegionOnMap(): void {
 	}, 100);
 }
 
-export async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
+async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
 	const deps = getDependencies();
 
 	if (

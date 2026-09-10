@@ -42,13 +42,15 @@ import {
 // The integration itself moved to analysis/VirtualDistance.ts once Store Result
 // and Export CSV started persisting these numbers (change-list entry (h)): the
 // `summarize` seam that writes them lives in modes/analysis/ and must not reach
-// into this layer. Re-exported here so every existing import site keeps working
-// and there is still exactly ONE integration.
-export {
-	computeVirtualDistanceWindowTotals,
-	integrateVirtualDistance,
-	virtualDistanceDifferencePercent,
-} from "../analysis/VirtualDistance";
+// into this layer, and there is still exactly ONE integration.
+//
+// ONE SYMBOL LEFT IN THIS HOP, not three. It was re-exported so every existing
+// import site kept working; every site but `vdHeader.ts` has since moved to
+// importing from `analysis/VirtualDistance` directly, so the other two
+// re-exports had no importer at all and are gone. `integrateVirtualDistance` is
+// still IMPORTED above — this file calls it — it is only no longer passed
+// through.
+export { computeVirtualDistanceWindowTotals } from "../analysis/VirtualDistance";
 export type PlotTrace = Record<string, unknown>;
 export type PlotLayout = Record<string, unknown>;
 export type PlotConfig = Record<string, unknown>;

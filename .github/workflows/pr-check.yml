@@ -1,7 +1,8 @@
 name: PR check
 
-# `npm run check` — prettier plus both tsc passes — followed by `npm run lint`
-# and `npm run test`, on the pull request itself.
+# `npm run check` — prettier, both tsc passes, and knip gating on every issue
+# type — followed by `npm run lint` and `npm run test`, on the pull request
+# itself.
 #
 # Without this they ran in CI only on push to `main`, inside the Pages deploy,
 # so a formatting slip, a type error or a failing test failed the DEPLOY rather
@@ -45,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
 
       # The WASM build is not optional, even though this workflow only runs the
-      # formatter and the type-checker. `npm run check` runs `tsc`, and
+      # formatter, the type-checker and knip. `npm run check` runs `tsc`, and
       # `src/analysis/VeCalculatorFactory.ts`, `src/state/AppState.ts` and four
       # test files import `@wasm/virtual_elevation_analyzer.js`, which
       # `tsconfig.json` maps to `./pkg/*`. `frontend/pkg` is gitignored, so a

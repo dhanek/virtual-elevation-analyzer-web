@@ -20,7 +20,7 @@ export const TIRE_SENSITIVITY_PRESETS: Record<TireSensitivity, number> = {
 export const DEFAULT_TIRE_SENSITIVITY: TireSensitivity = "typical";
 
 /** Anchor temperature in °C (BRR lab test temperature). */
-export const CRR_TEMP_ANCHOR_C = 22;
+const CRR_TEMP_ANCHOR_C = 22;
 
 /** Soft validity range of the model in °C. */
 export const CRR_TEMP_VALID_MIN_C = 5;

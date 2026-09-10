@@ -164,9 +164,7 @@ export function calculateOutAndBackMeanElevation(
 /**
  * Build multi-segment series for out-and-back plots (wind/power/VD).
  */
-export function buildOutAndBackMultiSegmentSeries(
-	profiles: OutAndBackVEProfile[],
-) {
+function buildOutAndBackMultiSegmentSeries(profiles: OutAndBackVEProfile[]) {
 	return profiles.flatMap((profile, index) => {
 		const color = getMultiSegmentColor(index);
 		const series = [] as Array<{

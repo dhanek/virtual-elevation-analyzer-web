@@ -38,7 +38,7 @@ let axis: PlotXAxis = "time";
  */
 let distanceAvailable = false;
 
-export const PLOT_X_AXIS_TOGGLE_CLASS = "plot-x-axis-toggle";
+const PLOT_X_AXIS_TOGGLE_CLASS = "plot-x-axis-toggle";
 
 export function getPlotXAxis(): PlotXAxis {
 	return axis;

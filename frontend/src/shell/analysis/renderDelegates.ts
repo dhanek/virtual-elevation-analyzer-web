@@ -14,7 +14,7 @@ import { log } from "../../utils/log";
 /**
  * Wraps a standard-mode render function in a named delegate with debug logging.
  */
-export function createStandardRenderDelegate(
+function createStandardRenderDelegate(
 	renderFn: (args: StandardRenderArgs) => Promise<void> | void,
 ): (args: StandardRenderArgs) => Promise<void> | void {
 	return (args) => {
@@ -26,7 +26,7 @@ export function createStandardRenderDelegate(
 /**
  * Wraps a GPS-lap render function in a named delegate with debug logging.
  */
-export function createGpsLapRenderDelegate(
+function createGpsLapRenderDelegate(
 	renderFn: ModeRenderCallbacks["gpsLap"],
 ): ModeRenderCallbacks["gpsLap"] {
 	return (args) => {
@@ -38,7 +38,7 @@ export function createGpsLapRenderDelegate(
 /**
  * Wraps an out-and-back render function in a named delegate with debug logging.
  */
-export function createOutAndBackRenderDelegate(
+function createOutAndBackRenderDelegate(
 	renderFn: ModeRenderCallbacks["outAndBack"],
 ): ModeRenderCallbacks["outAndBack"] {
 	return (args) => {
