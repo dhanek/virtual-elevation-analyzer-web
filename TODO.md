@@ -532,13 +532,14 @@ selection-level `Rho`/`WindSpeed`/`WindDir` columns stay beside them: both are t
 different questions. Absent on old records AND when every lap used the selection value, so its
 presence means the laps genuinely differed.
 
-**Tests** (+41: 19 in `segmentWeather.test.ts`, 7 in `weatherSeries.test.ts`, 3 in
-`autoRho.test.ts`, 2 in `resultColumns.test.ts`, plus re-expressed assertions). `autoRho.test.ts`
-counted raw `getWeatherData` calls to mean "did the flight run once?"; that question now needs
-separating from slot lookups, so the counts are expressed as `selectionLookups()` — filtered on not
-sitting on a 15-minute boundary — rather than bumped to a larger magic number.
+**Tests** (+62: 19 in `segmentWeather.test.ts`, 23 in `weatherSeries.test.ts`, 4 in
+`autoRho.test.ts`, 2 in `resultColumns.test.ts`, 2 in `updateModeVEPlots.test.ts`, 2 in
+`resultsStorageVirtualDistance.test.ts`, plus re-expressed assertions). `autoRho.test.ts` counted
+raw `getWeatherData` calls to mean "did the flight run once?"; that question now needs separating
+from slot lookups, so the counts are expressed as `selectionLookups()` — filtered on not sitting on
+a 15-minute boundary — rather than bumped to a larger magic number.
 
-**Verification.** `npm run test` 1219 passed / 101 files; `check` and `lint` exit 0. Driven in the
+**Verification.** `npm run test` 1240 passed / 101 files; `check` and `lint` exit 0. Driven in the
 running app on 2026-09-10 against the live API and the real IndexedDB, over a 2h05m selection:
 
 | | slots | network calls |
