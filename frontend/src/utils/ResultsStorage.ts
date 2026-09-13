@@ -657,6 +657,9 @@ export class ResultsStorage {
 			// total. `?? []` rather than a fabricated single value, so a caller
 			// that supplies none stores none.
 			virtualDistances: data.virtualDistances ?? [],
+			// Per-lap weather as analysed. `null` (every lap used the selection
+			// values) and absent both store as absent, never as `[]`.
+			segmentWeather: data.segmentWeather ?? undefined,
 			avgPower: data.avgPower,
 			avgSpeed: data.avgSpeed,
 			avgTemperature: data.avgTemperature,

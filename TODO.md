@@ -515,10 +515,12 @@ selection-level constant, which is what the app did before.
 
 **Guards.** A FIT `air_speed`/`wind_speed` channel still wins — a measurement of the air the rider
 actually met is not overridden with a model. Selection-level `params.rho`/`wind_speed` are
-unchanged, so the panel still shows what it always did. A single-segment analysis IS affected: with
-a slot series present, a one-segment selection also runs on the rho/wind interpolated at that
-segment's own midpoint, so the calculator can be handed different figures from the ones the panel
-shows.
+unchanged, so the panel still shows what it always did. A single-segment analysis IS affected when
+auto-rho owns the rho: with a slot series present, `auto_calculate_rho` on and `rho_source` not
+"manual", a one-segment selection also runs on the rho interpolated at that segment's own midpoint,
+and on the interpolated wind only when `weatherMayFillWind` gives the API the wind (D-a). A
+hand-typed or legacy wind is kept as typed. So the calculator can be handed a different rho, and
+possibly a different wind, from the ones the panel shows.
 `MAX_WEATHER_SLOTS = 48` caps a corrupt-timestamp span at 12 hours.
 
 **Storage is per-lap, on maintainer instruction.** Once laps differ, one stored rho/wind is no
