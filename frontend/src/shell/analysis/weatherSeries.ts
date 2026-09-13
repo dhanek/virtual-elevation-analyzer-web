@@ -154,8 +154,12 @@ export function trimRegionTimeSpan(
  *
  * Past those gates the rho always comes from the series, but the WIND only when
  * `weatherMayFillWind(params)` says the API owns it (D-a). A hand-typed or
- * legacy wind is returned unchanged from `params`, so every field is what the
- * segment is actually analysed at. If that kept wind has no direction, the
+ * legacy wind is returned unchanged from `params`, so the wind fields are what
+ * the segment is analysed at. The rho is what the calculator is handed as
+ * `params.rho`; when the ride carries a usable air-density channel the
+ * calculator integrates that per-sample series instead
+ * (`VeCalculatorFactory.ts`, `create_ve_calculator_with_rho_array`), so the rho
+ * is then not what the physics used. If that kept wind has no direction, the
  * whole override is null, because the stored per-lap row cannot represent it.
  *
  * `calcRho` is injected rather than imported so this stays node-testable; the

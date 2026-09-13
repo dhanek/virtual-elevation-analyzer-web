@@ -78,10 +78,12 @@ export interface SaveResultData {
 	 */
 	virtualDistances?: SegmentVirtualDistance[];
 	/**
-	 * The weather each independently-integrated segment was ACTUALLY analysed
-	 * at, in analysis order. Optional for the same reason as the line above: a
-	 * caller that has not gone through the update pass carries none rather than
-	 * a wrong one.
+	 * Per-segment weather, in analysis order. The wind fields are what each
+	 * segment was analysed at; `rho` is the value handed to the calculator as
+	 * `params.rho`, which is not what the physics used when a usable air-density
+	 * channel supplies a per-sample series instead (see `StoredVEResult`).
+	 * Optional for the same reason as the line above: a caller that has not gone
+	 * through the update pass carries none rather than a wrong one.
 	 */
 	segmentWeather?: SegmentWeatherRecord[] | null;
 	timestamp: Date;
@@ -137,14 +139,20 @@ export interface StoredVEResult {
 	 */
 	virtualDistances?: SegmentVirtualDistance[];
 	/**
-	 * The weather each independently-integrated segment was ACTUALLY analysed
-	 * at, in analysis order.
+	 * The weather each independently-integrated segment was analysed at, in
+	 * analysis order, with the limit on `rho` stated below.
 	 *
 	 * `rho`, `windSpeed` and `windDirection` above describe the selection as a
 	 * whole — one sample at the trim region's midpoint. Once each lap resolves
 	 * its own weather that single figure stops being what the physics used, and
 	 * a record claiming otherwise would be a quiet lie about a number the user
-	 * may later compare runs on. These rows are the honest version.
+	 * may later compare runs on. These rows carry each lap's own figures, under
+	 * the same limit the selection-level `rho` already has: the wind fields are
+	 * what the segment was analysed at, but `rho` is the value handed to the
+	 * calculator as `params.rho`. When the ride carries a usable air-density
+	 * channel the calculator integrates that per-sample series instead
+	 * (`VeCalculatorFactory.ts`, `create_ve_calculator_with_rho_array`), so
+	 * `rho` is then not what the physics used.
 	 *
 	 * ABSENT on every record written before per-lap weather, and absent when
 	 * every segment ran on the selection-level values — so its presence means

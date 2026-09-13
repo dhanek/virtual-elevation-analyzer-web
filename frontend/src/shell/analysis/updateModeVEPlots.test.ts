@@ -477,7 +477,7 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 });
 
 /**
- * `:131`'s `applyVeStatus(appState, "computing")` looks redundant on every test
+ * `:138`'s `applyVeStatus(appState, "computing")` looks redundant on every test
  * above: a FIRST Analyze already leaves the panel at `computing` from the
  * render, so those fixtures pass with or without the line. The case it
  * actually covers is a SECOND pass over an already-`ready` panel -- a slider
@@ -515,9 +515,9 @@ describe("the entry write to `computing` covers a second pass over a ready panel
 		});
 
 		// The probe actually ran -- without this, a fixture that throws before
-		// `updateModeVEPlots.ts:367` would pass vacuously on the assertion below.
+		// `updateModeVEPlots.ts:409` would pass vacuously on the assertion below.
 		expect(calls.aggregate).toBe(1);
-		// The redundant-looking entry write at `updateModeVEPlots.ts:131` is what
+		// The redundant-looking entry write at `updateModeVEPlots.ts:138` is what
 		// makes this "computing" rather than the stale "ready" left over from the
 		// panel's previous pass.
 		expect(recordedStatus).toBe("computing");

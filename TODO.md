@@ -125,9 +125,9 @@ itself. Nothing below (b) starts early.*
       rather than re-deriving it):
 
       - [x] The store has a removal path besides the manual `clearCache()` button —
-            `evictOverflow`, `WeatherCache.ts:290-330`
+            `evictOverflow`, `WeatherCache.ts:403-456`
       - [x] The bound is enforced on the path `autoRho` actually reaches, i.e. on write rather
-            than on a manual action — eviction runs inside `store()` (`WeatherCache.ts:245`),
+            than on a manual action — eviction runs inside `store()` (`WeatherCache.ts:362`),
             which both `getWeatherData` and `updateCachedEntry` call
       - [x] Existing cached data survives: no migration, no `dbVersion` bump — the `cachedAt`
             index the cursor walks was in the original `onupgradeneeded`; verified in Chrome
@@ -179,6 +179,16 @@ rather than parsed ride dates, so that is indicative, not measured.*
       while `historical-forecast-api` returns **96/96 non-null**.
       `WeatherAPI.ts:39-43,60-80`, `index.html:13`
 
+      Criteria (concretised 2026-09-13, PR #25 review round 44 — the item was prose, these were
+      derived from it and confirmed by the maintainer, so a later round reads this as tier A
+      rather than re-deriving it):
+
+      - [x] historical-forecast is the rung between Forecast and Archive —
+            `WeatherAPI.ts:45`, ladder docstring `:58-60`
+      - [x] `connect-src` allows the new host — `index.html:13`
+      - [x] Only an all-null body advances the ladder; an HTTP or transport failure
+            surfaces — `fetchFromAPI`, `WeatherAPI.ts:138`
+
 - [x] **[L] Establish a ground-truth reference before WEATH-01's GO stands.**
       **RETIRED 2026-09-10 as not-needed — not done.** See **D-d** under *Decisions needed*. The
       analysis below stays as the record of why the question was asked and is still technically
@@ -224,8 +234,16 @@ rather than parsed ride dates, so that is indicative, not measured.*
       at, which injects spatial error into exactly the budget (b) has to re-measure against its
       0.3 m/s bar. Doing it first would contaminate that measurement — so the radius is chosen and
       measured as part of (b), not before it. The cap shipped in (a) bounds the growth meanwhile.
-      `frontend/src/utils/WeatherCache.ts:178-188`, `autoRho.ts:150-157`
+      `frontend/src/utils/WeatherCache.ts:77-102`, `autoRho.ts:294`
       *origin: brainstorm for condition (a), 2026-09-02 — maintainer ruled bound-only*
+
+      Criteria (concretised 2026-09-13, PR #25 review round 44 — the item was prose, these were
+      derived from it and confirmed by the maintainer, so a later round reads this as tier A
+      rather than re-deriving it):
+
+      - [x] The key is coarsened to ~2–3 decimals and autoRho's guard shares the
+            builder — `WEATHER_KEY_DECIMALS = 3` and `buildWeatherQueryKey`,
+            `WeatherCache.ts:65,77`; `autoRho.ts:294`
 
 - [x] **[L–XL] WEATH-01 itself** — **Done 2026-09-10, rescoped by measurement.** See *Per-lap
       weather* under **Done**. Delivered as [M], not [L–XL], and NOT as written: the item asked for
@@ -244,6 +262,17 @@ rather than parsed ride dates, so that is indicative, not measured.*
       interpolation, wired into the production auto-rho/VE path. Research is already done and the
       per-sample plumbing (`rho_array`, `wind_speed: Vec<f64>`) exists end-to-end, so this
       produces arrays rather than touching VE maths.
+
+      Criteria (concretised 2026-09-13, PR #25 review round 44 — the item was prose, these were
+      derived from it and confirmed by the maintainer, so a later round reads this as tier A
+      rather than re-deriving it):
+
+      - [x] Per-lap weather reaches the production VE path — `segmentWeatherOverride`
+            call, `updateModeVEPlots.ts:288`
+      - [x] The rescope to per-lap rather than per-quarter-hour weather is agreed —
+            maintainer, 2026-09-13
+      - [x] The rung and the cache key shipped ahead of the ground-truth item because
+            D-d retired it — maintainer confirmed D-d, 2026-09-13
 
 ## Bundle G · Test infrastructure
 
@@ -486,7 +515,10 @@ selection-level constant, which is what the app did before.
 
 **Guards.** A FIT `air_speed`/`wind_speed` channel still wins — a measurement of the air the rider
 actually met is not overridden with a model. Selection-level `params.rho`/`wind_speed` are
-unchanged, so the panel still shows what it always did and a single-segment analysis is unaffected.
+unchanged, so the panel still shows what it always did. A single-segment analysis IS affected: with
+a slot series present, a one-segment selection also runs on the rho/wind interpolated at that
+segment's own midpoint, so the calculator can be handed different figures from the ones the panel
+shows.
 `MAX_WEATHER_SLOTS = 48` caps a corrupt-timestamp span at 12 hours.
 
 **Storage is per-lap, on maintainer instruction.** Once laps differ, one stored rho/wind is no
@@ -1442,7 +1474,7 @@ it was probed later the same day and split in two — see *Condition (b), as the
       **No TTL, and that is not an omission.** An entry is the weather at a fixed instant at a fixed
       place. Rides past `forecastMaxDays = 82` come from the ERA5 archive, which does not change, so
       an expiry would re-fetch immutable data forever to serve only the recent-ride case — and
-      `autoRho.ts:178-190` already re-fetches the one case that matters, a cached row that came back
+      `autoRho.ts:333-353` already re-fetches the one case that matters, a cached row that came back
       without wind data.
 
       **The eviction is FIFO by insertion, and it is named that rather than LRU.** `cachedAt` is
@@ -1480,7 +1512,7 @@ it was probed later the same day and split in two — see *Condition (b), as the
         - *re-storing an existing key evicts nothing* — **uniquely** killed by evicting off a
           running put-counter instead of the store's size. Guards `updateCachedEntry`.
         - *a surviving row is still SERVED from cache after an eviction* — **uniquely** killed by a
-          cache hit reporting `source: 'api'`, the field `autoRho.ts:178` branches on. **The first
+          cache hit reporting `source: 'api'`, the field `autoRho.ts:335` branches on. **The first
           draft of this case asserted the newest row survived and was a restatement** of the case
           above it — the mutation pass killed both with the same cursor direction and nothing else
           touched it, so it was rewritten onto the read path.
@@ -2124,7 +2156,7 @@ On real physics the gap is stark and is recorded in the test: the old stitched f
 - [x] **[S] The GPS analyze legs pass the rho array.** Found by asking a question the eye cannot
       answer -- does the kick's repaint change anything? -- and measuring it instead. All three
       analyze-leg calculators (`renderGpsLap.ts`, `renderOutAndBack.ts` outbound and inbound) were
-      built with NO `rhoArray`, while `updateModeVEPlots.ts:251` passes a per-segment slice. On any
+      built with NO `rhoArray`, while `updateModeVEPlots.ts:270` passes a per-segment slice. On any
       ride carrying usable air density the first paint therefore integrated constant `params.rho`
       and the kick's repaint the real per-point series: **mean RMSE 7.809 m at the analyze paint
       against 7.555 m a macrotask later**, with the analyze number the wrong one. Both now call the
@@ -2211,7 +2243,7 @@ Implemented in the working tree; **not yet committed**, pending an in-app check.
       absent or that it wrote itself, and never one whose `wind_entry` is `"manual"` or
       `"unknown"`. Note the bug was **wider than recorded**: the legacy `"unknown"` case was
       protected for k but its *wind* was replaced too, so a legacy analysis was re-fitted on every
-      reload regardless. `autoRho.ts:230-245`, `windHeightControls.ts` · *origin: Phase 8 WR-05*
+      reload regardless. `autoRho.ts:400-421`, `windHeightControls.ts` · *origin: Phase 8 WR-05*
 
 - [x] **[S] k is stored and exported.** `windHeightFactor` on `StoredVEResult`, carried in
       `saveResult`, and a new `WindHeightPct` column sited next to the wind it scales. Optional and

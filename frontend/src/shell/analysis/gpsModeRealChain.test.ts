@@ -93,7 +93,7 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
  * The central property of the analyze-leg retirement is that nothing ever
  * observes `veStatus === "ready"` before `summarize` has written the fields that
  * claim describes. `updateModeVEPlots` orders those two lines itself
- * (`:370,375`), but ordering asserted from OUTSIDE the primitive can only see
+ * (`:413,421`), but ordering asserted from OUTSIDE the primitive can only see
  * the end state — `ready` after the pass — which an implementation that set
  * `ready` on entry would also satisfy.
  *
@@ -677,7 +677,7 @@ describe.each(MODES)(
 		 * WHAT CHANGED. The superset/subset mismatch is now structurally
 		 * impossible rather than merely tested: with the seed gone there is ONE
 		 * place that decides which laps survived, and it is the producer.
-		 * `updateModeVEPlots.ts:217` applies the same `< 10 samples` rule to the
+		 * `updateModeVEPlots.ts:227` applies the same `< 10 samples` rule to the
 		 * third range below, so the samples that reach `currentFilteredData` are
 		 * the samples of the laps that produced a profile — by construction, not
 		 * by a filter written twice. The expected length is UNCHANGED, which is
@@ -725,7 +725,7 @@ describe.each(MODES)(
 		 * `veStatus === "ready"` before `handler.summarize` has run, because
 		 * `ready` IS the claim that `currentVEResult` and its three siblings
 		 * describe this selection. `updateModeVEPlots` orders the two lines
-		 * (`:370` summarize, `:375` ready) and nothing tested it — the primitive
+		 * (`:413` summarize, `:421` ready) and nothing tested it — the primitive
 		 * cannot be driven from a unit test without a populated
 		 * `currentFitData`/`currentParameters`, and every `makeAppState` helper in
 		 * this repo is module-private. This file has a real one, built through the
@@ -889,7 +889,7 @@ describe.each(MODES)(
  * THE DEFAULT TAB-ACTIVE PREDICATE, DRIVEN AGAINST REAL TAB MARKUP (D-14).
  *
  * WHY THIS BLOCK EXISTS. Before 07-05 the mutation `?? false` -> `=== false` at
- * `updateModeVEPlots.ts:99` — which inverts `isVeTabActive` — failed exactly two
+ * `updateModeVEPlots.ts:118` — which inverts `isVeTabActive` — failed exactly two
  * files, `standardModeRealChain.test.ts` and `standardCompareSecondaryPlots.test.ts`.
  * Both Standard. The predicate was guarded in ONE mode of three. It survived this
  * file untouched, and it survived `updateModeVEPlots.test.ts` entirely, because
@@ -1016,7 +1016,7 @@ describe.each(MODES)(
  * ONE pass that runs. That is not a weaker claim — it is the same claim about
  * the only place left that can hold it — and the expected arrays are unchanged,
  * because the primitive resolves through the identical helper
- * (`updateModeVEPlots.ts:168`) over the identical first segment.
+ * (`updateModeVEPlots.ts:157`) over the identical first segment.
  *
  * `elevationToggle.integration.test.ts` claimed to cover exactly this in three
  * cases named "standard mode", "gps-lap mode" and "out-and-back mode". All

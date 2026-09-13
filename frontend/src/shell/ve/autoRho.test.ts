@@ -899,7 +899,7 @@ describe("calculateAutoRho — the per-lap weather series", () => {
 	test("leaves the selection-level rho untouched by the series", async () => {
 		// The series is an ENHANCEMENT. `params.rho` must still be the trim
 		// midpoint's value, because that is what the panel shows and what a
-		// single-segment analysis falls back to.
+		// segment falls back to when no per-lap override applies.
 		const h = setupHarness();
 		await succeedOnT1(h);
 
