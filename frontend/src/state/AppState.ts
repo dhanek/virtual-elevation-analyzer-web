@@ -1,3 +1,5 @@
+import type { WeatherSlot } from "../analysis/segmentWeather";
+import type { SegmentWeatherRecord } from "../utils/ResultsStorage";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import type {
 	DetectedLap,
@@ -243,6 +245,22 @@ export interface AnalysisState {
 	} | null;
 	isLoadingParameters: boolean;
 	lastWeatherQueryKey: string | null;
+	/**
+	 * The 15-minute weather slots spanning the current selection, fetched by
+	 * `autoRho` and read synchronously by the plot path so each lap can be
+	 * analysed at ITS OWN weather rather than the selection midpoint's.
+	 *
+	 * Null when auto-rho has not run, the fetch failed outright, or the wind
+	 * comes from the FIT file — in every one of those the analysis falls back
+	 * to the single `params.rho`/`wind_speed` pair, which is what it used
+	 * before per-lap weather existed.
+	 */
+	weatherSeries: WeatherSlot[] | null;
+	/**
+	 * Per-lap weather from the most recent update pass, published for Store
+	 * Result. Null when every segment ran on the selection-level values.
+	 */
+	currentSegmentWeather: SegmentWeatherRecord[] | null;
 }
 
 export interface DemState extends ElevationProfilesState {
@@ -322,6 +340,8 @@ export class AppState {
 		standardPendingAutoRhoDebounce: null,
 		isLoadingParameters: false,
 		lastWeatherQueryKey: null,
+		weatherSeries: null,
+		currentSegmentWeather: null,
 	};
 
 	readonly dem: DemState = {
@@ -495,6 +515,22 @@ export class AppState {
 		pending: { owner: object; promise: Promise<void> } | null,
 	) {
 		this.analysis.standardPendingAutoRhoDebounce = pending;
+	}
+
+	get currentSegmentWeather(): SegmentWeatherRecord[] | null {
+		return this.analysis.currentSegmentWeather;
+	}
+
+	set currentSegmentWeather(rows: SegmentWeatherRecord[] | null) {
+		this.analysis.currentSegmentWeather = rows;
+	}
+
+	get weatherSeries(): WeatherSlot[] | null {
+		return this.analysis.weatherSeries;
+	}
+
+	set weatherSeries(series: WeatherSlot[] | null) {
+		this.analysis.weatherSeries = series;
 	}
 
 	get lastWeatherQueryKey(): string | null {

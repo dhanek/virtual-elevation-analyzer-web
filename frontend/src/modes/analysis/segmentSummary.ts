@@ -74,9 +74,9 @@ export function buildFilteredDataFromProfiles(
 	//
 	// `mapTrimToSegments` does NOT narrow `segment.range` — it spreads the range
 	// unchanged and adds a `trim` field (`standardSegments.ts:132`) — and
-	// `updateModeVEPlots.ts:218-224` builds `profile.indices` from `range`
+	// `updateModeVEPlots.ts:235-242` builds `profile.indices` from `range`
 	// alone, because the calculator wants the FULL slice plus separate trim
-	// boundaries (`:257-258`). So `profile.indices` is the UNTRIMMED range, and
+	// boundaries (`:339-340`). So `profile.indices` is the UNTRIMMED range, and
 	// walking it directly yields the whole selection.
 	//
 	// That mattered the moment `handleStoreResult` stopped slicing with the
@@ -228,7 +228,7 @@ export function writeSegmentModeResultState(
 	// `currentAnalyzedLaps` is the key `saveLapSettings` / `loadLapSettings` use.
 	// Both segment handlers pass the SURVIVING items, so on any analysis where
 	// the primitive drops a segment — a lap under `MIN_SEGMENT_SAMPLES`
-	// (`updateModeVEPlots.ts:210-215`), or a calculator that threw (`:318-320`) —
+	// (`updateModeVEPlots.ts:227-232`), or a calculator that threw (`:398-400`) —
 	// the first slider move re-keyed the user's tuned CdA/Crr from `[1,2,3,4]` to
 	// `[1,2,4]`. `resolveMultiSegmentAnalysisParams` never asks for that key
 	// again, so re-analyzing the same selection came back with the defaults. The

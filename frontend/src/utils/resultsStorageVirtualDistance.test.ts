@@ -14,7 +14,8 @@
  *    and taking the export down with every old row in it. The old-record case
  *    below is what stops that.
  */
-import { describe, expect, it } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	CSV_HEADERS,
 	generateCSVFromResults,
@@ -401,5 +402,88 @@ describe("the CSV carries the wind height factor (WR-02)", () => {
 
 		expect(cellsOf(csv)[headerIndex("WindHeightPct")]).toBe("");
 		expect(cellsOf(csv)).toHaveLength(CSV_HEADERS.length);
+	});
+});
+
+/**
+ * A real round trip through the store's engine (save, then read back), not the
+ * capture-only `fakeDb` above: that proves only what `put` received, not what a
+ * reader gets. Setup follows resultsStorageDelete.test.ts ("deleting one stored
+ * result"): a fresh `IDBFactory` per test, then `initialize()`.
+ */
+describe("Store Result persists per-lap weather (FAPP-01)", () => {
+	let storage: ResultsStorage;
+
+	beforeEach(async () => {
+		globalThis.indexedDB = new IDBFactory();
+		storage = new ResultsStorage();
+		await storage.initialize();
+	});
+
+	function saveData(
+		segmentWeather: SaveResultData["segmentWeather"],
+	): SaveResultData {
+		return {
+			fileName: "ride.fit",
+			laps: [2, 3],
+			trimStart: 0,
+			trimEnd: 100,
+			cda: 0.25,
+			crr: 0.004,
+			windSource: "constant",
+			parameters: { system_mass: 80, rho: 1.225, eta: 0.97 } as never,
+			result: {
+				virtual_elevation: new Float64Array(0),
+				r2: 0.98,
+				rmse: 1.23,
+				ve_elevation_diff: 4,
+				actual_elevation_diff: 5,
+				virtual_distance_air: 0,
+				virtual_distance_ground: 0,
+				vd_difference_percent: 0,
+			},
+			segmentWeather,
+			timestamp: new Date("2026-08-04T10:00:00.000Z"),
+			recordingDate: "2026-08-04",
+			avgPower: 250,
+			avgSpeed: 36,
+			avgTemperature: 18,
+			notes: "test",
+		} satisfies SaveResultData;
+	}
+
+	it("reads back the per-lap rows it was given", async () => {
+		const rows = [
+			{ label: "Lap 2", rho: 1.2101, windSpeed: 3.25, windDirection: 220 },
+			{ label: "Lap 3", rho: 1.1899, windSpeed: 4.5, windDirection: 235 },
+		];
+		await storage.saveResult(saveData(rows));
+
+		const stored = await storage.getAllResults();
+		// Reaching the store is a precondition: an empty read would fail the
+		// assertions below for the wrong reason.
+		expect(stored).toHaveLength(1);
+		expect(stored[0].segmentWeather).toEqual(rows);
+
+		// Through the real export, which is where the missing field showed.
+		const cells = cellsOf(
+			generateCSVFromResults(await storage.getAllResults()),
+		);
+		expect(cells[headerIndex("LapWeatherSegments")]).toBe("Lap 2;Lap 3");
+		expect(cells[headerIndex("LapRho")]).toBe("1.2101;1.1899");
+	});
+
+	it("stores nothing when every lap used the selection value", async () => {
+		// Regression pin for the null branch, NOT a guard for FAPP-01: it passes
+		// both with and without the fix, because a dropped field also reads back
+		// as absent.
+		await storage.saveResult(saveData(null));
+
+		const stored = await storage.getAllResults();
+		expect(stored).toHaveLength(1);
+		expect(stored[0].segmentWeather).toBeUndefined();
+
+		const cells = cellsOf(generateCSVFromResults(stored));
+		expect(cells[headerIndex("LapRho")]).toBe("");
 	});
 });

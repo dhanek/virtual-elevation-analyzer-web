@@ -29,12 +29,27 @@ import type { StoredVEResult } from "./ResultsStorage";
 /** `[VDSegments, VDAirKm, VDGroundKm, VDDiffPercent]`, already formatted. */
 type VirtualDistanceCells = readonly [string, string, string, string];
 
+/**
+ * `[LapWeatherSegments, LapRho, LapWindSpeed, LapWindDirection]`, formatted.
+ *
+ * A SECOND parameter rather than four more slots on the first: the two groups
+ * come from different producers and can be present independently — an analysis
+ * can have virtual distances and no per-lap weather, or the reverse — so
+ * widening the VD tuple would make each group's absence indistinguishable from
+ * the other's.
+ */
+type LapWeatherCells = readonly [string, string, string, string];
+
 export interface ResultColumn {
 	/** Stable identity, independent of the displayed header. */
 	readonly id: string;
 	readonly header: string;
 	/** The value, UNESCAPED. CSV quoting belongs to the CSV writer. */
-	readonly cell: (result: StoredVEResult, vd: VirtualDistanceCells) => string;
+	readonly cell: (
+		result: StoredVEResult,
+		vd: VirtualDistanceCells,
+		lw: LapWeatherCells,
+	) => string;
 	/**
 	 * Emit this cell wrapped in quotes even when it contains nothing that needs
 	 * escaping. Only `Notes` does, and only because it always has: a record with
@@ -167,6 +182,23 @@ export const RESULT_COLUMNS: readonly ResultColumn[] = [
 	{ id: "vdAirKm", header: "VDAirKm", cell: (_r, vd) => vd[1] },
 	{ id: "vdGroundKm", header: "VDGroundKm", cell: (_r, vd) => vd[2] },
 	{ id: "vdDiffPercent", header: "VDDiffPercent", cell: (_r, vd) => vd[3] },
+	// PER-LAP WEATHER. Same shape as the VD group above and for the same reason:
+	// a multi-lap analysis has N of these and no single one. The Rho/WindSpeed/
+	// WindDirection columns earlier in the row remain the SELECTION-level values
+	// — they are what the panel showed — and these state what each lap was
+	// actually integrated at. Empty when every lap used the selection value.
+	{
+		id: "lapWeatherSegments",
+		header: "LapWeatherSegments",
+		cell: (_r, _vd, lw) => lw[0],
+	},
+	{ id: "lapRho", header: "LapRho", cell: (_r, _vd, lw) => lw[1] },
+	{ id: "lapWindSpeed", header: "LapWindSpeed", cell: (_r, _vd, lw) => lw[2] },
+	{
+		id: "lapWindDirection",
+		header: "LapWindDirection",
+		cell: (_r, _vd, lw) => lw[3],
+	},
 ];
 
 /**

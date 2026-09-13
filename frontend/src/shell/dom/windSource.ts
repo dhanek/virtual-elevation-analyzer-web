@@ -24,7 +24,7 @@ export function getSelectedWindSource(): string {
  *
  * The value is whatever the template's `value=` attribute says, so a typo there
  * — or a future fourth radio nobody added to the union — produced a string the
- * primitive treats as "not compare, not constant" (`updateModeVEPlots.ts:136`)
+ * primitive treats as "not compare, not constant" (`updateModeVEPlots.ts:155`)
  * and handed unchecked to `resolveWindSeries`, silently. A cast at the call site
  * cannot catch that, because a cast is exactly the thing that erases the check.
  */
