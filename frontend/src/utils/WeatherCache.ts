@@ -13,8 +13,8 @@ import { WeatherAPI, WeatherResponse, WeatherAPIError } from "./WeatherAPI";
 import { log } from "./log";
 
 export interface WeatherCacheKey {
-	lat: number; // Rounded to 6 decimals
-	lon: number; // Rounded to 6 decimals
+	lat: number; // Rounded to WEATHER_KEY_DECIMALS
+	lon: number; // Rounded to WEATHER_KEY_DECIMALS
 	date: string; // YYYY-MM-DD
 	slotHour: number; // 0-23 (UTC), hour of nearest 15-min slot
 	slotMinute: number; // 0, 15, 30, or 45 (nearest 15-min slot)
@@ -39,15 +39,68 @@ interface WeatherCacheStats {
  * so ~300 bytes of JSON — 5000 rows is roughly 1.5 MB, and far more distinct
  * trim windows than a session produces.
  *
- * The cap exists because the key cannot absorb this on its own: `buildCacheKey`
- * uses the trim region's centroid at 6 decimals (~0.1 m) while the data behind
- * it has kilometre-scale spatial and 15-minute temporal resolution, so every
- * trim-slider move misses the cache and mints another row. Coarsening the key
- * is the fix for THAT, and it is deliberately not done here — it would round
- * the wind value the cache returns, and bundle F's condition (b) has to
- * re-measure wind accuracy against a 0.3 m/s bar first.
+ * The cap was load-bearing while the key was 6 decimals wide (~0.1 m) against
+ * kilometre-scale data, because every trim-slider move minted another row. The
+ * key is now coarsened (see `WEATHER_KEY_DECIMALS`) and rows accumulate far more
+ * slowly, so the cap is a backstop rather than the only thing holding the store
+ * down. It stays: nothing about the key BOUNDS the row count, it only slows it.
  */
 export const WEATHER_CACHE_MAX_ENTRIES = 5000;
+
+/**
+ * How many decimals of latitude/longitude the cache key keeps — ~111 m, and at
+ * worst ~78 m from the true centroid.
+ *
+ * The key was 6 decimals (0.11 m). Measured across the local rides, a ONE-POINT
+ * trim-slider nudge moves the centroid 0.1–2.5 m and a 1% trim moves it 4–212 m,
+ * so essentially every slider move missed the cache and re-queried Open-Meteo.
+ *
+ * 3 decimals is not a trade of accuracy for hit rate. Open-Meteo snaps a query
+ * to its own model grid — 1–11 km on the forecast endpoints, 0.25° ≈ 28 km on
+ * ERA5 — and returns byte-identical data for points 500 m apart, so this rounds
+ * away precision the API had already discarded. The API query itself is
+ * deliberately NOT rounded: it would change nothing observable, and leaving it
+ * alone keeps the request identical to what a cache-less path would send.
+ */
+export const WEATHER_KEY_DECIMALS = 3;
+
+/**
+ * The single source of the key string. Both the IndexedDB primary key and
+ * `autoRho`'s in-session `lastWeatherQueryKey` guard come from here.
+ *
+ * They used to be two inline format literals that were NOT equivalent: the
+ * cache emitted an unpadded hour (`9:15`) and autoRho a padded one (`09:15`),
+ * so the two silently disagreed for any ride before 10:00 UTC. Neither needed
+ * the other's format, which is exactly why the divergence went unnoticed —
+ * and why one builder is worth more than the duplication it removes.
+ */
+export function buildWeatherQueryKey(metadata: TrimRegionMetadata): string {
+	return weatherCacheKeyString(weatherCacheKeyOf(metadata));
+}
+
+/** The structured key: coordinates snapped, timestamp on its 15-minute slot. */
+function weatherCacheKeyOf(metadata: TrimRegionMetadata): WeatherCacheKey {
+	const slot = roundToNearest15Min(metadata.middleDate);
+
+	return {
+		lat: Number(metadata.avgLat.toFixed(WEATHER_KEY_DECIMALS)),
+		lon: Number(metadata.avgLon.toFixed(WEATHER_KEY_DECIMALS)),
+		date: slot.date,
+		slotHour: slot.slotHour,
+		slotMinute: slot.slotMinute,
+	};
+}
+
+/**
+ * Format a structured key for IndexedDB. Reads the key's own already-snapped
+ * coordinates rather than re-rounding, so the string and the `location` index
+ * cannot drift apart.
+ */
+function weatherCacheKeyString(key: WeatherCacheKey): string {
+	const hh = String(key.slotHour).padStart(2, "0");
+	const mm = String(key.slotMinute).padStart(2, "0");
+	return `${key.lat.toFixed(WEATHER_KEY_DECIMALS)}_${key.lon.toFixed(WEATHER_KEY_DECIMALS)}_${key.date}_${hh}:${mm}`;
+}
 
 /**
  * THE ONE CACHE THE APP USES, and the reason it is a module-level singleton
@@ -239,22 +292,14 @@ export class WeatherCache {
 	 * Build cache key from metadata
 	 */
 	private buildCacheKey(metadata: TrimRegionMetadata): WeatherCacheKey {
-		const slot = roundToNearest15Min(metadata.middleDate);
-
-		return {
-			lat: metadata.avgLat,
-			lon: metadata.avgLon,
-			date: slot.date,
-			slotHour: slot.slotHour,
-			slotMinute: slot.slotMinute,
-		};
+		return weatherCacheKeyOf(metadata);
 	}
 
 	/**
 	 * Generate unique string key for IndexedDB storage
 	 */
 	private generateCacheKeyString(key: WeatherCacheKey): string {
-		return `${key.lat.toFixed(6)}_${key.lon.toFixed(6)}_${key.date}_${key.slotHour}:${String(key.slotMinute).padStart(2, "0")}`;
+		return weatherCacheKeyString(key);
 	}
 
 	/**

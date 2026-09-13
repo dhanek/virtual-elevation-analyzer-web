@@ -66,6 +66,10 @@ function fullRecord(): StoredVEResult {
 			{ label: "Lap 2", airKm: 0.108, groundKm: 0.09, differencePercent: 20 },
 			{ label: "Lap 3", airKm: 0.126, groundKm: 0.09, differencePercent: 40 },
 		],
+		segmentWeather: [
+			{ label: "Lap 2", rho: 1.221, windSpeed: 3.4, windDirection: 215 },
+			{ label: "Lap 3", rho: 1.2265, windSpeed: 4.1, windDirection: 231 },
+		],
 		avgPower: 250,
 		avgSpeed: 36,
 		avgTemperature: 18,
@@ -111,18 +115,20 @@ const HEADER_LINE =
 	"RecordingDate,FileName,Notes,CdA,Crr,AvgPower,AvgSpeed,RMSE,R2,AvgTemp," +
 	"Timestamp,Laps,LapsCovered,VEGain,ActualGain,WindSource,WindSpeed,WindDir," +
 	"WindHeightPct,AirSpeedCal,CrrApplied,AmbientTemp,TireSensitivity,SystemMass," +
-	"Rho,Eta,TrimStart,TrimEnd,VDSegments,VDAirKm,VDGroundKm,VDDiffPercent";
+	"Rho,Eta,TrimStart,TrimEnd,VDSegments,VDAirKm,VDGroundKm,VDDiffPercent," +
+	"LapWeatherSegments,LapRho,LapWindSpeed,LapWindDirection";
 
 const FULL_ROW =
 	'2026-08-04,ride.fit,"has ""quotes"", and commas",0.250,0.0040,250.0,' +
 	"36.00,1.23,0.9800,18.0,2026-08-04T10:00:00.000Z,2-3,2,4.00,5.00,fit," +
 	"3.5,220,72,5.0,0.0043,18.5,typical,80,1.225,0.970,0,100,Lap 2;Lap 3," +
-	"0.108;0.126,0.090;0.090,20.00;40.00";
+	"0.108;0.126,0.090;0.090,20.00;40.00,Lap 2;Lap 3,1.2210;1.2265," +
+	"3.40;4.10,215;231";
 
 const LEGACY_ROW =
 	'2026-01-01,old.fit,"",0.300,0.0050,200.0,30.00,2.00,0.9000,,' +
 	"2026-01-01T00:00:00.000Z,1,,1.00,2.00,constant,,,,,,,,75,1.200,0.970," +
-	"0,10,,,,";
+	"0,10,,,,,,,,";
 
 describe("the exported CSV", () => {
 	it("writes the header line unchanged", () => {
@@ -137,6 +143,28 @@ describe("the exported CSV", () => {
 	it("writes a pre-optional-columns record unchanged, with empty cells", () => {
 		const csv = generateCSVFromResults([legacyRecord()]);
 		expect(csv).toBe(`${HEADER_LINE}\n${LEGACY_ROW}\n`);
+	});
+
+	it("leaves the per-lap columns empty when every lap used the selection value", () => {
+		// The four columns exist to say the laps DIFFERED. When they did not,
+		// the Rho/WindSpeed/WindDir columns already state the truth, and
+		// repeating one value N times would only invite the reader to think
+		// something varied.
+		const record = fullRecord();
+		delete (record as { segmentWeather?: unknown }).segmentWeather;
+
+		const cells = generateCSVFromResults([record]).split("\n")[1];
+		expect(cells.endsWith("20.00;40.00,,,,")).toBe(true);
+	});
+
+	it("keeps the SELECTION-level rho beside the per-lap rho", () => {
+		// Both are true and they answer different questions: 1.225 is what the
+		// panel showed for the selection, 1.2210/1.2265 is what each lap was
+		// integrated at. Killed by overwriting Rho with a per-lap value.
+		const row = generateCSVFromResults([fullRecord()]).split("\n")[1];
+
+		expect(row).toContain(",1.225,");
+		expect(row).toContain(",1.2210;1.2265,");
 	});
 
 	/**

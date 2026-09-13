@@ -443,7 +443,7 @@ describe("standardMode update path vs live checkbox selection", () => {
  *
  * `mapTrimToSegments` does NOT narrow `segment.range` — it spreads the range
  * unchanged and adds a `trim` field (`standardSegments.ts:132`), and
- * `updateModeVEPlots.ts:218-224` builds `profile.indices` from `range` alone
+ * `updateModeVEPlots.ts:235-242` builds `profile.indices` from `range` alone
  * because the calculator wants the full slice plus separate trim boundaries.
  *
  * So `profile.indices` is the UNTRIMMED range. A concatenation that walks it

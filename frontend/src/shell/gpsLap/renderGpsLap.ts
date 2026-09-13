@@ -146,7 +146,7 @@ export async function showGpsLapVEAnalysis(
 	//     `resolveRhoArray` here too.
 	//
 	// `updateModeVEPlots` resolves both once per update, full length
-	// (`updateModeVEPlots.ts:168,177`), and is now the only pass that does. With
+	// (`updateModeVEPlots.ts:157,175`), and is now the only pass that does. With
 	// one producer there is nothing left here to agree with.
 
 	const gpsLapWindResolution = resolveWindSeries({
@@ -210,7 +210,7 @@ export async function showGpsLapVEAnalysis(
 
 		// KEPT, even though nothing here can throw on a short lap any more: the
 		// laps this leg keeps are the laps whose series the tabs draw, and a
-		// two-sample lap draws nothing useful. `updateModeVEPlots.ts:217` applies
+		// two-sample lap draws nothing useful. `updateModeVEPlots.ts:227` applies
 		// the identical `MIN_SEGMENT_SAMPLES` rule to the segments it computes, so
 		// on THIS rule the two passes agree without either filtering on the
 		// other's behalf.

@@ -20,6 +20,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
 	WeatherCache,
 	WEATHER_CACHE_MAX_ENTRIES,
+	WEATHER_KEY_DECIMALS,
+	buildWeatherQueryKey,
 	resetWeatherCacheInstance,
 	weatherCacheInstance,
 } from "./WeatherCache";
@@ -335,5 +337,134 @@ describe("the shared WeatherCache instance", () => {
 		const second = weatherCacheInstance();
 		expect(second).not.toBe(first);
 		await expect(second.initialize()).resolves.toBeUndefined();
+	});
+});
+
+/**
+ * THE KEY'S WIDTH, which decides whether the cache can ever hit.
+ *
+ * The key used the trim centroid at 6 decimals — 0.11 m — while the data behind
+ * it is a 1–11 km model grid. Measured on real rides, a ONE-POINT slider nudge
+ * moves the centroid 0.1–2.5 m, so every nudge minted a row and re-queried the
+ * API; the cache was write-only in practice and the size cap was load-bearing.
+ *
+ * 3 decimals (~111 m, ≤78 m worst case) is the width. It is not a guess about
+ * accuracy: Open-Meteo snaps to its own grid and returns byte-identical data for
+ * points 500 m apart, so rounding the KEY discards precision the API already
+ * discarded. The query itself is deliberately left at full precision — rounding
+ * it would change nothing observable.
+ *
+ * What this buys is a HIGH hit rate, not a guaranteed one. Snapping to a grid
+ * means two points can straddle a cell boundary however close they are, so a
+ * nudge across one still misses. That case has its own test below rather than
+ * being left for someone to rediscover as a bug.
+ *
+ * Each case names the mutation that kills it.
+ */
+describe("the width of the weather cache key", () => {
+	let api: WeatherAPI & { calls: number };
+
+	beforeEach(() => {
+		globalThis.indexedDB = new IDBFactory();
+		api = countingApi();
+	});
+
+	afterEach(() => {
+		resetWeatherCacheInstance();
+	});
+
+	/** Same fixture as above but with both coordinates free. */
+	function metadataAtLatLon(lat: number, lon: number): TrimRegionMetadata {
+		return { ...metadataAt(lat), avgLon: lon };
+	}
+
+	it("serves a second window ~40 m away from cache", async () => {
+		// Killed by removing the rounding: at 6 decimals these are two keys and
+		// the API is called twice. This is the production case — a slider nudge.
+		// Both points sit INSIDE cell 47.123_8.654, which is the case the
+		// rounding is for; see the boundary case below for the one it is not.
+		const cache = new WeatherCache();
+		await cache.getWeatherData(metadataAtLatLon(47.1231, 8.6541), api);
+		await cache.getWeatherData(metadataAtLatLon(47.1234, 8.6544), api);
+
+		expect(api.calls).toBe(1);
+	});
+
+	it("still misses when a small move straddles a cell boundary", async () => {
+		// NOT a defect, and recorded so nobody files it as one. Snapping to a
+		// grid buys a high hit rate, never a guaranteed one: two points 40 m
+		// apart land in different cells when the boundary runs between them.
+		// 47.123456 → 47.123, 47.123812 → 47.124.
+		const cache = new WeatherCache();
+		await cache.getWeatherData(metadataAtLatLon(47.123456, 8.654321), api);
+		await cache.getWeatherData(metadataAtLatLon(47.123812, 8.654321), api);
+
+		expect(api.calls).toBe(2);
+	});
+
+	it("still fetches for a window ~500 m away", async () => {
+		// Killed by rounding too hard (2 decimals or coarser), which would fold
+		// genuinely different locations onto one row.
+		const cache = new WeatherCache();
+		await cache.getWeatherData(metadataAtLatLon(47.123456, 8.654321), api);
+		await cache.getWeatherData(metadataAtLatLon(47.128456, 8.654321), api);
+
+		expect(api.calls).toBe(2);
+	});
+
+	it("still separates two 15-minute slots at one location", async () => {
+		// Killed by coarsening TIME along with location. The key has two
+		// dimensions and only one of them was too narrow.
+		const cache = new WeatherCache();
+		const base = metadataAtLatLon(47.123456, 8.654321);
+		await cache.getWeatherData(base, api);
+		await cache.getWeatherData(
+			{ ...base, middleDate: new Date("2026-08-04T10:37:00.000Z") },
+			api,
+		);
+
+		expect(api.calls).toBe(2);
+	});
+
+	it("stores the ROUNDED coordinates, so the location index agrees with the key", async () => {
+		// Killed by rounding only inside the key string and leaving `key.lat`
+		// raw: the row would then be unreachable through the `location` index
+		// that `getEntriesForLocation` reads, and two windows sharing a cacheKey
+		// would disagree about where they were.
+		const cache = new WeatherCache();
+		await cache.getWeatherData(metadataAtLatLon(47.123456, 8.654321), api);
+
+		expect(await cache.getEntriesForLocation(47.123456, 8.654321)).toHaveLength(
+			0,
+		);
+		const rounded = await cache.getEntriesForLocation(47.123, 8.654);
+		expect(rounded).toHaveLength(1);
+		expect(rounded[0].key.lat).toBe(47.123);
+		expect(rounded[0].key.lon).toBe(8.654);
+	});
+
+	it("pins the key format, including a zero-padded hour", async () => {
+		// Killed by changing the separator, the field order, or the padding.
+		// The hour is padded here and was NOT padded in the cache's own key
+		// before this builder existed, while autoRho's copy padded it — the two
+		// call sites silently disagreed on format for hours below 10.
+		const key = buildWeatherQueryKey({
+			...metadataAt(47.123456),
+			avgLon: 8.654321,
+			middleDate: new Date("2026-08-04T09:07:00.000Z"),
+		});
+
+		expect(key).toBe("47.123_8.654_2026-08-04_09:00");
+	});
+
+	it("does not leak full precision into the key", async () => {
+		// Non-vacuity guard: asserts the rounding actually happened rather than
+		// trusting the constant. Killed by any decimal count above 3.
+		const key = buildWeatherQueryKey(metadataAtLatLon(47.123456, 8.654321));
+
+		expect(WEATHER_KEY_DECIMALS).toBe(3);
+		expect(key).not.toContain("47.123456");
+		expect(key).not.toContain("8.654321");
+		expect(key.startsWith("47.123_8.654_")).toBe(true);
 	});
 });

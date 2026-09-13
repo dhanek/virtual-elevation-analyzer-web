@@ -8,10 +8,17 @@ import {
 } from "../shell/ve/weatherFallback";
 
 /**
- * TEST-01 — coverage for WEATH-03 rung 2: an all-null Forecast response must
- * degrade silently to the Archive API rather than surfacing a failure. The
- * outage cases additionally check the code each rung throws still lands on the
- * intended user-facing text via `resolveWeatherFailure`.
+ * TEST-01 — coverage for the WEATH-03 fallback ladder:
+ *
+ *   Forecast 15min → historical-forecast 15min → Archive hourly
+ *
+ * An all-null response on either 15-minute rung must degrade silently to the
+ * next one rather than surfacing a failure. The middle rung exists because
+ * `archive-api` serves no `minutely_15` block at all for older rides, while
+ * `historical-forecast-api` does; Archive stays the terminal rung, which either
+ * returns data or throws. The outage cases additionally check the code each
+ * rung throws still lands on the intended user-facing text via
+ * `resolveWeatherFailure`.
  *
  * All network access is mocked; no test here touches the real Open-Meteo.
  */
@@ -29,8 +36,13 @@ const OLD_ACTIVITY = new Date("2026-04-01T14:07:00Z");
 const RECENT_SLOT = "2026-07-16T14:00";
 const OLD_SLOT = "2026-04-01T14:00";
 
-const FORECAST_HOST = "api.open-meteo.com/v1/forecast";
-const ARCHIVE_HOST = "archive-api.open-meteo.com/v1/archive";
+// Pinned with the scheme on purpose: "historical-forecast-api.open-meteo.com"
+// CONTAINS "api.open-meteo.com" as a substring, so bare hosts would make every
+// "this rung, not that one" assertion below vacuous.
+const FORECAST_HOST = "https://api.open-meteo.com/v1/forecast";
+const ARCHIVE_HOST = "https://archive-api.open-meteo.com/v1/archive";
+const HISTORICAL_HOST =
+	"https://historical-forecast-api.open-meteo.com/v1/forecast";
 
 function makeMetadata(middleDate: Date = RECENT_ACTIVITY): TrimRegionMetadata {
 	return {
@@ -88,6 +100,34 @@ function forecastWithDataBody(
 			surface_pressure: [1009.0, 1011.2],
 			wind_speed_10m: [2.0, 3.0],
 			wind_direction_10m: [170, 190],
+		},
+	};
+}
+
+/**
+ * historical-forecast payload with usable minutely_15 values (rung 2). Same
+ * schema as the Forecast endpoint — deliberately distinct values so a test can
+ * tell which rung answered.
+ */
+function historicalForecastBody(
+	slot: string = OLD_SLOT,
+): Record<string, unknown> {
+	const [date, time] = slot.split("T");
+	return {
+		minutely_15: {
+			time: [`${date}T13:45`, `${date}T${time}`, `${date}T14:15`],
+			temperature_2m: [16.0, 17.7, 18.0],
+			dew_point_2m: [8.0, 8.8, 9.0],
+			wind_speed_10m: [4.0, 4.4, 5.0],
+			wind_direction_10m: [280, 300, 310],
+		},
+		hourly: {
+			time: [`${date}T13:00`, `${date}T${time}`],
+			temperature_2m: [15.0, 17.0],
+			dew_point_2m: [7.0, 8.0],
+			surface_pressure: [1002.0, 1003.3],
+			wind_speed_10m: [4.0, 4.2],
+			wind_direction_10m: [270, 290],
 		},
 	};
 }
@@ -203,6 +243,15 @@ describe("WeatherAPI fixtures", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 
+	test("the three host constants are mutually distinguishable", () => {
+		// Guards the assertions below: without the scheme, HISTORICAL_HOST
+		// contains FORECAST_HOST and every "not that rung" check goes vacuous.
+		expect(HISTORICAL_HOST).not.toContain(FORECAST_HOST);
+		expect(FORECAST_HOST).not.toContain(HISTORICAL_HOST);
+		expect(HISTORICAL_HOST).not.toContain(ARCHIVE_HOST);
+		expect(ARCHIVE_HOST).not.toContain(FORECAST_HOST);
+	});
+
 	test("metadata fixture pins the activity inside the Forecast window", () => {
 		const metadata = makeMetadata();
 		const daysAgo = Math.floor(
@@ -238,20 +287,60 @@ describe("fetchWeatherData — rung 1: Forecast returns data", () => {
 	});
 });
 
-describe("fetchWeatherData — rung 2: Forecast all-null → Archive", () => {
-	test("falls back to the Archive API and returns its data", async () => {
+describe("fetchWeatherData — rung 2: historical-forecast", () => {
+	test("an old ride goes straight to historical-forecast, not Archive", async () => {
+		const fetchMock = mockFetchSequence(jsonResponse(historicalForecastBody()));
+
+		const result = await new WeatherAPI().fetchWeatherData(
+			makeMetadata(OLD_ACTIVITY),
+		);
+
+		// Past the 82-day window the Forecast rung is skipped, but the ride
+		// still gets 15-minute resolution — the whole point of this rung.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(urlOfCall(fetchMock, 0)).toContain(HISTORICAL_HOST);
+		expect(urlOfCall(fetchMock, 0)).toContain("minutely_15=");
+		expect(result).toEqual({
+			temperature: 17.7,
+			dewPoint: 8.8,
+			pressure: 1003.3,
+			windSpeed: 4.4,
+			windDirection: 300,
+			queriedAt: NOW.getTime(),
+		});
+	});
+
+	test("a grey-zone Forecast null lands here before Archive", async () => {
 		const fetchMock = mockFetchSequence(
 			jsonResponse(forecastAllNullBody()),
-			jsonResponse(archiveBody()),
+			jsonResponse(historicalForecastBody(RECENT_SLOT)),
 		);
 
 		const result = await new WeatherAPI().fetchWeatherData(makeMetadata());
 
-		// Rung 2 must be silent: the caller gets data, not an error.
+		// The ~69–82 day grey zone: Forecast accepts the date but serves nulls.
+		// That used to drop to hourly Archive; it now keeps 15-minute data.
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(urlOfCall(fetchMock, 0)).toContain(FORECAST_HOST);
+		expect(urlOfCall(fetchMock, 1)).toContain(HISTORICAL_HOST);
+		expect(result.temperature).toBe(17.7);
+		expect(result.windSpeed).toBe(4.4);
+	});
+
+	test("an all-null historical-forecast degrades to Archive hourly", async () => {
+		const fetchMock = mockFetchSequence(
+			jsonResponse(forecastAllNullBody(OLD_SLOT)),
+			jsonResponse(archiveBody(OLD_SLOT)),
+		);
+
+		const result = await new WeatherAPI().fetchWeatherData(
+			makeMetadata(OLD_ACTIVITY),
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(urlOfCall(fetchMock, 0)).toContain(HISTORICAL_HOST);
 		expect(urlOfCall(fetchMock, 1)).toContain(ARCHIVE_HOST);
-		// Values are the Archive ones, not the (all-null) Forecast ones.
+		// Values are the Archive ones, not the (all-null) historical ones.
 		expect(result).toEqual({
 			temperature: 18.4,
 			dewPoint: 9.6,
@@ -262,19 +351,38 @@ describe("fetchWeatherData — rung 2: Forecast all-null → Archive", () => {
 		});
 	});
 
-	test("queries the same day/location on both rungs, hourly-only on Archive", async () => {
+	test("all three rungs run when both 15-minute rungs return nulls", async () => {
 		const fetchMock = mockFetchSequence(
 			jsonResponse(forecastAllNullBody()),
+			jsonResponse(forecastAllNullBody(RECENT_SLOT)),
+			jsonResponse(archiveBody()),
+		);
+
+		const result = await new WeatherAPI().fetchWeatherData(makeMetadata());
+
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		expect(urlOfCall(fetchMock, 0)).toContain(FORECAST_HOST);
+		expect(urlOfCall(fetchMock, 1)).toContain(HISTORICAL_HOST);
+		expect(urlOfCall(fetchMock, 2)).toContain(ARCHIVE_HOST);
+		expect(result.temperature).toBe(18.4);
+	});
+
+	test("queries the same day/location on every rung, hourly-only on Archive", async () => {
+		const fetchMock = mockFetchSequence(
+			jsonResponse(forecastAllNullBody()),
+			jsonResponse(forecastAllNullBody(RECENT_SLOT)),
 			jsonResponse(archiveBody()),
 		);
 
 		await new WeatherAPI().fetchWeatherData(makeMetadata());
 
 		const forecastUrl = urlOfCall(fetchMock, 0);
-		const archiveUrl = urlOfCall(fetchMock, 1);
+		const historicalUrl = urlOfCall(fetchMock, 1);
+		const archiveUrl = urlOfCall(fetchMock, 2);
 		expect(forecastUrl).toContain("minutely_15=");
+		expect(historicalUrl).toContain("minutely_15=");
 		expect(archiveUrl).not.toContain("minutely_15=");
-		for (const url of [forecastUrl, archiveUrl]) {
+		for (const url of [forecastUrl, historicalUrl, archiveUrl]) {
 			expect(url).toContain("latitude=47.123456");
 			expect(url).toContain("longitude=8.654321");
 			expect(url).toContain("start_date=2026-07-16");
@@ -284,17 +392,22 @@ describe("fetchWeatherData — rung 2: Forecast all-null → Archive", () => {
 	});
 });
 
-describe("fetchWeatherData — Archive-only path for old activities", () => {
-	test("skips the Forecast API beyond the 82-day window", async () => {
-		const fetchMock = mockFetchSequence(jsonResponse(archiveBody(OLD_SLOT)));
+describe("fetchWeatherData — the Forecast rung is skipped past 82 days", () => {
+	test("an old ride never touches api.open-meteo.com", async () => {
+		const fetchMock = mockFetchSequence(
+			jsonResponse(forecastAllNullBody(OLD_SLOT)),
+			jsonResponse(archiveBody(OLD_SLOT)),
+		);
 
 		const result = await new WeatherAPI().fetchWeatherData(
 			makeMetadata(OLD_ACTIVITY),
 		);
 
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(urlOfCall(fetchMock, 0)).toContain(ARCHIVE_HOST);
-		expect(urlOfCall(fetchMock, 0)).toContain("start_date=2026-04-01");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		for (const index of [0, 1]) {
+			expect(urlOfCall(fetchMock, index)).not.toContain(FORECAST_HOST);
+			expect(urlOfCall(fetchMock, index)).toContain("start_date=2026-04-01");
+		}
 		expect(result.temperature).toBe(18.4);
 		expect(result.pressure).toBe(1007.8);
 	});
@@ -337,7 +450,9 @@ describe("fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
 		expect(severity).toBe("warning");
 	});
 
-	test("surfaces the Archive failure when both rungs fail", async () => {
+	test("a hard error on the historical rung does not fall through to Archive", async () => {
+		// Only an ALL-NULL body advances the ladder. A transport or HTTP
+		// failure is surfaced, exactly as it already is on the Forecast rung.
 		const fetchMock = mockFetchSequence(
 			jsonResponse(forecastAllNullBody()),
 			errorResponse(500, "Internal Server Error"),
@@ -348,6 +463,23 @@ describe("fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
 		);
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(urlOfCall(fetchMock, 1)).toContain(HISTORICAL_HOST);
+		expect((error as WeatherAPIError).code).toBe("API_ERROR");
+	});
+
+	test("surfaces the Archive failure when every rung fails", async () => {
+		const fetchMock = mockFetchSequence(
+			jsonResponse(forecastAllNullBody()),
+			jsonResponse(forecastAllNullBody()),
+			errorResponse(500, "Internal Server Error"),
+		);
+
+		const error = await captureError(() =>
+			new WeatherAPI().fetchWeatherData(makeMetadata()),
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		expect(urlOfCall(fetchMock, 2)).toContain(ARCHIVE_HOST);
 		expect((error as WeatherAPIError).code).toBe("API_ERROR");
 		expect(resolveWeatherFailure(error).userMessage).toBe(
 			`${WEATHER_FAILURE_PREFIX}: Weather service unavailable. Using manual rho value.`,
@@ -355,9 +487,11 @@ describe("fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
 	});
 
 	test("an all-null Archive response degrades through the generic message", async () => {
-		// End of the ladder: Forecast null → Archive null. The thrown code has
-		// no dedicated user text, so the generic fallback must cover it.
+		// End of the ladder: Forecast null → historical null → Archive null.
+		// The thrown code has no dedicated user text, so the generic fallback
+		// must cover it.
 		const fetchMock = mockFetchSequence(
+			jsonResponse(forecastAllNullBody()),
 			jsonResponse(forecastAllNullBody()),
 			jsonResponse(archiveAllNullBody()),
 		);
@@ -366,7 +500,7 @@ describe("fetchWeatherData — rung 3: outages surface as coded WeatherAPIErrors
 			new WeatherAPI().fetchWeatherData(makeMetadata()),
 		);
 
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock).toHaveBeenCalledTimes(3);
 		expect(error).toBeInstanceOf(WeatherAPIError);
 		expect((error as WeatherAPIError).code).toBe("INCOMPLETE_DATA");
 		expect(resolveWeatherFailure(error)).toEqual({

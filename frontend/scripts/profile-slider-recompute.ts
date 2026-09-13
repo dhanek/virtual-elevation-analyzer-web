@@ -29,7 +29,7 @@ import {
  * not the optimizer — but `AnalysisParameters` types both as `number | null`
  * because `null` means "optimize this one". `calculate_virtual_elevation`
  * takes numbers, and production only ever reaches it with the resolved values
- * (`renderStandardVe.ts:148`, `updateModeVEPlots.ts:260`). Naming the
+ * (`renderStandardVe.ts:148`, `updateModeVEPlots.ts:342-347`). Naming the
  * precondition here keeps the wasm boundary honest instead of widening it.
  */
 type FixedParameters = AnalysisParameters & { cda: number; crr: number };
