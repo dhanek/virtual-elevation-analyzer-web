@@ -39,6 +39,16 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 	},
 }));
 
+// Per-lap weather calls the WASM air-density calculator. A fixed rho makes the
+// series-sourced value distinguishable from any params rho in the cases below.
+vi.mock(
+	"../../../pkg/virtual_elevation_analyzer.js",
+	async (importOriginal) => ({
+		...(await importOriginal<object>()),
+		AirDensityCalculator: { calculate_air_density: () => 1.0 },
+	}),
+);
+
 import { AppState } from "../../state/AppState";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
@@ -511,6 +521,122 @@ describe("the entry write to `computing` covers a second pass over a ready panel
 		// makes this "computing" rather than the stale "ready" left over from the
 		// panel's previous pass.
 		expect(recordedStatus).toBe("computing");
+	});
+});
+
+/**
+ * PER-LAP WEATHER ONLY REPLACES WHAT THE API OWNS (F44-01).
+ *
+ * The slot series `autoRho` leaves behind is applied per segment, but a wind the
+ * user typed (D-a) and a rho the user typed with auto-rho off are theirs. These
+ * drive the real primitive and read what the calculator was handed.
+ */
+describe("per-lap weather respects who owns the wind and the rho", () => {
+	// 2026-01-01T12:00:00Z in FIT seconds, one sample a minute.
+	const T0 = Math.floor(Date.UTC(2026, 0, 1, 12, 0, 0) / 1000);
+
+	function weatherState(paramOverrides: Record<string, unknown>): AppState {
+		const timestamps = Array.from(
+			{ length: SAMPLE_COUNT },
+			(_, i) => T0 + i * 60,
+		);
+		const appState = new AppState();
+		appState.currentFitData = {
+			timestamps,
+			power: timestamps.map(() => 200),
+			velocity: timestamps.map(() => 10),
+			position_lat: timestamps.map((_, i) => 45 + i * 1e-5),
+			position_long: timestamps.map((_, i) => -30 + i * 1e-5),
+			altitude: timestamps.map(() => 100),
+			distance: timestamps.map((_, i) => i * 10),
+			air_density_data: timestamps.map(() => 0),
+			road_speed: timestamps.map(() => 0),
+			temperature: timestamps.map(() => 16),
+			record_count: SAMPLE_COUNT,
+		} as any;
+		appState.currentParameters = {
+			...makeParams(),
+			wind_height_factor: 1.0,
+			...paramOverrides,
+		};
+		appState.currentLaps = [
+			{ start_time: T0, end_time: T0 + 19 * 60 },
+			{ start_time: T0 + 20 * 60, end_time: T0 + 39 * 60 },
+			{ start_time: T0 + 40 * 60, end_time: T0 + 59 * 60 },
+		] as any;
+		appState.selectedLaps = [1, 3];
+		const slot = (ms: number) => ({
+			slotMs: ms,
+			data: {
+				temperature: 15,
+				dewPoint: 5,
+				pressure: 1013,
+				windSpeed: 9,
+				windDirection: 20,
+				queriedAt: 0,
+			},
+		});
+		appState.weatherSeries = [slot(T0 * 1000), slot((T0 + 3600) * 1000)];
+		return appState;
+	}
+
+	async function run(appState: AppState) {
+		const { callbacks } = spyCallbacks();
+		return updateModeVEPlots({
+			appState,
+			handler: getAnalysisModeHandler(HANDLER_KEY.standard),
+			callbacks,
+			windSource: "constant",
+			cda: 0.3,
+			crr: 0.005,
+			isTabActive: () => false,
+		});
+	}
+
+	it("a hand-typed wind reaches the calculator and the stored rows unchanged", async () => {
+		const appState = weatherState({
+			wind_entry: "manual",
+			wind_speed: 2,
+			wind_direction: 180,
+			auto_calculate_rho: true,
+			rho_source: "weather_api",
+		});
+
+		await run(appState);
+
+		// Proves the loop reached the calculator, so the loop below is not vacuous.
+		expect(calculatorCalls.length).toBe(2);
+		for (const call of calculatorCalls) {
+			expect(call.params.wind_speed).toBe(2);
+			expect(call.params.wind_direction).toBe(180);
+		}
+		const rows = appState.currentSegmentWeather;
+		expect(rows).toHaveLength(2);
+		for (const row of rows!) {
+			expect(row.windSpeed).toBe(2);
+			expect(row.windDirection).toBe(180);
+		}
+	});
+
+	it("with auto-rho off, the series is ignored entirely", async () => {
+		const appState = weatherState({
+			wind_entry: "weather",
+			wind_speed: 4,
+			wind_direction: 90,
+			rho: 1.25,
+			auto_calculate_rho: false,
+			rho_source: "weather_api",
+		});
+
+		await run(appState);
+
+		expect(calculatorCalls.length).toBe(2);
+		for (const call of calculatorCalls) {
+			expect(call.params.rho).toBe(1.25);
+			expect(call.params.wind_speed).toBe(4);
+			expect(call.params.wind_direction).toBe(90);
+		}
+		expect(appState.currentSegmentWeather).toBeNull();
 	});
 });
 

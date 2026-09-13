@@ -22,7 +22,9 @@ import type { WeatherSlot } from "../../analysis/segmentWeather";
 import type { WeatherCache } from "../../utils/WeatherCache";
 import type { WeatherAPI } from "../../utils/WeatherAPI";
 import type { TrimRegionMetadata } from "../../utils/GeoCalculations";
+import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import { log } from "../../utils/log";
+import { weatherMayFillWind } from "../ve/windHeightControls";
 
 /**
  * Most slots one selection may fetch — 12 hours.
@@ -51,6 +53,13 @@ export const MAX_WEATHER_SLOTS = 48;
  * Lookups are sequential rather than parallel. The cache absorbs a re-analysis
  * entirely, so this cost is paid once per ride, and a burst of parallel
  * requests to a free public API is a worse neighbour than a slow loop.
+ *
+ * `isStale`, when given, is checked before each lookup, and the loop stops at
+ * the first `true` and returns the slots already fetched. A caller whose inputs
+ * moved on (an auto-rho flight whose trim window changed) would otherwise keep
+ * asking for slots nobody will use. Being stale is not a slot failure, so
+ * nothing is logged per skipped slot and nothing throws: the caller owns the
+ * decision to abandon, and discards the partial series itself.
  */
 export async function fetchWeatherSeries(
 	metadata: TrimRegionMetadata,
@@ -58,6 +67,7 @@ export async function fetchWeatherSeries(
 	end: Date,
 	cache: WeatherCache,
 	api: WeatherAPI,
+	isStale?: () => boolean,
 ): Promise<WeatherSlot[]> {
 	const first = bracketingSlots(start).before.getTime();
 	const lastBracket = bracketingSlots(end);
@@ -76,6 +86,7 @@ export async function fetchWeatherSeries(
 
 	const series: WeatherSlot[] = [];
 	for (const slotMs of slots) {
+		if (isStale?.()) break;
 		try {
 			const entry = await cache.getWeatherData(
 				{ ...metadata, middleDate: new Date(slotMs) },
@@ -134,6 +145,19 @@ export function trimRegionTimeSpan(
  * measurement of the air the rider actually met, and overriding it with a model
  * would replace data with a forecast.
  *
+ * It also returns null when the API does not own the rho:
+ *   - `auto_calculate_rho` is off. The series is only maintained by auto-rho, so
+ *     with it off the series is a leftover from an earlier flight, and a rho the
+ *     user typed must not be replaced by it.
+ *   - `rho_source` is "manual". Auto-rho's failure path sets this when the last
+ *     fetch failed, so the series then describes a different region.
+ *
+ * Past those gates the rho always comes from the series, but the WIND only when
+ * `weatherMayFillWind(params)` says the API owns it (D-a). A hand-typed or
+ * legacy wind is returned unchanged from `params`, so every field is what the
+ * segment is actually analysed at. If that kept wind has no direction, the
+ * whole override is null, because the stored per-lap row cannot represent it.
+ *
  * `calcRho` is injected rather than imported so this stays node-testable; the
  * production caller passes the WASM air-density calculator.
  */
@@ -141,11 +165,24 @@ export function segmentWeatherOverride(
 	series: readonly WeatherSlot[] | null | undefined,
 	timestamps: ArrayLike<number>,
 	windSource: "constant" | "fit" | "none",
+	params: AnalysisParameters,
 	calcRho: (tempC: number, pressureHpa: number, dewPointC: number) => number,
 ): { rho: number; wind_speed: number; wind_direction: number } | null {
 	if (!series || series.length === 0) return null;
 	if (windSource !== "constant") return null;
+	if (params.auto_calculate_rho !== true) return null;
+	if (params.rho_source === "manual") return null;
 	if (timestamps.length === 0) return null;
+
+	// D-a: the wind belongs to the user unless `weatherMayFillWind` says the API
+	// owns it. The rule lives there; this only keeps the user's numbers.
+	let keptWind: { wind_speed: number; wind_direction: number } | null = null;
+	if (!weatherMayFillWind(params)) {
+		const speed = params.wind_speed;
+		const direction = params.wind_direction;
+		if (speed == null || direction == null) return null;
+		keptWind = { wind_speed: speed, wind_direction: direction };
+	}
 
 	const first = timestamps[0];
 	const last = timestamps[timestamps.length - 1];
@@ -165,7 +202,7 @@ export function segmentWeatherOverride(
 				4,
 			),
 		),
-		wind_speed: weather.windSpeed,
-		wind_direction: weather.windDirection,
+		wind_speed: keptWind ? keptWind.wind_speed : weather.windSpeed,
+		wind_direction: keptWind ? keptWind.wind_direction : weather.windDirection,
 	};
 }

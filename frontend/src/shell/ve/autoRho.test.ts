@@ -927,4 +927,68 @@ describe("calculateAutoRho — the per-lap weather series", () => {
 		expect(rho).toBe(1.1984);
 		expect(h.appState.weatherSeries).toEqual([]);
 	});
+
+	test("an abandoned flight leaves no key vouching for its params or series", async () => {
+		// Fixture setup: samples 5.5 minutes apart, so T1 spans three 15-minute
+		// slots and T2 four, and neither trim midpoint lands on a slot boundary
+		// (which is what keeps `% 900_000` separating slot from selection lookups).
+		const h = setupHarness();
+		const wide = makeFilteredLapData();
+		wide.timestamps = wide.timestamps.map((_, i) => BASE_TS + i * 330);
+		h.appState.currentFitData = { ...wide } as never;
+		h.appState.filteredLapData = wide;
+
+		// T1 weather: 21.4 °C / 3 m/s -> rho 1.1984. T2: 30 °C / 9 m/s -> 1.1.
+		mocks.calculateAirDensity.mockImplementation((t: number) =>
+			t === 21.4 ? 1.19837 : 1.1,
+		);
+		const windy = (temperature: number, windSpeed: number) => {
+			const base = weatherEntry(temperature);
+			return { ...base, data: { ...base.data, windSpeed } };
+		};
+		let phase: "A" | "B" = "A";
+		// Bounded, so a regression fails instead of spinning.
+		let budget = 50;
+		mocks.getWeatherData.mockImplementation(async (md: TrimRegionMetadata) => {
+			budget -= 1;
+			if (budget < 0) throw new Error("lookup budget exhausted");
+			if (phase === "B" && md.middleDate.getTime() % 900_000 === 0) {
+				// The user drags back to T1 while T2's slot series is loading.
+				setTrim(T1);
+			}
+			return phase === "A" ? windy(21.4, 3) : windy(30, 9);
+		});
+		const lookups = () => mocks.getWeatherData.mock.calls.length;
+		const run = () =>
+			calculateAutoRho(h.appState, h.parametersComponent, h.services);
+		const seriesWinds = () =>
+			h.appState.weatherSeries?.map((s) => s.data.windSpeed);
+
+		// Flight A: T1, completes.
+		setTrim(T1);
+		expect(await run()).toBe(1.1984);
+		const seriesA = seriesWinds();
+		expect(seriesA).toEqual([3, 3, 3]);
+
+		// Flight B: T2, abandoned inside its first slot lookup.
+		phase = "B";
+		setTrim(T2);
+		const beforeB = lookups();
+		expect(await run()).toBeNull();
+		// 1 selection + the slot that moved the trim, not 1 + all four slots.
+		expect(lookups() - beforeB).toBe(2);
+
+		// Flight C: back on T1, the window actually on screen.
+		phase = "A";
+		setTrim(T1);
+		const beforeC = lookups();
+		const rhoC = await run();
+
+		// C re-read T1 rather than short-circuiting on A's stale key.
+		expect(lookups() - beforeC).toBeGreaterThan(0);
+		expect(rhoC).toBe(1.1984);
+		expect(h.parametersComponent.getParameters().rho).toBe(1.1984);
+		expect(h.parametersComponent.getParameters().wind_speed).toBe(3);
+		expect(seriesWinds()).toEqual(seriesA);
+	}, 10_000);
 });

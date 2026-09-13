@@ -289,6 +289,7 @@ export async function updateModeVEPlots(
 			appState.weatherSeries,
 			slice.timestamps,
 			wind.selectedWindSource,
+			params,
 			AirDensityCalculator.calculate_air_density,
 		);
 		const segmentParams = weatherOverride

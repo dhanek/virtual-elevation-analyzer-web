@@ -463,6 +463,10 @@ async function performAutoRho(
 			}
 
 			if (abandonStaleFlight()) return null;
+			// The key records what is loaded, and from here on the loaded values
+			// belong to this flight. A flight abandoned after this point must not
+			// leave an older key vouching for them.
+			appState.lastWeatherQueryKey = null;
 			parametersComponent.setParameters(updateParams);
 			refreshCrrTempReadout(parametersComponent.getParameters());
 			refreshWindHeightReadout(parametersComponent.getParameters());
@@ -482,22 +486,26 @@ async function performAutoRho(
 				trimEnd,
 			);
 			if (selectionSpan) {
-				appState.weatherSeries = await fetchWeatherSeries(
+				const series = await fetchWeatherSeries(
 					metadata,
 					selectionSpan.start,
 					selectionSpan.end,
 					weatherCache,
 					weatherAPI,
+					() => !ownsCurrentInputs(),
 				);
+				// A stale flight's series describes a window nobody is looking at,
+				// so it is never published.
+				if (abandonStaleFlight()) return null;
+				appState.weatherSeries = series;
 				log.debug(
-					`🕐 Per-lap weather: ${appState.weatherSeries.length} slot(s) ` +
+					`🕐 Per-lap weather: ${series.length} slot(s) ` +
 						`covering ${selectionSpan.start.toISOString()} - ` +
 						`${selectionSpan.end.toISOString()}`,
 				);
 			} else {
 				appState.weatherSeries = null;
 			}
-			if (abandonStaleFlight()) return null;
 
 			// The result is now loaded, so this query may be skipped next time.
 			appState.lastWeatherQueryKey = queryKey;
