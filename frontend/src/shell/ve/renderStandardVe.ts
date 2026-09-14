@@ -32,7 +32,9 @@ import {
 } from "../../plots/StandardPlotBuilders";
 import { setupVESliders } from "./bindStandardSliders";
 import { calculateAutoRho } from "./autoRho";
+import { autoConvergeLockControlsMarkup } from "./autoConvergeLocks";
 import { crrTempControlsMarkup } from "./crrTempControls";
+import { elevationDiffControlsMarkup } from "./elevationDiffControls";
 import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
@@ -50,6 +52,7 @@ import {
 	resolveDisplayCda,
 	resolveDisplayCrr,
 } from "../../analysis/unsetParameterFallbacks";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
 import { bindTabButtons, resetTabRenderMapForNewPanel } from "../dom/tabs";
@@ -62,6 +65,8 @@ export interface StandardVeCallbacks {
 	onSaveScreenshot: () => void;
 	onStoreResult: () => void;
 	onExportAll: () => void;
+	onExportSettings: () => void;
+	onExportBundle: () => void;
 	onShowAllResults: () => void;
 	saveCurrentLapSettings: () => void;
 }
@@ -446,6 +451,8 @@ export async function showVirtualElevationAnalysisInline(
                                     <input type="range" id="crrSlider" min="${crrBounds.min}" max="${crrBounds.max}" value="${resolveDisplayCrr(appState.currentParameters!.crr)}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${resolveDisplayCrr(appState.currentParameters!.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(appState.currentParameters!, "standard")}
                                 ${crrTempControlsMarkup(appState.currentParameters!)}
                                 ${windHeightControlsMarkup(appState.currentParameters!, initialWindSource)}
                             </div>
@@ -496,6 +503,8 @@ export async function showVirtualElevationAnalysisInline(
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
                         <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
                 <div class="ve-plots-main">
@@ -526,6 +535,7 @@ export async function showVirtualElevationAnalysisInline(
 																? `<button class="ve-tab-button" data-tab="vd"${fitWindVisibilityAttrs(initialWindSource)}>VD</button>`
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
                             ${lapViewToggleMarkup("stitched")}
@@ -599,6 +609,7 @@ export async function showVirtualElevationAnalysisInline(
                             <div class="ve-plot-container"><div id="vdPlot" class="ve-plot-container__plot ve-plot-container__plot--tall"></div></div>
                             ${plotXAxisToggleMarkup()}
                         </div>
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>
@@ -766,6 +777,8 @@ export async function showVirtualElevationAnalysisInline(
 		onSaveScreenshot: callbacks.onSaveScreenshot,
 		onStoreResult: callbacks.onStoreResult,
 		onExportAll: callbacks.onExportAll,
+		onExportSettings: callbacks.onExportSettings,
+		onExportBundle: callbacks.onExportBundle,
 		onShowAllResults: callbacks.onShowAllResults,
 	});
 

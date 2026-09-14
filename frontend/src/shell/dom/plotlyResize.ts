@@ -40,7 +40,7 @@ const HIDDEN_SELECTOR =
  * WHAT MAKES THIS CALL SAFE, and it was not safe the first time it was written.
  * `Plots.resize` DELETES `gd.layout.width` and `gd.layout.height` and
  * re-autosizes, guarded only by `layout.width && layout.height`
- * (plotly-basic.js:48331) — so a figure that pins a height but no width has
+ * (plotly-cartesian.js:48489) — so a figure that pins a height but no width has
  * that height thrown away. Standard's figures did exactly that, into containers
  * with no CSS height, and this call collapsed them from 350 px to 26 px.
  *

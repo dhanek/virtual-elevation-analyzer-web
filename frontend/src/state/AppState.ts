@@ -1,6 +1,7 @@
 import type { WeatherSlot } from "../analysis/segmentWeather";
 import type { SegmentWeatherRecord } from "../utils/ResultsStorage";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
+import type { AutoConvergeState } from "../analysis/AutoConverge";
 import type {
 	DetectedLap,
 	GpsLapDetectionResult,
@@ -227,6 +228,13 @@ export interface AnalysisState {
 	 */
 	veStatus: VeStatus;
 	airSpeedCalibrationPercent: number;
+	/**
+	 * Auto-converge UI state (Convergence plan, phase 1). Runtime, like the
+	 * calibration above — deliberately NOT on AnalysisParameters, so the
+	 * Section-3 template never emits `checked` and no merge route is needed;
+	 * persistence is a recorded follow-up.
+	 */
+	autoConverge: AutoConvergeState;
 	isCalculatingAutoRho: boolean;
 	/** One advertised current/queued weather operation for this AppState. */
 	autoRhoPromise: Promise<number | null> | null;
@@ -331,6 +339,12 @@ export class AppState {
 		currentWindSource: "none",
 		veStatus: "idle",
 		airSpeedCalibrationPercent: 0,
+		autoConverge: {
+			enabled: false,
+			cdaLocked: false,
+			crrLocked: false,
+			profileSolve: false,
+		},
 		isCalculatingAutoRho: false,
 		autoRhoPromise: null,
 		autoRhoFlightKey: null,
@@ -651,6 +665,10 @@ export class AppState {
 
 	set airSpeedCalibrationPercent(calibrationPercent: number) {
 		this.analysis.airSpeedCalibrationPercent = calibrationPercent;
+	}
+
+	get autoConverge(): AutoConvergeState {
+		return this.analysis.autoConverge;
 	}
 
 	get gpsLapDetectionResult(): GpsLapDetectionResult | null {

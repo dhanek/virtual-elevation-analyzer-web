@@ -2,7 +2,5 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
 
   "entry": ["src/main.ts", "scripts/*.ts", "vite.config.ts", "vitest.config.ts"],
-  "project": ["src/**/*.ts", "scripts/**/*.ts"],
-
-  "ignoreBinaries": ["vite-node"]
+  "project": ["src/**/*.ts", "scripts/**/*.ts"]
 }

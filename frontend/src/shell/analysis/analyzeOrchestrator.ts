@@ -23,11 +23,19 @@ import {
 	saveCurrentLapSettings,
 } from "./storageHandlers";
 import {
+	handleExportBundle,
+	handleExportSettings,
+} from "./settingsExportHandlers";
+import {
 	isGpsLapSelectionMode,
 	getGpsAnalysisMode,
 } from "../section3/section3Orchestration";
 import { waitForPlotly } from "./plotlyLoader";
 import { requestModeUpdate } from "./requestModeUpdate";
+import {
+	ensureAutoConvergeState,
+	syncAutoConvergeControlState,
+} from "../ve/autoConvergeLocks";
 import { configureParameterMerge } from "./parametersSync";
 import {
 	clearLapViewToggle,
@@ -226,6 +234,37 @@ export function setupAnalyzeButton(): void {
 	if (analyzeBtn) {
 		analyzeBtn.addEventListener("click", handleAnalyze);
 	}
+	bindAutoConvergeCheckbox();
+}
+
+/**
+ * The Section-3 auto-converge checkbox. Bound here because a GPS-mode switch
+ * destroys and rebuilds Section 3's DOM, and `restoreSection3Controls`
+ * already re-runs `setupAnalyzeButton` — so the rebind comes for free. The
+ * handler is a stable module-level reference, so a repeated bind on the same
+ * element deduplicates instead of stacking listeners (the `handleAnalyze`
+ * pattern above).
+ */
+function bindAutoConvergeCheckbox(): void {
+	const checkbox = document.getElementById(
+		"autoConvergeToggle",
+	) as HTMLInputElement | null;
+	if (!checkbox) {
+		return;
+	}
+	const { appState } = getDependencies();
+	checkbox.checked = ensureAutoConvergeState(appState).enabled;
+	checkbox.addEventListener("change", handleAutoConvergeToggle);
+}
+
+function handleAutoConvergeToggle(event: Event): void {
+	const checkbox = event.currentTarget as HTMLInputElement;
+	const { appState } = getDependencies();
+	ensureAutoConvergeState(appState).enabled = checkbox.checked;
+	// Reveal/hide the lock block and release any disabled slider; then let the
+	// funnel decide whether a recompute is possible (it gates on visibility).
+	syncAutoConvergeControlState(appState);
+	requestModeUpdate("autoConverge");
 }
 
 export function updateAnalyzeButton(): void {
@@ -503,6 +542,12 @@ export async function handleAnalyze(): Promise<void> {
 							},
 							onExportAll: () => {
 								void handleExportAllResults(deps.resultsStorage);
+							},
+							onExportSettings: () => {
+								void handleExportSettings(deps.appState, deps.parameterStorage);
+							},
+							onExportBundle: () => {
+								void handleExportBundle(deps.appState, deps.parameterStorage);
 							},
 							saveCurrentLapSettings: () => {
 								void saveCurrentLapSettings(

@@ -1,4 +1,5 @@
 import { AppState } from "../../state/AppState";
+import type { Section3Selection } from "../../analysis/SettingsBundle";
 import {
 	clampTrimWindow,
 	MIN_TRIM_WINDOW_SAMPLES,
@@ -107,6 +108,57 @@ export function getGpsAnalysisMode(): GpsAnalysisMode {
 }
 
 /**
+ * Restore Section 3's selection state from an imported settings bundle:
+ * the analysis-type dropdown value and the ticked FIT laps.
+ *
+ * STATE ONLY, no render — by design. The import path calls this right after
+ * `processSelectedFile()` resolves, i.e. in the microtask gap BEFORE the
+ * 100 ms `initializeSection3` timer that load scheduled can fire, so the one
+ * render Section 3 was getting anyway paints the restored state: cards
+ * checked, dropdown set, and — because the detection binders it runs load
+ * their gate from ParameterStorage (which the import just seeded) and
+ * auto-detect when laps are selected — the map markers and detected laps
+ * come back without any code here touching them. Rendering here instead
+ * would race that timer and paint Section 3 twice.
+ *
+ * `Section3AnalysisMode` is `SettingsBundle`'s restatement of
+ * `GpsAnalysisMode` (that module must stay shell-free); the assignment below
+ * is where the compiler proves the two lists agree.
+ */
+export function restoreSection3Selection(section3: Section3Selection): void {
+	const deps = getDependencies();
+	const lapCount = deps.appState.currentLaps.length;
+	deps.appState.selectedLaps = section3.selectedLaps.filter(
+		(lap) => lap >= 1 && lap <= lapCount,
+	);
+	currentGpsAnalysisMode = section3.gpsAnalysisMode;
+}
+
+/**
+ * Persist the CURRENT Section-3 selection into the file's stored record, so
+ * the next analyze of this file — an Analyze press, a reload, a re-import —
+ * replicates it.
+ *
+ * Called ONLY from user-interaction paths (the mode dropdown, the lap cards,
+ * select-all), never from render reconciliation: `updateSelectedLaps` also
+ * runs as Section 3's post-render hook, and a save there would let a
+ * load-time render write the empty just-reset selection over the stored one
+ * before `processFitFile`'s restore has read it.
+ */
+function persistSection3Selection(): void {
+	const deps = getDependencies();
+	if (!deps.appState.currentFileHash) return;
+	deps.parameterStorage
+		.saveSection3(deps.appState.currentFileHash, {
+			gpsAnalysisMode: currentGpsAnalysisMode,
+			selectedLaps: [...deps.appState.selectedLaps],
+		})
+		.catch((err) => {
+			log.error("Failed to persist Section 3 selection:", err);
+		});
+}
+
+/**
  * Set the GPS analysis mode and update all dependent UI elements
  */
 export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
@@ -176,6 +228,10 @@ export function setGpsAnalysisMode(mode: GpsAnalysisMode): void {
 			mapViz.clearOutAndBackMarkers();
 		}
 	}
+
+	// The dropdown is a user control (restore paths set the module variable
+	// directly, never through here), so the new mode is worth persisting.
+	persistSection3Selection();
 
 	log.debug(`GPS analysis mode changed: ${previousMode} -> ${mode}`);
 }
@@ -579,6 +635,8 @@ function rerenderSection3(): void {
 		// the user had left. The binders below re-publish it a few lines later,
 		// and each runs its own initial detection, so nothing is lost by clearing
 		// first.
+		// The same ordering matters on a file-over-file load: the stale closure
+		// would write the old file's gate offset into the new file's settings.
 		clearGpsRedetect();
 		restoreSection3Controls(hasGpsData);
 
@@ -639,10 +697,17 @@ function restoreSection3Controls(hasGpsData: boolean): void {
 
 		const lapListEl = document.getElementById("lapList");
 		if (lapListEl) {
-			bindLapSelection(lapListEl, () => updateSelectedLaps());
-			bindSelectAllButton("selectAllLaps", "lapList", () =>
-				updateSelectedLaps(),
-			);
+			// Persist AFTER the state update, and only on these user-event
+			// bindings — the bare reconciliation call below must not save
+			// (see persistSection3Selection).
+			bindLapSelection(lapListEl, () => {
+				updateSelectedLaps();
+				persistSection3Selection();
+			});
+			bindSelectAllButton("selectAllLaps", "lapList", () => {
+				updateSelectedLaps();
+				persistSection3Selection();
+			});
 		}
 		deps.setupAnalyzeButton();
 		updateSelectedLaps();
@@ -1945,6 +2010,8 @@ export function initializeSection3(): void {
 		// the user had left. The binders below re-publish it a few lines later,
 		// and each runs its own initial detection, so nothing is lost by clearing
 		// first.
+		// The same ordering matters on a file-over-file load: the stale closure
+		// would write the old file's gate offset into the new file's settings.
 		clearGpsRedetect();
 		restoreSection3Controls(hasGpsData);
 

@@ -136,6 +136,7 @@ const noopCallbacks: ModeUpdateCallbacks = {
 	renderPower: () => {},
 	renderVd: () => {},
 	renderMetrics: () => {},
+	renderConvergence: () => {},
 };
 
 /**

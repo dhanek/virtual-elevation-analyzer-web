@@ -85,7 +85,7 @@ export function virtualDistanceHeaderMarkup(): string {
 	return `<div class="ve-metrics-compact ve-metrics-compact--spaced ve-vd-header" id="${VD_HEADER_ID}"></div>`;
 }
 
-function span(
+export function span(
 	id: string | null,
 	text: string,
 	className?: string,

@@ -99,6 +99,7 @@ function spyCallbacks() {
 		renderWind: 0,
 		renderPower: 0,
 		renderVd: 0,
+		renderConvergence: 0,
 		renderMetrics: 0,
 	};
 	const callbacks: ModeUpdateCallbacks = {
@@ -123,6 +124,9 @@ function spyCallbacks() {
 		},
 		renderVd: () => {
 			calls.renderVd++;
+		},
+		renderConvergence: () => {
+			calls.renderConvergence++;
 		},
 		renderMetrics: () => {
 			calls.renderMetrics++;
@@ -190,7 +194,7 @@ describe("updateModeVEPlots renders once per update, for every mode", () => {
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
-				callbacks,
+				makeCallbacks: () => callbacks,
 				windSource: "fit",
 				cda: 0.3,
 				crr: 0.005,
@@ -211,7 +215,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
 			crr: 0.005,
@@ -221,6 +225,10 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		expect(calls.renderWind).toBe(0);
 		expect(calls.renderPower).toBe(0);
 		expect(calls.renderVd).toBe(0);
+		// The D-14 claim that matters most: the closure-error grid behind this
+		// callback is the most expensive compute in the app, and it must not
+		// run while its pane is closed.
+		expect(calls.renderConvergence).toBe(0);
 	});
 
 	it("renders each of wind/power/vd exactly once when the tabs are active", async () => {
@@ -228,7 +236,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
 			crr: 0.005,
@@ -238,6 +246,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		expect(calls.renderWind).toBe(1);
 		expect(calls.renderPower).toBe(1);
 		expect(calls.renderVd).toBe(1);
+		expect(calls.renderConvergence).toBe(1);
 	});
 });
 
@@ -250,7 +259,7 @@ describe("wind is resolved ONCE PER UPDATE, not once per segment (D-05)", () => 
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
-				callbacks,
+				makeCallbacks: () => callbacks,
 				windSource: "fit",
 				cda: 0.3,
 				crr: 0.005,
@@ -281,7 +290,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
-				callbacks,
+				makeCallbacks: () => callbacks,
 				windSource: "compare",
 				cda: 0.3,
 				crr: 0.005,
@@ -308,7 +317,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
-				callbacks,
+				makeCallbacks: () => callbacks,
 				windSource: "compare",
 				cda: 0.3,
 				crr: 0.005,
@@ -359,7 +368,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 				const outcome = await updateModeVEPlots({
 					appState: stateFor(mode),
 					handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
-					callbacks,
+					makeCallbacks: () => callbacks,
 					windSource: source,
 					cda: 0.3,
 					crr: 0.005,
@@ -388,7 +397,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 		await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "compare",
 			cda: 0.3,
 			crr: 0.005,
@@ -415,7 +424,7 @@ describe("the summarize seam owns the AppState result writes (D-17a / N-1)", () 
 			await updateModeVEPlots({
 				appState,
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
-				callbacks,
+				makeCallbacks: () => callbacks,
 				windSource: "fit",
 				cda: 0.3,
 				crr: 0.005,
@@ -441,7 +450,7 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 		await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
 			crr: 0.005,
@@ -463,7 +472,7 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 		const outcome = await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
 			crr: 0.005,
@@ -507,7 +516,7 @@ describe("the entry write to `computing` covers a second pass over a ready panel
 		await updateModeVEPlots({
 			appState,
 			handler,
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
 			crr: 0.005,
@@ -585,7 +594,7 @@ describe("per-lap weather respects who owns the wind and the rho", () => {
 		return updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandler(HANDLER_KEY.standard),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "constant",
 			cda: 0.3,
 			crr: 0.005,
@@ -648,7 +657,7 @@ describe("guards", () => {
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandler(null),
-			callbacks,
+			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
 			crr: 0.005,

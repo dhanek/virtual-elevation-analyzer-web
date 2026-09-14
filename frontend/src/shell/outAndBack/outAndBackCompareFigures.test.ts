@@ -75,6 +75,7 @@ function makeSection(index: number, withCompare: boolean): OutAndBackVEProfile {
 			? Array.from({ length: SAMPLES }, (_, i) => -i * (0.25 + index))
 			: null,
 		outboundActualElevation: actual,
+		outboundReferenceElevation: null,
 		outboundSeries: null,
 		inboundDistances: distances.slice(),
 		inboundVE: Array.from(
@@ -85,6 +86,7 @@ function makeSection(index: number, withCompare: boolean): OutAndBackVEProfile {
 			? Array.from({ length: SAMPLES }, (_, i) => 7 + i * (0.4 + index))
 			: null,
 		inboundActualElevation: actual.slice().reverse(),
+		inboundReferenceElevation: null,
 		inboundSeries: null,
 		outboundDuration: 120,
 		inboundDuration: 130,
