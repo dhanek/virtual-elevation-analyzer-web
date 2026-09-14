@@ -455,6 +455,33 @@ re-deriving it):
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
+### A saved gate survives reopening its file — 2026-09-14
+
+**Found in review, not by a user.** Round 53 on PR #8 noticed that the PR fixes, in passing, a loss
+on `main`: `saveParameters` rebuilt the stored record from `parameters` and `lapSettings` alone, so
+it dropped `gpsMarkerSettings`, `outAndBackMarkerSettings` and `oneWayMarkerSettings`. Fixed on
+`main` on its own rather than waiting for PR #8's port.
+
+**Reproduced first, and it was wider than the finding.** On the reference ride, laps 10, 12 and 16:
+placing a gate in any of the three modes and then changing system mass removed that gate from the
+IndexedDB record. The control made it worse: a GPS gate at 8 s, verified in storage, **no parameter
+touched**, reload — the slider came back at the 5 s default. Auto-rho calls `setParameters` on every
+file load (`shell/ve/autoRho.ts:470`), that save is not suppressed by `isLoadingParameters`
+(`utils/ParameterStorage.ts:78-81`), so on any record with `auto_calculate_rho: true` no stored gate
+survived reopening its file.
+
+**The fix** spreads the existing record under the fields `saveParameters` writes. Every other
+writer in the store already mutated the record it read; this was the only one that rebuilt it.
+
+Test written first and confirmed red (`expected null to deeply equal { gateTimeOffset: 8 }`): all
+three gate families survive a later parameter save, against `fake-indexeddb`. 1267 tests / 104
+files, `check` and `lint` clean. Checked in the running app on the reference ride in Chrome: GPS
+gate at 8 s, mass changed, reload, ride reopened, same laps → the slider restores 8 s and the
+changed mass. Out-and-back (8 s / 50 s) and one-way (59 s / 120 s) saved together, reload, ride
+reopened → both restore their own pair.
+`frontend/src/utils/ParameterStorage.ts` (`saveParameters`),
+`frontend/src/utils/parameterStorageKeepsGates.test.ts`
+
 ### One-way gates, A to B — 2026-09-14
 
 **The item this closes:** *[L] GPS gate detection: single gate vs A/B directional.* Reviewed during

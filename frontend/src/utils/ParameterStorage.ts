@@ -221,13 +221,16 @@ export class ParameterStorage {
 			const transaction = this.db!.transaction([this.storeName], "readwrite");
 			const objectStore = transaction.objectStore(this.storeName);
 
-			// Get existing data to preserve lapSettings
+			// Get existing data to preserve what this save does not write
 			const getRequest = objectStore.get(fileHash);
 
 			getRequest.onsuccess = () => {
 				const existingData = getRequest.result as StoredParameters | undefined;
 
+				// Spread first: the gate settings live in this record too, and auto-rho
+				// saves parameters on every file load, so a rebuilt record lost them.
 				const data: StoredParameters = {
+					...existingData,
 					fileHash,
 					parameters,
 					lapSettings: existingData?.lapSettings || {}, // Preserve existing lap settings
