@@ -69,6 +69,49 @@ export function renderSection3Template(input: Section3TemplateInput): string {
 	);
 	const lapCardsHtml = renderSelectableCards(lapItems, "lap-checkbox");
 
+	// One-way mode shares the GPS lap panel — its segments are analysed as GPS
+	// laps — but places two gates, with the out-and-back markup and ids, which
+	// `bindOutAndBackDetection` binds. The two modes never render together.
+	const isOneWay = gpsAnalysisMode === "GPS gate one way";
+	const twoGateSliderControls = `                    <div class="oab-gate-slider-controls hidden" id="oabGateSliderControls">
+                        <div class="gate-slider-group">
+                            <div class="gate-slider-row gate-slider-row--tight">
+                                <label class="gate-slider-row__label gate-slider-row__label--gate-a">Gate A:</label>
+                                <input type="range" id="oabGateASlider" min="0" max="100" value="5" step="1" class="gate-slider-row__slider">
+                                <input type="number" id="oabGateAValue" value="5" min="0" step="1" class="gate-slider-row__value">
+                                <span class="gate-slider-row__unit">s</span>
+                            </div>
+                            <div id="oabGateAInfo" class="gate-position-info gate-position-info--indented"></div>
+                        </div>
+                        <div>
+                            <div class="gate-slider-row gate-slider-row--tight">
+                                <label class="gate-slider-row__label gate-slider-row__label--gate-b">Gate B:</label>
+                                <input type="range" id="oabGateBSlider" min="0" max="100" value="60" step="1" class="gate-slider-row__slider">
+                                <input type="number" id="oabGateBValue" value="60" min="0" step="1" class="gate-slider-row__value">
+                                <span class="gate-slider-row__unit">s</span>
+                            </div>
+                            <div id="oabGateBInfo" class="gate-position-info gate-position-info--indented"></div>
+                        </div>
+                    </div>`;
+	const singleGateControls = `
+                    <p class="gps-lap-detection-panel__hint">
+                        Select FIT laps above, then set gate position to detect virtual laps.
+                    </p>
+                    <div class="gps-gate-slider-controls hidden" id="gpsGateSliderControls">
+                        <div class="gate-slider-row">
+                            <label class="gate-slider-row__label">Gate Position:</label>
+                            <input type="range" id="gpsGateSlider" min="0" max="100" value="5" step="1" class="gate-slider-row__slider">
+                            <input type="number" id="gpsGateValue" value="5" min="0" step="1" class="gate-slider-row__value">
+                            <span class="gate-slider-row__unit">s</span>
+                        </div>
+                        <div id="gpsGatePositionInfo" class="gate-position-info"></div>
+                    </div>`;
+	const oneWayGateControls = `
+                    <p class="gps-lap-detection-panel__hint">
+                        Set gate A (start) and gate B (end) on the stretch to measure. Only passes in the direction you placed them count.
+                    </p>
+${twoGateSliderControls}`;
+
 	return `
         <div class="analysis-layout">
             <div class="analysis-sidebar">
@@ -104,18 +147,7 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                 <!-- GPS Lap Detection Panel (shown below lap selection when enabled) -->
                 <div class="gps-lap-detection-panel" id="gpsLapDetectionPanel">
                     <h4>GPS Virtual Lap Detection</h4>
-                    <p class="gps-lap-detection-panel__hint">
-                        Select FIT laps above, then set gate position to detect virtual laps.
-                    </p>
-                    <div class="gps-gate-slider-controls hidden" id="gpsGateSliderControls">
-                        <div class="gate-slider-row">
-                            <label class="gate-slider-row__label">Gate Position:</label>
-                            <input type="range" id="gpsGateSlider" min="0" max="100" value="5" step="1" class="gate-slider-row__slider">
-                            <input type="number" id="gpsGateValue" value="5" min="0" step="1" class="gate-slider-row__value">
-                            <span class="gate-slider-row__unit">s</span>
-                        </div>
-                        <div id="gpsGatePositionInfo" class="gate-position-info"></div>
-                    </div>
+                    ${isOneWay ? oneWayGateControls : singleGateControls}
                     <div id="gpsDetectedLapsInfo" class="detected-laps-info hidden">
                         <div class="detected-laps-info__summary">
                             Detected <span id="gpsLapCount">0</span> virtual laps
@@ -137,26 +169,7 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                     <p class="gps-lap-detection-panel__hint">
                         Set two gates: A (start/end) and B (turnaround). B must be after A.
                     </p>
-                    <div class="oab-gate-slider-controls hidden" id="oabGateSliderControls">
-                        <div class="gate-slider-group">
-                            <div class="gate-slider-row gate-slider-row--tight">
-                                <label class="gate-slider-row__label gate-slider-row__label--gate-a">Gate A:</label>
-                                <input type="range" id="oabGateASlider" min="0" max="100" value="5" step="1" class="gate-slider-row__slider">
-                                <input type="number" id="oabGateAValue" value="5" min="0" step="1" class="gate-slider-row__value">
-                                <span class="gate-slider-row__unit">s</span>
-                            </div>
-                            <div id="oabGateAInfo" class="gate-position-info gate-position-info--indented"></div>
-                        </div>
-                        <div>
-                            <div class="gate-slider-row gate-slider-row--tight">
-                                <label class="gate-slider-row__label gate-slider-row__label--gate-b">Gate B:</label>
-                                <input type="range" id="oabGateBSlider" min="0" max="100" value="60" step="1" class="gate-slider-row__slider">
-                                <input type="number" id="oabGateBValue" value="60" min="0" step="1" class="gate-slider-row__value">
-                                <span class="gate-slider-row__unit">s</span>
-                            </div>
-                            <div id="oabGateBInfo" class="gate-position-info gate-position-info--indented"></div>
-                        </div>
-                    </div>
+                    ${twoGateSliderControls}
                     <div id="outAndBackSectionsInfo" class="detected-laps-info hidden">
                         <div class="detected-laps-info__summary">
                             Detected <span id="outAndBackSectionCount">0</span> out-and-back sections

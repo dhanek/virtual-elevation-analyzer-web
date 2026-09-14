@@ -49,6 +49,16 @@ vi.mock("../../utils/GpsLapDetection", async (importOriginal) => ({
 			};
 		}
 	},
+	OneWayGateDetector: class {
+		detectLaps() {
+			return {
+				detectedLaps: detected.laps,
+				passings: [],
+				markerLat: 0,
+				markerLon: 0,
+			};
+		}
+	},
 	GpsLapDetector: class {
 		detectLaps() {
 			return {
@@ -65,6 +75,7 @@ import {
 	configureSection3Orchestration,
 	handleGpsLapSelectionChange,
 	runGpsLapDetection,
+	runOneWayGateDetection,
 	runOutAndBackDetection,
 } from "./section3Orchestration";
 import { AppState } from "../../state/AppState";
@@ -523,6 +534,40 @@ describe("the VE panel in GPS-lap mode", () => {
 
 			expect(veSectionHidden()).toBe(false);
 			expect(appState.gpsSelectedLaps).toEqual([1]);
+		});
+	});
+
+	/**
+	 * One-way segments ARE GPS laps once detected — same list, same panel, same
+	 * basis — so a one-way re-detection owes the panel the same two guards.
+	 */
+	describe("after a one-way gate re-detection", () => {
+		const gateA = { lat: 52.52, lon: 13.405, index: 0 };
+		const gateB = { lat: 52.52, lon: 13.405, index: 40 };
+
+		it("tears the panel down when a gate move re-cuts the segments", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			analyzedLaps(appState, [lap(1, 0, 40), lap(2, 81, 120)]);
+
+			detected.laps = [lap(1, 5, 45), lap(2, 86, 125)];
+			await runOneWayGateDetection(gateA, gateB);
+
+			expect(veSectionHidden()).toBe(true);
+			expect(appState.gpsDetectedLaps).toEqual(detected.laps);
+			expect(appState.gpsSelectedLaps).toEqual([1, 2]);
+		});
+
+		it("leaves the panel alone when the gates have not moved", async () => {
+			const appState = makeAppState();
+			configureWithFitLap(appState);
+			const laps = [lap(1, 0, 40), lap(2, 81, 120)];
+			analyzedLaps(appState, laps);
+
+			detected.laps = laps.map((l) => ({ ...l }));
+			await runOneWayGateDetection(gateA, gateB);
+
+			expect(veSectionHidden()).toBe(false);
 		});
 	});
 

@@ -61,3 +61,24 @@ describe("renderSection3Template lap selection reflection", () => {
 		expect(selectedCards).toBe(3);
 	});
 });
+
+describe("renderSection3Template gate controls per GPS mode", () => {
+	it("gives lap splitting its single gate", () => {
+		const html = renderSection3Template({ ...baseInput, selectedLaps: [1] });
+		expect(html).toContain('id="gpsGateSlider"');
+		expect(html).not.toContain('id="oabGateASlider"');
+	});
+
+	it("gives one-way mode a start and an end gate over the GPS lap list", () => {
+		const html = renderSection3Template({
+			...baseInput,
+			selectedLaps: [1],
+			gpsAnalysisMode: "GPS gate one way",
+		});
+		expect(html).not.toContain('id="gpsGateSlider"');
+		expect(html).toContain('id="oabGateASlider"');
+		expect(html).toContain('id="oabGateBSlider"');
+		expect(html).toContain('id="gpsLapList"');
+		expect(html).not.toContain('id="outAndBackSectionList"');
+	});
+});

@@ -42,12 +42,16 @@ interface OutAndBackMarkerSettings {
 	};
 }
 
+/** The two stored families of two-gate settings, one per mode. */
+type TwoGateField = "outAndBackMarkerSettings" | "oneWayMarkerSettings";
+
 interface StoredParameters {
 	fileHash: string;
 	parameters: AnalysisParameters;
 	lapSettings: { [lapKey: string]: LapSettings }; // Key is lap indices joined by '-' (e.g., "0", "1-2-3")
 	gpsMarkerSettings?: { [lapKey: string]: GpsMarkerSettings }; // GPS marker per lap selection
 	outAndBackMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // Out and Back markers per lap selection
+	oneWayMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // One-way gates per lap selection, same shape
 	lastUsed: number; // timestamp
 	fileName?: string; // optional, for debugging
 }
@@ -688,9 +692,41 @@ export class ParameterStorage {
 	// ==================== Out and Back Marker Settings ====================
 
 	/**
-	 * Save Out and Back marker settings for a specific file and lap selection
+	 * Save out-and-back marker settings for a specific file and lap selection
 	 */
-	async saveOutAndBackMarkerSettings(
+	saveOutAndBackMarkerSettings(
+		fileHash: string,
+		selectedLaps: number[],
+		markerSettings: OutAndBackMarkerSettings,
+	): Promise<void> {
+		return this.saveTwoGateMarkerSettings(
+			"outAndBackMarkerSettings",
+			fileHash,
+			selectedLaps,
+			markerSettings,
+		);
+	}
+
+	/**
+	 * Save one-way gate settings for a specific file and lap selection. Stored
+	 * apart from out-and-back: the same two sliders mean start and end there,
+	 * not start/end and turnaround.
+	 */
+	saveOneWayMarkerSettings(
+		fileHash: string,
+		selectedLaps: number[],
+		markerSettings: OutAndBackMarkerSettings,
+	): Promise<void> {
+		return this.saveTwoGateMarkerSettings(
+			"oneWayMarkerSettings",
+			fileHash,
+			selectedLaps,
+			markerSettings,
+		);
+	}
+
+	private async saveTwoGateMarkerSettings(
+		field: TwoGateField,
 		fileHash: string,
 		selectedLaps: number[],
 		markerSettings: OutAndBackMarkerSettings,
@@ -747,19 +783,16 @@ export class ParameterStorage {
 					};
 				}
 
-				// Ensure outAndBackMarkerSettings exists
-				if (!existingData.outAndBackMarkerSettings) {
-					existingData.outAndBackMarkerSettings = {};
-				}
-
-				// Update Out and Back marker settings
-				existingData.outAndBackMarkerSettings[lapKey] = markerSettings;
+				existingData[field] = {
+					...existingData[field],
+					[lapKey]: markerSettings,
+				};
 				existingData.lastUsed = Date.now();
 
 				const putRequest = objectStore.put(existingData);
 
 				putRequest.onsuccess = () => {
-					log.debug(`✅ Out and Back markers saved for lap key: ${lapKey}`);
+					log.debug(`✅ ${field} saved for lap key: ${lapKey}`);
 					resolve();
 				};
 
@@ -780,9 +813,33 @@ export class ParameterStorage {
 	}
 
 	/**
-	 * Load Out and Back marker settings for a specific file and lap selection
+	 * Load out-and-back marker settings for a specific file and lap selection
 	 */
-	async loadOutAndBackMarkerSettings(
+	loadOutAndBackMarkerSettings(
+		fileHash: string,
+		selectedLaps: number[],
+	): Promise<OutAndBackMarkerSettings | null> {
+		return this.loadTwoGateMarkerSettings(
+			"outAndBackMarkerSettings",
+			fileHash,
+			selectedLaps,
+		);
+	}
+
+	/** Load one-way gate settings for a specific file and lap selection */
+	loadOneWayMarkerSettings(
+		fileHash: string,
+		selectedLaps: number[],
+	): Promise<OutAndBackMarkerSettings | null> {
+		return this.loadTwoGateMarkerSettings(
+			"oneWayMarkerSettings",
+			fileHash,
+			selectedLaps,
+		);
+	}
+
+	private async loadTwoGateMarkerSettings(
+		field: TwoGateField,
 		fileHash: string,
 		selectedLaps: number[],
 	): Promise<OutAndBackMarkerSettings | null> {
@@ -802,13 +859,10 @@ export class ParameterStorage {
 
 			request.onsuccess = () => {
 				const result = request.result as StoredParameters | undefined;
-				if (
-					result &&
-					result.outAndBackMarkerSettings &&
-					result.outAndBackMarkerSettings[lapKey]
-				) {
-					log.debug(`✅ Out and Back markers loaded for lap key: ${lapKey}`);
-					resolve(result.outAndBackMarkerSettings[lapKey]);
+				const saved = result?.[field]?.[lapKey];
+				if (saved) {
+					log.debug(`✅ ${field} loaded for lap key: ${lapKey}`);
+					resolve(saved);
 				} else {
 					resolve(null);
 				}
