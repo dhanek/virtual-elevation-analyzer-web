@@ -40,7 +40,6 @@ import {
 	type SettingsEnvelope,
 } from "../../analysis/SettingsBundle";
 import { readZip } from "../../utils/zip";
-import { rememberActivityFile } from "../dev/devSessionStore";
 
 interface FileLoadDependencies {
 	appState: AppState;
@@ -145,9 +144,13 @@ export async function handleFileSelection(file: File): Promise<void> {
 	displayFileInfo(file);
 
 	// DEV ONLY, and it does not await: cache the bytes so a Vite reload can
-	// come back to this ride instead of an empty drop zone. No-op in a
-	// production build. See shell/dev/devSessionStore.
-	void rememberActivityFile(file);
+	// come back to this ride instead of an empty drop zone. Not in a
+	// production build: the import is dropped. See shell/dev/devSessionStore.
+	if (import.meta.env.DEV) {
+		void import("../dev/devSessionStore").then(({ rememberActivityFile }) =>
+			rememberActivityFile(file),
+		);
+	}
 
 	// Calculate file hash immediately for parameter persistence
 	deps.appState.currentFileHash =
