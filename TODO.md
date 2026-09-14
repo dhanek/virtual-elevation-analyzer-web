@@ -309,7 +309,7 @@ removed. `npm run check`, `npm run lint`, vitest and `cargo test` clean on the p
 ride file or ride filename in the diff, fixtures or commit messages. Line-number citations in new
 comments re-verified at the ported tip.
 
-- [ ] **I1 [L] The described features: solver + Convergence tab, barometric lag, JSON/zip settings
+- [x] **I1 [L] The described features: solver + Convergence tab, barometric lag, JSON/zip settings
       export.** The PR body names these three.
       *Criteria:* each works on the reference ride in the running app in all four modes (Standard,
       GPS lap, out-and-back, one-way — one-way did not exist on the PR's base); the settings export
@@ -331,7 +331,7 @@ comments re-verified at the ported tip.
       - `noNodeBuiltins` fails when a `node:` import is added under `src/api` (mutation-checked);
         knip sees every `src/api` export used.
 
-- [ ] **I3 [S] Dev conveniences — part (c).** Warm-reload session cache, WSL file-watch polling, a
+- [x] **I3 [S] Dev conveniences — part (c).** Warm-reload session cache, WSL file-watch polling, a
       wasm-rebuild reload plugin, `dev:all`. Only `npm run dev` changes.
       *Criteria:* the production build contains none of the dev-session code (grep of `dist`);
       polling is off on macOS unless `VITE_POLL=1`; the reload plugin is serve-only and fires only
@@ -345,7 +345,7 @@ comments re-verified at the ported tip.
       `crr_for_gain` inverts `ve_gain` within tolerance and returns a named failure when no root
       exists; `cargo test` green.
 
-- [ ] **I5 [S] `plotly.js-basic-dist` → `plotly.js-cartesian-dist` — part (e).** Needed for the
+- [x] **I5 [S] `plotly.js-basic-dist` → `plotly.js-cartesian-dist` — part (e).** Needed for the
       Convergence tab's contour trace; the plot chunk grows ~27%.
       *Criteria:* `index.html`'s CSP unchanged (no `unsafe-eval`) and no CSP report while the
       Convergence tab renders; the plot chunk size is stated in the Done entry; the contour renders
@@ -529,8 +529,8 @@ changed and why.
 
 ### Bundle I · PR #8 ported onto `main` — 2026-09-14
 
-**The items this advances:** *Bundle I · Port PR #8 onto `main`* — I2, I4 and I6 close; I1, I3 and
-I5 stay open on the maintainer's in-app checks only, listed below.
+**The items this advances:** *Bundle I · Port PR #8 onto `main`* — all six close: I2, I4 and
+I6 by suite or measurement; I1, I3 and I5 once the in-app checks below ran.
 
 **Measured at `4acbff7` by review round 56 (`vite build`):**
 
@@ -546,10 +546,13 @@ carries no dev-session code (the grep exits 1), polling is off on macOS unless `
 reload plugin is serve-only and watches `pkg/`. I4: every criterion, after F55-09. I5: `index.html`'s
 CSP unchanged, no `eval(` in the build, chunk sizes stated above. I6: every criterion.
 
-**Still open — the maintainer's checks in the running app, not recorded as run on `4acbff7`:** the
-four modes analyse on the reference ride (I1); a warm reload restores ride, laps, mode and gates,
-and `dev:all` works on macOS (I3); the contour renders on the reference ride and the Convergence tab
-raises no CSP report (I5). Those three items tick when the checks pass.
+**Checked in the running app (review rounds 56 and 57, by the driver session, counted by the
+maintainer's ruling):** I1: the four modes (Standard, GPS lap, out-and-back, one-way) analyse on
+the reference ride with no console error, at `fc54b18`. I3: a warm reload restores ride, laps,
+mode and gates (`4acbff7`); `dev:all` starts and stops cleanly under macOS /bin/bash 3.2
+(`4acbff7`) and, with cargo-watch installed, a Rust edit rebuilds the wasm and reloads the page
+(`fc54b18`). I5: the Convergence contour renders on the reference ride and no CSP report is raised
+while it does, in a production build under `vite preview` (`4acbff7`).
 
 ### A saved gate survives reopening its file — 2026-09-14
 
