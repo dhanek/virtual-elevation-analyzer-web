@@ -2,6 +2,23 @@ import { AppState } from "../../state/AppState";
 import { ParameterStorage } from "../../utils/ParameterStorage";
 import { MapVisualization } from "../../components/MapVisualization";
 import { log } from "../../utils/log";
+import type { GatePosition } from "../../utils/GpsLapDetection";
+
+/** Which two-gate mode is bound: its storage key and its marker labels. */
+const GATE_PAIRS = {
+	outAndBack: {
+		load: "loadOutAndBackMarkerSettings",
+		save: "saveOutAndBackMarkerSettings",
+		labelA: "Gate A (Start/End)",
+		labelB: "Gate B (Turnaround)",
+	},
+	oneWay: {
+		load: "loadOneWayMarkerSettings",
+		save: "saveOneWayMarkerSettings",
+		labelA: "Gate A (Start)",
+		labelB: "Gate B (End)",
+	},
+} as const;
 
 export interface OutAndBackDetectionCallbacks {
 	getSelectedDataTimeRange: () => {
@@ -13,12 +30,14 @@ export interface OutAndBackDetectionCallbacks {
 		timeOffset: number,
 		startTime: number,
 	) => number | null;
-	runOutAndBackDetection: (
-		markerALat: number,
-		markerALon: number,
-		markerBLat: number,
-		markerBLon: number,
-	) => void;
+	/**
+	 * Out-and-back (the default) or one-way. One-way mode places the same two
+	 * gates with the same markup, but saves them under its own key and detects
+	 * GPS laps from them.
+	 */
+	gates?: keyof typeof GATE_PAIRS;
+	/** Both gates as the samples their sliders resolved to. */
+	runDetection: (gateA: GatePosition, gateB: GatePosition) => void;
 	/**
 	 * Hand the caller a "re-run detection with the gates where they are now"
 	 * closure.
@@ -51,6 +70,7 @@ export async function bindOutAndBackDetection(
 	callbacks: OutAndBackDetectionCallbacks,
 ): Promise<void> {
 	if (!mapVisualization || !appState.currentFitData) return;
+	const pair = GATE_PAIRS[callbacks.gates ?? "outAndBack"];
 
 	const sliderControls = document.getElementById("oabGateSliderControls");
 	const gateASlider = document.getElementById(
@@ -107,11 +127,10 @@ export async function bindOutAndBackDetection(
 		let offsetB = carry?.b ?? Math.min(60, maxSeconds - 5); // Default 60 seconds or near end
 		if (appState.currentFileHash) {
 			try {
-				const savedMarkers =
-					await parameterStorage.loadOutAndBackMarkerSettings(
-						appState.currentFileHash,
-						appState.selectedLaps,
-					);
+				const savedMarkers = await parameterStorage[pair.load](
+					appState.currentFileHash,
+					appState.selectedLaps,
+				);
 				if (
 					savedMarkers &&
 					savedMarkers.gateATimeOffset !== undefined &&
@@ -152,7 +171,7 @@ export async function bindOutAndBackDetection(
 	sliderControls.classList.remove("hidden");
 
 	// Helper to get gate position info from time offset
-	const getGatePosition = (timeOffset: number) => {
+	const getGatePosition = (timeOffset: number): GatePosition | null => {
 		const currentTimeRange = callbacks.getSelectedDataTimeRange();
 		const gateIndex = callbacks.findDataIndexAtTimeOffset(
 			timeOffset,
@@ -186,8 +205,8 @@ export async function bindOutAndBackDetection(
 		}
 
 		// Update markers on map
-		if (posA) mapVisualization?.setGpsMarkerA(posA.lat, posA.lon);
-		if (posB) mapVisualization?.setGpsMarkerB(posB.lat, posB.lon);
+		if (posA) mapVisualization?.setGpsMarkerA(posA.lat, posA.lon, pair.labelA);
+		if (posB) mapVisualization?.setGpsMarkerB(posB.lat, posB.lon, pair.labelB);
 
 		// Save settings — ONLY WHEN THE USER MOVED A GATE. The key includes
 		// `appState.selectedLaps`, read here at call time, so a pass triggered by
@@ -196,7 +215,7 @@ export async function bindOutAndBackDetection(
 		// saved for those laps. See the GPS-lap twin.
 		if (persist && appState.currentFileHash) {
 			try {
-				await parameterStorage.saveOutAndBackMarkerSettings(
+				await parameterStorage[pair.save](
 					appState.currentFileHash,
 					appState.selectedLaps,
 					{
@@ -211,7 +230,7 @@ export async function bindOutAndBackDetection(
 
 		// Run detection if both gates are valid
 		if (posA && posB) {
-			callbacks.runOutAndBackDetection(posA.lat, posA.lon, posB.lat, posB.lon);
+			callbacks.runDetection(posA, posB);
 		}
 	};
 

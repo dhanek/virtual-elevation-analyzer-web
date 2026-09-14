@@ -235,19 +235,19 @@ export class MapVisualization {
 	/**
 	 * Set GPS marker A at a specific location
 	 */
-	public setGpsMarkerA(lat: number, lon: number): void {
+	public setGpsMarkerA(lat: number, lon: number, label?: string): void {
 		const ctx = this.getContext();
 		if (!ctx) return;
-		gateMarkers.setGpsMarkerA(ctx, this.gateMarkers, lat, lon);
+		gateMarkers.setGpsMarkerA(ctx, this.gateMarkers, lat, lon, label);
 	}
 
 	/**
 	 * Set GPS marker B at a specific location
 	 */
-	public setGpsMarkerB(lat: number, lon: number): void {
+	public setGpsMarkerB(lat: number, lon: number, label?: string): void {
 		const ctx = this.getContext();
 		if (!ctx) return;
-		gateMarkers.setGpsMarkerB(ctx, this.gateMarkers, lat, lon);
+		gateMarkers.setGpsMarkerB(ctx, this.gateMarkers, lat, lon, label);
 	}
 
 	/**

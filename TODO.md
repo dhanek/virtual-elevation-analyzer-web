@@ -406,17 +406,6 @@ re-deriving it):
       calibration work is the closest prior art and its gating lesson (gate on the gust index, not
       on R²) applies here. *origin: maintainer, 2026-08-30*
 
-- [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
-      deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
-      own investigation before it can be sized.
-      **Investigated 2026-09-14.** Not a regression: "GPS gate one way" was never built — the
-      detector's switch fell back to lap splitting (`GpsLapDetection.ts`, unchanged since the
-      original port), while the Python recipe's mode detects A→B gate pairs in one direction. The
-      investigation also found both existing detectors cutting wrong laps. Split in two: the
-      correctness half is under **Done** (*Gate detection cuts only the selected laps*); what
-      remains is the one-way A→B mode itself.
-      `gateMarkers.ts`, `bindGpsDetection.ts`, `bindOutAndBackDetection.ts`
-
 - [x] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
       The analyze leg paints `updateMetricsDisplay` from ONE fit over the concatenated selection
       (`initializeVEAnalysis`); the kick a macrotask later writes the MEAN of the per-lap fits
@@ -465,6 +454,51 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### One-way gates, A to B — 2026-09-14
+
+**The item this closes:** *[L] GPS gate detection: single gate vs A/B directional.* Reviewed during
+Phase 7 and deliberately not folded in — it is the detection layer, not the update pipeline. Needs
+its own investigation before it can be sized. `gateMarkers.ts`, `bindGpsDetection.ts`,
+`bindOutAndBackDetection.ts`
+
+**Not a regression — never built.** "GPS gate one way" sat in the mode dropdown while the detector's
+switch fell back to lap splitting, unchanged since the original port, so the mode showed one gate
+and cut ordinary laps. The Python recipe the port came from defines it as A→B gate pairs counted in
+one direction (`gps_gate_result.py`, `detect_sections`). The investigation's correctness half
+shipped first: *Gate detection cuts only the selected laps*, below.
+
+**What it does.** A segment runs from a pass of gate A to the next pass of gate B, each counted only
+in the direction the rider was travelling at the sample its slider resolved to; every A before B
+restarts the segment. Passes the other way are not gate passes, so the return leg of an
+out-and-back course is ignored unless the gates are placed on it. The Python version took the
+direction from the first pass it found instead, which a window opening on a wrong-way pass silently
+inverts.
+
+**Built from parts that already existed.** The segments are `DetectedLap`-shaped and go into the
+GPS lap list, so the panel, the `gpsLap` analysis handler and Store Result treat them as GPS laps
+with no change — the mode was already routed there. The gate controls are the out-and-back
+two-gate markup and binder, which now takes `gates: "oneWay"`: that selects its own stored key
+(`oneWayMarkerSettings`, same shape as out-and-back's) and marker labels "Start" and "End" rather
+than "Start/End" and "Turnaround". A pair saved for out-and-back on the same laps is not a sensible
+one-way pair, hence the separate key. The binder hands detection both gates as samples, not just
+positions, because the sample's bearing is the direction. The lap-splitting detector lost its dead
+`mode` switch, and the three copies of the "bind whichever detector this mode uses" block in
+Section 3 are one `bindGateDetection`.
+
+**Measured on the reference ride, laps 10, 12 and 16:** gates at 8 s and 50 s give 5 segments of
+39–42 s / 0.40 km, one per outbound repetition; gates placed on the return leg (100 s, 120 s) give 5
+northbound segments of 19–20 s. Analyze over the first set: 5 laps, mean R² 0.3309.
+
+Tests written first and confirmed red: 4 detector tests (direction, the return leg, gaps, last A
+before B), 4 binder tests (own storage key on load and save, gates passed as samples, labels), 2
+template tests, 2 invalidation tests for a one-way re-detection. 1262 tests / 103 files, `check`
+and `lint` clean. Checked in the running app on the reference ride in Chrome.
+`frontend/src/utils/GpsLapDetection.ts` (`OneWayGateDetector`),
+`frontend/src/shell/section3/bindOutAndBackDetection.ts`,
+`frontend/src/shell/section3/section3Orchestration.ts` (`runOneWayGateDetection`,
+`bindGateDetection`), `frontend/src/shell/section3/renderSection3Template.ts`,
+`frontend/src/utils/ParameterStorage.ts`
 
 ### Gate detection cuts only the selected laps — 2026-09-14
 

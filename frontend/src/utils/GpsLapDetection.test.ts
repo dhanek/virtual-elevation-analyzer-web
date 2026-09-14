@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	DEFAULT_ONE_WAY_GATE_CONFIG,
 	DEFAULT_OUT_AND_BACK_CONFIG,
 	GpsLapDetector,
+	OneWayGateDetector,
 	OutAndBackDetector,
 	getDefaultLapDetectionConfig,
 } from "./GpsLapDetection";
@@ -312,5 +314,110 @@ describe("GpsLapDetector", () => {
 		for (const lap of result.detectedLaps) {
 			expect(insideSomeWindow(windows, lap.startIdx, lap.endIdx)).toBe(true);
 		}
+	});
+});
+
+describe("OneWayGateDetector", () => {
+	/**
+	 * A gate as the binder hands it over: the sample the slider resolved to.
+	 * That sample's own bearing is the one way the gate counts.
+	 */
+	function gateAt(track: Track, p: Point, from = 0) {
+		const index = track.nearest(p, from);
+		return { lat: track.lat[index], lon: track.lon[index], index };
+	}
+
+	function detect(
+		track: Track,
+		a: { lat: number; lon: number; index: number },
+		b: { lat: number; lon: number; index: number },
+		windows: Window[],
+	) {
+		return new OneWayGateDetector(
+			track.lat,
+			track.lon,
+			track.timestamps,
+			track.distance,
+			{ gateA: a, gateB: b, windows, ...DEFAULT_ONE_WAY_GATE_CONFIG },
+		).detectLaps();
+	}
+
+	it("counts only the passes in the direction the gates were placed", () => {
+		const track = buildTrack(repeat(OUT_AND_BACK_REP, 3));
+		const a = gateAt(track, [0, 0]);
+		const b = gateAt(track, [0, 400], a.index);
+		const result = detect(track, a, b, whole(track));
+
+		expect(result.detectedLaps).toHaveLength(3);
+		for (const lap of result.detectedLaps) {
+			// 400 m northbound at 8 m a second, never the 1.2 km round trip.
+			expect(lap.duration).toBeGreaterThan(45);
+			expect(lap.duration).toBeLessThan(55);
+			expect(lap.directionName).toBe("N");
+		}
+		expect(result.detectedLaps.map((l) => l.lapNumber)).toEqual([1, 2, 3]);
+	});
+
+	it("measures the return leg when the gates are placed on it", () => {
+		const track = buildTrack(repeat(OUT_AND_BACK_REP, 3));
+		const turn = track.nearest([6, 500]);
+		const a = gateAt(track, [6, 400], turn);
+		const b = gateAt(track, [6, 0], a.index);
+		const result = detect(track, a, b, whole(track));
+
+		expect(result.detectedLaps).toHaveLength(3);
+		for (const lap of result.detectedLaps) {
+			expect(lap.directionName).toBe("S");
+		}
+	});
+
+	it("never builds a segment across a FIT lap that is not selected", () => {
+		const { track, windows } = threeRepsFirstAndThirdSelected();
+		const a = gateAt(track, [0, 0]);
+		const b = gateAt(track, [0, 400], a.index);
+		const result = detect(track, a, b, windows);
+
+		expect(result.detectedLaps).toHaveLength(2);
+		for (const lap of result.detectedLaps) {
+			expect(insideSomeWindow(windows, lap.startIdx, lap.endIdx)).toBe(true);
+		}
+	});
+
+	it("starts from the last pass of A before B", () => {
+		// Through A, back round a short loop, through A again, then out to B.
+		const track = buildTrack([
+			[0, -100],
+			[0, 100],
+			[3, 104],
+			[6, 100],
+			[6, -100],
+			[3, -104],
+			[0, -100],
+			[0, 500],
+		]);
+		const secondPassOfA = track.nearest([0, 0], track.nearest([3, -104]));
+		const a = gateAt(track, [0, 0]);
+		const b = gateAt(track, [0, 400], secondPassOfA);
+		const result = detect(track, a, b, whole(track));
+
+		expect(result.detectedLaps).toHaveLength(1);
+		expect(
+			Math.abs(result.detectedLaps[0].startIdx - secondPassOfA),
+		).toBeLessThanOrEqual(2);
+	});
+
+	it("never emits a zero-length segment when A and B are on the same spot", () => {
+		const track = buildTrack(repeat(OUT_AND_BACK_REP, 3));
+		const a = gateAt(track, [0, 100]);
+		// The same northbound point, taken one rep later.
+		const b = gateAt(track, [0, 100], track.nearest([6, -100]));
+		const result = detect(track, a, b, whole(track));
+
+		// Reachability: three A and three B passes, on equal indices.
+		expect(result.passings).toHaveLength(6);
+		for (const lap of result.detectedLaps) {
+			expect(lap.endIdx).toBeGreaterThan(lap.startIdx);
+		}
+		expect(result.detectedLaps).toHaveLength(0);
 	});
 });

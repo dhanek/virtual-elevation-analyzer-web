@@ -87,6 +87,7 @@ export function setGpsMarkerA(
 	markers: GateMarkers,
 	lat: number,
 	lon: number,
+	label = "Gate A (Start/End)",
 ): void {
 	// Remove existing marker A if present
 	if (markers.a) {
@@ -104,7 +105,7 @@ export function setGpsMarkerA(
 	});
 
 	// Add label positioned above the marker
-	markers.a.bindPopup("Gate A (Start/End)");
+	markers.a.bindPopup(label);
 	markers.a.bindTooltip("A", {
 		permanent: true,
 		direction: "top",
@@ -123,6 +124,7 @@ export function setGpsMarkerB(
 	markers: GateMarkers,
 	lat: number,
 	lon: number,
+	label = "Gate B (Turnaround)",
 ): void {
 	// Remove existing marker B if present
 	if (markers.b) {
@@ -140,7 +142,7 @@ export function setGpsMarkerB(
 	});
 
 	// Add label positioned above the marker
-	markers.b.bindPopup("Gate B (Turnaround)");
+	markers.b.bindPopup(label);
 	markers.b.bindTooltip("B", {
 		permanent: true,
 		direction: "top",

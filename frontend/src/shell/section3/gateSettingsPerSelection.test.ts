@@ -289,7 +289,7 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 	let appState: AppState;
 	let saveOutAndBackMarkerSettings: ReturnType<typeof vi.fn>;
 	let loadOutAndBackMarkerSettings: ReturnType<typeof vi.fn>;
-	let runOutAndBackDetection: ReturnType<typeof vi.fn>;
+	let runDetection: ReturnType<typeof vi.fn>;
 	let redetect: () => void;
 
 	const saved = new Map<
@@ -315,7 +315,7 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 				saved.set(key(laps), settings);
 			},
 		);
-		runOutAndBackDetection = vi.fn();
+		runDetection = vi.fn();
 
 		saved.set("1", { gateATimeOffset: 3, gateBTimeOffset: 15 });
 		saved.set("1,2", { gateATimeOffset: 40, gateBTimeOffset: 280 });
@@ -327,7 +327,7 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 			{
 				getSelectedDataTimeRange: timeRangeFor(appState),
 				findDataIndexAtTimeOffset: (offset: number) => offset,
-				runOutAndBackDetection,
+				runDetection,
 				registerRedetect: (fn) => {
 					redetect = fn;
 				},
@@ -403,5 +403,87 @@ describe("the out-and-back gates follow the FIT lap selection", () => {
 		await settle();
 
 		expect(saveOutAndBackMarkerSettings).toHaveBeenCalled();
+	});
+});
+
+/**
+ * ONE-WAY MODE REUSES THE TWO-GATE BINDER, not its storage. Its gates mean
+ * "start" and "end" rather than "start/end" and "turnaround", so a pair saved
+ * for out-and-back on the same laps is not a sensible one-way pair.
+ */
+describe("the one-way gates", () => {
+	let appState: AppState;
+	let saveOneWayMarkerSettings: ReturnType<typeof vi.fn>;
+	let loadOneWayMarkerSettings: ReturnType<typeof vi.fn>;
+	let runDetection: ReturnType<typeof vi.fn>;
+	let setGpsMarkerA: ReturnType<typeof vi.fn>;
+	let setGpsMarkerB: ReturnType<typeof vi.fn>;
+
+	beforeEach(async () => {
+		setupDom();
+		appState = makeAppState();
+		loadOneWayMarkerSettings = vi.fn(async () => ({
+			gateATimeOffset: 3,
+			gateBTimeOffset: 15,
+		}));
+		saveOneWayMarkerSettings = vi.fn(async () => {});
+		runDetection = vi.fn();
+		setGpsMarkerA = vi.fn();
+		setGpsMarkerB = vi.fn();
+
+		// Only the one-way methods exist, so reaching for the out-and-back ones
+		// fails the load and leaves the sliders on their defaults.
+		await bindOutAndBackDetection(
+			appState,
+			{ loadOneWayMarkerSettings, saveOneWayMarkerSettings } as never,
+			{ setGpsMarkerA, setGpsMarkerB } as never,
+			{
+				gates: "oneWay",
+				getSelectedDataTimeRange: timeRangeFor(appState),
+				findDataIndexAtTimeOffset: (offset: number) => offset,
+				runDetection,
+			},
+		);
+	});
+
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+	it("starts on the one-way gates saved for the selection", () => {
+		expect(loadOneWayMarkerSettings).toHaveBeenCalledWith("hash-1", [1]);
+		expect(el("oabGateASlider").value).toBe("3");
+		expect(el("oabGateBSlider").value).toBe("15");
+	});
+
+	it("saves a moved gate under the one-way key", async () => {
+		const slider = el("oabGateBSlider");
+		slider.value = "12";
+		slider.dispatchEvent(new Event("input"));
+		await settle();
+
+		expect(saveOneWayMarkerSettings).toHaveBeenCalledWith("hash-1", [1], {
+			gateATimeOffset: 3,
+			gateBTimeOffset: 12,
+		});
+	});
+
+	it("hands detection both gates with the samples they resolved to", () => {
+		// The sample, not just the position: its bearing is the one way.
+		expect(runDetection).toHaveBeenCalledWith(
+			{ lat: 52.5 + 3 / 100000, lon: 13.4 + 3 / 100000, index: 3 },
+			{ lat: 52.5 + 15 / 100000, lon: 13.4 + 15 / 100000, index: 15 },
+		);
+	});
+
+	it("labels the markers as start and end, not turnaround", () => {
+		expect(setGpsMarkerA).toHaveBeenLastCalledWith(
+			expect.any(Number),
+			expect.any(Number),
+			"Gate A (Start)",
+		);
+		expect(setGpsMarkerB).toHaveBeenLastCalledWith(
+			expect.any(Number),
+			expect.any(Number),
+			"Gate B (End)",
+		);
 	});
 });
