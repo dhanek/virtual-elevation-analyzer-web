@@ -18,7 +18,7 @@ pids=()
 cleanup() {
     # A single Ctrl-C in the terminal reaches the whole process group, but a
     # kill of this script does not, so take the children down explicitly.
-    for pid in "${pids[@]}"; do
+    for pid in ${pids[@]+"${pids[@]}"}; do
         kill "$pid" 2>/dev/null
     done
     wait 2>/dev/null
@@ -43,5 +43,11 @@ echo "🚀 Starting Vite dev server"
 npm --prefix "$REPO_ROOT/frontend" run dev &
 pids+=($!)
 
-# Exit as soon as either side dies, rather than leaving a half-running loop.
-wait -n
+# Exit as soon as either side dies. A poll, not `wait -n`: macOS ships
+# bash 3.2, which rejects `wait -n` and would run the EXIT trap at once.
+while :; do
+    for pid in "${pids[@]}"; do
+        kill -0 "$pid" 2>/dev/null || exit 0
+    done
+    sleep 1
+done
