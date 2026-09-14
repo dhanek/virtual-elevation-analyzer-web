@@ -94,12 +94,16 @@ export function buildSaveResultData(
 
 	const avgPower = calculateAverage(trimmedPower, false);
 	const avgSpeed = calculateAverage(trimmedVelocity, false) * 3.6;
-	// STILL zero-skipping, deliberately. `buildFilteredDataFromProfiles`
-	// now marks a missing reading as NaN (which `calculateAverage` drops
-	// anyway), so for the two segment modes this flag could be dropped —
-	// but `prepareAnalysisPayload.ts:88` and `ActivityLoader.ts:242` still
-	// fabricate a 0 for a missing sample, and Standard's analyze path and
-	// every CSV ride go through those.
+	// Temperature is the ONLY average that skips zeros, deliberately. A
+	// missing temperature reaches this array as 0, not NaN: the FIT parser
+	// (`parse_fit_file`, Rust) pushes 0 for every record without one, and
+	// `createCsvActivityData` zero-fills a CSV with no Temperature column.
+	// Both analyze-side concatenations — `prepareAnalysisPayload` (Standard)
+	// and `buildFilteredDataFromProfiles` (the segment modes) — NaN-mark only
+	// non-finite values, so that 0 passes through looking like a reading.
+	// Skipping zeros keeps those fabricated samples out of the mean, at the
+	// cost of also dropping a genuine 0 °C reading. A channel that is 0
+	// throughout still averages to 0 here, not to absent.
 	// ABSENT, not 0, when the ride carries no usable reading: a stored 0 is
 	// indistinguishable from a genuine 0 °C ride.
 	const hasAnyTemperature = trimmedTemperature.some(Number.isFinite);
