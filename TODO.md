@@ -41,6 +41,7 @@ dependency column below says what actually has to wait.
 | ~~**F**~~ | ~~Weather — the deferred WEATH-01 feature~~ | — | **Done** 2026-09-10 — (a) bounded cache, (b) retired by **D-d**, endpoint rung, cache key, and WEATH-01 itself (rescoped to per-lap weather by measurement) |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
+| **I** | Port PR #8 (solver, convergence plot, baro lag, settings export) onto `main` | XL | nothing — decided 2026-09-14 |
 | — | Standalone work | varies | — |
 
 Every bundle above is now **committed** on `refactoring`; the per-bundle Done entries below still
@@ -291,6 +292,73 @@ re-deriving it):
       each with a mutation that kills it
 - [x] The scripts RUN, not merely typecheck — `profile:slider` and `profile:gps-lap-render`
       both exit 0
+
+## Bundle I · Port PR #8 onto `main`
+
+**Origin:** review round 53 on PR #8 (`JB/week36-solve-plots`, reviewed at `a123299`). The branch
+forked at `40bbc64` and conflicts with `main` in 34 files, among them the ones it rewrites. Maintainer
+ruling 2026-09-14: **we port it ourselves** onto current `main`, as one PR, with the undescribed
+scope written down here so the port is reviewed against criteria rather than against itself. The
+deep review round 53 deferred runs on the ported tip. `saveParameters` losing gates, which the PR
+fixed in passing, already shipped on `main` (*A saved gate survives reopening its file*); the port
+drops that hunk rather than carrying a second fix.
+
+**Common to every item:** the port lands on `main` as it is now, not as it was at `40bbc64`, so each
+changed call site follows the refactors in #9–#28, and nothing reintroduces a structure those PRs
+removed. `npm run check`, `npm run lint`, vitest and `cargo test` clean on the ported tip. No real
+ride file or ride filename in the diff, fixtures or commit messages. Line-number citations in new
+comments re-verified at the ported tip.
+
+- [ ] **I1 [L] The described features: solver + Convergence tab, barometric lag, JSON/zip settings
+      export.** The PR body names these three.
+      *Criteria:* each works on the reference ride in the running app in all four modes (Standard,
+      GPS lap, out-and-back, one-way — one-way did not exist on the PR's base); the settings export
+      round-trips including all three gate families; a nonzero `baro_lag_seconds` is never applied
+      silently (default 0).
+
+- [ ] **I2 [M] Headless API (`frontend/src/api/*`) and the `ve-run` CLI — part (b).**
+      Runs an analysis from a terminal: a ride file plus a JSON config in, results JSON out.
+      *Criteria — one code path, no fork (maintainer's condition):*
+      - `runAnalysis` drives the **same** pipeline the app uses (`updateModeVEPlots`); the CLI is a
+        thin shim that parses arguments and calls `src/api`, with no analysis logic of its own.
+      - No physics, aggregation, trim or result-column logic lives in `src/api` or
+        `scripts/ve-run.ts`; everything there is imported from the modules the UI uses.
+        `headlessCallbacks.ts` is the likeliest place for a second copy to grow, so it may only
+        adapt existing functions, and a test fails if it defines its own aggregation.
+      - A golden test proves the CLI and the app give identical r²/RMSE/CdA/Crr for the same
+        selection in every mode.
+      - The schema covers one-way gates, or rejects `mode: "oneWay"` with a named error.
+      - `noNodeBuiltins` fails when a `node:` import is added under `src/api` (mutation-checked);
+        knip sees every `src/api` export used.
+
+- [ ] **I3 [S] Dev conveniences — part (c).** Warm-reload session cache, WSL file-watch polling, a
+      wasm-rebuild reload plugin, `dev:all`. Only `npm run dev` changes.
+      *Criteria:* the production build contains none of the dev-session code (grep of `dist`);
+      polling is off on macOS unless `VITE_POLL=1`; the reload plugin is serve-only and fires only
+      on `pkg/` changes; a warm reload restores ride, laps, mode and gates on the reference ride;
+      `dev:all` starts the dev server and the wasm watcher.
+
+- [ ] **I4 [M] Rust gain kernel — part (d).** `ve_gain`, `ve_gain_grid`, `crr_for_gain` in
+      `backend/src/virtual_elevation.rs`; the solver and Convergence tab are built on them.
+      *Criteria:* `ve_gain(cda, crr, s, e)` equals `ve[e] - ve[s]` from `build_virtual_elevation`
+      within 1e-9 over random windows; each `ve_gain_grid` cell equals `ve_gain` for that pair;
+      `crr_for_gain` inverts `ve_gain` within tolerance and returns a named failure when no root
+      exists; `cargo test` green.
+
+- [ ] **I5 [S] `plotly.js-basic-dist` → `plotly.js-cartesian-dist` — part (e).** Needed for the
+      Convergence tab's contour trace; the plot chunk grows ~27%.
+      *Criteria:* `index.html`'s CSP unchanged (no `unsafe-eval`) and no CSP report while the
+      Convergence tab renders; the entry chunk is no larger than on `main`; the plot chunk size is
+      stated in the Done entry; the contour renders on the reference ride.
+
+- [ ] **I6 [XS] `.gitattributes` with `* text=auto eol=lf` — part (f).**
+      *Criteria:* `git add --renormalize .` on the ported tip changes zero files; binaries (`.fit`
+      fixtures, `.wasm`, images) are not treated as text.
+
+**Not ported — part (a):** the Python `ve_batch` package and its `python.yml` workflow. Ruling
+2026-09-14: dropped; the CLI in I2 is the scripting surface.
+
+---
 
 ## Standalone work
 
