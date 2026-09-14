@@ -49,13 +49,14 @@ import { requestModeUpdate } from "../analysis/requestModeUpdate";
 import { noteTrimWindowRequested } from "../analysis/bindModeControls";
 import { saveCurrentLapSettings } from "../analysis/storageHandlers";
 import { sameItems } from "../ve/veSelectionGuard";
+import { selectedLapWindows } from "./selectedLapWindows";
 
 /**
  * "Re-run the active GPS detection with the gates where they are now",
  * published by whichever binder is currently bound.
  *
  * BOTH DETECTORS ARE SCOPED TO THE FIT LAP SELECTION — each derives its
- * `trimStart`/`trimEnd` from `appState.selectedLaps` — and nothing re-ran them
+ * detection windows from `appState.selectedLaps` — and nothing re-ran them
  * when that selection changed. Ticking a second FIT lap left the detected lap
  * count, the checkbox list and the VE panel all describing the previous window;
  * the only way to provoke a re-detect was to nudge a gate by a second. Reported
@@ -843,42 +844,12 @@ export async function runGpsLapDetection(
 		return;
 	}
 
-	// Calculate trim indices from selected FIT laps' time ranges
-	let trimStart = 0;
-	let trimEnd = deps.appState.currentFitData.timestamps.length - 1;
-
-	if (
-		deps.appState.selectedLaps.length > 0 &&
-		deps.appState.currentLaps.length > 0
-	) {
-		// Get time ranges for selected FIT laps
-		const selectedLapData = deps.appState.selectedLaps.map(
-			(lapNumber) => deps.appState.currentLaps[lapNumber - 1],
-		);
-		const allTimestamps = Array.from(
-			deps.appState.currentFitData.timestamps,
-		) as number[];
-
-		// Find the data indices that fall within the selected FIT laps' time ranges
-		const indicesInSelectedLaps: number[] = [];
-		for (let i = 0; i < allTimestamps.length; i++) {
-			const timestamp = allTimestamps[i];
-			const isInSelectedLap = selectedLapData.some(
-				(lap) => timestamp >= lap.start_time && timestamp <= lap.end_time,
-			);
-			if (isInSelectedLap) {
-				indicesInSelectedLaps.push(i);
-			}
-		}
-
-		if (indicesInSelectedLaps.length > 0) {
-			trimStart = indicesInSelectedLaps[0];
-			trimEnd = indicesInSelectedLaps[indicesInSelectedLaps.length - 1];
-			log.debug(
-				`GPS lap detection trim region: ${trimStart} to ${trimEnd} (${indicesInSelectedLaps.length} points from ${deps.appState.selectedLaps.length} FIT laps)`,
-			);
-		}
-	}
+	const windows = selectedLapWindows(
+		deps.appState.currentFitData.timestamps,
+		deps.appState.currentLaps,
+		deps.appState.selectedLaps,
+	);
+	log.debug("GPS lap detection windows:", windows);
 
 	// Get detection mode from Section 3 GPS mode state (not None since we're running detection)
 	const detectionMode = getGpsAnalysisMode();
@@ -890,8 +861,7 @@ export async function runGpsLapDetection(
 	const config: GpsLapDetectionConfig = {
 		markerLat,
 		markerLon,
-		trimStart,
-		trimEnd,
+		windows,
 		...getDefaultLapDetectionConfig(),
 		mode,
 	};
@@ -1108,46 +1078,19 @@ export async function runOutAndBackDetection(
 		return;
 	}
 
-	// Calculate trim indices from selected FIT laps' time ranges
-	let trimStart = 0;
-	let trimEnd = deps.appState.currentFitData.timestamps.length - 1;
-
-	if (
-		deps.appState.selectedLaps.length > 0 &&
-		deps.appState.currentLaps.length > 0
-	) {
-		const selectedLapData = deps.appState.selectedLaps.map(
-			(lapNumber) => deps.appState.currentLaps[lapNumber - 1],
-		);
-		const allTimestamps = Array.from(
-			deps.appState.currentFitData.timestamps,
-		) as number[];
-
-		const indicesInSelectedLaps: number[] = [];
-		for (let i = 0; i < allTimestamps.length; i++) {
-			const timestamp = allTimestamps[i];
-			const isInSelectedLap = selectedLapData.some(
-				(lap) => timestamp >= lap.start_time && timestamp <= lap.end_time,
-			);
-			if (isInSelectedLap) {
-				indicesInSelectedLaps.push(i);
-			}
-		}
-
-		if (indicesInSelectedLaps.length > 0) {
-			trimStart = indicesInSelectedLaps[0];
-			trimEnd = indicesInSelectedLaps[indicesInSelectedLaps.length - 1];
-			log.debug(`Out and Back trim region: ${trimStart} to ${trimEnd}`);
-		}
-	}
+	const windows = selectedLapWindows(
+		deps.appState.currentFitData.timestamps,
+		deps.appState.currentLaps,
+		deps.appState.selectedLaps,
+	);
+	log.debug("Out and Back detection windows:", windows);
 
 	const config: OutAndBackConfig = {
 		markerALat,
 		markerALon,
 		markerBLat,
 		markerBLon,
-		trimStart,
-		trimEnd,
+		windows,
 		...DEFAULT_OUT_AND_BACK_CONFIG,
 	};
 
@@ -1408,7 +1351,7 @@ export function updateSelectedLaps(): void {
 
 	// AND IN THE GPS MODES, RE-DETECT. The FIT selection is the detection
 	// WINDOW there, not the analysis unit: `runGpsLapDetection` and
-	// `runOutAndBackDetection` both derive `trimStart`/`trimEnd` from
+	// `runOutAndBackDetection` both derive their detection windows from
 	// `selectedLaps`. Nothing re-ran them when it changed, so ticking a second
 	// FIT lap left the detected-lap count and the panel on the old window until
 	// the user nudged a gate.
