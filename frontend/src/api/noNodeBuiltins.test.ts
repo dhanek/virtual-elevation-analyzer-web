@@ -30,17 +30,34 @@ function* walk(dir: string): Generator<string> {
 }
 
 const IMPORT_SPECIFIERS =
-	/from\s+["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)/g;
+	/from\s+["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s+["']([^"']+)["']|require\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 function specifiersOf(source: string): string[] {
 	const out: string[] = [];
 	for (const match of source.matchAll(IMPORT_SPECIFIERS)) {
-		out.push((match[1] ?? match[2])!);
+		out.push(match.slice(1).find((g) => g !== undefined)!);
 	}
 	return out;
 }
 
 describe("src/api stays out of the bundle", () => {
+	it("recognises every import form", () => {
+		const sources = [
+			`import "node:fs";`,
+			`import { a } from "node:fs";`,
+			`import * as b from 'node:fs';`,
+			`import type { C } from "node:fs";`,
+			`const d = await import("node:fs");`,
+			`export { e } from "node:fs";`,
+			`export * from "node:fs";`,
+			`const f = require("node:fs");`,
+			`import {\n\ta,\n\tb,\n} from "node:fs";`,
+		];
+		for (const source of sources) {
+			expect(specifiersOf(source), source).toEqual(["node:fs"]);
+		}
+	});
+
 	it("imports no node builtin from any non-test api module", () => {
 		const offenders: string[] = [];
 		for (const path of walk(join(SRC_ROOT, "api"))) {
