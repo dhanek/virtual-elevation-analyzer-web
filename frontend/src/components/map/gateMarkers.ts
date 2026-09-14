@@ -60,7 +60,7 @@ export function setGpsMarker(
 	}
 
 	// Add popup
-	markers.gate.bindPopup("GPS Gate - Click to move");
+	markers.gate.bindPopup("GPS Gate");
 
 	markers.gate.addTo(ctx.gpsMarkerLayer);
 

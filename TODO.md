@@ -409,6 +409,12 @@ re-deriving it):
 - [ ] **[L] GPS gate detection: single gate vs A/B directional.** Reviewed during Phase 7 and
       deliberately not folded in — it is the detection layer, not the update pipeline. Needs its
       own investigation before it can be sized.
+      **Investigated 2026-09-14.** Not a regression: "GPS gate one way" was never built — the
+      detector's switch fell back to lap splitting (`GpsLapDetection.ts`, unchanged since the
+      original port), while the Python recipe's mode detects A→B gate pairs in one direction. The
+      investigation also found both existing detectors cutting wrong laps. Split in two: the
+      correctness half is under **Done** (*Gate detection cuts only the selected laps*); what
+      remains is the one-way A→B mode itself.
       `gateMarkers.ts`, `bindGpsDetection.ts`, `bindOutAndBackDetection.ts`
 
 - [x] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
@@ -459,6 +465,56 @@ re-deriving it):
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Gate detection cuts only the selected laps — 2026-09-14
+
+**The item this advances:** *[L] GPS gate detection: single gate vs A/B directional* — its
+correctness half. The one-way A→B mode stays open under *Standalone work*.
+
+**Measured before any code, on the reference ride, laps 10, 12 and 16**, gate A at 8 s, B at 50 s:
+
+| mode | before | after |
+|---|---|---|
+| out-and-back | 11 sections, 7 reaching into unselected laps 11, 13, 14 and 15 | 5, all inside |
+| out-and-back, B on the turnaround | 2 sections, one spanning 1721 unselected samples | 5, split at the turn |
+| lap splitting | 11 laps, 9 reaching into unselected laps | 3, all inside |
+
+**Four defects, one per row of evidence.**
+
+1. **The window was the span, not the selection.** Both detectors took one index range from the
+   first selected sample to the last, so laps 10 + 12 also detected inside lap 11 — the per-point
+   membership list was built and then only its two ends were used. Detection now runs per
+   contiguous block of selected laps (`selectedLapWindows.ts`); nothing it builds can cross a gap.
+   Adjacent selected laps stay one block.
+2. **A U-turn inside a gate's radius collapsed into one passing** with whatever bearing the rider
+   pointed at mid-turn, so a B gate on the turnaround — which its own popup invites — never saw the
+   reversed pass the state machine waits for. A visit whose approach and departure differ by more
+   than 90° now yields two passings at its closest sample, arriving and leaving.
+3. **Lap splitting stopped at the first unpaired passing.** A window opening on a one-off pass the
+   other way returned zero laps however many followed. It now skips that passing.
+4. **Out-and-back started from the FIRST pass of A before B**, not the last, so a rider who came
+   back through A before heading out got an outbound leg that included the detour.
+
+The reference ride also showed a fifth effect that reading the code had not: the rider waits near
+A between FIT laps, and with the span window that standing cluster merged across the lap break into
+one passing whose closest sample sat ~250 samples later — which is why lap 10's second repetition
+used to report a 311 s inbound leg reaching into lap 11, against ~37 s for every other. Per-lap windows cut it at the lap boundary.
+
+**The shared half of the two detectors is one module now** (`gatePassings.ts`): bearings, samples
+near a gate, visits reduced to passings. It had been copied verbatim between the two classes, and
+every fix above would otherwise have landed twice. The gate popup's "Click to move" is gone — there
+was never a click handler.
+
+**Not changed, deliberately.** The gate slider still spans the whole selection including gaps, so it
+can point into an unselected lap; changing its meaning would reinterpret every stored offset for a
+non-contiguous selection. A passing is still "within 20 m", not a line crossing — no measured case
+needed more.
+
+Tests written first and confirmed red for the reason each names: 7 detector tests on synthetic
+two-lane tracks, 3 for the window helper. 1250 tests / 103 files, `check` and `lint` clean. Checked in
+the running app on the reference ride in all three modes. `frontend/src/utils/gatePassings.ts`,
+`frontend/src/utils/GpsLapDetection.ts`, `frontend/src/shell/section3/selectedLapWindows.ts`,
+`frontend/src/shell/section3/section3Orchestration.ts`
 
 ### Per-lap weather — 2026-09-10
 
