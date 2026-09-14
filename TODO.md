@@ -316,7 +316,7 @@ comments re-verified at the ported tip.
       round-trips including all three gate families; a nonzero `baro_lag_seconds` is never applied
       silently (default 0).
 
-- [ ] **I2 [M] Headless API (`frontend/src/api/*`) and the `ve-run` CLI — part (b).**
+- [x] **I2 [M] Headless API (`frontend/src/api/*`) and the `ve-run` CLI — part (b).**
       Runs an analysis from a terminal: a ride file plus a JSON config in, results JSON out.
       *Criteria — one code path, no fork (maintainer's condition):*
       - `runAnalysis` drives the **same** pipeline the app uses (`updateModeVEPlots`); the CLI is a
@@ -338,7 +338,7 @@ comments re-verified at the ported tip.
       on `pkg/` changes; a warm reload restores ride, laps, mode and gates on the reference ride;
       `dev:all` starts the dev server and the wasm watcher.
 
-- [ ] **I4 [M] Rust gain kernel — part (d).** `ve_gain`, `ve_gain_grid`, `crr_for_gain` in
+- [x] **I4 [M] Rust gain kernel — part (d).** `ve_gain`, `ve_gain_grid`, `crr_for_gain` in
       `backend/src/virtual_elevation.rs`; the solver and Convergence tab are built on them.
       *Criteria:* `ve_gain(cda, crr, s, e)` equals `ve[e] - ve[s]` from `build_virtual_elevation`
       within 1e-9 over random windows; each `ve_gain_grid` cell equals `ve_gain` for that pair;
@@ -350,12 +350,12 @@ comments re-verified at the ported tip.
       *Criteria:* `index.html`'s CSP unchanged (no `unsafe-eval`) and no CSP report while the
       Convergence tab renders; the plot chunk size is stated in the Done entry; the contour renders
       on the reference ride. ~~The entry chunk is no larger than on `main`~~ — **amended
-      2026-09-14 (maintainer):** measured 471 kB on `main` against 524 kB on the port (+53 kB,
-      ≈ +17 kB gzipped) because the solver and convergence modules load eagerly; the growth is
+      2026-09-14 (maintainer):** measured 471 kB on `main` against 522 kB on the port (521.64 kB,
+      measured after F55-02 dropped the dev-session modules; 524 kB before it) because the solver and convergence modules load eagerly; the growth is
       accepted rather than lazy-loaded. The contour uses the app's blue → grey → red tokens, not
       Viridis (maintainer, same day).
 
-- [ ] **I6 [XS] `.gitattributes` with `* text=auto eol=lf` — part (f).**
+- [x] **I6 [XS] `.gitattributes` with `* text=auto eol=lf` — part (f).**
       *Criteria:* `git add --renormalize .` on the ported tip changes zero files; binaries (`.fit`
       fixtures, `.wasm`, images) are not treated as text.
 
@@ -526,6 +526,30 @@ comments re-verified at the ported tip.
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Bundle I · PR #8 ported onto `main` — 2026-09-14
+
+**The items this advances:** *Bundle I · Port PR #8 onto `main`* — I2, I4 and I6 close; I1, I3 and
+I5 stay open on the maintainer's in-app checks only, listed below.
+
+**Measured at `4acbff7` by review round 56 (`vite build`):**
+
+| chunk | on `main` before the port | at `4acbff7` |
+|---|---|---|
+| plot, `plotly-cartesian` | 997 kB | 1,272.66 kB |
+| entry, `index` | 471 kB | 521.64 kB (524 kB at `148c0e7`, before F55-02 dropped the dev modules) |
+
+**Met by suite or measurement (rounds 55 and 56).** `check`, `lint` and vitest clean (1559 tests /
+132 files); `cargo test` 34 + 1. I1: the settings export round-trips including one-way gates, and
+`baro_lag_seconds` defaults to 0. I2: every criterion, after F55-03, F55-05 and F55-07. I3: `dist`
+carries no dev-session code (the grep exits 1), polling is off on macOS unless `VITE_POLL=1`, the
+reload plugin is serve-only and watches `pkg/`. I4: every criterion, after F55-09. I5: `index.html`'s
+CSP unchanged, no `eval(` in the build, chunk sizes stated above. I6: every criterion.
+
+**Still open — the maintainer's checks in the running app, not recorded as run on `4acbff7`:** the
+four modes analyse on the reference ride (I1); a warm reload restores ride, laps, mode and gates,
+and `dev:all` works on macOS (I3); the contour renders on the reference ride and the Convergence tab
+raises no CSP report (I5). Those three items tick when the checks pass.
 
 ### A saved gate survives reopening its file — 2026-09-14
 
