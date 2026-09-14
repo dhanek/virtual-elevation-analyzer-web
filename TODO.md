@@ -368,44 +368,6 @@ comments re-verified at the ported tip.
 
 *Not bundled: each of these is isolated, or needs its own scoping before it can be sized honestly.*
 
-- [ ] **[S] Scrub the ride filename from `main`'s history — after PR #8 lands, not before.**
-      The current file no longer names the ride (see *Conventions*), but the name is still in **25
-      commits** on `main`, spanning `3b05de7` (2026-08-31) to `dcdcaac` (2026-09-03) — in `TODO.md`
-      content and in six commit messages. `TODO.md` is not the only path affected: commits on branch
-      `in-app-checks-a-c-e` (`3299df0`) also put the name into
-      `frontend/src/analysis/unsetParameterFallbacks.ts`, so the scrub covers that source path too.
-      That was corrected in the working tree on 2026-09-04; the history still carries it.
-
-      **This was attempted on 2026-09-04 and reverted.** The rewrite itself worked — 25 commits,
-      443 commits in and out, `TODO.md` the only path touched — but it broke **PR #8**, the open
-      third-party contribution. The pre-flight check was wrong: it used GitHub's `baseRefOid`
-      (`cd4b771`, where the PR was *opened*) instead of the real merge-base. The contributor has
-      since merged `main` into their branch, so PR #8 **does** contain two of the rewritten commits
-      (`3b05de7`, `943c527`). The rewrite took PR #8 from **2** conflicting files to **16** and
-      dropped its merge-base from `40bbc64` to `15d42aa`. `main` was force-pushed back to `dcdcaac`
-      and PR #8 verified back to its original two conflicts.
-
-      **The sequencing rule this establishes:** merge PR #8 first, then rewrite. With no open
-      third-party branch left, only our own PRs need rebasing. Before any future attempt, check the
-      real merge-base of every open PR — `git merge-base refs/remotes/pr/N/head main` — never
-      `baseRefOid`.
-
-      **Recipe** (mechanical, does not depend on any local branch surviving; deliberately does
-      not restate the string it removes): a `sed -E` script matching the ride's filename — with and
-      without surrounding backticks, with and without its home-directory path prefix, plus its
-      single-lap variant — and mapping those onto "the reference ride" and "a single-lap cut of the
-      reference ride"; then the two prose lines that name the local download folder. Run it through
-      `git filter-branch --tree-filter` (on `TODO.md`, the only affected path) and `--msg-filter`
-      over `<earliest-affected>^..main`. Derive the exact pattern from the offending commits at the
-      time, not from this entry.
-
-      **Know what it does not buy.** The name also lives in `refs/pull/7|9|10|11|12/head`, which
-      GitHub keeps reachable **permanently** for merged PRs — all five were confirmed to still
-      contain it. A force-push to `main` cleans the branch, not the repository as GitHub serves it.
-      Genuine removal needs GitHub Support to purge those refs, or a fresh repository. Decide
-      whether that is the actual goal before spending the rewrite.
-      *origin: maintainer, 2026-09-04*
-
 - [x] **[M] Standard's first paint disagrees with the settled panel on a file with no stored
       parameters.** *Owner: bundle **C**.* Found by bundle C's in-app check 2026-09-03,
       **root-caused and fixed 2026-09-04.** See *Standard's two Crr fallbacks* under **Done**.
@@ -553,6 +515,40 @@ mode and gates (`4acbff7`); `dev:all` starts and stops cleanly under macOS /bin/
 (`4acbff7`) and, with cargo-watch installed, a Rust edit rebuilds the wasm and reloads the page
 (`fc54b18`). I5: the Convergence contour renders on the reference ride and no CSP report is raised
 while it does, in a production build under `vite preview` (`4acbff7`).
+
+### The ride filename is out of `main`'s history — 2026-09-14
+
+**The item this closes:** *[S] Scrub the ride filename from `main`'s history — after PR #8 lands,
+not before.* The 2026-09-04 attempt was reverted because it broke the open third-party PR #8; that
+PR is now closed (superseded by the port, #29), and no PR was open at rewrite time — checked, not
+assumed.
+
+**What was rewritten.** `git filter-branch` over `3b05de7^..main`: 42 commits, a `--tree-filter`
+on `TODO.md` (the only affected path) and a `--msg-filter`, mapping every spelling of the name —
+bare, with the home-directory prefix, the single-lap variant, each with or without backticks — onto
+"the reference ride" / "a single-lap cut of the reference ride", plus the one prose line that named
+the download folder. The pattern was derived from the offending commits, not from the old entry.
+
+**Measured before and after.** Before: 24 commits carried it in `TODO.md`, 6 commit messages did.
+After: 0 and 0, across messages and trees. The final tree is byte-identical to the pre-rewrite tip
+(`367ddbd`) and the commit count is unchanged at 460, so no file content changed — only history.
+`main` was force-pushed with a lease (`367ddbd` → `519343d`), and GitHub's copy was re-checked
+through the API: tip message, `TODO.md` on `main` and the 45 newest commit messages all clean.
+
+**A first pass missed one commit.** The range was derived from commits whose TREE carried the name
+and started at `943c527`; `3b05de7` carries it only in its MESSAGE and is older. The verification
+caught it and the rewrite was re-run from `3b05de7^`. Derive the range from messages AND trees.
+
+**Seven stale branches were deleted from origin** (`bundle-f-weather`, `bundle-g-test-infrastructure`,
+`gate-detection-correctness`, `gate-one-way-mode`, `in-app-checks-a-c-e`, `refactoring`,
+`retire-analyze-calculator-pass`); their work was already in `main` and their tips carried the name.
+`main` is now the only branch on origin. Local backup of the pre-rewrite tip:
+`backup/main-scrub-2026-09-14`.
+
+**What this does NOT buy, accepted by the maintainer 2026-09-14.** GitHub keeps `refs/pull/N/head`
+for merged PRs permanently, and those contain the pre-rewrite commits. The name is therefore still
+reachable to anyone who knows those ref URLs. Genuine removal needs GitHub Support to purge them or
+a fresh repository; the maintainer chose to clean the branch and accept the PR refs.
 
 ### A saved gate survives reopening its file — 2026-09-14
 
