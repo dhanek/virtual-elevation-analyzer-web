@@ -2,7 +2,8 @@
 #
 # The full dev loop: Vite on the frontend, cargo-watch rebuilding the wasm
 # core into frontend/pkg. The `ve-wasm-reload` plugin in vite.config.ts
-# reloads the page when a rebuild lands, so an edit to Rust and an edit to
+# reloads the page when the watch command touches frontend/pkg/.build-done
+# after a successful build, so an edit to Rust and an edit to
 # TypeScript both end with the browser showing the new code.
 #
 # Requires cargo-watch (cargo install cargo-watch). Without it this still
@@ -31,7 +32,7 @@ if command -v cargo-watch &> /dev/null; then
         --workdir "$REPO_ROOT/backend" \
         --watch src \
         --watch Cargo.toml \
-        --shell 'wasm-pack build --target web --out-dir ../frontend/pkg' &
+        --shell 'wasm-pack build --target web --out-dir ../frontend/pkg && touch ../frontend/pkg/.build-done' &
     pids+=($!)
 else
     echo "⚠️  cargo-watch not found — Rust changes will NOT rebuild."

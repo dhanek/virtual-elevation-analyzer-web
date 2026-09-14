@@ -1,6 +1,7 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import { release } from "os";
 import { resolve } from "path";
+import { wasmReloadPlugin } from "./src/shell/dev/wasmReloadPlugin";
 
 const PKG_DIR = resolve(__dirname, "pkg");
 
@@ -21,36 +22,6 @@ function needsPolling(): boolean {
 	return onWsl && __dirname.startsWith("/mnt/");
 }
 
-/**
- * Full-reload the page when wasm-pack rewrites `frontend/pkg`.
- *
- * `npm run dev:wasm` (root) rebuilds the Rust crate into that directory on
- * every change under `backend/`. The generated JS glue is in the module
- * graph, so Vite would notice that on its own — but the actual code lives in
- * `..._bg.wasm`, which the glue fetches at runtime by URL and which no module
- * imports. Without this, editing Rust and rebuilding leaves the page running
- * the previous wasm binary with no indication anything changed.
- *
- * Reload rather than HMR because the module is instantiated once at boot
- * (`init()` in fileLoadOrchestration); there is nothing to hot-swap it into.
- */
-function wasmReloadPlugin(): Plugin {
-	return {
-		name: "ve-wasm-reload",
-		apply: "serve",
-		configureServer(server) {
-			server.watcher.add(PKG_DIR);
-			const reload = (file: string) => {
-				if (!file.replace(/\\/g, "/").includes("/pkg/")) return;
-				server.config.logger.info("wasm rebuilt, reloading page");
-				server.ws.send({ type: "full-reload", path: "*" });
-			};
-			server.watcher.on("change", reload);
-			server.watcher.on("add", reload);
-		},
-	};
-}
-
 export default defineConfig(() => ({
 	// Use GitHub Pages base path only when VITE_GITHUB_PAGES=true
 	// For local dev/testing: npm run build
@@ -60,7 +31,7 @@ export default defineConfig(() => ({
 			? "/virtual-elevation-analyzer-web/"
 			: "/",
 	root: ".",
-	plugins: [wasmReloadPlugin()],
+	plugins: [wasmReloadPlugin(PKG_DIR)],
 	build: {
 		outDir: "../dist",
 		emptyOutDir: true,
