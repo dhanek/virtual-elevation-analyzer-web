@@ -13,6 +13,7 @@ import {
 	mapTrimToSegments,
 	hasUsableDistance,
 	stitchStandardProfiles,
+	trimLeavesMeasurableWindow,
 } from "./standardSegments";
 
 function segment(key: string, startIdx: number, endIdx: number): ModeSegment {
@@ -31,6 +32,14 @@ const SHARED_BOUNDARY_SEGMENTS = [
 	segment("lap3", 18, 27),
 ];
 const SELECTED_INDICES = Array.from({ length: 28 }, (_, i) => i);
+
+describe("trimLeavesMeasurableWindow", () => {
+	it("keeps a window of MIN_TRIMMED_SEGMENT_SAMPLES and drops anything thinner or reversed", () => {
+		expect(trimLeavesMeasurableWindow(5, 6)).toBe(false);
+		expect(trimLeavesMeasurableWindow(5, 7)).toBe(true);
+		expect(trimLeavesMeasurableWindow(7, 5)).toBe(false);
+	});
+});
 
 describe("mapTrimToSegments", () => {
 	it("maps a full-width window onto every segment's own extent", () => {

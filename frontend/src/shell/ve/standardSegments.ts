@@ -52,6 +52,14 @@ import type { AppState, WindSource } from "../../state/AppState";
  */
 export const MIN_TRIMMED_SEGMENT_SAMPLES = 3;
 
+/** The one drop rule for a trim window; both the selection-space and the per-segment-key paths call it. */
+export function trimLeavesMeasurableWindow(
+	start: number,
+	end: number,
+): boolean {
+	return end - start + 1 >= MIN_TRIMMED_SEGMENT_SAMPLES;
+}
+
 /**
  * The apparent-wind series for the current selection, resolved the ONE way
  * (D-05).
@@ -124,7 +132,7 @@ export function mapTrimToSegments(
 		const localStart = Math.max(0, fullStart - startIdx);
 		const localEnd = Math.min(endIdx - startIdx, fullEnd - startIdx);
 
-		if (localEnd - localStart + 1 < MIN_TRIMMED_SEGMENT_SAMPLES) {
+		if (!trimLeavesMeasurableWindow(localStart, localEnd)) {
 			// Outside the window, or covered too thinly to fit. See
 			// MIN_TRIMMED_SEGMENT_SAMPLES.
 			continue;

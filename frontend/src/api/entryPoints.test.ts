@@ -104,4 +104,20 @@ describe("the headless path computes nothing of its own", () => {
 		]);
 	});
 
+	// STRUCTURAL: no fixture reaches a hand-written copy of the trim drop rule
+	// distinctly from `trimLeavesMeasurableWindow` — a copy computes the same
+	// answer today — so the only checkable claim is that no copy exists.
+	it("restates no trim drop rule — src/api calls trimLeavesMeasurableWindow", () => {
+		const offenders: string[] = [];
+		for (const path of walk(join(SRC_ROOT, "api"))) {
+			const source = readFileSync(path, "utf8");
+			if (
+				source.includes("MIN_TRIMMED_SEGMENT_SAMPLES") ||
+				/end\s*-\s*[\w.]*start\s*\+\s*1/.test(source)
+			) {
+				offenders.push(path.slice(SRC_ROOT.length + 1).replace(/\\/g, "/"));
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
 });

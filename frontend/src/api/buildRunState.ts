@@ -25,7 +25,7 @@ import {
 import type { AnalysisModeHandler, ModeSegment } from "../modes/analysis/types";
 import {
 	mapTrimToSegments,
-	MIN_TRIMMED_SEGMENT_SAMPLES,
+	trimLeavesMeasurableWindow,
 } from "../shell/ve/standardSegments";
 import {
 	AppState,
@@ -209,9 +209,8 @@ function applyTrim(
 			trimmed.push(segment);
 			continue;
 		}
-		if (window.end - window.start + 1 < MIN_TRIMMED_SEGMENT_SAMPLES) {
-			// Matches `mapTrimToSegments`' drop rule for a window that leaves
-			// nothing measurable.
+		if (!trimLeavesMeasurableWindow(window.start, window.end)) {
+			// The shared drop rule (`trimLeavesMeasurableWindow`).
 			continue;
 		}
 		trimmed.push({ ...segment, trim: { ...window } });
