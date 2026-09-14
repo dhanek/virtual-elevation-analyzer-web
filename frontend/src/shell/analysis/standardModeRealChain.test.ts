@@ -276,6 +276,8 @@ async function renderStitched(
 			onSaveScreenshot: () => {},
 			onStoreResult: () => {},
 			onExportAll: () => {},
+			onExportSettings: () => {},
+			onExportBundle: () => {},
 			onShowAllResults: () => {},
 			saveCurrentLapSettings: () => {},
 		},
@@ -487,7 +489,7 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 	});
 
 	it("puts VD in the strip and draws it on click", async () => {
-		expect(tabStrip()).toEqual(["ve", "wind", "power", "vd"]);
+		expect(tabStrip()).toEqual(["ve", "wind", "power", "vd", "convergence"]);
 
 		clickTab("vd");
 		await settle();
@@ -509,7 +511,7 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 			await selectWindSource(source);
 
 			expect(vdButtonHidden()).toBe(false);
-			expect(tabStrip()).toEqual(["ve", "wind", "power", "vd"]);
+			expect(tabStrip()).toEqual(["ve", "wind", "power", "vd", "convergence"]);
 			expect(activeTabId()).toBe("vd-tab");
 			// And it is REDRAWN for the new source, not left showing the old one.
 			expect(drawTargets).toContain("vdPlot");
@@ -535,7 +537,7 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 		// `.ve-tab-content--active` are different axes and neither implies the
 		// other, which is exactly how a blank panel happens.
 		expect(vdButtonHidden()).toBe(true);
-		expect(tabStrip()).toEqual(["ve", "wind", "power"]);
+		expect(tabStrip()).toEqual(["ve", "wind", "power", "convergence"]);
 		expect((document.getElementById("vd-tab") as HTMLElement).hidden).toBe(
 			true,
 		);
@@ -630,7 +632,7 @@ describe("standard (None): the STACKED overlay's VD tab", () => {
 		await selectWindSource("constant");
 
 		expect(vdButtonHidden()).toBe(true);
-		expect(tabStrip()).toEqual(["ve", "wind", "power"]);
+		expect(tabStrip()).toEqual(["ve", "wind", "power", "convergence"]);
 		expect(activeTabId()).toBe("ve-tab");
 		expect(overlay.ve).toHaveBeenCalled();
 		expect(missingTargets).toEqual([]);

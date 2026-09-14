@@ -25,7 +25,7 @@ const BUNDLED_PLOTLY = { newPlot: () => {}, __bundled: true };
  */
 let chunkFails = false;
 
-vi.mock("plotly.js-basic-dist", () => ({
+vi.mock("plotly.js-cartesian-dist", () => ({
 	get default() {
 		if (chunkFails) {
 			throw new Error("Failed to fetch dynamically imported module");

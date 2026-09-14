@@ -43,8 +43,12 @@ import {
 	type BindModeControlsResult,
 } from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
-import { getSelectedWindSource } from "../dom/windSource";
+import { getCheckedWindSource, getSelectedWindSource } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
+import {
+	handleExportBundle,
+	handleExportSettings,
+} from "../analysis/settingsExportHandlers";
 import {
 	handleStoreResult,
 	handleExportAllResults,
@@ -64,12 +68,16 @@ import { applyVeStatus } from "../../state/veStatus";
 import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
+import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
+import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
+import { requestConvergenceRedraw } from "../analysis/convergenceView";
 
 /**
  * Select the GPS-detected laps and put the stacked panel on screen.
@@ -266,6 +274,7 @@ export async function showGpsLapVEAnalysis(
 			// Compare (D-07/D-20) is resolved by the primitive, which is now the
 			// only pass that resolves anything.
 			virtualElevationCompare: null,
+			referenceElevation: null,
 			supplementarySeries,
 			duration,
 			totalDistance,
@@ -289,8 +298,13 @@ export async function showGpsLapVEAnalysis(
 		resolvedParams.wind_speed !== 0 &&
 		resolvedParams.wind_direction !== undefined;
 
-	// Preserve current wind source selection if UI exists (for recalculations)
-	const preservedWindSource = getSelectedWindSource();
+	// Preserve the CHECKED wind source across the re-render — null when no
+	// radio is checked (first render, or a sensor-less ride), so the
+	// `preservedWindSource || (hasWindSpeed ? "fit" : "constant")` default below
+	// actually fires. `getSelectedWindSource`'s 'fit' fallback here made that
+	// default dead code: a ride with no wind channel opened stuck on 'fit',
+	// its lone constant radio unchecked and the wind-height control hidden.
+	const preservedWindSource = getCheckedWindSource();
 
 	// Show the GPS lap VE analysis interface with wind data info
 	await showGpsLapVEPlot(
@@ -441,6 +455,7 @@ export async function showGpsLapVEPlot(
 		wind: () => renderGpsLapWindPlot(lapProfiles),
 		power: () => renderGpsLapPowerPlot(lapProfiles),
 		vd: () => renderGpsLapVdPlot(lapProfiles),
+		convergence: requestConvergenceRedraw,
 	});
 
 	// Setup action footer buttons
@@ -456,6 +471,12 @@ export async function showGpsLapVEPlot(
 		},
 		onExportAll: () => {
 			void handleExportAllResults(resultsStorage);
+		},
+		onExportSettings: () => {
+			void handleExportSettings(appState, parameterStorage);
+		},
+		onExportBundle: () => {
+			void handleExportBundle(appState, parameterStorage);
 		},
 	});
 
@@ -681,6 +702,8 @@ export function buildGpsLapVeAnalysisTemplate(
                                     <input type="range" id="crrSlider" min="${crrBounds.min}" max="${crrBounds.max}" value="${resolveDisplayCrr(params.crr)}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${resolveDisplayCrr(params.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(params, "gpsLap")}
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>
@@ -731,6 +754,8 @@ export function buildGpsLapVeAnalysisTemplate(
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
                         <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
 
@@ -754,6 +779,7 @@ export function buildGpsLapVeAnalysisTemplate(
                             `
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -837,6 +863,7 @@ export function buildGpsLapVeAnalysisTemplate(
                         `
 														: ""
 												}
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>

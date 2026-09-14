@@ -92,6 +92,14 @@ export interface SaveResultData {
 	avgSpeed: number;
 	avgTemperature?: number;
 	notes: string;
+	/**
+	 * Which panel shape the store ran under. DIAGNOSTIC, not persisted:
+	 * `toStoredVEResult` maps no column from it, but the out-and-back fixture
+	 * chain asserts on it (N-1: the store fix must not work by pretending to
+	 * be gps-lap), so it is part of the SaveResultData contract. Optional:
+	 * callers that never had it (older fixtures) stay valid.
+	 */
+	isGpsLapMode?: boolean;
 }
 
 export interface StoredVEResult {
@@ -279,6 +287,71 @@ export function generateCSVFromResults(results: StoredVEResult[]): string {
 	}
 
 	return csv;
+}
+
+/**
+ * ONE mapping from a `SaveResultData` to the stored/exported row shape
+ * (Convergence plan, C5). `saveResult` uses it for the IndexedDB write and
+ * the headless API uses it for its `csvRow`, so the batch CSV and the app's
+ * Export CSV are the same table by construction.
+ */
+export function toStoredVEResult(data: SaveResultData): StoredVEResult {
+	const lapKey = data.laps.length === 0 ? "all" : data.laps.join("-");
+
+	return {
+		fileName: data.fileName,
+		lapKey: lapKey,
+		// UNDEFINED, not the full selection, when the caller supplies none:
+		// "coverage unknown" and "covered everything" are different claims,
+		// and only one of them is true of a record stored before a recompute.
+		lapsCoveredKey: data.lapsCovered ? data.lapsCovered.join("-") : undefined,
+		trimStart: data.trimStart,
+		trimEnd: data.trimEnd,
+		cda: data.cda,
+		crr: data.crr,
+		crrApplied: data.crrApplied,
+		ambientTemp: data.ambientTemp,
+		tireSensitivity: data.tireSensitivity,
+		airSpeedCalibration: data.airSpeedCalibration,
+		windSource: data.windSource,
+		windSpeed: data.parameters.wind_speed ?? "",
+		windDirection: data.parameters.wind_direction ?? "",
+		// WR-02: carried across explicitly, like every other named column.
+		//
+		// What is stored is what the PHYSICS USED, not the raw parameter --
+		// the same rule `crrApplied` above follows. `resolveWindHeightFactor`
+		// degrades a corrupt row (NaN, Infinity, negative) to
+		// LEGACY_WIND_HEIGHT_FACTOR before any wind is scaled.
+		//
+		// The presence check is load-bearing, not defensive: the resolver maps
+		// an ABSENT factor onto LEGACY_WIND_HEIGHT_FACTOR too, so a bare call
+		// would write 1.0 into every record saved from a params object that
+		// never held the field. Absent stays `undefined`.
+		windHeightFactor:
+			typeof data.parameters.wind_height_factor === "number"
+				? resolveWindHeightFactor(data.parameters)
+				: undefined,
+		systemMass: data.parameters.system_mass,
+		rho: data.parameters.rho,
+		eta: data.parameters.eta,
+		r2: data.result.r2,
+		rmse: data.result.rmse,
+		veGain: data.result.ve_elevation_diff,
+		actualGain: data.result.actual_elevation_diff,
+		// Entry (h): the per-segment figures as shown, NOT a flattened
+		// total. `?? []` rather than a fabricated single value, so a caller
+		// that supplies none stores none.
+		virtualDistances: data.virtualDistances ?? [],
+		// Per-lap weather as analysed. `null` (every lap used the selection
+		// values) and absent both store as absent, never as `[]`.
+		segmentWeather: data.segmentWeather ?? undefined,
+		avgPower: data.avgPower,
+		avgSpeed: data.avgSpeed,
+		avgTemperature: data.avgTemperature,
+		notes: data.notes,
+		recordingDate: data.recordingDate,
+		timestamp: data.timestamp.toISOString(),
+	};
 }
 
 export class ResultsStorage {
@@ -608,65 +681,7 @@ export class ResultsStorage {
 			throw new Error("Database not initialized");
 		}
 
-		const lapKey = data.laps.length === 0 ? "all" : data.laps.join("-");
-
-		const storedResult: StoredVEResult = {
-			fileName: data.fileName,
-			lapKey: lapKey,
-			// UNDEFINED, not the full selection, when the caller supplies none:
-			// "coverage unknown" and "covered everything" are different claims,
-			// and only one of them is true of a record stored before a recompute.
-			lapsCoveredKey: data.lapsCovered ? data.lapsCovered.join("-") : undefined,
-			trimStart: data.trimStart,
-			trimEnd: data.trimEnd,
-			cda: data.cda,
-			crr: data.crr,
-			crrApplied: data.crrApplied,
-			ambientTemp: data.ambientTemp,
-			tireSensitivity: data.tireSensitivity,
-			airSpeedCalibration: data.airSpeedCalibration,
-			windSource: data.windSource,
-			windSpeed: data.parameters.wind_speed ?? "",
-			windDirection: data.parameters.wind_direction ?? "",
-			// WR-02: carried across explicitly, like every other named column.
-			//
-			// What is stored is what the PHYSICS USED, not the raw parameter --
-			// the same rule `crrApplied` above follows. `resolveWindHeightFactor`
-			// is the one function the analysis asks for the factor, and it
-			// degrades a corrupt row (NaN, Infinity, negative) to
-			// LEGACY_WIND_HEIGHT_FACTOR before any wind is scaled. Exporting the
-			// raw value would print a number the analysis never applied.
-			//
-			// The presence check is load-bearing, not defensive. The resolver
-			// maps an ABSENT factor onto LEGACY_WIND_HEIGHT_FACTOR too, so a
-			// bare call would write 1.0 -- a `100` cell -- into every record
-			// saved from a params object that never held the field. Absent stays
-			// `undefined` and exports an empty cell, exactly as before.
-			windHeightFactor:
-				typeof data.parameters.wind_height_factor === "number"
-					? resolveWindHeightFactor(data.parameters)
-					: undefined,
-			systemMass: data.parameters.system_mass,
-			rho: data.parameters.rho,
-			eta: data.parameters.eta,
-			r2: data.result.r2,
-			rmse: data.result.rmse,
-			veGain: data.result.ve_elevation_diff,
-			actualGain: data.result.actual_elevation_diff,
-			// Entry (h): the per-segment figures as shown, NOT a flattened
-			// total. `?? []` rather than a fabricated single value, so a caller
-			// that supplies none stores none.
-			virtualDistances: data.virtualDistances ?? [],
-			// Per-lap weather as analysed. `null` (every lap used the selection
-			// values) and absent both store as absent, never as `[]`.
-			segmentWeather: data.segmentWeather ?? undefined,
-			avgPower: data.avgPower,
-			avgSpeed: data.avgSpeed,
-			avgTemperature: data.avgTemperature,
-			notes: data.notes,
-			recordingDate: data.recordingDate,
-			timestamp: data.timestamp.toISOString(),
-		};
+		const storedResult: StoredVEResult = toStoredVEResult(data);
 
 		return new Promise((resolve, reject) => {
 			const transaction = this.db!.transaction([this.storeName], "readwrite");

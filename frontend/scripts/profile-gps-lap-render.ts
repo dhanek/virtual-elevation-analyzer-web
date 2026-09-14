@@ -251,7 +251,7 @@ async function main(): Promise<void> {
 			await updateModeVEPlots({
 				appState,
 				handler,
-				callbacks: timed as any,
+				makeCallbacks: () => timed as any,
 				windSource: "fit",
 				// A drag moves CdA, so vary it the way a drag does; an identical
 				// value every iteration would let a downstream memo answer for
@@ -353,16 +353,17 @@ async function main(): Promise<void> {
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler,
-			callbacks: {
-				...callbacks,
-				renderVe: (profiles: never) => {
-					captured = profiles;
-				},
-				renderMetrics: () => {},
-				renderWind: () => {},
-				renderPower: () => {},
-				renderVd: () => {},
-			} as any,
+			makeCallbacks: () =>
+				({
+					...callbacks,
+					renderVe: (profiles: never) => {
+						captured = profiles;
+					},
+					renderMetrics: () => {},
+					renderWind: () => {},
+					renderPower: () => {},
+					renderVd: () => {},
+				}) as any,
 			windSource: "fit",
 			cda: 0.23,
 			crr: 0.004,
@@ -400,6 +401,7 @@ async function main(): Promise<void> {
 				// literal's freshness is lost across that inference. Measured,
 				// not assumed.
 				virtualElevationCompare: null,
+				referenceElevation: null,
 				duration: 600,
 				totalDistance: p.distancesKm[p.distancesKm.length - 1] ?? 0,
 			}));

@@ -121,6 +121,7 @@ const noopCallbacks: ModeUpdateCallbacks = {
 	renderWind: () => {},
 	renderPower: () => {},
 	renderVd: () => {},
+	renderConvergence: () => {},
 	renderMetrics: () => {},
 };
 
@@ -161,9 +162,23 @@ function renderPanel(): void {
 			<label><input type="radio" name="windSource" value="constant"></label>
 			<label><input type="radio" name="windSource" value="compare"></label>
 
+			<label><input type="radio" name="elevationDiffSource" value="dem" checked></label>
+			<label><input type="radio" name="elevationDiffSource" value="barometer"></label>
+			<label><input type="radio" name="elevationDiffSource" value="manual"></label>
+			<div id="elevationDiffManualRow" class="elevation-diff-controls__manual--hidden">
+				<input type="number" id="elevationDiffManual" value="">
+			</div>
+			<div id="elevationDiffStatus"></div>
+
 			<div class="lap-view-toggle" id="elevationProfileSwitchToggle">
 				<button type="button" class="lap-view-toggle-btn lap-view-toggle-btn--active" data-smoothing="off">OFF</button>
 				<button type="button" class="lap-view-toggle-btn" data-smoothing="on">ON</button>
+			</div>
+
+			<div id="autoConvergeLocks" hidden>
+				<input type="checkbox" id="cdaLockToggle">
+				<input type="checkbox" id="crrLockToggle">
+				<div id="autoConvergeStatus" hidden></div>
 			</div>
 
 			<div id="crrTempControls">
@@ -268,19 +283,27 @@ async function interact(spec: ModeControlSpec): Promise<void> {
 			document.getElementById(spec.elements.buttonId!)!.click();
 			break;
 		case "radioGroup": {
-			const constant = document.querySelector(
-				'input[name="windSource"][value="constant"]',
-			) as HTMLInputElement;
-			constant.checked = true;
-			constant.dispatchEvent(new Event("change"));
+			const selector =
+				spec.reason === "elevationDiffSource"
+					? 'input[name="elevationDiffSource"][value="barometer"]'
+					: 'input[name="windSource"][value="constant"]';
+			const radio = document.querySelector(selector) as HTMLInputElement;
+			radio.checked = true;
+			radio.dispatchEvent(new Event("change"));
 			break;
 		}
 		case "toggle":
-			(
-				document.querySelector(
-					'#elevationProfileSwitchToggle [data-smoothing="on"]',
-				) as HTMLButtonElement
-			).click();
+			if (spec.reason === "autoConverge") {
+				const lock = el("crrLockToggle");
+				lock.checked = true;
+				lock.dispatchEvent(new Event("change"));
+			} else {
+				(
+					document.querySelector(
+						'#elevationProfileSwitchToggle [data-smoothing="on"]',
+					) as HTMLButtonElement
+				).click();
+			}
 			break;
 		case "delegated":
 			if (spec.reason === "crrTemp") {
@@ -314,12 +337,14 @@ describe("MODE_CONTROL_TABLE is the Priority 6 control union", () => {
 			new Set([
 				"cda",
 				"crr",
+				"autoConverge",
 				"trim",
 				"calibration",
 				"autoAdjustCalibration",
 				"airSpeedOffset",
 				"windSource",
 				"elevationSmoothing",
+				"elevationDiffSource",
 				"crrTemp",
 				"windHeight",
 			]),
@@ -360,8 +385,9 @@ describe("standard: every rendered row reaches the primitive exactly once", () =
 	);
 
 	it("covers every standard row of the table", () => {
-		// 13 before the two `mapTrim` rows moved to Section 3 (2026-09-03).
-		expect(standardRows.length).toBe(11);
+		// 13 before the two `mapTrim` rows moved to Section 3 (2026-09-03), and
+		// two more since for the auto-converge controls.
+		expect(standardRows.length).toBe(13);
 	});
 
 	for (const spec of standardRows) {
@@ -871,13 +897,15 @@ describe("the GPS modes render no trim markup, and the matrix says so", () => {
 
 describe("every ModeUpdateReason is exercised by the matrix", () => {
 	it("covers all of them except the three that are not panel controls", () => {
-		// THREE reasons reach the funnel from outside the mode panel and are
+		// FOUR reasons reach the funnel from outside the mode panel and are
 		// deliberately absent from the table: `parameters`, from
-		// `handleParametersChange`; `segmentSelection`, from Section 3's
-		// detected-lap and section checkboxes; and `mapTrim`, from Section 3's
-		// map-trim sliders (2026-09-03). Every OTHER reason must appear in
-		// at least one executed pair -- otherwise a control added to the table
-		// without a matrix case would ship untested.
+		// `handleParametersChange`; `convergence`, from the Convergence tab's
+		// activation callback (`requestConvergenceRedraw` on a surface-cache
+		// miss); `segmentSelection`, from Section 3's detected-lap and section
+		// checkboxes; and `mapTrim`, from Section 3's map-trim sliders
+		// (2026-09-03). Every OTHER reason must appear in at least one executed
+		// pair -- otherwise a control added to the table without a matrix case
+		// would ship untested.
 		const exercised = new Set<string>();
 		for (const modeCase of MODE_CASES) {
 			for (const spec of MODE_CONTROL_TABLE) {
@@ -891,12 +919,14 @@ describe("every ModeUpdateReason is exercised by the matrix", () => {
 			new Set([
 				"cda",
 				"crr",
+				"autoConverge",
 				"trim",
 				"calibration",
 				"autoAdjustCalibration",
 				"airSpeedOffset",
 				"windSource",
 				"elevationSmoothing",
+				"elevationDiffSource",
 				"crrTemp",
 				"windHeight",
 			]),
@@ -955,8 +985,15 @@ describe("the matrix observes render EFFECTS, not only primitive calls", () => {
 		// is the property mutation row (b) needs in order to fail visibly.
 		expect(primitive).toHaveBeenCalledTimes(1);
 		const args = soleCall();
-		expect(args.callbacks).toBe(spyCallbacks);
-		args.callbacks.renderVe([]);
+		// D4: the funnel hands the primitive a FACTORY, resolved at pass time.
+		const callbacks = args.makeCallbacks({
+			windSource: "fit",
+			cda: 0.31,
+			crr: CRR,
+			appliedCrr: CRR,
+		});
+		expect(callbacks).toBe(spyCallbacks);
+		callbacks.renderVe([]);
 		expect(renders).toEqual(["ve"]);
 	});
 });

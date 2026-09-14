@@ -6,7 +6,7 @@
 /**
  * Linear interpolation between two points
  */
-function linearInterpolate(
+export function linearInterpolate(
 	x: number,
 	x0: number,
 	x1: number,

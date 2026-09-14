@@ -10,19 +10,32 @@
  * bump — so the dependency is bundled instead, the same move `67bc5fc` made for
  * Leaflet's CSS when it dropped unpkg from the CSP.
  *
- * `plotly.js-basic-dist` is pinned to 2.27.0, the exact bundle the CDN tag
- * named, so this is a sourcing change and not a version bump. Basic is
- * deliberate: it needs no `eval`, which is what lets the CSP stay free of
- * `unsafe-eval`.
+ * `plotly.js-cartesian-dist` is pinned to 2.27.0 — the version the CDN tag
+ * named, and the version `plotly.js-basic-dist` was pinned to before it — so
+ * both moves were sourcing changes, not version bumps. Basic was swapped for
+ * cartesian to get the `contour` trace the Convergence tab draws; cartesian
+ * adds contour, heatmap, histogram, box, violin and image over basic's bar,
+ * pie and scatter, and nothing else.
+ *
+ * The CSP constraint that made basic "deliberate" still holds for cartesian.
+ * Plotly's real `unsafe-eval` requirement lives in the gl/regl traces, which
+ * cartesian excludes; the only `new Function` in the whole cartesian bundle is
+ * webpack's `return this` global shim (plotly-cartesian.js:103567), which is
+ * dead under a module build. Verified two ways: the built chunk grepped for
+ * `new Function` and `eval(`, and the site loaded against `index.html`'s
+ * `script-src 'self' 'wasm-unsafe-eval'` with no CSP report.
  *
  * The global assignment is not decoration. `gpsLapPlots.ts` and its siblings
  * read `(window as any).Plotly` directly rather than taking the resolved handle,
  * so the global has to keep being populated until those call sites are
  * converted to imports.
  *
- * DYNAMIC `import()`, not a static one. Plotly is ~1 MB minified — a static
- * import puts it in the entry chunk and triples first load (448 kB -> 1445 kB
- * raw, 119 kB -> 460 kB gzipped, measured). Splitting it out keeps the original
+ * DYNAMIC `import()`, not a static one. Plotly is ~1.27 MB minified — a static
+ * import puts it in the entry chunk and roughly quadruples first load (basic
+ * measured 448 kB -> 1445 kB raw, 119 kB -> 460 kB gzipped; cartesian's chunk
+ * is 1,273 kB / 430 kB gzipped against a 465 kB / 123 kB entry, measured
+ * 2026-09-01 — the +27% over basic is the contour/heatmap code the Convergence
+ * tab uses). Splitting it out keeps the original
  * design intent of the CDN tag — nothing is fetched until an analysis actually
  * needs to plot — while sourcing it from the build instead of a third party.
  * The promise is cached so concurrent callers share one chunk fetch.
@@ -44,7 +57,7 @@ export function waitForPlotly(): Promise<PlotlyHandle> {
 	}
 
 	if (!pending) {
-		pending = import("plotly.js-basic-dist")
+		pending = import("plotly.js-cartesian-dist")
 			.then((module) => {
 				const Plotly = module.default;
 				(window as unknown as Record<string, unknown>).Plotly = Plotly;

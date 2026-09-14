@@ -337,6 +337,13 @@ export async function initializeApplicationShell(
 				await parameterStorage.clearAll();
 				await resultsStorage.clearAllResults();
 
+				// The dev warm-reload cache is saved parameters too, as far as
+				// the person clicking this is concerned. No-op in production.
+				if (import.meta.env.DEV) {
+					const { clearDevSession } = await import("../dev/devSessionStore");
+					await clearDevSession();
+				}
+
 				// Also clear weather cache — the SHARED instance, so this clears
 				// the same connection `autoRho` reads through rather than opening
 				// a second one to clear behind it.
@@ -383,4 +390,16 @@ export async function initializeApplicationShell(
 
 	// Initialize FIT processor
 	await initializeFitProcessor();
+
+	// DEV ONLY: come back to the ride that was loaded before the last reload.
+	// After `initializeFitProcessor`, because the replay parses the file and
+	// reads ParameterStorage, both of which it just set up. Not in a
+	// production build: the import is dropped; `?fresh` skips it. See
+	// shell/dev/devSessionRestore.
+	if (import.meta.env.DEV) {
+		const { startDevSessionSnapshots, restoreDevSession } =
+			await import("../dev/devSessionRestore");
+		startDevSessionSnapshots(appState);
+		await restoreDevSession(appState);
+	}
 }

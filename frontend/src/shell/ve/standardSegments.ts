@@ -32,6 +32,7 @@
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { ModeSegment, SegmentVeProfile } from "../../modes/analysis/types";
+import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
 import type { AppState, WindSource } from "../../state/AppState";
 
 /**
@@ -50,6 +51,14 @@ import type { AppState, WindSource } from "../../state/AppState";
  * UI is a recorded follow-up, deliberately not built here.
  */
 export const MIN_TRIMMED_SEGMENT_SAMPLES = 3;
+
+/** The one drop rule for a trim window; both the selection-space and the per-segment-key paths call it. */
+export function trimLeavesMeasurableWindow(
+	start: number,
+	end: number,
+): boolean {
+	return end - start + 1 >= MIN_TRIMMED_SEGMENT_SAMPLES;
+}
 
 /**
  * The apparent-wind series for the current selection, resolved the ONE way
@@ -123,7 +132,7 @@ export function mapTrimToSegments(
 		const localStart = Math.max(0, fullStart - startIdx);
 		const localEnd = Math.min(endIdx - startIdx, fullEnd - startIdx);
 
-		if (localEnd - localStart + 1 < MIN_TRIMMED_SEGMENT_SAMPLES) {
+		if (!trimLeavesMeasurableWindow(localStart, localEnd)) {
 			// Outside the window, or covered too thinly to fit. See
 			// MIN_TRIMMED_SEGMENT_SAMPLES.
 			continue;
@@ -148,6 +157,11 @@ export interface StitchedStandardSeries {
 	 */
 	virtualElevationCompare: number[] | null;
 	actualElevation: number[];
+	/**
+	 * The stitched NON-master elevation channel (see `SegmentVeProfile`),
+	 * non-null iff the profiles carry one. Same length as `actualElevation`.
+	 */
+	referenceElevation: ReferenceElevationSeries | null;
 	timestamps: number[];
 	velocity: number[];
 	power: number[];
@@ -206,6 +220,13 @@ export function stitchStandardProfiles(
 	);
 	const virtualElevationCompare: number[] | null = isCompare ? [] : null;
 	const actualElevation: number[] = [];
+	// Same all-or-nothing shape as the compare leg: built only when at least
+	// one profile carries a reference, padded with NaN over any that does not,
+	// so the series never shortens and slides later samples off their x.
+	const referenceLabel =
+		profiles.find((profile) => profile.referenceElevation)?.referenceElevation
+			?.label ?? null;
+	const referenceSeries: number[] | null = referenceLabel ? [] : null;
 	const timestamps: number[] = [];
 	const velocity: number[] = [];
 	const power: number[] = [];
@@ -242,6 +263,12 @@ export function stitchStandardProfiles(
 			);
 		}
 		actualElevation.push(...profile.actualElevation);
+		if (referenceSeries) {
+			referenceSeries.push(
+				...(profile.referenceElevation?.series ??
+					new Array<number>(length).fill(Number.NaN)),
+			);
+		}
 		power.push(...profile.supplementarySeries.powerWatts);
 
 		// Same padding rule as the compare leg above — a segment contributes its
@@ -294,6 +321,10 @@ export function stitchStandardProfiles(
 		virtualElevation,
 		virtualElevationCompare,
 		actualElevation,
+		referenceElevation:
+			referenceLabel && referenceSeries
+				? { label: referenceLabel, series: referenceSeries }
+				: null,
 		timestamps,
 		velocity,
 		power,

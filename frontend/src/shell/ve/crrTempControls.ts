@@ -142,6 +142,12 @@ export function bindCrrTempControls(binding: CrrTempControlsBinding): boolean {
 
 	refreshCrrTempReadout(binding.getParams());
 
+	// The info badge lives inside the toggle's <label>; without this, reading
+	// the tooltip by clicking would also flip the checkbox.
+	document
+		.getElementById("crrTempInfo")
+		?.addEventListener("click", (event) => event.preventDefault());
+
 	toggle.addEventListener("change", () => {
 		const params = binding.getParams();
 		if (!params) return;

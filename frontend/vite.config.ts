@@ -1,5 +1,26 @@
 import { defineConfig } from "vite";
+import { release } from "os";
 import { resolve } from "path";
+import { wasmReloadPlugin } from "./src/shell/dev/wasmReloadPlugin";
+
+const PKG_DIR = resolve(__dirname, "pkg");
+
+/**
+ * WSL cannot deliver inotify events for files on a Windows drive: the
+ * 9p/drvfs mount under /mnt/<letter> simply never fires them, so chokidar
+ * sits silent and NOTHING hot-reloads — not the wasm below, not CSS, not a
+ * source edit. Polling is the only way to see a change there, and it is
+ * wasteful everywhere else, so turn it on exactly where it is needed.
+ *
+ * `VITE_POLL=1` / `VITE_POLL=0` forces it either way, for a layout this
+ * check does not anticipate.
+ */
+function needsPolling(): boolean {
+	if (process.env.VITE_POLL === "1") return true;
+	if (process.env.VITE_POLL === "0") return false;
+	const onWsl = process.platform === "linux" && /microsoft/i.test(release());
+	return onWsl && __dirname.startsWith("/mnt/");
+}
 
 export default defineConfig(() => ({
 	// Use GitHub Pages base path only when VITE_GITHUB_PAGES=true
@@ -10,6 +31,7 @@ export default defineConfig(() => ({
 			? "/virtual-elevation-analyzer-web/"
 			: "/",
 	root: ".",
+	plugins: [wasmReloadPlugin(PKG_DIR)],
 	build: {
 		outDir: "../dist",
 		emptyOutDir: true,
@@ -41,6 +63,8 @@ export default defineConfig(() => ({
 		fs: {
 			allow: [".."],
 		},
+		// See needsPolling: an empty object leaves chokidar's defaults alone.
+		watch: needsPolling() ? { usePolling: true, interval: 300 } : {},
 	},
 	optimizeDeps: {
 		exclude: ["virtual-elevation-analyzer"],

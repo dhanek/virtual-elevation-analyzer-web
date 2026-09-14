@@ -44,8 +44,12 @@ import {
 	type BindModeControlsResult,
 } from "../analysis/bindModeControls";
 import { registerModeUpdateCallbacks } from "../analysis/modeUpdateCallbacks";
-import { getSelectedWindSource } from "../dom/windSource";
+import { getCheckedWindSource, getSelectedWindSource } from "../dom/windSource";
 import { bindActionFooter } from "../dom/actionFooter";
+import {
+	handleExportBundle,
+	handleExportSettings,
+} from "../analysis/settingsExportHandlers";
 import {
 	handleStoreResult,
 	handleExportAllResults,
@@ -60,14 +64,18 @@ import {
 } from "./outAndBackPlots";
 import { createOutAndBackUpdateCallbacks } from "./updateOutAndBack";
 import { saveOutAndBackScreenshot } from "./outAndBackScreenshot";
+import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
+import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
+import { convergenceTabMarkup } from "../analysis/convergenceTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
 import { applyVeStatus } from "../../state/veStatus";
+import { requestConvergenceRedraw } from "../analysis/convergenceView";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -262,11 +270,13 @@ export async function showOutAndBackVEAnalysis(
 			// only pass that resolves anything.
 			outboundVECompare: null,
 			outboundActualElevation: [],
+			outboundReferenceElevation: null,
 			outboundSeries: outbound?.series ?? null,
 			inboundDistances: inbound?.series.distancesKm ?? [],
 			inboundVE: [],
 			inboundVECompare: null,
 			inboundActualElevation: [],
+			inboundReferenceElevation: null,
 			inboundSeries: inbound?.series ?? null,
 			outboundDuration: section.outboundDuration,
 			inboundDuration: section.inboundDuration,
@@ -287,8 +297,13 @@ export async function showOutAndBackVEAnalysis(
 		resolvedParams.wind_speed !== 0 &&
 		resolvedParams.wind_direction !== undefined;
 
-	// Preserve current wind source selection if UI exists (for recalculations)
-	const preservedWindSource = getSelectedWindSource();
+	// Preserve the CHECKED wind source across the re-render — null when no
+	// radio is checked (first render, or a sensor-less ride), so the
+	// `preservedWindSource || (hasWindSpeed ? "fit" : "constant")` default below
+	// actually fires. `getSelectedWindSource`'s 'fit' fallback here made that
+	// default dead code: a ride with no wind channel opened stuck on 'fit',
+	// its lone constant radio unchecked and the wind-height control hidden.
+	const preservedWindSource = getCheckedWindSource();
 
 	// Show the Out and Back VE analysis interface with wind data info
 	await showOutAndBackVEPlot(
@@ -411,6 +426,8 @@ export function buildOutAndBackVeAnalysisTemplate(
                                     <input type="range" id="crrSlider" min="${crrBounds.min}" max="${crrBounds.max}" value="${resolveDisplayCrr(params.crr)}" step="0.0001" class="ve-slider">
                                     <input type="number" id="crrValue" value="${resolveDisplayCrr(params.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
+                                ${autoConvergeLockControlsMarkup()}
+                                ${elevationDiffControlsMarkup(params, "outAndBack")}
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>
@@ -461,6 +478,8 @@ export function buildOutAndBackVeAnalysisTemplate(
                         <button id="storeResult" class="primary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--spaced">Store Result</button>
                         <button id="showAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Show All Results</button>
                         <button id="exportAllResults" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export All Results to CSV</button>
+                        <button id="exportSettingsJson" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Settings (JSON)</button>
+                        <button id="exportBundleZip" class="secondary-btn ve-sidebar-footer__btn ve-sidebar-footer__btn--compact">Export Zip (FIT + Settings)</button>
                     </div>
                 </div>
 
@@ -484,6 +503,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                             `
 																: ""
 														}
+                            <button class="ve-tab-button" data-tab="convergence">Convergence</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -557,6 +577,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                         </div>
 
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
+                        ${convergenceTabMarkup()}
                     </div>
                 </div>
             </div>
@@ -699,6 +720,7 @@ export async function showOutAndBackVEPlot(
 		wind: () => renderOutAndBackWindPlot(profiles),
 		power: () => renderOutAndBackPowerPlot(profiles),
 		vd: () => renderOutAndBackVdPlot(profiles),
+		convergence: requestConvergenceRedraw,
 	});
 
 	// Setup action footer buttons
@@ -714,6 +736,12 @@ export async function showOutAndBackVEPlot(
 		},
 		onExportAll: () => {
 			void handleExportAllResults(resultsStorage);
+		},
+		onExportSettings: () => {
+			void handleExportSettings(appState, parameterStorage);
+		},
+		onExportBundle: () => {
+			void handleExportBundle(appState, parameterStorage);
 		},
 	});
 
