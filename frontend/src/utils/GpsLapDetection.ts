@@ -21,13 +21,8 @@ const DEFAULT_PROXIMITY_THRESHOLD_METERS = 20;
 const DEFAULT_BEARING_WINDOW_POINTS = 5;
 const DEFAULT_SAME_DIRECTION_ANGLE_THRESHOLD_DEGREES = 30;
 const DEFAULT_OPPOSITE_DIRECTION_ANGLE_THRESHOLD_DEGREES = 90;
+const DEFAULT_ONE_WAY_ANGLE_THRESHOLD_DEGREES = 45;
 const METERS_PER_KILOMETER = 1000;
-
-// Detection mode types - extensible for future modes
-type LapDetectionMode =
-	| "GPS based lap splitting" // Same direction crossings
-	| "GPS gate one way" // Future: single direction gate
-	| "GPS based out and back"; // Future: out and back detection
 
 export interface GpsLapDetectionConfig {
 	markerLat: number; // GPS marker latitude
@@ -37,7 +32,6 @@ export interface GpsLapDetectionConfig {
 	proximityThreshold: number; // Distance threshold in meters (default: 20)
 	bearingWindowSize: number; // Points for bearing smoothing (default: 5)
 	angleThreshold: number; // Direction matching threshold in degrees (default: 30)
-	mode: LapDetectionMode; // Detection mode
 }
 
 export interface DetectedLap {
@@ -129,27 +123,9 @@ export class GpsLapDetector {
 	}
 
 	/**
-	 * Main detection method - detects laps based on configured mode
-	 */
-	public detectLaps(): GpsLapDetectionResult {
-		switch (this.config.mode) {
-			case "GPS based lap splitting":
-				return this.detectLapsSameDirection();
-			case "GPS gate one way":
-				// Future: implement one-way gate detection
-				return this.detectLapsSameDirection(); // Fallback for now
-			case "GPS based out and back":
-				// Future: implement out-and-back detection
-				return this.detectLapsSameDirection(); // Fallback for now
-			default:
-				return this.detectLapsSameDirection();
-		}
-	}
-
-	/**
 	 * Detect laps where crossings are in the same direction, window by window.
 	 */
-	private detectLapsSameDirection(): GpsLapDetectionResult {
+	public detectLaps(): GpsLapDetectionResult {
 		const detectedLaps: DetectedLap[] = [];
 		const allPassings: PassingPoint[] = [];
 		const bearings = calculateSmoothedBearings(
@@ -400,6 +376,133 @@ export class OutAndBackDetector {
 	}
 }
 
+// ==================== One-Way Gate Detector ====================
+
+/** A gate as placed: the sample its slider resolved to. */
+export interface GatePosition {
+	lat: number;
+	lon: number;
+	index: number;
+}
+
+export interface OneWayGateConfig {
+	gateA: GatePosition; // Start gate
+	gateB: GatePosition; // End gate
+	/** The selected FIT laps as contiguous index ranges; no segment spans two. */
+	windows: IndexWindow[];
+	proximityThreshold: number; // Distance threshold in meters (default: 20)
+	bearingWindowSize: number; // Points for bearing smoothing (default: 5)
+	angleThreshold: number; // Tolerance around each gate's direction (default: 45)
+}
+
+/**
+ * One-way gate detector — the web port of the Python recipe's "GPS gate one
+ * way" mode, which the web app offered for years while running lap splitting.
+ *
+ * A segment runs from a pass of gate A to the next pass of gate B, each IN THE
+ * DIRECTION THE GATE WAS PLACED: the bearing at the sample its slider resolved
+ * to. Passes the other way are not gate passes at all, so the return leg of an
+ * out-and-back course is ignored unless the gates are placed on it. The Python
+ * version took the direction from the first pass it found instead, which a
+ * window opening on a pass the wrong way silently inverted.
+ *
+ * Output is `DetectedLap`-shaped on purpose: each segment is analysed exactly
+ * like a GPS lap, by the same panel, handler and Store Result path.
+ */
+export class OneWayGateDetector {
+	private track: TrackArrays;
+	private distance: number[];
+	private config: OneWayGateConfig;
+
+	constructor(
+		positionLat: number[],
+		positionLon: number[],
+		timestamps: number[],
+		distance: number[],
+		config: OneWayGateConfig,
+	) {
+		this.track = { positionLat, positionLon, timestamps };
+		this.distance = distance;
+		this.config = config;
+	}
+
+	public detectLaps(): GpsLapDetectionResult {
+		const { gateA, gateB, proximityThreshold, angleThreshold } = this.config;
+		const bearings = calculateSmoothedBearings(
+			this.track,
+			this.config.bearingWindowSize,
+		);
+		const directionA = bearings[gateA.index] ?? 0;
+		const directionB = bearings[gateB.index] ?? 0;
+		const detectedLaps: DetectedLap[] = [];
+		const allPassings: PassingPoint[] = [];
+
+		const passesOneWay = (
+			gate: GatePosition,
+			direction: number,
+			window: IndexWindow,
+		): PassingPoint[] =>
+			findGatePassings(
+				this.track,
+				bearings,
+				gate.lat,
+				gate.lon,
+				window,
+				proximityThreshold,
+			).filter(
+				(p) =>
+					circularAngleDifference(p.direction, direction) <= angleThreshold,
+			);
+
+		for (const window of this.config.windows) {
+			const passingsA = passesOneWay(gateA, directionA, window);
+			const passingsB = passesOneWay(gateB, directionB, window);
+			allPassings.push(...passingsA, ...passingsB);
+
+			const merged: MarkedPassing[] = [
+				...passingsA.map((p): MarkedPassing => ({ ...p, marker: "A" })),
+				...passingsB.map((p): MarkedPassing => ({ ...p, marker: "B" })),
+			].sort((a, b) => a.index - b.index);
+
+			// Every A (re)starts the segment, so it runs from the last A before B,
+			// and a B on A's own sample closes it without a segment.
+			let start: PassingPoint | null = null;
+			for (const passing of merged) {
+				if (passing.marker === "A") {
+					start = passing;
+				} else if (start) {
+					if (passing.index > start.index) {
+						detectedLaps.push({
+							lapNumber: detectedLaps.length + 1,
+							startIdx: start.index,
+							endIdx: passing.index,
+							startTime: start.timestamp,
+							endTime: passing.timestamp,
+							duration: passing.timestamp - start.timestamp,
+							distance:
+								(this.distance[passing.index] - this.distance[start.index]) /
+								METERS_PER_KILOMETER,
+							startDirection: start.direction,
+							endDirection: passing.direction,
+							directionName: bearingToCompassDirection(start.direction),
+							startLat: start.lat,
+							startLon: start.lon,
+						});
+					}
+					start = null;
+				}
+			}
+		}
+
+		return {
+			detectedLaps,
+			passings: allPassings,
+			markerLat: gateA.lat,
+			markerLon: gateA.lon,
+		};
+	}
+}
+
 /**
  * Default values for GPS lap detection configuration
  */
@@ -407,7 +510,6 @@ const DEFAULT_LAP_DETECTION_CONFIG = {
 	proximityThreshold: DEFAULT_PROXIMITY_THRESHOLD_METERS,
 	bearingWindowSize: DEFAULT_BEARING_WINDOW_POINTS,
 	angleThreshold: DEFAULT_SAME_DIRECTION_ANGLE_THRESHOLD_DEGREES,
-	mode: "GPS based lap splitting" as LapDetectionMode,
 };
 
 /**
@@ -420,11 +522,20 @@ export const DEFAULT_OUT_AND_BACK_CONFIG = {
 };
 
 /**
+ * Default values for one-way gate detection configuration
+ */
+export const DEFAULT_ONE_WAY_GATE_CONFIG = {
+	proximityThreshold: DEFAULT_PROXIMITY_THRESHOLD_METERS,
+	bearingWindowSize: DEFAULT_BEARING_WINDOW_POINTS,
+	angleThreshold: DEFAULT_ONE_WAY_ANGLE_THRESHOLD_DEGREES,
+};
+
+/**
  * Get default configuration for GPS lap detection
  */
 export function getDefaultLapDetectionConfig(): Pick<
 	GpsLapDetectionConfig,
-	"proximityThreshold" | "bearingWindowSize" | "angleThreshold" | "mode"
+	"proximityThreshold" | "bearingWindowSize" | "angleThreshold"
 > {
 	return { ...DEFAULT_LAP_DETECTION_CONFIG };
 }

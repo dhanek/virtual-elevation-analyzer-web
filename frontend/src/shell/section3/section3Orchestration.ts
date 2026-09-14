@@ -14,7 +14,12 @@ import { log } from "../../utils/log";
 import {
 	GpsLapDetector,
 	OutAndBackDetector,
+	type GatePosition,
 	type GpsLapDetectionConfig,
+	type GpsLapDetectionResult,
+	OneWayGateDetector,
+	DEFAULT_ONE_WAY_GATE_CONFIG,
+	type IndexWindow,
 	type OutAndBackConfig,
 	getDefaultLapDetectionConfig,
 	DEFAULT_OUT_AND_BACK_CONFIG,
@@ -590,35 +595,7 @@ function rerenderSection3(): void {
 					mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 					deps.setMapVisualization(mapVisualization);
 
-					// Setup GPS lap detection if enabled
-					if (showGpsLapDetection) {
-						void bindGpsDetection(
-							deps.appState,
-							deps.parameterStorage,
-							mapVisualization,
-							{
-								getSelectedDataTimeRange,
-								findDataIndexAtTimeOffset,
-								runGpsLapDetection,
-								registerRedetect: setGpsRedetect,
-							},
-						);
-					}
-
-					// Setup Out and Back detection if enabled
-					if (showOutAndBack) {
-						void bindOutAndBackDetection(
-							deps.appState,
-							deps.parameterStorage,
-							mapVisualization,
-							{
-								getSelectedDataTimeRange,
-								findDataIndexAtTimeOffset,
-								runOutAndBackDetection,
-								registerRedetect: setGpsRedetect,
-							},
-						);
-					}
+					bindGateDetection(mapVisualization, gpsMode);
 				} else {
 					// Map not yet initialized, initialize it
 					const mapVisualization = new MapVisualization("mapView");
@@ -627,33 +604,7 @@ function rerenderSection3(): void {
 					mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 					deps.setMapVisualization(mapVisualization);
 
-					if (showGpsLapDetection) {
-						void bindGpsDetection(
-							deps.appState,
-							deps.parameterStorage,
-							mapVisualization,
-							{
-								getSelectedDataTimeRange,
-								findDataIndexAtTimeOffset,
-								runGpsLapDetection,
-								registerRedetect: setGpsRedetect,
-							},
-						);
-					}
-
-					if (showOutAndBack) {
-						void bindOutAndBackDetection(
-							deps.appState,
-							deps.parameterStorage,
-							mapVisualization,
-							{
-								getSelectedDataTimeRange,
-								findDataIndexAtTimeOffset,
-								runOutAndBackDetection,
-								registerRedetect: setGpsRedetect,
-							},
-						);
-					}
+					bindGateDetection(mapVisualization, gpsMode);
 				}
 			}
 		} catch (error) {
@@ -747,6 +698,41 @@ export function isGpsLapSelectionMode(
 }
 
 /**
+ * Bind the gate controls of the GPS mode on screen. One-way mode places two
+ * gates like out-and-back but produces GPS laps, so it gets the two-gate binder
+ * with its own storage and detector.
+ */
+function bindGateDetection(
+	mapVisualization: MapVisualization,
+	gpsMode: GpsAnalysisMode,
+): void {
+	const { appState, parameterStorage } = getDependencies();
+	const common = {
+		getSelectedDataTimeRange,
+		findDataIndexAtTimeOffset,
+		registerRedetect: setGpsRedetect,
+	};
+	if (gpsMode === "GPS based lap splitting") {
+		void bindGpsDetection(appState, parameterStorage, mapVisualization, {
+			...common,
+			runGpsLapDetection,
+		});
+	} else if (gpsMode === "GPS gate one way") {
+		void bindOutAndBackDetection(appState, parameterStorage, mapVisualization, {
+			...common,
+			gates: "oneWay",
+			runDetection: runOneWayGateDetection,
+		});
+	} else if (gpsMode === "GPS based out and back") {
+		void bindOutAndBackDetection(appState, parameterStorage, mapVisualization, {
+			...common,
+			runDetection: (a, b) =>
+				runOutAndBackDetection(a.lat, a.lon, b.lat, b.lon),
+		});
+	}
+}
+
+/**
  * Get the time range of currently selected data (from selected FIT laps)
  */
 function getSelectedDataTimeRange(): {
@@ -829,57 +815,83 @@ export async function runGpsLapDetection(
 	markerLon: number,
 	_markerIndex: number,
 ): Promise<void> {
+	const windows = gpsDetectionWindows("GPS lap detection");
+	if (!windows) return;
 	const deps = getDependencies();
-
-	if (!deps.appState.currentFitData) return;
-
-	// Detection is scoped to the selected FIT laps. With no selection there is
-	// no scope to detect within, so bail out rather than fall back to the whole
-	// activity (which would detect laps the user never asked for).
-	if (
-		deps.appState.selectedLaps.length === 0 ||
-		deps.appState.currentLaps.length === 0
-	) {
-		log.debug("Skipping GPS lap detection: no FIT laps selected");
-		return;
-	}
-
-	const windows = selectedLapWindows(
-		deps.appState.currentFitData.timestamps,
-		deps.appState.currentLaps,
-		deps.appState.selectedLaps,
-	);
-	log.debug("GPS lap detection windows:", windows);
-
-	// Get detection mode from Section 3 GPS mode state (not None since we're running detection)
-	const detectionMode = getGpsAnalysisMode();
-	const mode =
-		detectionMode && detectionMode !== "None"
-			? detectionMode
-			: "GPS based lap splitting";
+	const fitData = deps.appState.currentFitData!;
 
 	const config: GpsLapDetectionConfig = {
 		markerLat,
 		markerLon,
 		windows,
 		...getDefaultLapDetectionConfig(),
-		mode,
 	};
 
 	const detector = new GpsLapDetector(
-		Array.from(deps.appState.currentFitData.position_lat),
-		Array.from(deps.appState.currentFitData.position_long),
-		Array.from(deps.appState.currentFitData.timestamps),
-		Array.from(deps.appState.currentFitData.distance),
+		Array.from(fitData.position_lat),
+		Array.from(fitData.position_long),
+		Array.from(fitData.timestamps),
+		Array.from(fitData.distance),
 		config,
 	);
+	applyGpsLapDetection(detector.detectLaps());
+}
+
+/**
+ * Run one-way gate detection: segments from gate A to gate B, each counted
+ * only in the direction it was placed. The segments go into the GPS lap list,
+ * so everything downstream treats them as GPS laps.
+ */
+export async function runOneWayGateDetection(
+	gateA: GatePosition,
+	gateB: GatePosition,
+): Promise<void> {
+	const windows = gpsDetectionWindows("one-way gate detection");
+	if (!windows) return;
+	const fitData = getDependencies().appState.currentFitData!;
+
+	const detector = new OneWayGateDetector(
+		Array.from(fitData.position_lat),
+		Array.from(fitData.position_long),
+		Array.from(fitData.timestamps),
+		Array.from(fitData.distance),
+		{ gateA, gateB, windows, ...DEFAULT_ONE_WAY_GATE_CONFIG },
+	);
+	applyGpsLapDetection(detector.detectLaps());
+}
+
+/**
+ * The detection windows for the selected FIT laps, or null when detection must
+ * not run. Detection is scoped to the selected FIT laps: with no selection
+ * there is no scope to detect within, so it bails rather than fall back to the
+ * whole activity (which would detect laps the user never asked for).
+ */
+function gpsDetectionWindows(label: string): IndexWindow[] | null {
+	const { appState } = getDependencies();
+	if (!appState.currentFitData) return null;
+	if (appState.selectedLaps.length === 0 || appState.currentLaps.length === 0) {
+		log.debug(`Skipping ${label}: no FIT laps selected`);
+		return null;
+	}
+	const windows = selectedLapWindows(
+		appState.currentFitData.timestamps,
+		appState.currentLaps,
+		appState.selectedLaps,
+	);
+	log.debug(`${label} windows:`, windows);
+	return windows;
+}
+
+/** Publish a GPS lap detection — from either detector — to state, map and UI. */
+function applyGpsLapDetection(result: GpsLapDetectionResult): void {
+	const deps = getDependencies();
 
 	// Captured BEFORE the overwrite: the guard at the foot of this function
 	// compares the detection the panel was built against with the one just
 	// produced, so the previous list has to be read while it is still there.
 	const detectionBefore = deps.appState.gpsDetectedLaps.map(lapRangeCut);
 
-	deps.appState.gpsLapDetectionResult = detector.detectLaps();
+	deps.appState.gpsLapDetectionResult = result;
 	deps.appState.gpsDetectedLaps =
 		deps.appState.gpsLapDetectionResult.detectedLaps;
 
@@ -1063,27 +1075,10 @@ export async function runOutAndBackDetection(
 	markerBLat: number,
 	markerBLon: number,
 ): Promise<void> {
+	const windows = gpsDetectionWindows("Out and Back detection");
+	if (!windows) return;
 	const deps = getDependencies();
-
-	if (!deps.appState.currentFitData) return;
-
-	// Detection is scoped to the selected FIT laps. With no selection there
-	// is no scope to detect within, so bail out rather than fall back to the
-	// whole activity (which would detect sections the user never asked for).
-	if (
-		deps.appState.selectedLaps.length === 0 ||
-		deps.appState.currentLaps.length === 0
-	) {
-		log.debug("Skipping Out and Back detection: no FIT laps selected");
-		return;
-	}
-
-	const windows = selectedLapWindows(
-		deps.appState.currentFitData.timestamps,
-		deps.appState.currentLaps,
-		deps.appState.selectedLaps,
-	);
-	log.debug("Out and Back detection windows:", windows);
+	const fitData = deps.appState.currentFitData!;
 
 	const config: OutAndBackConfig = {
 		markerALat,
@@ -1095,10 +1090,10 @@ export async function runOutAndBackDetection(
 	};
 
 	const detector = new OutAndBackDetector(
-		Array.from(deps.appState.currentFitData.position_lat),
-		Array.from(deps.appState.currentFitData.position_long),
-		Array.from(deps.appState.currentFitData.timestamps),
-		Array.from(deps.appState.currentFitData.distance),
+		Array.from(fitData.position_lat),
+		Array.from(fitData.position_long),
+		Array.from(fitData.timestamps),
+		Array.from(fitData.distance),
 		config,
 	);
 
@@ -1963,35 +1958,7 @@ export function initializeSection3(): void {
 				drawTrimRegionOnMap();
 				log.debug("Map initialized with GPS data");
 
-				// Setup GPS lap detection if enabled
-				if (showGpsLapDetection) {
-					void bindGpsDetection(
-						deps.appState,
-						deps.parameterStorage,
-						mapVisualization,
-						{
-							getSelectedDataTimeRange,
-							findDataIndexAtTimeOffset,
-							runGpsLapDetection,
-							registerRedetect: setGpsRedetect,
-						},
-					);
-				}
-
-				// Setup Out and Back detection if enabled
-				if (showOutAndBack) {
-					void bindOutAndBackDetection(
-						deps.appState,
-						deps.parameterStorage,
-						mapVisualization,
-						{
-							getSelectedDataTimeRange,
-							findDataIndexAtTimeOffset,
-							runOutAndBackDetection,
-							registerRedetect: setGpsRedetect,
-						},
-					);
-				}
+				bindGateDetection(mapVisualization, gpsMode);
 			} else {
 				log.debug("No GPS data - skipping map initialization");
 				deps.setMapVisualization(null);
