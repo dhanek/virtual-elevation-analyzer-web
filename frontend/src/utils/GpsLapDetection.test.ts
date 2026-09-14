@@ -228,6 +228,39 @@ describe("OutAndBackDetector", () => {
 			Math.abs(result.detectedSections[0].outboundStartIdx - secondPassOfA),
 		).toBeLessThanOrEqual(2);
 	});
+
+	for (const bend of [100, 135, 170]) {
+		it(`starts the inbound leg at the return pass when B sits on a ${bend}° bend`, () => {
+			const rad = (bend * Math.PI) / 180;
+			const far: Point = [300 * Math.sin(rad), 500 + 300 * Math.cos(rad)];
+			const track = buildTrack([
+				[0, -100],
+				[0, 500],
+				far,
+				[far[0] + 4, far[1] + 4],
+				[0, 500],
+				[0, -100],
+			]);
+			const firstB = track.nearest([0, 500]);
+			const returnB = track.nearest([0, 500], track.nearest(far));
+			const result = new OutAndBackDetector(
+				track.lat,
+				track.lon,
+				track.timestamps,
+				track.distance,
+				outAndBackConfig([0, 0], [0, 500], whole(track)),
+			).detectSections();
+
+			expect(result.detectedSections).toHaveLength(1);
+			const s = result.detectedSections[0];
+			// Without this the test would pass just as well if the doubling stopped firing.
+			expect(
+				result.passingsB.filter((p) => p.index === s.outboundEndIdx),
+			).toHaveLength(2);
+			expect(Math.abs(s.outboundEndIdx - firstB)).toBeLessThanOrEqual(3);
+			expect(Math.abs(s.inboundStartIdx - returnB)).toBeLessThanOrEqual(3);
+		});
+	}
 });
 
 describe("GpsLapDetector", () => {

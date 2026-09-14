@@ -320,6 +320,7 @@ export class OutAndBackDetector {
 		let outStart: PassingPoint | null = null;
 		let outEnd: PassingPoint | null = null;
 		let inStart: PassingPoint | null = null;
+		let inStartProvisional = false;
 
 		for (const passing of passings) {
 			if (!outEnd) {
@@ -335,6 +336,19 @@ export class OutAndBackDetector {
 						angleThreshold
 				) {
 					inStart = passing;
+					inStartProvisional = passing.index === outEnd.index;
+				}
+			} else if (passing.marker === "B") {
+				// A bend sharper than TURNAROUND_ANGLE_DEGREES doubles its passing
+				// just as a U-turn does, so an inStart at outEnd's own index is only
+				// provisional: a later reversed pass through B tells the two apart.
+				if (
+					inStartProvisional &&
+					circularAngleDifference(passing.direction, outEnd.direction) >
+						angleThreshold
+				) {
+					inStart = passing;
+					inStartProvisional = passing.index === outEnd.index;
 				}
 			} else if (
 				passing.marker === "A" &&
@@ -345,6 +359,7 @@ export class OutAndBackDetector {
 				outStart = null;
 				outEnd = null;
 				inStart = null;
+				inStartProvisional = false;
 			}
 		}
 
