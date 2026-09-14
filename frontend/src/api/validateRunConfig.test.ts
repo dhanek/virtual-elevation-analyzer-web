@@ -40,6 +40,26 @@ describe("validateRunConfig", () => {
 		);
 	});
 
+	test("names one-way gates as unsupported, not as a compare mix-up", () => {
+		const outcome = validateRunConfig({ ...good(), mode: "oneWay" });
+		expect(outcome.ok).toBe(false);
+		const modeError = outcome.ok
+			? undefined
+			: outcome.errors.find((e) => e.path === "mode");
+		expect(modeError).toBeDefined();
+		expect(modeError!.message).toContain("one-way");
+		expect(modeError!.message).not.toContain("inputs.windSource");
+	});
+
+	test("an unknown mode gets the plain message, without the compare hint", () => {
+		const outcome = validateRunConfig({ ...good(), mode: "bogus" });
+		const modeError = outcome.ok
+			? undefined
+			: outcome.errors.find((e) => e.path === "mode");
+		expect(modeError).toBeDefined();
+		expect(modeError!.message).not.toContain("inputs.windSource");
+	});
+
 	test("a selection that does not match the mode is an error, never a silent zero-segment run", () => {
 		expect(
 			errorsOf({ ...good(), mode: "gpsLap", selection: { laps: [2] } }).join(),

@@ -291,9 +291,17 @@ export function validateRunConfig(raw: unknown): ValidateRunConfigResult {
 
 	const mode = raw.mode as AnalysisModeId;
 	if (!MODES.includes(mode)) {
+		let message: string;
+		if (raw.mode === "compare") {
+			message = `must be one of ${MODES.join(", ")} — 'compare' is not a mode, it is inputs.windSource`;
+		} else if (raw.mode === "oneWay") {
+			message = `one-way gates are not supported by the run schema; must be one of ${MODES.join(", ")}`;
+		} else {
+			message = `must be one of ${MODES.join(", ")}`;
+		}
 		errors.push({
 			path: "mode",
-			message: `must be one of ${MODES.join(", ")} — 'compare' is not a mode, it is inputs.windSource`,
+			message,
 			received: raw.mode,
 		});
 	} else {
