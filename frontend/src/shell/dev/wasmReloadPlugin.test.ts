@@ -34,8 +34,8 @@ function makeServer() {
 	return { server, handlers, fire };
 }
 
-function setup() {
-	const plugin = wasmReloadPlugin(PKG_DIR);
+function setupWith(pkgDir: string) {
+	const plugin = wasmReloadPlugin(pkgDir);
 	const ctx = makeServer();
 	const configureServer = plugin.configureServer as unknown as (
 		server: unknown,
@@ -45,6 +45,10 @@ function setup() {
 		file: string;
 	}) => unknown;
 	return { plugin, ...ctx, hotUpdate };
+}
+
+function setup() {
+	return setupWith(PKG_DIR);
 }
 
 describe("wasmReloadPlugin", () => {
@@ -89,9 +93,10 @@ describe("wasmReloadPlugin", () => {
 		});
 
 		it("with a Windows path", () => {
-			ctx.fire("change", "C:\\repo\\frontend\\pkg\\.build-done");
-			expect(ctx.server.ws.send).toHaveBeenCalledTimes(1);
-			expect(ctx.server.ws.send).toHaveBeenCalledWith({
+			const win = setupWith("C:\\repo\\frontend\\pkg");
+			win.fire("change", "C:\\repo\\frontend\\pkg\\.build-done");
+			expect(win.server.ws.send).toHaveBeenCalledTimes(1);
+			expect(win.server.ws.send).toHaveBeenCalledWith({
 				type: "full-reload",
 				path: "*",
 			});
@@ -135,17 +140,98 @@ describe("wasmReloadPlugin", () => {
 		for (const file of [
 			"/repo/frontend/pkg/virtual_elevation_analyzer.js",
 			"/repo/frontend/pkg/virtual_elevation_analyzer_bg.wasm",
-			"C:\\repo\\frontend\\pkg\\virtual_elevation_analyzer_bg.wasm",
 		]) {
 			it(`returns [] for ${file}`, () => {
 				expect(ctx.hotUpdate({ file })).toEqual([]);
 			});
 		}
 
+		it("returns [] for C:\\repo\\frontend\\pkg\\virtual_elevation_analyzer_bg.wasm", () => {
+			const win = setupWith("C:\\repo\\frontend\\pkg");
+			expect(
+				win.hotUpdate({
+					file: "C:\\repo\\frontend\\pkg\\virtual_elevation_analyzer_bg.wasm",
+				}),
+			).toEqual([]);
+		});
+
 		it("returns undefined for /repo/frontend/src/main.ts", () => {
 			expect(
 				ctx.hotUpdate({ file: "/repo/frontend/src/main.ts" }),
 			).toBeUndefined();
+		});
+	});
+
+	describe("(f) matches the pkgDir, not a /pkg/ substring", () => {
+		const NESTED_PKG_DIR =
+			"/home/u/pkg/virtual-elevation-analyzer-web/frontend/pkg";
+		const NESTED_FRONTEND =
+			"/home/u/pkg/virtual-elevation-analyzer-web/frontend";
+
+		it("f1) a src file under a pkg ancestor is not suppressed", () => {
+			const nested = setupWith(NESTED_PKG_DIR);
+			expect(
+				nested.hotUpdate({ file: `${NESTED_FRONTEND}/src/main.ts` }),
+			).toBeUndefined();
+		});
+
+		it("f2) a pkgDir file under a pkg ancestor is suppressed", () => {
+			const nested = setupWith(NESTED_PKG_DIR);
+			expect(
+				nested.hotUpdate({
+					file: `${NESTED_FRONTEND}/pkg/virtual_elevation_analyzer_bg.wasm`,
+				}),
+			).toEqual([]);
+		});
+
+		it("f3) a marker in the pkg ancestor does not reload", () => {
+			const nested = setupWith(NESTED_PKG_DIR);
+			nested.fire("change", "/home/u/pkg/.build-done");
+			expect(nested.server.ws.send).toHaveBeenCalledTimes(0);
+			expect(nested.server.config.logger.info).toHaveBeenCalledTimes(0);
+		});
+
+		it("f4) the marker in pkgDir under a pkg ancestor reloads once", () => {
+			const nested = setupWith(NESTED_PKG_DIR);
+			nested.fire("change", `${NESTED_FRONTEND}/pkg/.build-done`);
+			expect(nested.server.ws.send).toHaveBeenCalledTimes(1);
+			expect(nested.server.ws.send).toHaveBeenCalledWith({
+				type: "full-reload",
+				path: "*",
+			});
+		});
+
+		it("f5) a sibling directory sharing the pkgDir prefix does not match", () => {
+			const sibling = setupWith("/repo/frontend/pkg");
+			expect(
+				sibling.hotUpdate({
+					file: "/repo/frontend/pkg-old/virtual_elevation_analyzer.js",
+				}),
+			).toBeUndefined();
+			sibling.fire("change", "/repo/frontend/pkg-old/.build-done");
+			expect(sibling.server.ws.send).toHaveBeenCalledTimes(0);
+		});
+
+		it("f6) a trailing slash on pkgDir still matches", () => {
+			const slashed = setupWith("/repo/frontend/pkg/");
+			expect(
+				slashed.hotUpdate({
+					file: "/repo/frontend/pkg/virtual_elevation_analyzer_bg.wasm",
+				}),
+			).toEqual([]);
+			slashed.fire("change", "/repo/frontend/pkg/.build-done");
+			expect(slashed.server.ws.send).toHaveBeenCalledTimes(1);
+		});
+
+		it("f7) a backslash pkgDir matches Vite-normalised forward-slash files", () => {
+			const win = setupWith("C:\\repo\\frontend\\pkg");
+			expect(
+				win.hotUpdate({
+					file: "C:/repo/frontend/pkg/virtual_elevation_analyzer_bg.wasm",
+				}),
+			).toEqual([]);
+			win.fire("change", "C:/repo/frontend/pkg/.build-done");
+			expect(win.server.ws.send).toHaveBeenCalledTimes(1);
 		});
 	});
 });

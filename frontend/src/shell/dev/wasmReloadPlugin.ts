@@ -24,13 +24,14 @@ const toPosix = (file: string): string => file.replace(/\\/g, "/");
  * in Vite's module graph and core would otherwise reload on the first wave.
  */
 export function wasmReloadPlugin(pkgDir: string): Plugin {
+	const pkgPrefix = `${toPosix(pkgDir).replace(/\/+$/, "")}/`;
 	return {
 		name: "ve-wasm-reload",
 		apply: "serve",
 		configureServer(server) {
 			server.watcher.add(pkgDir);
 			const reload = (file: string) => {
-				if (!toPosix(file).endsWith(`/pkg/${WASM_BUILD_DONE_MARKER}`)) return;
+				if (toPosix(file) !== `${pkgPrefix}${WASM_BUILD_DONE_MARKER}`) return;
 				server.config.logger.info("wasm rebuilt, reloading page");
 				server.ws.send({ type: "full-reload", path: "*" });
 			};
@@ -38,7 +39,7 @@ export function wasmReloadPlugin(pkgDir: string): Plugin {
 			server.watcher.on("add", reload);
 		},
 		hotUpdate({ file }) {
-			if (toPosix(file).includes("/pkg/")) {
+			if (toPosix(file).startsWith(pkgPrefix)) {
 				return [];
 			}
 		},
