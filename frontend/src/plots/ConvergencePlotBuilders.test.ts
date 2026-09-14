@@ -56,9 +56,13 @@ describe("buildClosureContourFigure", () => {
 		]);
 		expect(figure.data[2].name).toBe("Best fit");
 		expect(figure.data[3].name).toBe("Current");
-		// Reversed Viridis: the low-error valley reads bright against a dark
-		// field, which is what makes the minimum findable at a glance.
-		expect(figure.data[0].reversescale).toBe(true);
+		// The app's own blue → grey → red, low error at the blue end: the
+		// valley is the saturated colour, which is what makes the minimum
+		// findable at a glance. Not reversed, or the valley would read red.
+		const scale = figure.data[0].colorscale as Array<[number, string]>;
+		expect(scale[0]).toEqual([0, "#4363d8"]);
+		expect(scale[scale.length - 1]).toEqual([1, "#e53e3e"]);
+		expect(figure.data[0].reversescale).toBeUndefined();
 	});
 
 	it("hands Plotly the pooled z in its [crr][cda] orientation untouched", () => {

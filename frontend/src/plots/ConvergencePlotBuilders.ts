@@ -69,6 +69,18 @@ export type ConvergenceMetric = "closure" | "profileSpread";
 /** Colour shared by the band's iso-line and its label. */
 const BAND_COLOR = "#ff7f0e";
 
+/**
+ * Low error blue, high error red, through a neutral grey — the app's own
+ * primary, border and danger tokens (`styles/tokens.css`) rather than a
+ * library palette, so the map reads as part of the same page as the VE plots.
+ * The valley (what the user is looking for) is the saturated blue end.
+ */
+const CLOSURE_COLORSCALE: Array<[number, string]> = [
+	[0, "#4363d8"],
+	[0.5, "#e2e8f0"],
+	[1, "#e53e3e"],
+];
+
 export function buildClosureContourFigure(
 	input: ConvergencePlotInput,
 ): PlotDefinition {
@@ -92,8 +104,7 @@ export function buildClosureContourFigure(
 			y: crrValues,
 			z: surface.z,
 			contours: { coloring: "heatmap" },
-			colorscale: "Viridis",
-			reversescale: true,
+			colorscale: CLOSURE_COLORSCALE,
 			colorbar: {
 				title: {
 					text: profile ? "Profile spread RMSE (m)" : "Closure error (m)",
