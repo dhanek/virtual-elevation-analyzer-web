@@ -781,7 +781,8 @@ impl VirtualElevationCalculator {
     /// is bracketed; NaN when it is not, so a caller can tell "outside the
     /// bounds" from a bound. Single segment only — the pooled multi-segment
     /// solve needs every segment's calculator at once and lives in
-    /// TypeScript.
+    /// TypeScript. The NaN is `try_crr_for_gain`'s `CrrForGainError`,
+    /// collapsed for JavaScript.
     #[wasm_bindgen]
     pub fn crr_for_gain(
         &self,
@@ -792,38 +793,8 @@ impl VirtualElevationCalculator {
         trim_start: usize,
         trim_end: usize,
     ) -> f64 {
-        let Some((start, end)) =
-            self.metrics_window(self.data.velocity.len(), trim_start, trim_end)
-        else {
-            return f64::NAN;
-        };
-        let kernel = self.build_gain_kernel(start, end);
-        if kernel.step.is_empty() || !(crr_lo < crr_hi) {
-            return f64::NAN;
-        }
-        let gain_lo = kernel.gain(cda, crr_lo);
-        let gain_hi = kernel.gain(cda, crr_hi);
-        // Decreasing in Crr: bracketed when gain(lo) >= target >= gain(hi).
-        if !(gain_hi <= target_gain && target_gain <= gain_lo) {
-            return f64::NAN;
-        }
-
-        let (mut lo, mut hi) = (crr_lo, crr_hi);
-        for _ in 0..200 {
-            let mid = 0.5 * (lo + hi);
-            if mid <= lo || mid >= hi {
-                break;
-            }
-            if kernel.gain(cda, mid) > target_gain {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-            if hi - lo <= 1e-12 {
-                break;
-            }
-        }
-        0.5 * (lo + hi)
+        self.try_crr_for_gain(cda, target_gain, crr_lo, crr_hi, trim_start, trim_end)
+            .unwrap_or(f64::NAN)
     }
 
     /// Calculate R², RMSE and elevation differences within trim region
@@ -904,6 +875,72 @@ impl VirtualElevationCalculator {
         let actual_diff = actual_full[safe_trim_end] - actual_full[safe_trim_start];
 
         (r2, rmse, ve_diff, actual_diff)
+    }
+}
+
+/// Why `try_crr_for_gain` found no Crr. `crr_for_gain` collapses every
+/// variant to NaN for JavaScript; Rust callers and tests keep them apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrrForGainError {
+    /// The trim window has no samples to sum (`metrics_window` refused it,
+    /// or the kernel came out empty).
+    DegenerateWindow,
+    /// `crr_lo` is not strictly below `crr_hi`.
+    InvertedBracket,
+    /// `target_gain` lies outside `[gain(crr_hi), gain(crr_lo)]`.
+    NotBracketed,
+}
+
+// Deliberately NOT #[wasm_bindgen]: a `Result` with a Rust enum error has no
+// JavaScript shape here, so the named failure stays on the Rust side.
+impl VirtualElevationCalculator {
+    /// `crr_for_gain` with the failure named: the Crr at which
+    /// `ve_gain(cda, ·)` equals `target_gain`, by bisection over
+    /// `[crr_lo, crr_hi]`.
+    pub fn try_crr_for_gain(
+        &self,
+        cda: f64,
+        target_gain: f64,
+        crr_lo: f64,
+        crr_hi: f64,
+        trim_start: usize,
+        trim_end: usize,
+    ) -> Result<f64, CrrForGainError> {
+        let Some((start, end)) =
+            self.metrics_window(self.data.velocity.len(), trim_start, trim_end)
+        else {
+            return Err(CrrForGainError::DegenerateWindow);
+        };
+        let kernel = self.build_gain_kernel(start, end);
+        if kernel.step.is_empty() {
+            return Err(CrrForGainError::DegenerateWindow);
+        }
+        if !(crr_lo < crr_hi) {
+            return Err(CrrForGainError::InvertedBracket);
+        }
+        let gain_lo = kernel.gain(cda, crr_lo);
+        let gain_hi = kernel.gain(cda, crr_hi);
+        // Decreasing in Crr: bracketed when gain(lo) >= target >= gain(hi).
+        if !(gain_hi <= target_gain && target_gain <= gain_lo) {
+            return Err(CrrForGainError::NotBracketed);
+        }
+
+        let (mut lo, mut hi) = (crr_lo, crr_hi);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if mid <= lo || mid >= hi {
+                break;
+            }
+            if kernel.gain(cda, mid) > target_gain {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            if hi - lo <= 1e-12 {
+                break;
+            }
+        }
+        Ok(0.5 * (lo + hi))
     }
 }
 
@@ -1622,31 +1659,109 @@ mod tests {
         for &cda in &[0.20, 0.30, 0.45] {
             for &crr in &[0.002, 0.005, 0.012] {
                 for &(start, end) in &windows {
-                    let expected = calc
-                        .calculate_virtual_elevation(cda, crr, start, end)
-                        .ve_elevation_diff();
-                    let actual = calc.ve_gain(cda, crr, start, end);
-                    if actual.is_nan() {
-                        assert_eq!(
-                            expected, 0.0,
-                            "{}: ve_gain({}, {}, {}, {}) refused a window the profile \
-                             answered with {}",
-                            label, cda, crr, start, end, expected
-                        );
-                        continue;
-                    }
-                    assert!(
-                        (expected - actual).abs() < GAIN_TOLERANCE,
-                        "{}: ve_gain({}, {}, {}, {}) = {} but the profile says {}",
-                        label,
-                        cda,
-                        crr,
-                        start,
-                        end,
-                        actual,
-                        expected
-                    );
+                    assert_gain_matches_profile_at(calc, cda, crr, start, end, label);
                 }
+            }
+        }
+    }
+
+    /// One (CdA, Crr, window) point of `assert_gain_matches_profile`: NaN
+    /// only where the profile said exactly 0.0, otherwise within
+    /// `GAIN_TOLERANCE`.
+    fn assert_gain_matches_profile_at(
+        calc: &VirtualElevationCalculator,
+        cda: f64,
+        crr: f64,
+        start: usize,
+        end: usize,
+        label: &str,
+    ) {
+        let expected = calc
+            .calculate_virtual_elevation(cda, crr, start, end)
+            .ve_elevation_diff();
+        let actual = calc.ve_gain(cda, crr, start, end);
+        if actual.is_nan() {
+            assert_eq!(
+                expected, 0.0,
+                "{}: ve_gain({}, {}, {}, {}) refused a window the profile \
+                 answered with {}",
+                label, cda, crr, start, end, expected
+            );
+            return;
+        }
+        assert!(
+            (expected - actual).abs() < GAIN_TOLERANCE,
+            "{}: ve_gain({}, {}, {}, {}) = {} but the profile says {}",
+            label,
+            cda,
+            crr,
+            start,
+            end,
+            actual,
+            expected
+        );
+    }
+
+    /// SplitMix64: a seeded, dependency-free generator for the random-window
+    /// test. Not for anything but reproducible test draws.
+    struct SplitMix64(u64);
+
+    impl SplitMix64 {
+        fn next_u64(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+
+        /// Uniform in [0, 1).
+        fn next_f64(&mut self) -> f64 {
+            (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+        }
+
+        /// Uniform in `0..bound`.
+        fn below(&mut self, bound: usize) -> usize {
+            (self.next_u64() % bound as u64) as usize
+        }
+
+        fn uniform(&mut self, lo: f64, hi: f64) -> f64 {
+            lo + (hi - lo) * self.next_f64()
+        }
+    }
+
+    /// The fixed window list in `assert_gain_matches_profile` names the shapes
+    /// someone thought of; this draws the ones nobody did. Start and end are
+    /// uniform in `0..N+10`, so reversed and past-the-end pairs occur on
+    /// purpose, over both a GPS/wind/rho ride and the altitude constant ride.
+    #[test]
+    fn ve_gain_matches_profile_over_random_windows() {
+        const SEED: u64 = 0x5EED_0F_6A1D;
+        const DRAWS: usize = 500;
+
+        let calculators = [
+            (
+                "wind + GPS + rho array",
+                VirtualElevationCalculator::new(varied_ride(), windy_params()),
+            ),
+            (
+                "constant ride",
+                VirtualElevationCalculator::new(
+                    constant_ride(steady_state_power(), 100.0, vec![0.0; N]),
+                    reference_params(),
+                ),
+            ),
+        ];
+
+        for (name, calc) in &calculators {
+            let mut rng = SplitMix64(SEED);
+            for draw in 0..DRAWS {
+                let start = rng.below(N + 10);
+                let end = rng.below(N + 10);
+                let cda = rng.uniform(0.15, 0.50);
+                let crr = rng.uniform(0.001, 0.015);
+                let label = format!("{} (seed {:#x}, draw {})", name, SEED, draw);
+                assert_gain_matches_profile_at(calc, cda, crr, start, end, &label);
             }
         }
     }
@@ -1770,6 +1885,40 @@ mod tests {
             .is_nan());
         // So is an inverted bracket.
         assert!(calc.crr_for_gain(0.3, target, 0.03, 0.001, 0, N - 1).is_nan());
+    }
+
+    /// The NaN above is three different refusals; `try_crr_for_gain` keeps
+    /// them apart, so a swap between two of them is visible here even though
+    /// `crr_for_gain` would still return NaN for both.
+    #[test]
+    fn try_crr_for_gain_names_each_failure() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        let planted = 0.005;
+        let target = calc.ve_gain(0.3, planted, 0, N - 1);
+
+        let recovered = calc
+            .try_crr_for_gain(0.3, target, 0.001, 0.03, 0, N - 1)
+            .expect("a bracketed target recovers its Crr");
+        assert!(
+            (recovered - planted).abs() < 1e-9,
+            "bisection should recover crr={} but gave {}",
+            planted,
+            recovered
+        );
+
+        assert_eq!(
+            calc.try_crr_for_gain(0.3, target, 0.001, 0.03, 50, 50),
+            Err(CrrForGainError::DegenerateWindow)
+        );
+        assert_eq!(
+            calc.try_crr_for_gain(0.3, target, 0.03, 0.001, 0, N - 1),
+            Err(CrrForGainError::InvertedBracket)
+        );
+        let unreachable = calc.ve_gain(0.3, 0.0005, 0, N - 1);
+        assert_eq!(
+            calc.try_crr_for_gain(0.3, unreachable, 0.001, 0.03, 0, N - 1),
+            Err(CrrForGainError::NotBracketed)
+        );
     }
 
     #[test]
