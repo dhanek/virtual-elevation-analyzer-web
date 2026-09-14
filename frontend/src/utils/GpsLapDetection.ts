@@ -464,28 +464,31 @@ export class OneWayGateDetector {
 				...passingsB.map((p): MarkedPassing => ({ ...p, marker: "B" })),
 			].sort((a, b) => a.index - b.index);
 
-			// Every A (re)starts the segment, so it runs from the last A before B.
+			// Every A (re)starts the segment, so it runs from the last A before B,
+			// and a B on A's own sample closes it without a segment.
 			let start: PassingPoint | null = null;
 			for (const passing of merged) {
 				if (passing.marker === "A") {
 					start = passing;
 				} else if (start) {
-					detectedLaps.push({
-						lapNumber: detectedLaps.length + 1,
-						startIdx: start.index,
-						endIdx: passing.index,
-						startTime: start.timestamp,
-						endTime: passing.timestamp,
-						duration: passing.timestamp - start.timestamp,
-						distance:
-							(this.distance[passing.index] - this.distance[start.index]) /
-							METERS_PER_KILOMETER,
-						startDirection: start.direction,
-						endDirection: passing.direction,
-						directionName: bearingToCompassDirection(start.direction),
-						startLat: start.lat,
-						startLon: start.lon,
-					});
+					if (passing.index > start.index) {
+						detectedLaps.push({
+							lapNumber: detectedLaps.length + 1,
+							startIdx: start.index,
+							endIdx: passing.index,
+							startTime: start.timestamp,
+							endTime: passing.timestamp,
+							duration: passing.timestamp - start.timestamp,
+							distance:
+								(this.distance[passing.index] - this.distance[start.index]) /
+								METERS_PER_KILOMETER,
+							startDirection: start.direction,
+							endDirection: passing.direction,
+							directionName: bearingToCompassDirection(start.direction),
+							startLat: start.lat,
+							startLon: start.lon,
+						});
+					}
 					start = null;
 				}
 			}

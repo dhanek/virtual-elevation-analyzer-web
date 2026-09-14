@@ -405,4 +405,19 @@ describe("OneWayGateDetector", () => {
 			Math.abs(result.detectedLaps[0].startIdx - secondPassOfA),
 		).toBeLessThanOrEqual(2);
 	});
+
+	it("never emits a zero-length segment when A and B are on the same spot", () => {
+		const track = buildTrack(repeat(OUT_AND_BACK_REP, 3));
+		const a = gateAt(track, [0, 100]);
+		// The same northbound point, taken one rep later.
+		const b = gateAt(track, [0, 100], track.nearest([6, -100]));
+		const result = detect(track, a, b, whole(track));
+
+		// Reachability: three A and three B passes, on equal indices.
+		expect(result.passings).toHaveLength(6);
+		for (const lap of result.detectedLaps) {
+			expect(lap.endIdx).toBeGreaterThan(lap.startIdx);
+		}
+		expect(result.detectedLaps).toHaveLength(0);
+	});
 });
