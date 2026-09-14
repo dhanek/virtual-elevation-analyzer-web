@@ -23,7 +23,7 @@ export interface GpsDetectionCallbacks {
 	 * closure.
 	 *
 	 * The detection window is scoped to the SELECTED FIT LAPS — both detectors
-	 * derive `trimStart`/`trimEnd` from `appState.selectedLaps` — but nothing
+	 * derive their detection windows from `appState.selectedLaps` — but nothing
 	 * re-ran them when that selection changed, so ticking another lap left the
 	 * detected list, and the VE panel built from it, describing the old window.
 	 * The only way to provoke a re-detect was to nudge a gate, which is what
