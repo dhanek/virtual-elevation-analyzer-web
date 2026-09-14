@@ -32,14 +32,27 @@ describe("updateModeVEPlots has one funnel per surface", () => {
 		// compile time and cannot call anything, so they do not count.
 		const importStatement =
 			/import\s+(type\s+)?[^;]*from\s+["'][^"']*\/updateModeVEPlots(?:\.ts)?["']/g;
+		// A dynamic import loads the module's values, so it always counts.
+		const dynamicImport =
+			/import\s*\(\s*["'][^"']*\/updateModeVEPlots(?:\.ts)?["']\s*\)/g;
+		// A re-export hands the values on; `export type` is erased like `import type`.
+		// Anchored to a line start so the word "export" in prose cannot open a match.
+		const reExport =
+			/^\s*export\s+(type\s+)?[^;]*from\s+["'][^"']*\/updateModeVEPlots(?:\.ts)?["']/gm;
 
 		for (const path of walk(SRC_ROOT)) {
 			const source = readFileSync(path, "utf8");
+			const relative = path.slice(SRC_ROOT.length + 1).replace(/\\/g, "/");
 			for (const match of source.matchAll(importStatement)) {
 				if (match[1]) continue; // type-only
-				valueImporters.push(
-					path.slice(SRC_ROOT.length + 1).replace(/\\/g, "/"),
-				);
+				valueImporters.push(relative);
+			}
+			for (const _match of source.matchAll(dynamicImport)) {
+				valueImporters.push(relative);
+			}
+			for (const match of source.matchAll(reExport)) {
+				if (match[1]) continue; // type-only
+				valueImporters.push(relative);
 			}
 		}
 
@@ -90,4 +103,5 @@ describe("the headless path computes nothing of its own", () => {
 			"computeStandardAggregate",
 		]);
 	});
+
 });
