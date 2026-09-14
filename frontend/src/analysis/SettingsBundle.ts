@@ -67,6 +67,12 @@ export interface SettingsEnvelope {
 	lapSettings: Record<string, LapSettings>;
 	gpsMarkerSettings: Record<string, GpsMarkerSettings>;
 	outAndBackMarkerSettings: Record<string, OutAndBackMarkerSettings>;
+	/**
+	 * One-way gates, same shape as out-and-back's but stored apart: a pair
+	 * placed for out-and-back is not a sensible one-way pair. Absent on exports
+	 * predating one-way gates, and read back as empty.
+	 */
+	oneWayMarkerSettings: Record<string, OutAndBackMarkerSettings>;
 }
 
 export function buildSettingsEnvelope(input: {
@@ -94,6 +100,7 @@ export function buildSettingsEnvelope(input: {
 		lapSettings: input.record?.lapSettings ?? {},
 		gpsMarkerSettings: input.record?.gpsMarkerSettings ?? {},
 		outAndBackMarkerSettings: input.record?.outAndBackMarkerSettings ?? {},
+		oneWayMarkerSettings: input.record?.oneWayMarkerSettings ?? {},
 	};
 }
 
@@ -163,6 +170,7 @@ export function parseSettingsEnvelope(text: string): ParsedSettingsEnvelope {
 			lapSettings: record(candidate.lapSettings),
 			gpsMarkerSettings: record(candidate.gpsMarkerSettings),
 			outAndBackMarkerSettings: record(candidate.outAndBackMarkerSettings),
+			oneWayMarkerSettings: record(candidate.oneWayMarkerSettings),
 		},
 	};
 }
@@ -211,6 +219,7 @@ export function envelopeToStoredRecord(
 		lapSettings: envelope.lapSettings,
 		gpsMarkerSettings: envelope.gpsMarkerSettings,
 		outAndBackMarkerSettings: envelope.outAndBackMarkerSettings,
+		oneWayMarkerSettings: envelope.oneWayMarkerSettings,
 		section3: envelope.section3,
 		lastUsed: now,
 		fileName: targetFileName,

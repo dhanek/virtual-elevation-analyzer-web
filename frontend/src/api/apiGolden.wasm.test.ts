@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { beforeAll, describe, expect, it, test } from "vitest";
+import { beforeAll, describe, expect, it, test, vi } from "vitest";
 import { initSync } from "@wasm/virtual_elevation_analyzer.js";
 import {
 	isGoldenRidePresent,
@@ -27,6 +27,9 @@ import type {
 	SegmentVeProfile,
 } from "../modes/analysis/types";
 import { updateModeVEPlots } from "../shell/analysis/updateModeVEPlots";
+import { createGpsLapUpdateCallbacks } from "../shell/gpsLap/updateGpsLap";
+import { createOutAndBackUpdateCallbacks } from "../shell/outAndBack/updateOutAndBack";
+import { computeStandardAggregate } from "../shell/ve/standardAggregate";
 import type { AppState } from "../state/AppState";
 import { RESULT_COLUMNS } from "../utils/resultColumns";
 import { loadRunActivity } from "./loadActivity";
@@ -37,6 +40,19 @@ import {
 	type RunConfig,
 } from "./schema";
 import { validateRunConfig } from "./validateRunConfig";
+
+// The screens' callback factories import the map module, and Leaflet reads
+// `window` at import time. Nothing here draws a map, so a stand-in whose every
+// member is a no-op keeps this file on node — where the WASM path resolves —
+// instead of moving it to jsdom, where it does not.
+vi.mock("leaflet", () => {
+	const stub: unknown = new Proxy(function () {}, {
+		get: () => stub,
+		apply: () => stub,
+		construct: () => stub as object,
+	});
+	return { default: stub };
+});
 
 const WASM_PATH = fileURLToPath(
 	new URL("../../pkg/virtual_elevation_analyzer_bg.wasm", import.meta.url),
@@ -163,6 +179,7 @@ describe.skipIf(!built || !fixturePresent)("headless API round trip", () => {
 		mode: AnalysisModeId,
 		windSource: "fit" | "constant" | "compare",
 		withRho: boolean,
+		screenCallbacks?: (appState: AppState) => ModeUpdateCallbacks,
 	) {
 		const ride = loadGoldenRide();
 		const noop: ModeUpdateCallbacks = {
@@ -206,7 +223,7 @@ describe.skipIf(!built || !fixturePresent)("headless API round trip", () => {
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandlerById(mode),
-			makeCallbacks: () => noop,
+			makeCallbacks: () => (screenCallbacks ? screenCallbacks(appState) : noop),
 			windSource,
 			cda: CDA,
 			crr: CRR,
@@ -245,6 +262,54 @@ describe.skipIf(!built || !fixturePresent)("headless API round trip", () => {
 				expect(profile.resultCompare).not.toBeNull();
 				expect(profile.resultCompare!.ve_elevation_diff).toBeCloseTo(
 					direct.profiles[i].resultCompare!.ve_elevation_diff,
+					PRECISION,
+				);
+			}
+		});
+	}
+
+	// THE SCREEN'S OWN AGGREGATE, not a convenient mean (Bundle I, I2). The
+	// primitive is driven with the callbacks each browser panel installs, and
+	// the headline numbers the API reports must equal the ones that panel
+	// would show — so a headless aggregate that drifted from the screen's
+	// fails here rather than in a stored CSV row.
+	// Only the aggregate is under test: the screens' renderers paint DOM this
+	// file has none of, so each factory contributes its `aggregate` alone.
+	const noRender = {
+		renderVe: () => {},
+		renderWind: () => {},
+		renderPower: () => {},
+		renderVd: () => {},
+		renderConvergence: () => {},
+		renderMetrics: () => {},
+	};
+	const SCREEN_CALLBACKS: Record<
+		AnalysisModeId,
+		(appState: AppState) => ModeUpdateCallbacks
+	> = {
+		// Standard's binder installs the extracted aggregate as-is
+		// (`bindStandardSliders.ts`).
+		standard: () => ({ ...noRender, aggregate: computeStandardAggregate }),
+		gpsLap: (appState) => ({
+			...noRender,
+			aggregate: createGpsLapUpdateCallbacks(appState).aggregate,
+		}),
+		outAndBack: (appState) => ({
+			...noRender,
+			aggregate: createOutAndBackUpdateCallbacks(appState, null).aggregate,
+		}),
+	};
+
+	for (const mode of MODES) {
+		it(`${mode}: the API's aggregate equals the screen's`, async () => {
+			const api = await runApi(configFor(mode, "fit", true));
+			const screen = await runDirect(mode, "fit", true, SCREEN_CALLBACKS[mode]);
+			expect(api.outcome.aggregate.segmentCount).toBe(
+				screen.aggregate.segmentCount,
+			);
+			for (const key of ["r2", "rmse", "veGain", "actualGain"] as const) {
+				expect(api.outcome.aggregate[key]).toBeCloseTo(
+					screen.aggregate[key],
 					PRECISION,
 				);
 			}

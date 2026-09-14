@@ -23,6 +23,9 @@ const storedRecord = (): StoredParameters => ({
 	outAndBackMarkerSettings: {
 		"3": { gateATimeOffset: 5, gateBTimeOffset: 250 },
 	},
+	oneWayMarkerSettings: {
+		"10-12-16": { gateATimeOffset: 8, gateBTimeOffset: 50 },
+	},
 	lastUsed: 1_700_000_000_000,
 	fileName: "ride.fit",
 });
@@ -53,6 +56,34 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 			gpsAnalysisMode: "GPS based out and back",
 			selectedLaps: [2, 4],
 		});
+	});
+
+	it("carries all three gate families through export and import", () => {
+		// One-way gates (#27) are stored apart from out-and-back's under their
+		// own key; an export that dropped them would re-import a one-way
+		// analysis with its gates reset.
+		const envelope = buildSettingsEnvelope({
+			record: storedRecord(),
+			parameters: params(),
+			activityFileName: "ride.fit",
+			activityFileHash: "abc_ride",
+			section3: null,
+		});
+		const parsed = parseSettingsEnvelope(JSON.stringify(envelope));
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		const record = envelopeToStoredRecord(
+			parsed.envelope,
+			"target_hash",
+			"t.fit",
+		);
+		expect(record.gpsMarkerSettings).toEqual(storedRecord().gpsMarkerSettings);
+		expect(record.outAndBackMarkerSettings).toEqual(
+			storedRecord().outAndBackMarkerSettings,
+		);
+		expect(record.oneWayMarkerSettings).toEqual(
+			storedRecord().oneWayMarkerSettings,
+		);
 	});
 
 	it("the live form parameters win over the stored record's", () => {
@@ -146,6 +177,8 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 		if (!parsed.ok) return;
 		expect(parsed.envelope.lapSettings).toEqual({});
 		expect(parsed.envelope.outAndBackMarkerSettings).toEqual({});
+		// An export from before one-way gates existed.
+		expect(parsed.envelope.oneWayMarkerSettings).toEqual({});
 		expect(parsed.envelope.section3).toBeNull();
 	});
 });

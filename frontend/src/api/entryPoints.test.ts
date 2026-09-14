@@ -51,3 +51,43 @@ describe("updateModeVEPlots has one funnel per surface", () => {
 		]);
 	});
 });
+
+/**
+ * NO SECOND COPY OF THE MATHS (Bundle I, I2 — the maintainer's condition that
+ * the headless path "uses the same code").
+ *
+ * `headlessCallbacks.ts` is the one place a headless-only aggregate could
+ * grow: it picks which aggregate a mode uses, and the easy fix for any
+ * mismatch would be a local mean. It may only delegate — every mode's number
+ * comes from a `compute…Aggregate` the browser panel also calls — so any
+ * arithmetic of its own is a fork, and fails here. The parity test in
+ * `apiGolden.wasm.test.ts` checks the numbers; this checks the shape that
+ * keeps them equal when nobody is running that test.
+ */
+describe("the headless path computes nothing of its own", () => {
+	it("headlessCallbacks only delegates to the screens' aggregate functions", () => {
+		const source = readFileSync(
+			join(SRC_ROOT, "api/headlessCallbacks.ts"),
+			"utf8",
+		)
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/\/\/.*$/gm, "");
+		const arithmetic = [
+			/\.reduce\s*\(/,
+			/\bMath\./,
+			/\bfor\s*\(/,
+			/\bwhile\s*\(/,
+			/[^=!<>]=\s*[^=>][^;\n]*[+\-*/]\s*[\w(]/,
+		].filter((pattern) => pattern.test(source));
+		expect(arithmetic).toEqual([]);
+
+		const returned = [...source.matchAll(/return\s+(\w+)\s*\(/g)].map(
+			(match) => match[1],
+		);
+		expect(returned.sort()).toEqual([
+			"computeGpsLapAggregate",
+			"computeOutAndBackAggregate",
+			"computeStandardAggregate",
+		]);
+	});
+});
