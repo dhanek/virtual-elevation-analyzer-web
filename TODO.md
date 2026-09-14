@@ -348,8 +348,12 @@ comments re-verified at the ported tip.
 - [ ] **I5 [S] `plotly.js-basic-dist` → `plotly.js-cartesian-dist` — part (e).** Needed for the
       Convergence tab's contour trace; the plot chunk grows ~27%.
       *Criteria:* `index.html`'s CSP unchanged (no `unsafe-eval`) and no CSP report while the
-      Convergence tab renders; the entry chunk is no larger than on `main`; the plot chunk size is
-      stated in the Done entry; the contour renders on the reference ride.
+      Convergence tab renders; the plot chunk size is stated in the Done entry; the contour renders
+      on the reference ride. ~~The entry chunk is no larger than on `main`~~ — **amended
+      2026-09-14 (maintainer):** measured 471 kB on `main` against 524 kB on the port (+53 kB,
+      ≈ +17 kB gzipped) because the solver and convergence modules load eagerly; the growth is
+      accepted rather than lazy-loaded. The contour uses the app's blue → grey → red tokens, not
+      Viridis (maintainer, same day).
 
 - [ ] **I6 [XS] `.gitattributes` with `* text=auto eol=lf` — part (f).**
       *Criteria:* `git add --renormalize .` on the ported tip changes zero files; binaries (`.fit`
