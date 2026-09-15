@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+	circuitWindows,
 	fitSharedScale,
+	gustIndex,
 	headingFromGps,
 	isValidFix,
 	windStationarity,
 	type ScaleFitSegment,
 } from "./HeadingCalibration";
+import { syntheticTrack } from "./__fixtures__/syntheticTrack";
 
 const RAD = Math.PI / 180;
 
@@ -230,5 +233,139 @@ describe("windStationarity", () => {
 		expect(windStationarity(segmentOf(ride), ride.timestamps)).toEqual({
 			available: false,
 		});
+	});
+});
+
+function windowsOf(track: ReturnType<typeof syntheticTrack>) {
+	return circuitWindows({
+		timestamps: track.timestamps,
+		positionLat: track.positionLat,
+		positionLong: track.positionLong,
+		usable: track.velocity.map(() => true),
+	});
+}
+
+describe("circuitWindows", () => {
+	it("keeps complete oval circuits and closes them on the start ray", () => {
+		const result = windowsOf(syntheticTrack({ circuits: 6.5 }));
+		expect(result.circuits).toBe(6);
+		expect(result.windows).toHaveLength(1);
+		expect(result.windows[0].closureMeters).toBeLessThan(1);
+	});
+
+	it("counts circuits ridden the other way round", () => {
+		expect(
+			windowsOf(syntheticTrack({ circuits: 6.5, reverse: true })).circuits,
+		).toBe(6);
+	});
+
+	it("R3: refuses an expanding spiral as not closed", () => {
+		const result = windowsOf(
+			syntheticTrack({ shape: "spiral", circuits: 7.2, growthMeters: 5 }),
+		);
+		expect(result).toMatchObject({ circuits: 0, refusal: "notClosed" });
+	});
+
+	it("R3: refuses a figure-eight as a reversal", () => {
+		const result = windowsOf(
+			syntheticTrack({ shape: "figureEight", circuits: 3 }),
+		);
+		expect(result).toMatchObject({ circuits: 0, refusal: "reversal" });
+	});
+
+	it("splits runs at a gap and never bridges it", () => {
+		const track = syntheticTrack({
+			circuits: 7,
+			dt: (i) => (i === 180 ? 60 : 1),
+		});
+		const result = windowsOf(track);
+		expect(result.windows.length).toBe(2);
+		expect(result.windows[0].endIdx).toBeLessThanOrEqual(180);
+		expect(result.windows[1].startIdx).toBe(181);
+	});
+
+	it("R6: a (0, 0) fix per circuit neither splits a run nor moves the window", () => {
+		const clean = windowsOf(syntheticTrack({ circuits: 6.5 }));
+		const dropped = windowsOf(
+			syntheticTrack({ circuits: 6.5, zeroFixAt: (i) => i % 34 === 17 }),
+		);
+		expect(dropped.circuits).toBe(clean.circuits);
+		expect(dropped.windows[0].startIdx).toBe(clean.windows[0].startIdx);
+	});
+
+	it("R7: splits a run at a non-increasing timestamp", () => {
+		const track = syntheticTrack({ circuits: 7 });
+		track.timestamps[200] = track.timestamps[199];
+		expect(windowsOf(track).windows.length).toBe(2);
+	});
+
+	it("reports noWholeCircuit for an open arc", () => {
+		expect(windowsOf(syntheticTrack({ circuits: 0.8 }))).toMatchObject({
+			circuits: 0,
+			refusal: "noWholeCircuit",
+		});
+	});
+});
+
+describe("gustIndex", () => {
+	function fittedResiduals(gust: (i: number) => number) {
+		const ride = sweep({ scale: 1.08 });
+		ride.va = ride.va.map((va, i) => va + gust(i) / 1.08);
+		const fit = ok(fitSharedScale([segmentOf(ride)]));
+		return {
+			residuals: fit.residuals[0],
+			airSpeed: ride.va,
+			timestamps: ride.timestamps,
+		};
+	}
+
+	it("is zero in steady wind", () => {
+		const { residuals, airSpeed, timestamps } = fittedResiduals(() => 0);
+		const result = gustIndex(residuals, airSpeed, timestamps);
+		expect(result.available && result.value).toBeLessThan(1e-9);
+	});
+
+	it("stays low for 1 s alternating noise", () => {
+		const { residuals, airSpeed, timestamps } = fittedResiduals((i) =>
+			i % 2 === 0 ? 0.5 : -0.5,
+		);
+		const result = gustIndex(residuals, airSpeed, timestamps);
+		expect(result.available && result.value).toBeLessThan(0.01);
+	});
+
+	it("crosses 0.04 for a 40 s gust of 1.2 m/s", () => {
+		const { residuals, airSpeed, timestamps } = fittedResiduals(
+			(i) => 1.2 * Math.sin((2 * Math.PI * i) / 40),
+		);
+		const result = gustIndex(residuals, airSpeed, timestamps);
+		expect(result.available && result.value).toBeGreaterThan(0.04);
+	});
+
+	it("R7: is unavailable, not zero, for repeated or non-finite timestamps", () => {
+		const { residuals, airSpeed } = fittedResiduals(
+			(i) => 1.2 * Math.sin((2 * Math.PI * i) / 40),
+		);
+		expect(
+			gustIndex(
+				residuals,
+				airSpeed,
+				residuals.map(() => 0),
+			),
+		).toEqual({ available: false });
+		const withNaN = residuals.map((_, i) => (i === 50 ? NaN : i));
+		expect(gustIndex(residuals, airSpeed, withNaN)).toEqual({
+			available: false,
+		});
+	});
+
+	it("R7: does not smooth across a gap", () => {
+		const residuals = [...new Array(60).fill(1), ...new Array(60).fill(-1)];
+		const airSpeed = residuals.map(() => 10);
+		const timestamps = [
+			...Array.from({ length: 60 }, (_, i) => i),
+			...Array.from({ length: 60 }, (_, i) => 120 + i),
+		];
+		const result = gustIndex(residuals, airSpeed, timestamps);
+		expect(result.available && result.value * 10).toBeCloseTo(1, 12);
 	});
 });

@@ -14,6 +14,7 @@
  */
 
 const DEG = Math.PI / 180;
+const METERS_PER_DEG_LAT = 6_371_000 * DEG;
 
 /** A step longer than this is a gap: no bearing across it, and circuit runs split at it. */
 const MAX_SAMPLE_GAP_SECONDS = 3;
@@ -375,4 +376,227 @@ function solveNormalEquations(m: number[][], r: number[]): number[] | null {
 		x[row] = sum / a[row][row];
 	}
 	return x.map((value, j) => value / d[j]);
+}
+
+/** Window start and its closing crossing may not be further apart than this. */
+const MAX_CLOSURE_METERS = 15;
+/** Signed track progress may not fall further than this behind its running peak. */
+const MAX_BACKTRACK_DEG = 90;
+const GUST_HALF_WINDOW_SECONDS = 7.5;
+
+type WindowRefusal = "noWholeCircuit" | "notClosed" | "reversal";
+
+interface CircuitWindow {
+	startIdx: number;
+	endIdx: number;
+	circuits: number;
+	closureMeters: number;
+}
+
+export interface CircuitWindows {
+	windows: CircuitWindow[];
+	mask: boolean[];
+	circuits: number;
+	refusal?: WindowRefusal;
+}
+
+export interface CircuitWindowInput {
+	timestamps: ArrayLike<number>;
+	positionLat: ArrayLike<number>;
+	positionLong: ArrayLike<number>;
+	usable: ArrayLike<boolean>;
+}
+
+/**
+ * Review R3: complete circuits of TRACK AZIMUTH, the validated rule (notes §3,
+ * `r5_irregularity.py`), not heading winding. Refused geometries: backtracking
+ * (figure-eight, reversal) and a window whose start and closing crossing do not
+ * meet (spiral, open arc). See the plan's "Supported input contract".
+ */
+export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
+	const n = Math.min(
+		input.timestamps.length,
+		input.positionLat.length,
+		input.positionLong.length,
+		input.usable.length,
+	);
+	const runs: number[][] = [];
+	let run: number[] = [];
+	for (let i = 0; i < n; i++) {
+		const t = input.timestamps[i];
+		if (
+			input.usable[i] !== true ||
+			!Number.isFinite(t) ||
+			!isValidFix(input.positionLat[i], input.positionLong[i])
+		) {
+			continue;
+		}
+		const last = run[run.length - 1];
+		if (last !== undefined) {
+			const dt = t - input.timestamps[last];
+			if (!(dt > 0) || dt > MAX_SAMPLE_GAP_SECONDS) {
+				runs.push(run);
+				run = [];
+			}
+		}
+		run.push(i);
+	}
+	if (run.length > 0) runs.push(run);
+
+	const mask = new Array<boolean>(n).fill(false);
+	const windows: CircuitWindow[] = [];
+	const refusals: WindowRefusal[] = [];
+	for (const indices of runs) {
+		const result = windowForRun(input, indices);
+		if ("refusal" in result) {
+			refusals.push(result.refusal);
+			continue;
+		}
+		windows.push(result);
+		for (const i of indices) {
+			if (i >= result.startIdx && i <= result.endIdx) mask[i] = true;
+		}
+	}
+
+	const circuits = windows.reduce((sum, w) => sum + w.circuits, 0);
+	if (windows.length > 0) return { windows, mask, circuits };
+	const refusal: WindowRefusal = refusals.includes("reversal")
+		? "reversal"
+		: refusals.includes("notClosed")
+			? "notClosed"
+			: "noWholeCircuit";
+	return { windows, mask, circuits: 0, refusal };
+}
+
+function windowForRun(
+	input: CircuitWindowInput,
+	indices: number[],
+): CircuitWindow | { refusal: WindowRefusal } {
+	if (indices.length < 3) return { refusal: "noWholeCircuit" };
+	let minLat = Infinity;
+	let maxLat = -Infinity;
+	let minLon = Infinity;
+	let maxLon = -Infinity;
+	for (const i of indices) {
+		minLat = Math.min(minLat, input.positionLat[i]);
+		maxLat = Math.max(maxLat, input.positionLat[i]);
+		minLon = Math.min(minLon, input.positionLong[i]);
+		maxLon = Math.max(maxLon, input.positionLong[i]);
+	}
+	const centerLat = (minLat + maxLat) / 2;
+	const centerLon = (minLon + maxLon) / 2;
+	const metersPerDegLon = METERS_PER_DEG_LAT * Math.cos(centerLat * DEG);
+	const x = indices.map(
+		(i) => (input.positionLong[i] - centerLon) * metersPerDegLon,
+	);
+	const y = indices.map(
+		(i) => (input.positionLat[i] - centerLat) * METERS_PER_DEG_LAT,
+	);
+
+	const progress = new Array<number>(indices.length).fill(0);
+	let previousAz = Math.atan2(x[0], y[0]) / DEG;
+	for (let k = 1; k < indices.length; k++) {
+		const az = Math.atan2(x[k], y[k]) / DEG;
+		progress[k] = progress[k - 1] + (((az - previousAz + 540) % 360) - 180);
+		previousAz = az;
+	}
+	const sign = Math.sign(progress[progress.length - 1]);
+	if (sign === 0) return { refusal: "noWholeCircuit" };
+	const signed = progress.map((value) => value * sign);
+
+	let peak = 0;
+	for (const value of signed) {
+		peak = Math.max(peak, value);
+		if (peak - value > MAX_BACKTRACK_DEG) return { refusal: "reversal" };
+	}
+
+	const circuits = Math.floor(signed[signed.length - 1] / 360);
+	if (circuits < 1) return { refusal: "noWholeCircuit" };
+	const limit = circuits * 360;
+	const cross = signed.findIndex((value) => value >= limit);
+	const before = cross - 1;
+	const fraction = (limit - signed[before]) / (signed[cross] - signed[before]);
+	const crossX = x[before] + fraction * (x[cross] - x[before]);
+	const crossY = y[before] + fraction * (y[cross] - y[before]);
+	const closureMeters = Math.hypot(crossX - x[0], crossY - y[0]);
+	if (closureMeters > MAX_CLOSURE_METERS) return { refusal: "notClosed" };
+
+	return {
+		startIdx: indices[0],
+		endIdx: indices[before],
+		circuits,
+		closureMeters,
+	};
+}
+
+export type GustIndex =
+	{ available: true; value: number } | { available: false };
+
+/**
+ * Notes §17.1, made time-aware (review R7): the sd of the ±7.5 s time-boxcar
+ * of the model residual, over mean air speed. Samples are those with a finite
+ * residual. Smoothing never crosses a gap longer than MAX_SAMPLE_GAP_SECONDS.
+ * Invalid or non-increasing timestamps make it unavailable, never zero.
+ */
+export function gustIndex(
+	residuals: ArrayLike<number>,
+	airSpeed: ArrayLike<number>,
+	timestamps: ArrayLike<number>,
+): GustIndex {
+	const idx: number[] = [];
+	const length = Math.min(residuals.length, airSpeed.length, timestamps.length);
+	for (let i = 0; i < length; i++) {
+		if (!Number.isFinite(residuals[i])) continue;
+		if (!Number.isFinite(timestamps[i]) || !Number.isFinite(airSpeed[i]))
+			return { available: false };
+		if (idx.length > 0 && !(timestamps[i] > timestamps[idx[idx.length - 1]]))
+			return { available: false };
+		idx.push(i);
+	}
+	if (idx.length === 0) return { available: false };
+
+	const runOf = new Array<number>(idx.length).fill(0);
+	for (let k = 1; k < idx.length; k++) {
+		const gap =
+			timestamps[idx[k]] - timestamps[idx[k - 1]] > MAX_SAMPLE_GAP_SECONDS;
+		runOf[k] = runOf[k - 1] + (gap ? 1 : 0);
+	}
+
+	const smoothed = new Array<number>(idx.length);
+	let sumAir = 0;
+	for (let k = 0; k < idx.length; k++) {
+		const tk = timestamps[idx[k]];
+		let sum = residuals[idx[k]];
+		let count = 1;
+		for (
+			let j = k - 1;
+			j >= 0 &&
+			runOf[j] === runOf[k] &&
+			tk - timestamps[idx[j]] <= GUST_HALF_WINDOW_SECONDS;
+			j--
+		) {
+			sum += residuals[idx[j]];
+			count++;
+		}
+		for (
+			let j = k + 1;
+			j < idx.length &&
+			runOf[j] === runOf[k] &&
+			timestamps[idx[j]] - tk <= GUST_HALF_WINDOW_SECONDS;
+			j++
+		) {
+			sum += residuals[idx[j]];
+			count++;
+		}
+		smoothed[k] = sum / count;
+		sumAir += airSpeed[idx[k]];
+	}
+
+	const mean = smoothed.reduce((a, b) => a + b, 0) / smoothed.length;
+	const variance =
+		smoothed.reduce((a, b) => a + (b - mean) ** 2, 0) / smoothed.length;
+	return {
+		available: true,
+		value: Math.sqrt(variance) / (sumAir / idx.length),
+	};
 }
