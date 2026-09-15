@@ -384,7 +384,7 @@ const MAX_CLOSURE_METERS = 15;
 const MAX_BACKTRACK_DEG = 90;
 const GUST_HALF_WINDOW_SECONDS = 7.5;
 
-type WindowRefusal = "noWholeCircuit" | "notClosed" | "reversal";
+export type WindowRefusal = "noWholeCircuit" | "notClosed" | "reversal";
 
 interface CircuitWindow {
 	startIdx: number;
