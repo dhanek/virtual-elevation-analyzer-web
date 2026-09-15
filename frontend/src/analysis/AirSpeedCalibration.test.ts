@@ -256,6 +256,25 @@ describe("calculateAutoAirSpeedCalibration", () => {
 		);
 	});
 
+	it("reports stability unavailable for a pooled single-circuit lap, not for the well-sampled one", () => {
+		const outcome = sinusoid(
+			run([
+				lap({ circuits: 6.5, scale: 1.08 }, "Lap 2"),
+				lap({ circuits: 1.2, scale: 1.08 }, "Lap 3"),
+			]),
+		);
+		expect(outcome.warnings).toContainEqual({
+			kind: "stationarityUnavailable",
+			label: "Lap 3",
+		});
+		expect(outcome.warnings).not.toContainEqual(
+			expect.objectContaining({
+				kind: "stationarityUnavailable",
+				label: "Lap 2",
+			}),
+		);
+	});
+
 	it("R4: warns when the wind reverses within a lap", () => {
 		const outcome = sinusoid(
 			run([

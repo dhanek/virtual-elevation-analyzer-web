@@ -273,8 +273,7 @@ export function calculateAutoAirSpeedCalibration(
 
 		const stability = windStationarity(segment.fit, segment.timestamps);
 		if (!stability.available) {
-			if (segment.windows.circuits >= 2)
-				warnings.push({ kind: "stationarityUnavailable", label: row.label });
+			warnings.push({ kind: "stationarityUnavailable", label: row.label });
 		} else if (stability.vectorChange > WIND_CHANGE_WARN) {
 			warnings.push({
 				kind: "windChanged",
