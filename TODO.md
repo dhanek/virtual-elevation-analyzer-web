@@ -41,7 +41,7 @@ dependency column below says what actually has to wait.
 | ~~**F**~~ | ~~Weather — the deferred WEATH-01 feature~~ | — | **Done** 2026-09-10 — (a) bounded cache, (b) retired by **D-d**, endpoint rung, cache key, and WEATH-01 itself (rescoped to per-lap weather by measurement) |
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
-| **I** | Port PR #8 (solver, convergence plot, baro lag, settings export) onto `main` | XL | nothing — decided 2026-09-14 |
+| ~~**I**~~ | ~~Port PR #8 (solver, convergence plot, baro lag, settings export) onto `main`~~ | — | **Done** 2026-09-14 — ported and merged as #29; PR #8 closed as superseded. All six items met; the Python `ve_batch` package and its workflow were deliberately not ported |
 | — | Standalone work | varies | — |
 
 Every bundle above is now **committed** on `refactoring`; the per-bundle Done entries below still
@@ -58,7 +58,7 @@ GPS modes by the maintainer on 2026-09-04, so **bundle C carries no debt** and n
 C1-01's own in-app check, at the end of *Done*, was run on 2026-09-02 at `d586961` and covers
 Section 3's selection and map behaviour only.
 
-Suggested order from here: the standalone items. A, B, C, D, E, G and H are done. **F** has had
+Suggested order from here: the standalone items. A, B, C, D, E, G, H and I are done. **F** has had
 its condition (a) closed (2026-09-02). What was condition (b) was probed on 2026-09-02 and split
 in two: the `historical-forecast` endpoint **[S]**, and **establishing a ground-truth reference**
 **[L]** as the long pole, because WEATH-01's GO rested on an accuracy claim the probe put in
@@ -69,6 +69,10 @@ closed**. WEATH-01 was rescoped by measurement rather than built as written — 
 The one piece of B
 deliberately NOT done is the analyze-leg retirement, now carried as a standalone item below; it is a
 performance and structure cleanup, not a correctness gap.
+
+**I** closed on 2026-09-14: PR #8's solver, Convergence tab, barometric lag and settings export
+are on `main` (#29), reviewed over six rounds; the Python `ve_batch` package was ruled out of the
+port. With that merged, the ride-filename history scrub it was blocking ran too — both under **Done**.
 
 ---
 
@@ -294,6 +298,8 @@ re-deriving it):
       both exit 0
 
 ## Bundle I · Port PR #8 onto `main`
+
+**Done 2026-09-14.** See *Bundle I · PR #8 ported onto `main`* under **Done**.
 
 **Origin:** review round 53 on PR #8 (`JB/week36-solve-plots`, reviewed at `a123299`). The branch
 forked at `40bbc64` and conflicts with `main` in 34 files, among them the ones it rewrites. Maintainer
