@@ -205,10 +205,10 @@ rather than parsed ride dates, so that is indicative, not measured.*
       an ELEMNT ACE (raw mm/s), each sweeping all 12 of 12 thirty-degree heading bins, so a wind
       vector and the pitot scale error are jointly recoverable from a ride by ordinary least
       squares on `hw_obs = (c−1)·v_ground + A·cos θ + B·sin θ`. The per-ride scale error is real
-      and varies by mount — c ≈ 0.885–1.003 across the set. If the velodrome auto-calibration item
-      below ever needs prior art with a known answer, that is where it is. **This is not a route
-      to replacing the weather API** (D-d), and the app already prefers `air_speed` when a file
-      has it.
+      and varies by mount — c ≈ 0.885–1.003 across the set. The velodrome auto-calibration work
+      (*Done → Velodrome auto-calibration — 2026-09-15*) used this set as its prior art. **This is
+      not a route to replacing the weather API** (D-d), and the app already prefers `air_speed`
+      when a file has it.
 
       *Original analysis follows.* **This, not the endpoint, is the long pole.** Condition (b) asks for a re-measurement
       against a 0.3 m/s bar, and that bar **cannot be met by comparing two models to each other**
@@ -495,13 +495,15 @@ API. The manual counterpart already exists: `appState.airSpeedCalibrationPercent
 control (`WindSourceResolver.ts:71-72`, `airSpeedCalibrationControlMarkup`). *origin: maintainer,
 2026-08-30*
 
-**Not finished yet — read this before treating the item as closed.** Tasks 1–6 (estimator,
-circuits/gust index, gated outcome, mode wiring, report, offline verification) are implemented.
-Tasks 1–3 are committed on `feat/velodrome-auto-calibration`; Tasks 4–6 are **staged, not
-committed**, by the plan's own rule of verifying app-visible work in the running app before it is
-committed. **The maintainer's 12-row in-app check has not run.** Nothing here is merged, pushed, or
-in a pull request. This entry is the record of what was built and verified offline; the numbered
-rows near the end are the outstanding checklist, not a result.
+**Status.** Tasks 1–6 (estimator, circuits/gust index, gated outcome, mode wiring, report, offline
+verification) are committed on `feat/velodrome-auto-calibration` in five commits:
+`0ac5713` Shared-scale heading fit with a wind vector per segment; `83345ac` Position-anchored
+circuit windows and a time-aware gust index; `44f867f` Gated Auto Adjust outcome: pooled
+shared-scale fit, warnings on the applied model; `6b1e21c` Report an unavailable wind-stability
+check for single-circuit laps; `9be6736` Auto Adjust fits a shared sensor scale on complete
+circuits, with its warnings shown. They are in PR #30, open against `main`; CI `check` passed on
+`9be6736`, and at that SHA vitest runs 136 files / 1653 tests with `check` and `lint` clean. The
+in-app check ran; *Checked in the running app* below records what it reported.
 
 **What it does.** On a ride with a measured `air_speed` channel, Auto Adjust fits one sensor scale
 `k` shared across the selected segments (one wind vector per segment) from closed-loop heading
@@ -582,34 +584,46 @@ sessions):
 | 6d | per-lap percent vs. the offline estimator | within ±1 pp | ≤0.003 pp |
 
 `GUST_INDEX_WARN` was re-derived from the time-aware estimator and moved from **0.04 to 0.042**
-(the 67th-percentile cut, 0.042113) — the only change to already-committed code Task 6 made, and it
-is staged, not committed.
+(the 67th-percentile cut, 0.042113) — the only change to already-committed code Task 6 made.
 
-**Outstanding — the maintainer's 12-row in-app check.** None of these has run. They are the plan for
-Task 7 Step 2, not a reported result, and they gate the commit:
+**Checked in the running app.** The *Reported* column is filled only from the "In-app check"
+section of PR #30.
 
-| # | Setup | Expected |
+| # | Setup | Reported |
 |---|---|---|
-| 1 | An ACE velodrome session, Standard, one lap, full trim, offset 2, Auto Adjust | `Heading fit:` readout within ±0.3 pp of the offline estimate for that lap; one row, with estimated wind |
-| 2 | Standard, two non-adjacent laps, Auto Adjust | Two per-lap rows, each within ±0.3 pp of the offline estimate; a `Laps differ` warning past 1 pp; circuits = the sum of the two rows |
-| 3 | After #2, move the trim start into one of the laps | Report disappears; Auto Adjust again gives that lap fewer circuits |
-| 4 | After #1, change the air-speed offset to 0, then back to 2 | Report clears on each change; the offset-0 result differs from #1 by about the Task 6 amount |
-| 5 | After #1, switch wind source to Constant, then back to FIT | Block hidden under Constant; report cleared on return |
-| 6 | After #1, drag CdA | Report stays |
-| 7 | After #1, click Analyze on the same selection | Report hidden; calibration value restored from lap settings |
-| 8 | GPS-lap mode, three non-adjacent laps | Pooled headline; three rows match the offline estimate; `Laps differ` warning (different positions) |
-| 9 | GPS-lap, one interval lap that Task 6c put in the gusty tercile | Gusty warning shows |
-| 10 | Out-and-back on a detected section | `Distance ratio:` with `Heading fit not used:`; percent identical to `origin/main` for the same selection |
-| 11 | A ride with no measured air speed, any mode | `Distance ratio:` plus the no-air-speed reason; percent identical to `origin/main` |
-| 12 | GPS-lap, a ride whose laps include a stop longer than 3 s on track | No bridging across the pause; circuits counted per run; fit succeeds or refuses with a named reason, never a silent null |
+| 1 | An ACE velodrome session, Standard, one lap, full trim, offset 2, Auto Adjust | +9.7 % over 18 circuits, with the wind-changed warning; headless 9.7067 |
+| 2 | Standard, two non-adjacent laps, Auto Adjust | Pooled +9.1 % over 34 circuits; rows +8.1 % / +10.2 % (headless 8.1189 / 10.1687); gusty on one; `Laps differ by 2.0 pp` |
+| 3 | After #2, move the trim start into one of the laps | **Accepted as reported:** the trim change clears the report; the re-run circuit count was not reported |
+| 4 | After #1, change the air-speed offset to 0, then back to 2 | The offset change clears the report; offset 0 vs 2 gives +9.3 % vs +9.1 %, and restoring reproduces +9.1 |
+| 5 | After #1, switch wind source to Constant, then back to FIT | **Accepted as reported:** the wind-source change clears the report; the block hidden under Constant was not reported |
+| 6 | After #1, drag CdA | CdA does not clear the report |
+| 7 | After #1, click Analyze on the same selection | Re-analyze hides the report |
+| 8 | GPS-lap mode, three non-adjacent laps | **Substituted:** GPS-lap mode, pooled +8.4 % from 4 complete circuits, partial end circuits reported as not fitted — not three non-adjacent laps with `Laps differ` |
+| 9 | GPS-lap, one interval lap that Task 6c put in the gusty tercile | **Accepted as reported:** no GPS-lap gusty-tercile run was reported; the gusty warning was seen on Standard row 2 instead |
+| 10 | Out-and-back on a detected section | **Substituted:** out-and-back on a velodrome detects no sections (a closed loop has no out-and-back structure); the geometry refusal was shown on an open-road ACE ride instead — `Distance ratio: +4.9 %`, "the selection holds no complete circuit" |
+| 11 | A ride with no measured air speed, any mode | The reference ride: `Distance ratio: +4.6 %`, matching headless 4.6320 |
+| 12 | GPS-lap, a ride whose laps include a stop longer than 3 s on track | **Substituted:** a pause inside a lap is not reproducible from the local rides; gap-splitting is covered by unit tests and the 30-lap corpus |
 
-A failed row goes back to its owning task and is re-run afterwards; the commit and PR (plan Task 7
-Step 4) wait for every row to pass.
+The same PR section also reports that map-trim and lap-untick changes clear the report.
 
-`frontend/src/analysis/HeadingCalibration.ts`, `frontend/src/analysis/headingCalibrationSegments.ts`,
-`frontend/src/analysis/AirSpeedCalibration.ts`, `frontend/src/shell/analysis/autoCalibration.ts`,
-`frontend/src/shell/ve/airSpeedCalibrationReport.ts`, `frontend/src/shell/ve/airSpeedCalibrationControl.ts`,
-and their tests. Notes updated: `docs/architecture/heading-airspeed-calibration-notes.md` §2 (the
+Rows 8, 10 and 12 were substituted and rows 3, 5 and 9 were checked only in part; the maintainer
+accepted all six as sufficient, 2026-09-16 (PR #30 review round 60) — no further manual testing.
+"Accepted" records that ruling; it does not turn an unreported expectation into a reported result.
+
+Analysis: `frontend/src/analysis/HeadingCalibration.ts`,
+`frontend/src/analysis/headingCalibrationSegments.ts`, `frontend/src/analysis/AirSpeedCalibration.ts`,
+`frontend/src/analysis/__fixtures__/syntheticTrack.ts`. Shell wiring:
+`frontend/src/shell/analysis/autoCalibration.ts`, `frontend/src/shell/analysis/bindModeControls.ts`,
+`frontend/src/shell/analysis/requestModeUpdate.ts`, `frontend/src/shell/gpsLap/renderGpsLap.ts`,
+`frontend/src/shell/outAndBack/renderOutAndBack.ts`, `frontend/src/shell/ve/bindStandardSliders.ts`.
+Report and control: `frontend/src/shell/ve/airSpeedCalibrationReport.ts`,
+`frontend/src/shell/ve/airSpeedCalibrationControl.ts`. Styles: `frontend/src/styles/ve-results.css`.
+Tests: `frontend/src/analysis/AirSpeedCalibration.test.ts`,
+`frontend/src/analysis/HeadingCalibration.test.ts`,
+`frontend/src/analysis/headingCalibrationSegments.test.ts`,
+`frontend/src/shell/analysis/modeControls.callshape.test.ts`,
+`frontend/src/shell/ve/airSpeedCalibrationReport.test.ts`,
+`frontend/src/shell/section3/mapTrimPanelHandoff.test.ts`. Notes updated: `docs/architecture/heading-airspeed-calibration-notes.md` §2 (the
 closure-argument correction) and §16.5 (the offset confirmation). *origin: maintainer, 2026-08-30 —
 plan `docs/superpowers/plans/2026-09-15-velodrome-auto-calibration.md`, independent review
 `docs/superpowers/reviews/2026-09-15-velodrome-auto-calibration-review.md`*
