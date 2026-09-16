@@ -25,9 +25,10 @@ import type { ShellServices } from "../analysis/types";
 import type { LapVEProfile } from "./types";
 
 import {
-	calculateAutoAirSpeedCalibrationPercent,
+	calculateAutoAirSpeedCalibration,
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
+import { headingCalibrationInput } from "../analysis/autoCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
@@ -575,16 +576,17 @@ export function setupGpsLapSliderHandlers(
 		// Every mode keeps its own segment source for the auto calibration: the
 		// difference between the three is DATA, not control flow, so it is an
 		// option here rather than a mode `if` inside the binder (D-02).
-		getAutoCalibrationPercent: () =>
-			calculateAutoAirSpeedCalibrationPercent(
-				buildAutoCalibrationSegmentsFromRanges(
+		getAutoCalibration: () =>
+			calculateAutoAirSpeedCalibration({
+				...headingCalibrationInput(appState),
+				vdSegments: buildAutoCalibrationSegmentsFromRanges(
 					appState,
 					ranges(),
 					getNormalizedActivityArrays,
 					resolveWindSeries,
 					extractSegmentData,
 				),
-			),
+			}),
 	});
 }
 

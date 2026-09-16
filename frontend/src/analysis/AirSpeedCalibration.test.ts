@@ -164,6 +164,18 @@ describe("calculateAutoAirSpeedCalibration", () => {
 		});
 	});
 
+	it("finding 3: an EMPTY selection reports 'no complete circuit', not 'no usable positions'", () => {
+		// `[].every(...)` is vacuously true, so before the fix this took the same
+		// branch as R6 above and reported "no usable GPS positions" for a
+		// selection that has no segments at all -- a different claim from "nothing
+		// was selected". With no segments there is also no virtual distance to
+		// fall back on (R10's path), so the honest report is an explicit `none`
+		// with the existing `noWholeCircuit` reason ("the selection holds no
+		// complete circuit").
+		const outcome = run([]);
+		expect(outcome).toEqual({ method: "none", reason: "noWholeCircuit" });
+	});
+
 	it("R3: falls back for an open arc, a spiral and a figure-eight", () => {
 		expect(run([lap({ circuits: 0.8 })])).toMatchObject({
 			fallback: "noWholeCircuit",

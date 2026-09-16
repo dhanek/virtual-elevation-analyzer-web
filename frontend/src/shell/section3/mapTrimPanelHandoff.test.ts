@@ -242,7 +242,7 @@ function bindPanel(appState: AppState): void {
 			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 		}),
-		getAutoCalibrationPercent: () => null,
+		getAutoCalibration: () => null,
 	});
 }
 

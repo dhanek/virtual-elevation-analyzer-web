@@ -435,17 +435,6 @@ comments re-verified at the ported tip.
       `DEFAULT_PARAMETERS`, and the three literals now reference the constants.
       *origin: bundle E in-app check, 2026-09-03*
 
-- [ ] **[XL] Outdoor velodrome auto-calibration.** `velodrome: true` today does exactly one thing —
-      zero the actual elevation (`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`,
-      `renderOutAndBack.ts:219`). An outdoor velodrome sweeps every heading within a lap, which is
-      what makes wind speed/direction (and k, and the air-speed calibration) jointly identifiable
-      from the ride itself instead of from the weather API. The manual counterpart already exists:
-      `appState.airSpeedCalibrationPercent` and its sidebar control
-      (`WindSourceResolver.ts:71-72`, `airSpeedCalibrationControlMarkup`). Needs a brainstorm on
-      what is fitted and how the fit is gated before any code — the vw-demo heading/air-speed
-      calibration work is the closest prior art and its gating lesson (gate on the gust index, not
-      on R²) applies here. *origin: maintainer, 2026-08-30*
-
 - [x] **[S–M] Standard's header jumps on a multi-lap selection: two different quantities, one span.**
       The analyze leg paints `updateMetricsDisplay` from ONE fit over the concatenated selection
       (`initializeVEAnalysis`); the kick a macrotask later writes the MEAN of the per-lap fits
@@ -494,6 +483,136 @@ comments re-verified at the ported tip.
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Velodrome auto-calibration — 2026-09-15
+
+**The item this closes:** *Standalone work → [XL] Outdoor velodrome auto-calibration.* Original
+wording: `velodrome: true` today does exactly one thing — zero the actual elevation
+(`VeCalculatorFactory.ts:76`, `renderGpsLap.ts:232`, `renderOutAndBack.ts:219`). An outdoor
+velodrome sweeps every heading within a lap, which is what makes wind speed/direction (and k, and
+the air-speed calibration) jointly identifiable from the ride itself instead of from the weather
+API. The manual counterpart already exists: `appState.airSpeedCalibrationPercent` and its sidebar
+control (`WindSourceResolver.ts:71-72`, `airSpeedCalibrationControlMarkup`). *origin: maintainer,
+2026-08-30*
+
+**Not finished yet — read this before treating the item as closed.** Tasks 1–6 (estimator,
+circuits/gust index, gated outcome, mode wiring, report, offline verification) are implemented.
+Tasks 1–3 are committed on `feat/velodrome-auto-calibration`; Tasks 4–6 are **staged, not
+committed**, by the plan's own rule of verifying app-visible work in the running app before it is
+committed. **The maintainer's 12-row in-app check has not run.** Nothing here is merged, pushed, or
+in a pull request. This entry is the record of what was built and verified offline; the numbered
+rows near the end are the outstanding checklist, not a result.
+
+**What it does.** On a ride with a measured `air_speed` channel, Auto Adjust fits one sensor scale
+`k` shared across the selected segments (one wind vector per segment) from closed-loop heading
+geometry alone — no CdA, Crr, elevation or power. Every other ride keeps today's distance-ratio
+fallback, unchanged.
+
+**Decisions (maintainer, 2026-09-15):**
+- **D1** Fit only rides with a measured `air_speed` channel: scale k plus wind. No
+  CdA/Crr/power/elevation, no power-only rides.
+- **D2** Multi-lap selections get one applied percent from a pooled fit, plus a per-lap table and a
+  disagreement warning.
+- **D3** Refuse on geometry (fall back to the distance ratio, and say why); warn on wind (apply k,
+  and say why).
+- **D4** Run whenever the geometry passes, not only with `velodrome: true`.
+- **D5** The report describes the current selection; anything that changes what it describes
+  clears it — it is not a stored record. (after review R10)
+- **D6** Fit on offset-aligned air speed, using the user's `air_speed_offset`, default **+2 s**,
+  confirmed by measurement below. (after review R5)
+
+**Non-goals**, each already excluded for a stated reason: power-only rides (D1); the 3-harmonic
+model (can't represent along-straight structure); the venue-shape, fixed-effects and 2SLS
+estimators (need protocol data no ride here has); writing the fitted wind into
+`wind_speed`/`wind_direction` or deriving the wind height factor k from it (the sensor path ignores
+constant wind; D-d stands); formal k ± σ, a persisted venue gate or gate UI, and per-lap stored k;
+the additive-offset alternative and R² (neither is gated on or shown, so neither is ported);
+automatic lag estimation (the offset control stays the user's).
+
+**Input contract** — what the fit assumes, and what catches or documents each failure: longitudinal
+air speed (a magnitude-type probe biases k with no warning — documented, not detected; eligibility
+is `dataSource === "air_speed"`); time-aligned via `air_speed_offset` applied over the full activity
+before any slicing; a multiplicative sensor error (an additive bias at constant pace looks
+identical); samples above 5 m/s (this corpus's censoring floor, not a universal one); ~1 Hz,
+strictly-increasing timestamps within a run (gaps over 3 s split runs; non-increasing timestamps
+make the gust index *unavailable* rather than zero); valid GPS fixes (finite, in-range, not the
+parser's `(0, 0)` sentinel); closed, non-reversing loops (complete circuits of track azimuth around
+the run's bounding-box centre, closing within 15 m, any backtrack beyond 90° refused).
+
+**Offset measurement — the air-speed time lag (2026-09-15).** Three independent methods (heading-fit
+residual, whole-ride correlation, on-track-acceleration-only correlation) agreed on sign: every
+ride, under every method, scored worst at −2 s, so a negative offset is ruled out. Magnitude grows
+with windiness — a gust moves air speed before ground speed reacts, so every lag estimator reads
+later on a windier ride (r = 0.82–0.89 between the estimated lag and fit residual across methods).
+The cleanest rides (on-track-acceleration correlation ≈ 0.9) point to +2.1–2.5 s, and that method's
+regression intercept at the calmest ride was +2.4 s. Conclusion: the physical lag is about +2 to
++2.5 s, so the app's existing **+2 s default is correct** — the data argue for +2, not for 4.
+Effect on k is small: moving the offset from 0 to +2 s shifts a ride's mean k by **≤0.3 pp**.
+
+**Independent review findings (R1–R10) and what answered each:**
+
+| Finding | Where it is answered |
+|---|---|
+| R1 — the pooled model could apply a wrong scale while every per-segment diagnostic looked clean | Task 1's joint (shared-scale, per-segment-wind) model; Task 3's warnings on the applied model; regression tests in both |
+| R2 — Standard bypassed per-lap calibration and the disagreement warning | Task 4's `activeUpdateSegments` and builder; builder test; in-app rows #2/#3 |
+| R3 — heading winding is not a validated whole-circuit detector | Task 2's position-anchored windows with reversal and closure checks; spiral/figure-eight tests; the 6b comparison against the original position-gated pipeline |
+| R4 — the wind-change diagnostic missed direction changes and depended on excluded data | Task 1's time-based halves and vector comparison; tests |
+| R5 — "raw" would have discarded a genuine timing correction along with calibration | The offset measurement above; D6; Task 3's aligned/unaligned test; in-app row #4 |
+| R6 — the GPS missing-data test didn't exercise the app's own zero-fix convention | Task 1's `isValidFix`/bearing rules; Task 2's zero-fix test; 6d's zero-fix count on a real parsed ride |
+| R7 — timestamp failures could read as zero gustiness | Task 2's time-aware gust index, explicit unavailable state, run splitting; 6c's re-derivation |
+| R8 — the proposed edits failed existing repository checks | Task 4 fixed every renamed stub and the builder's callback return-type annotation; knip clean |
+| R9 — the UI implied stronger accuracy and wind-interpretation than the evidence supports | Task 5's qualified-wording tests; constants' comments |
+| R10 — report lifetime followed neither the evidence nor the stored calibration | D5; Task 5's invalidation set and tests; an explicit `none` outcome; in-app rows #3–#7 |
+| The closure argument ("a loop average below ground speed can only be sensor gain") is false in general | This file, §2 (corrected 2026-09-15); the distance-ratio wording in Task 5 |
+
+**Task 6 — offline verification against the ACE velodrome sessions** (30 gated laps across 5
+sessions):
+
+| Step | Metric | Bound | Result |
+|---|---|---|---|
+| 6a — TS/Python estimator parity | max Δk, single and joint fits | < 1e-9 | 2.00e-15 |
+| 6b — position windows vs. the original position-gated pipeline, all 30 laps | median \|Δk\| | ≤ 0.5 pp | 0.2239 pp |
+| 6b | max \|Δk\| | ≤ 1.5 pp | 1.1640 pp |
+| 6b | max closure gap | ≤ 15 m | 2.387 m |
+| 6b | refusals | 0 | 0 / 30 |
+| 6c — gust-threshold re-derivation | top-tercile mean error vs. 1.5× the lower two terciles | must not fall below | 1.79 pp vs. 1.33 pp — no stop |
+| 6c | correlation r, gust index vs. error | must be ≥ 0.20 | 0.3107 — no stop |
+| 6d — the app's own FIT parser and WASM boot, on two real sessions | data source | `air_speed` | `air_speed` on both |
+| 6d | air/ground speed median ratio | 0.8–1.2× | 0.854, 0.999 |
+| 6d | per-lap percent vs. the offline estimator | within ±1 pp | ≤0.003 pp |
+
+`GUST_INDEX_WARN` was re-derived from the time-aware estimator and moved from **0.04 to 0.042**
+(the 67th-percentile cut, 0.042113) — the only change to already-committed code Task 6 made, and it
+is staged, not committed.
+
+**Outstanding — the maintainer's 12-row in-app check.** None of these has run. They are the plan for
+Task 7 Step 2, not a reported result, and they gate the commit:
+
+| # | Setup | Expected |
+|---|---|---|
+| 1 | An ACE velodrome session, Standard, one lap, full trim, offset 2, Auto Adjust | `Heading fit:` readout within ±0.3 pp of the offline estimate for that lap; one row, with estimated wind |
+| 2 | Standard, two non-adjacent laps, Auto Adjust | Two per-lap rows, each within ±0.3 pp of the offline estimate; a `Laps differ` warning past 1 pp; circuits = the sum of the two rows |
+| 3 | After #2, move the trim start into one of the laps | Report disappears; Auto Adjust again gives that lap fewer circuits |
+| 4 | After #1, change the air-speed offset to 0, then back to 2 | Report clears on each change; the offset-0 result differs from #1 by about the Task 6 amount |
+| 5 | After #1, switch wind source to Constant, then back to FIT | Block hidden under Constant; report cleared on return |
+| 6 | After #1, drag CdA | Report stays |
+| 7 | After #1, click Analyze on the same selection | Report hidden; calibration value restored from lap settings |
+| 8 | GPS-lap mode, three non-adjacent laps | Pooled headline; three rows match the offline estimate; `Laps differ` warning (different positions) |
+| 9 | GPS-lap, one interval lap that Task 6c put in the gusty tercile | Gusty warning shows |
+| 10 | Out-and-back on a detected section | `Distance ratio:` with `Heading fit not used:`; percent identical to `origin/main` for the same selection |
+| 11 | A ride with no measured air speed, any mode | `Distance ratio:` plus the no-air-speed reason; percent identical to `origin/main` |
+| 12 | GPS-lap, a ride whose laps include a stop longer than 3 s on track | No bridging across the pause; circuits counted per run; fit succeeds or refuses with a named reason, never a silent null |
+
+A failed row goes back to its owning task and is re-run afterwards; the commit and PR (plan Task 7
+Step 4) wait for every row to pass.
+
+`frontend/src/analysis/HeadingCalibration.ts`, `frontend/src/analysis/headingCalibrationSegments.ts`,
+`frontend/src/analysis/AirSpeedCalibration.ts`, `frontend/src/shell/analysis/autoCalibration.ts`,
+`frontend/src/shell/ve/airSpeedCalibrationReport.ts`, `frontend/src/shell/ve/airSpeedCalibrationControl.ts`,
+and their tests. Notes updated: `docs/architecture/heading-airspeed-calibration-notes.md` §2 (the
+closure-argument correction) and §16.5 (the offset confirmation). *origin: maintainer, 2026-08-30 —
+plan `docs/superpowers/plans/2026-09-15-velodrome-auto-calibration.md`, independent review
+`docs/superpowers/reviews/2026-09-15-velodrome-auto-calibration-review.md`*
 
 ### Bundle I · PR #8 ported onto `main` — 2026-09-14
 

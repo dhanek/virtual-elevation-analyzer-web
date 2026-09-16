@@ -93,11 +93,14 @@ export function calculateAutoAirSpeedCalibrationPercent(
 const HEADING_FIT_MIN_VELOCITY = 5.0;
 /**
  * Top tercile of the time-aware gust index over the 30 gated velodrome work
- * laps. PROVISIONAL at 0.04 (the r5 sample-count estimator's cut, 0.0407);
- * Task 6c re-derives it with this implementation and replaces this value. A
- * heuristic flag, not an error bar (review R9).
+ * laps. Re-derived 2026-09-16 (Task 6c) with this implementation: 33rd/67th
+ * percentile 0.0256 / 0.0421 (cut used here, rounded); tercile mean
+ * |k - session mean| 0.96 / 0.82 / 1.79 pp (low/mid/high), Pearson
+ * r = 0.31 against that error — consistent with the r5 estimator's reference
+ * (0.79 / 0.81 / 1.81 pp, r = 0.31). A heuristic flag, not an error bar
+ * (review R9).
  */
-const GUST_INDEX_WARN = 0.04;
+const GUST_INDEX_WARN = 0.042;
 /** m/s, as a vector (notes §4, §12.3; review R4). */
 const WIND_CHANGE_WARN = 0.5;
 /** Notes §3 and §17.2: fewer complete circuits repeat worse. A repeatability hint, not an accuracy bound. */
@@ -123,7 +126,7 @@ export interface AutoCalibrationInput {
 	vdSegments: AutoCalibrationSegment[];
 }
 
-type CalibrationRefusal =
+export type CalibrationRefusal =
 	| "noMeasuredAirSpeed"
 	| "noUsablePositions"
 	| WindowRefusal
@@ -140,7 +143,7 @@ interface SegmentCalibration {
 	refusal?: CalibrationRefusal;
 }
 
-type CalibrationWarning =
+export type CalibrationWarning =
 	| { kind: "gusty"; label: string; gustIndex: number }
 	| { kind: "gustUnavailable"; label: string }
 	| { kind: "windChanged"; label: string; vectorChange: number }
@@ -218,6 +221,11 @@ export function calculateAutoAirSpeedCalibration(
 	};
 
 	if (!input.measuredAirSpeed) return fallback("noMeasuredAirSpeed");
+	// An EMPTY selection satisfies `.every(...)` below vacuously — no segment is
+	// usable because there are no segments — which reported "no usable GPS
+	// positions" for what is really "nothing was selected" (finding 3). Give it
+	// its own honest reason rather than falling into that vacuous truth.
+	if (input.headingSegments.length === 0) return fallback("noWholeCircuit");
 	const prepared = input.headingSegments.map(prepareSegment);
 	if (prepared.every((p) => !p.hasUsableFix))
 		return fallback("noUsablePositions");

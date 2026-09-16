@@ -365,6 +365,17 @@
 	margin-top: var(--space-sm);
 }
 
+.ve-parameter__report {
+	margin-top: var(--space-sm);
+	font-size: 0.85em;
+	color: var(--color-text-muted);
+}
+
+.ve-parameter__report-headline,
+.ve-parameter__report-warning {
+	font-weight: 600;
+}
+
 /* Air-speed time-offset panel on the wind tab (de-inlined from
    renderGpsLap.ts / renderOutAndBack.ts); off-palette #ddd/#f9f9f9 kept as
    literals to match the previous inline values */

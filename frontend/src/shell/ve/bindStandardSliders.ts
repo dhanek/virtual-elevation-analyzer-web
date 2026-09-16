@@ -2,7 +2,8 @@ import { AppState, WindSource } from "../../state/AppState";
 import { log } from "../../utils/log";
 import { MapVisualization } from "../../components/MapVisualization";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
-import { calculateAutoAirSpeedCalibrationPercent } from "../../analysis/AirSpeedCalibration";
+import { calculateAutoAirSpeedCalibration } from "../../analysis/AirSpeedCalibration";
+import { headingCalibrationInput } from "../analysis/autoCalibration";
 import {
 	createDistancePlotContext,
 	createPlotContext,
@@ -593,17 +594,21 @@ export function setupVESliders(
 			return Number.isNaN(start) || Number.isNaN(end) ? [] : [{ start, end }];
 		},
 		getSyncErrorSeries: () => ({ groundSpeed: velocity, airSpeed: windSpeed }),
-		getAutoCalibrationPercent: () => {
+		getAutoCalibration: () => {
 			const { start, end } = currentTrim();
-			return calculateAutoAirSpeedCalibrationPercent([
-				{
-					timestamps,
-					groundSpeed: velocity,
-					apparentSpeed: windSpeed,
-					startIndex: start,
-					endIndex: end,
-				},
-			]);
+			return calculateAutoAirSpeedCalibration({
+				...headingCalibrationInput(appState),
+				// The distance ratio's input exactly as before this feature.
+				vdSegments: [
+					{
+						timestamps,
+						groundSpeed: velocity,
+						apparentSpeed: windSpeed,
+						startIndex: start,
+						endIndex: end,
+					},
+				],
+			});
 		},
 	});
 

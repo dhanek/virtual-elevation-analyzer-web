@@ -31,6 +31,7 @@ import {
 	AIR_SPEED_CALIBRATION_MIN_PERCENT,
 	AIR_SPEED_CALIBRATION_STEP_PERCENT,
 } from "../../analysis/AirSpeedCalibration";
+import { AIR_SPEED_CALIBRATION_REPORT_ID } from "./airSpeedCalibrationReport";
 import {
 	fitWindControlsApplyTo,
 	WIND_SOURCE_VISIBILITY_ATTR,
@@ -68,6 +69,7 @@ export function airSpeedCalibrationControlMarkup(
             </div>
             <input type="range" id="airSpeedCalibrationSlider" min="${AIR_SPEED_CALIBRATION_MIN_PERCENT.toFixed(1)}" max="${AIR_SPEED_CALIBRATION_MAX_PERCENT.toFixed(1)}" step="${AIR_SPEED_CALIBRATION_STEP_PERCENT}" value="${currentValue}" />
             <button id="autoAdjustCalibration" class="secondary-btn ve-parameter__auto-btn">Auto Adjust</button>
+            <div id="${AIR_SPEED_CALIBRATION_REPORT_ID}" class="ve-parameter__report" aria-live="polite" hidden></div>
         </div>
     `;
 }

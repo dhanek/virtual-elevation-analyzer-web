@@ -26,9 +26,10 @@ import type { OutAndBackSection } from "../../utils/GpsLapDetection";
 import type { OutAndBackVEProfile } from "./types";
 
 import {
-	calculateAutoAirSpeedCalibrationPercent,
+	calculateAutoAirSpeedCalibration,
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
+import { headingCalibrationInput } from "../analysis/autoCalibration";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
@@ -819,16 +820,17 @@ export function setupOutAndBackSliderSync(
 				end: range.endIdx,
 			})),
 		getSyncErrorSeries: () => syncErrorSeries(appState),
-		getAutoCalibrationPercent: () =>
-			calculateAutoAirSpeedCalibrationPercent(
-				buildAutoCalibrationSegmentsFromRanges(
+		getAutoCalibration: () =>
+			calculateAutoAirSpeedCalibration({
+				...headingCalibrationInput(appState),
+				vdSegments: buildAutoCalibrationSegmentsFromRanges(
 					appState,
 					ranges(),
 					getNormalizedActivityArrays,
 					resolveWindSeries,
 					extractSegmentData,
 				),
-			),
+			}),
 	});
 }
 
