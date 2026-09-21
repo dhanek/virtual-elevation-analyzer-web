@@ -82,7 +82,7 @@ describe("describeCalibration", () => {
 			describeCalibration({ method: "none", reason: "noMeasuredAirSpeed" }),
 		).toEqual({
 			headline: "No calibration available",
-			details: ["This ride has no measured air-speed channel."],
+			details: ["This ride carries no measured wind channel."],
 			warnings: [],
 		});
 	});
