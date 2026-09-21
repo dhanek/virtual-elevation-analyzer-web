@@ -541,8 +541,11 @@ caveat attaches to BOTH: `resolveYawArray` falls back to all-zero yaw when `wind
 fitted as if its raw magnitude were already longitudinal — the same undetected bias, over the wider
 population the widening admits); time-aligned via `air_speed_offset` applied over the full activity
 before any slicing; a multiplicative sensor error (an additive bias at constant pace looks
-identical); samples above 5 m/s (this corpus's censoring floor, not a universal one); ~1 Hz,
-strictly-increasing timestamps within a run (gaps over 3 s split runs; non-increasing timestamps
+identical); samples above 5 m/s — the floor selects which samples are FITTED and never splits a
+run (this corpus's censoring floor, not a universal one); ~1 Hz, strictly-increasing timestamps
+within a run (a run is split by GPS alone: an invalid fix, a non-increasing timestamp, or a gap
+over 3 s (`HeadingCalibration.ts:433-443`); fit eligibility — the 5 m/s floor, and a pitot
+reading zero — gates the returned MASK, never the geometry; non-increasing timestamps also
 make the gust index *unavailable* rather than zero); valid GPS fixes (finite, in-range, not the
 parser's `(0, 0)` sentinel); closed, non-reversing loops (complete circuits of track azimuth around
 the run's bounding-box centre, closing within 15 m, any backtrack beyond 90° refused).
@@ -554,9 +557,13 @@ a later round to read as tier A rather than re-derive it from the prose above):
       circuits counts those circuits. The tolerance is the run's median per-sample azimuth step,
       so it scales with circuit size and speed — about 6° on a 450 m oval at 10 m/s and about
       19° on a 250 m track at 15 m/s, where a fixed few-degree constant would refuse a complete
-      lap. The 15 m closure check remains the authority on whether the loop actually closed, and
-      a run split by a GPS dropout over 3 s still loses its circuits (known, not fixed —
-      origin: PR #30 review round 63, F63-03 (ii)).
+      lap. The 15 m closure check remains the authority on whether the loop actually closed.
+
+- [ ] A run is split by GPS alone: an invalid fix, a non-increasing timestamp, or a gap over 3 s.
+      Fit eligibility — the 5 m/s floor and a pitot reading zero — gates which samples are
+      FITTED, never the geometry, so a brief mid-lap ease-off with continuous GPS does not
+      destroy a circuit. A run split by a GPS dropout over 3 s does still lose its circuits
+      (known, not fixed). *origin: PR #30 review round 64, F64-01/F64-02*
 
 **Offset measurement — the air-speed time lag (2026-09-15).** Three independent methods (heading-fit
 residual, whole-ride correlation, on-track-acceleration-only correlation) agreed on sign: every
