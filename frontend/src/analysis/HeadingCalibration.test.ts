@@ -236,12 +236,15 @@ describe("windStationarity", () => {
 	});
 });
 
-function windowsOf(track: ReturnType<typeof syntheticTrack>) {
+function windowsOf(
+	track: ReturnType<typeof syntheticTrack>,
+	usableAt: (i: number) => boolean = () => true,
+) {
 	return circuitWindows({
 		timestamps: track.timestamps,
 		positionLat: track.positionLat,
 		positionLong: track.positionLong,
-		usable: track.velocity.map(() => true),
+		usable: track.velocity.map((_, i) => usableAt(i)),
 	});
 }
 
@@ -311,6 +314,18 @@ describe("circuitWindows", () => {
 		expect(result.circuits).toBe(1);
 		expect(result.refusal).toBeUndefined();
 		expect(result.windows[0].closureMeters).toBeLessThan(15);
+	});
+
+	it("a four-sample eligibility hole splits nothing, and stays out of the mask", () => {
+		const result = windowsOf(
+			syntheticTrack({ circuits: 1 }),
+			(i) => i < 20 || i >= 24,
+		);
+		expect(result.circuits).toBe(1);
+		expect(result.refusal).toBeUndefined();
+		expect(result.mask.slice(20, 24)).toEqual([false, false, false, false]);
+		expect(result.mask[19]).toBe(true);
+		expect(result.mask[24]).toBe(true);
 	});
 
 	it("does not lose the last circuit of a whole-number multi-lap selection", () => {

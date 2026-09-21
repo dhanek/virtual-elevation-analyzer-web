@@ -412,6 +412,12 @@ export interface CircuitWindowInput {
  * `r5_irregularity.py`), not heading winding. Refused geometries: backtracking
  * (figure-eight, reversal) and a window whose start and closing crossing do not
  * meet (spiral, open arc). See the plan's "Supported input contract".
+ *
+ * A run is split by GPS alone: an invalid fix, a non-increasing timestamp, or a
+ * gap over `MAX_SAMPLE_GAP_SECONDS`. Fit eligibility (`usable`) gates the
+ * returned MASK, never the geometry, so a rider easing below the velocity floor
+ * — or a pitot reading zero — no longer destroys a circuit whose GPS is
+ * continuous.
  */
 export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
 	const n = Math.min(
@@ -425,7 +431,6 @@ export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
 	for (let i = 0; i < n; i++) {
 		const t = input.timestamps[i];
 		if (
-			input.usable[i] !== true ||
 			!Number.isFinite(t) ||
 			!isValidFix(input.positionLat[i], input.positionLong[i])
 		) {
@@ -454,7 +459,12 @@ export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
 		}
 		windows.push(result);
 		for (const i of indices) {
-			if (i >= result.startIdx && i <= result.endIdx) mask[i] = true;
+			if (
+				i >= result.startIdx &&
+				i <= result.endIdx &&
+				input.usable[i] === true
+			)
+				mask[i] = true;
 		}
 	}
 

@@ -202,6 +202,21 @@ describe("calculateAutoAirSpeedCalibration", () => {
 		expect(outcome.percent).toBeCloseTo(8, 6);
 	});
 
+	it("a four-second ease-off does not destroy the circuit", () => {
+		const outcome = sinusoid(
+			run([
+				lap({
+					circuits: 1,
+					scale: 1.08,
+					speed: (_f, i) => (i >= 20 && i < 24 ? 4 : 10),
+					gust: (i) => (i >= 20 && i < 24 ? 25 : 0),
+				}),
+			]),
+		);
+		expect(outcome.circuits).toBe(1);
+		expect(outcome.percent).toBeCloseTo(8, 6);
+	});
+
 	it("R1: pools laps with opposite winds, heading-correlated pace and irregular timing", () => {
 		const outcome = sinusoid(
 			run([
