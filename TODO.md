@@ -505,14 +505,14 @@ circuits, with its warnings shown. They are in PR #30, open against `main`; CI `
 `9be6736`, and at that SHA vitest runs 136 files / 1653 tests with `check` and `lint` clean. The
 in-app check ran; *Checked in the running app* below records what it reported.
 
-**What it does.** On a ride with a measured `air_speed` channel, Auto Adjust fits one sensor scale
-`k` shared across the selected segments (one wind vector per segment) from closed-loop heading
-geometry alone — no CdA, Crr, elevation or power. Every other ride keeps today's distance-ratio
-fallback, unchanged.
+**What it does.** On a ride carrying a measured wind channel — `air_speed`, or `wind_speed` with
+optional `wind_yaw` — Auto Adjust fits one sensor scale `k` shared across the selected segments
+(one wind vector per segment) from closed-loop heading geometry alone — no CdA, Crr, elevation or
+power. Every other ride keeps today's distance-ratio fallback, unchanged.
 
 **Decisions (maintainer, 2026-09-15):**
-- **D1** Fit only rides with a measured `air_speed` channel: scale k plus wind. No
-  CdA/Crr/power/elevation, no power-only rides.
+- **D1** Fit only rides with a measured wind channel — `air_speed`, or `wind_speed`/`wind_yaw`:
+  scale k plus wind. No CdA/Crr/power/elevation, no power-only rides.
 - **D2** Multi-lap selections get one applied percent from a pooled fit, plus a per-lap table and a
   disagreement warning.
 - **D3** Refuse on geometry (fall back to the distance ratio, and say why); warn on wind (apply k,
@@ -520,8 +520,10 @@ fallback, unchanged.
 - **D4** Run whenever the geometry passes, not only with `velodrome: true`.
 - **D5** The report describes the current selection; anything that changes what it describes
   clears it — it is not a stored record. (after review R10)
-- **D6** Fit on offset-aligned air speed, using the user's `air_speed_offset`, default **+2 s**,
-  confirmed by measurement below. (after review R5)
+- **D6** Fit on offset-aligned air speed, using the user's `air_speed_offset`. The default depends
+  on the channel: **+2 s** on `air_speed` (the ACE path), confirmed by the measurement below;
+  **0 s** on the `wind_speed` path, on the 2026-09-21 integer-shift RMS scan. "+2 s" is not
+  universal — read as universal it mis-sets the control on a `wind_speed` ride. (after review R5)
 
 **Non-goals**, each already excluded for a stated reason: power-only rides (D1); the 3-harmonic
 model (can't represent along-straight structure); the venue-shape, fixed-effects and 2SLS
@@ -533,13 +535,28 @@ automatic lag estimation (the offset control stays the user's).
 
 **Input contract** — what the fit assumes, and what catches or documents each failure: longitudinal
 air speed (a magnitude-type probe biases k with no warning — documented, not detected; eligibility
-is `dataSource === "air_speed"`); time-aligned via `air_speed_offset` applied over the full activity
+is a measured wind channel, `dataSource === "air_speed"` or `dataSource === "wind_speed"`, and the
+caveat attaches to BOTH: `resolveYawArray` falls back to all-zero yaw when `wind_yaw` is absent
+(`WindSourceResolver.ts:153-159`) and `cos(0) = 1`, so a `wind_speed` channel with no `wind_yaw` is
+fitted as if its raw magnitude were already longitudinal — the same undetected bias, over the wider
+population the widening admits); time-aligned via `air_speed_offset` applied over the full activity
 before any slicing; a multiplicative sensor error (an additive bias at constant pace looks
 identical); samples above 5 m/s (this corpus's censoring floor, not a universal one); ~1 Hz,
 strictly-increasing timestamps within a run (gaps over 3 s split runs; non-increasing timestamps
 make the gust index *unavailable* rather than zero); valid GPS fixes (finite, in-range, not the
 parser's `(0, 0)` sentinel); closed, non-reversing loops (complete circuits of track azimuth around
 the run's bounding-box centre, closing within 15 m, any backtrack beyond 90° refused).
+
+Criteria (PR #30 review round 63, F63-01 — the item carried none, so this one is opened here for
+a later round to read as tier A rather than re-derive it from the prose above):
+
+- [ ] A selection whose track azimuth sweeps to within ONE TYPICAL SAMPLE of a whole number of
+      circuits counts those circuits. The tolerance is the run's median per-sample azimuth step,
+      so it scales with circuit size and speed — about 6° on a 450 m oval at 10 m/s and about
+      19° on a 250 m track at 15 m/s, where a fixed few-degree constant would refuse a complete
+      lap. The 15 m closure check remains the authority on whether the loop actually closed, and
+      a run split by a GPS dropout over 3 s still loses its circuits (known, not fixed —
+      origin: PR #30 review round 63, F63-03 (ii)).
 
 **Offset measurement — the air-speed time lag (2026-09-15).** Three independent methods (heading-fit
 residual, whole-ride correlation, on-track-acceleration-only correlation) agreed on sign: every
