@@ -468,6 +468,23 @@ export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
 	return { windows, mask, circuits: 0, refusal };
 }
 
+/**
+ * The sweep is sampled, so the last fraction of a sample is always lost: a lap
+ * that closes on its own start still reads a few degrees short of 360. The
+ * tolerance is therefore one typical sample's azimuth, which scales with
+ * circuit size and speed — 6.3° on a 451 m oval at 10 m/s, 18.8° on a 250 m
+ * track at 15 m/s, where a fixed few-degree constant would refuse a complete
+ * lap. The MEDIAN, not the mean: the mean is pulled up by the corners (8.0°
+ * against 6.3° on the oval) and counts laps that end 11 m open. Not the final
+ * step either, which collapses toward zero when the rider coasts to a halt and
+ * restores the knife edge on exactly the lap that ends that way. Anything short
+ * by more than one sample is an open arc, and the closure check refuses it.
+ */
+function sweepToleranceDeg(stepDeg: number[], sign: number): number {
+	const oriented = stepDeg.map((v) => v * sign).sort((a, b) => a - b);
+	return Math.max(0, oriented[oriented.length >> 1]);
+}
+
 function windowForRun(
 	input: CircuitWindowInput,
 	indices: number[],
@@ -494,10 +511,13 @@ function windowForRun(
 	);
 
 	const progress = new Array<number>(indices.length).fill(0);
+	const stepDeg = new Array<number>(indices.length - 1);
 	let previousAz = Math.atan2(x[0], y[0]) / DEG;
 	for (let k = 1; k < indices.length; k++) {
 		const az = Math.atan2(x[k], y[k]) / DEG;
-		progress[k] = progress[k - 1] + (((az - previousAz + 540) % 360) - 180);
+		const step = ((az - previousAz + 540) % 360) - 180;
+		stepDeg[k - 1] = step;
+		progress[k] = progress[k - 1] + step;
 		previousAz = az;
 	}
 	const sign = Math.sign(progress[progress.length - 1]);
@@ -510,9 +530,10 @@ function windowForRun(
 		if (peak - value > MAX_BACKTRACK_DEG) return { refusal: "reversal" };
 	}
 
-	const circuits = Math.floor(signed[signed.length - 1] / 360);
+	const tolerance = sweepToleranceDeg(stepDeg, sign);
+	const circuits = Math.floor((signed[signed.length - 1] + tolerance) / 360);
 	if (circuits < 1) return { refusal: "noWholeCircuit" };
-	const limit = circuits * 360;
+	const limit = Math.min(circuits * 360, signed[signed.length - 1]);
 	const cross = signed.findIndex((value) => value >= limit);
 	const before = cross - 1;
 	const fraction = (limit - signed[before]) / (signed[cross] - signed[before]);

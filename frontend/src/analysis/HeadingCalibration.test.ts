@@ -305,6 +305,34 @@ describe("circuitWindows", () => {
 			refusal: "noWholeCircuit",
 		});
 	});
+
+	it("counts a lap that closes on its start but samples a few degrees short", () => {
+		const result = windowsOf(syntheticTrack({ circuits: 1 }));
+		expect(result.circuits).toBe(1);
+		expect(result.refusal).toBeUndefined();
+		expect(result.windows[0].closureMeters).toBeLessThan(15);
+	});
+
+	it("does not lose the last circuit of a whole-number multi-lap selection", () => {
+		expect(windowsOf(syntheticTrack({ circuits: 7 })).circuits).toBe(7);
+	});
+
+	it("still refuses a lap left open by more than one sample", () => {
+		expect(windowsOf(syntheticTrack({ circuits: 0.98 }))).toMatchObject({
+			circuits: 0,
+			refusal: "noWholeCircuit",
+		});
+	});
+
+	it("scales the tolerance to the circuit: a 250 m track at 15 m/s", () => {
+		const track = syntheticTrack({
+			circuits: 1,
+			straightMeters: 44,
+			radiusMeters: 25,
+			speed: () => 15,
+		});
+		expect(windowsOf(track)).toMatchObject({ circuits: 1 });
+	});
 });
 
 describe("gustIndex", () => {
