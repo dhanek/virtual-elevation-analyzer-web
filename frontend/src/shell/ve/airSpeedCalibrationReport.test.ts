@@ -60,6 +60,21 @@ describe("describeCalibration", () => {
 		]);
 	});
 
+	it("uses the singular for a one-circuit selection, warning included", () => {
+		const one: AutoCalibrationOutcome = {
+			...pooled,
+			circuits: 1,
+			perSegment: [{ ...pooled.perSegment[0], circuits: 1 }],
+			warnings: [{ kind: "fewCircuits", circuits: 1 }],
+		};
+		const text = describeCalibration(one);
+		expect(text.headline).toBe("Heading fit: +8.0 % from 1 complete circuit");
+		expect(text.details[0]).toContain("over 1 circuit;");
+		expect(text.warnings[0]).toBe(
+			"Short selection (1 complete circuit); more complete circuits generally improve repeatability.",
+		);
+	});
+
 	it("names the distance ratio's assumption and why the heading fit was not used", () => {
 		expect(
 			describeCalibration({

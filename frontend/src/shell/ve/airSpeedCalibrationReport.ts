@@ -35,6 +35,8 @@ const signed = (percent: number) =>
 	`${percent >= 0 ? "+" : ""}${percent.toFixed(1)} %`;
 const sentence = (text: string) =>
 	`${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+const circuits = (n: number, noun = "circuit") =>
+	`${n} ${noun}${n === 1 ? "" : "s"}`;
 
 function warningText(warning: CalibrationWarning): string {
 	switch (warning.kind) {
@@ -47,7 +49,7 @@ function warningText(warning: CalibrationWarning): string {
 		case "stationarityUnavailable":
 			return `${warning.label}: wind stability could not be checked.`;
 		case "fewCircuits":
-			return `Short selection (${warning.circuits} complete circuits); more complete circuits generally improve repeatability.`;
+			return `Short selection (${circuits(warning.circuits, "complete circuit")}); more complete circuits generally improve repeatability.`;
 		case "segmentSpread":
 			return `Laps differ by ${warning.spreadPercent.toFixed(1)} pp. Calibration depends on riding position; select laps ridden in one position.`;
 		case "clamped":
@@ -76,11 +78,11 @@ export function describeCalibration(
 			};
 		case "sinusoid":
 			return {
-				headline: `Heading fit: ${signed(outcome.percent)} from ${outcome.circuits} complete circuits`,
+				headline: `Heading fit: ${signed(outcome.percent)} from ${circuits(outcome.circuits, "complete circuit")}`,
 				details: outcome.perSegment.map((row) =>
 					row.percent === null
 						? `${row.label}: not fitted, ${REFUSAL_TEXT[row.refusal ?? "degenerate"]}`
-						: `${row.label}: ${signed(row.percent)} over ${row.circuits} circuits; estimated wind ${(row.windSpeed ?? NaN).toFixed(1)} m/s from ${Math.round(row.windDirDeg ?? NaN)}°`,
+						: `${row.label}: ${signed(row.percent)} over ${circuits(row.circuits)}; estimated wind ${(row.windSpeed ?? NaN).toFixed(1)} m/s from ${Math.round(row.windDirDeg ?? NaN)}°`,
 				),
 				warnings: outcome.warnings.map(warningText),
 			};
