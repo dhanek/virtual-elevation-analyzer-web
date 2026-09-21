@@ -119,7 +119,12 @@ export interface HeadingCalibrationSegment {
 }
 
 export interface AutoCalibrationInput {
-	/** True only for a measured `air_speed` channel (D1). */
+	/**
+	 * True for EITHER measured wind channel — a native `air_speed` field, or
+	 * `wind_speed`/`wind_yaw` (D1). Set from the RESOLVED `dataSource` of
+	 * `resolveWindSeries`, never from a raw FIT field: both channels arrive
+	 * here as the same longitudinal, offset-aligned series.
+	 */
 	measuredAirSpeed: boolean;
 	headingSegments: HeadingCalibrationSegment[];
 	/** Exactly the input the distance ratio received before this feature; its numbers must not move. */
