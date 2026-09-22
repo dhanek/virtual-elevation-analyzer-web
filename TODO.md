@@ -621,8 +621,11 @@ sessions):
 `GUST_INDEX_WARN` was re-derived from the time-aware estimator and moved from **0.04 to 0.042**
 (the 67th-percentile cut, 0.042113) — the only change to already-committed code Task 6 made.
 
-**Checked in the running app.** The *Reported* column is filled only from the "In-app check"
-section of PR #30.
+**Checked in the running app at `9be6736`.** The *Reported* column is filled only from the
+"In-app check" section of PR #30, and every number in it — the circuit counts in rows 1, 2 and 8
+included — was measured at that SHA, before the circuit-count rule was corrected later on this
+branch (review rounds 63, 65 and 66). A re-run on today's code can legitimately report a different
+count.
 
 | # | Setup | Reported |
 |---|---|---|
