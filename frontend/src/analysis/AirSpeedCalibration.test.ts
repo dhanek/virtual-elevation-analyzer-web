@@ -365,24 +365,41 @@ describe("calculateAutoAirSpeedCalibration", () => {
 });
 
 describe("calibrationSeries", () => {
-	it("reproduces the fit's own residuals for the same segment", () => {
-		const segment = lap({ circuits: 3 });
+	it("leaves the fit's residuals orthogonal to its basis (least squares)", () => {
+		// A true scale away from 1 is load-bearing: a wrong speed term such as
+		// `v * scale` in place of `v / scale` is numerically invisible at
+		// scale === 1, which is the fixture default (see the vacuity check in
+		// the task report).
+		const segment = lap({ circuits: 3, scale: 1.08 });
 		const outcome = sinusoid(run([segment]));
+		expect(Math.abs(outcome.scale - 1)).toBeGreaterThan(0.01);
 		const row = outcome.perSegment[0];
 		if (!row.coefficients)
 			throw new Error("expected coefficients on a fitted lap");
 		const series = calibrationSeries(segment, row.coefficients, outcome.scale);
 
 		expect(series.residual.length).toBeGreaterThan(50);
-		for (let i = 0; i < series.residual.length; i++) {
-			expect(series.windComponent[i] - series.model[i]).toBeCloseTo(
-				series.residual[i],
-				12,
-			);
-		}
 		// Every emitted sample is one the fit actually used.
 		expect(series.headingDeg.every((h) => h >= 0 && h <= 360)).toBe(true);
 		expect(series.residual.every(Number.isFinite)).toBe(true);
+
+		// Least squares leaves the residual orthogonal to every column of its
+		// design matrix (velocity, cos heading, sin heading). A wrong speed
+		// term breaks the velocity orthogonality specifically, without needing
+		// a second, independent fit to compare against.
+		const n = series.residual.length;
+		let dotVelocity = 0;
+		let dotCos = 0;
+		let dotSin = 0;
+		for (let i = 0; i < n; i++) {
+			const radians = series.headingDeg[i] * (Math.PI / 180);
+			dotVelocity += series.residual[i] * series.velocity[i];
+			dotCos += series.residual[i] * Math.cos(radians);
+			dotSin += series.residual[i] * Math.sin(radians);
+		}
+		expect(dotVelocity / n).toBeCloseTo(0, 9);
+		expect(dotCos / n).toBeCloseTo(0, 9);
+		expect(dotSin / n).toBeCloseTo(0, 9);
 	});
 
 	it("emits only the samples inside the counted circuit window", () => {

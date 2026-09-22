@@ -233,6 +233,13 @@ export interface CalibrationSeries {
 	label: string;
 	/** Fitted samples only, in sample order. */
 	headingDeg: number[];
+	/**
+	 * Ground speed at each fitted sample, same order and length as the other
+	 * series. Not needed by the Task 4 figure builder, but kept here — for the
+	 * orthogonality guard below and for future views — rather than making a
+	 * caller re-derive it from `windComponent` and `airSpeed`.
+	 */
+	velocity: number[];
 	/** va_meas − v / scale: measured air speed with the speed term removed. */
 	windComponent: number[];
 	/** a·cos θ + b·sin θ, the fitted wind model at that heading. */
@@ -267,6 +274,7 @@ export function calibrationSeries(
 	const out: CalibrationSeries = {
 		label: segment.label,
 		headingDeg: [],
+		velocity: [],
 		windComponent: [],
 		model: [],
 		residual: [],
@@ -283,6 +291,7 @@ export function calibrationSeries(
 		const model =
 			coefficients.a * Math.cos(radians) + coefficients.b * Math.sin(radians);
 		out.headingDeg.push(theta);
+		out.velocity.push(v);
 		out.windComponent.push(windComponent);
 		out.model.push(model);
 		out.residual.push(windComponent - model);
