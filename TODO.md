@@ -554,16 +554,21 @@ Criteria (PR #30 review round 63, F63-01 — the item carried none, so this one 
 a later round to read as tier A rather than re-derive it from the prose above):
 
 - [ ] A selection is credited the NEAREST whole number of circuits of track azimuth, and the 15 m
-      closure check gates that count: it is taken only when the crossing at that many turns lies
-      within 15 m of the window start, else the whole turn below it is tried and else the
-      selection is refused. The rounding is what bounds the sampling deficit, at half a turn, with
-      no separate azimuth tolerance. Crediting the turn ABOVE the sweep does not bound it: that
-      candidate's crossing clamps to the run's own last sample, so every closed lap passes its
-      closure test and every lap is credited one turn too many. How much azimuth one sample
-      carries depends on where in the loop it falls: on a real venue whose start/finish sits ~35 m
-      from the centre of a 300x283 m bounding box the within-lap step spread is 2.4 / 9.5 / 15.3
-      deg (median / p90 / max), so a complete lap can read ~18 deg short while closing within
-      11 m. *origin: PR #30 review round 65, F65-01/F65-03; corrected round 66, F66-01/F66-02*
+      closure check gates that count. What the check measures depends on the candidate, because
+      the crossing is sought at `min(circuits x 360 deg, sweep)`: a candidate ABOVE the sweep is
+      tested at the run's OWN last sample — whether the run ended within 15 m of its start — and a
+      candidate within the sweep at a genuine crossing that many turns in. The nearest whole turn
+      is the first kind whenever it rounds up, and always for a sweep under one turn. If the check
+      fails, the whole turn below is tried and else the selection is refused. The ROUNDING, not the
+      closure check, is what bounds the sampling deficit, at half a turn, and there is no separate
+      azimuth tolerance. Crediting the turn above the sweep unconditionally (`ceil`) does not bound
+      it: it gets the same endpoint closure test, which every closed lap passes, and nothing then
+      limits how far above the sweep the count sits, so every lap was credited one turn too many.
+      How much azimuth one sample carries depends on where in the loop it falls: on a real venue
+      whose start/finish sits ~35 m from the centre of a 300x283 m bounding box the within-lap step
+      spread is 2.4 / 9.5 / 15.3 deg (median / p90 / max), so a complete lap can read ~18 deg short
+      while closing within 11 m. *origin: PR #30 review round 65, F65-01/F65-03; corrected rounds
+      66 and 67, F66-02/F67-01*
 
 - [ ] A run is split by GPS alone: an invalid fix, a non-increasing timestamp, or a gap over 3 s.
       Fit eligibility — the 5 m/s floor and a pitot reading zero — gates which samples are
