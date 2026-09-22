@@ -308,10 +308,25 @@ export type CalibrationEligibility =
  * selection change so the button can say which method the selection is eligible
  * for before it is clicked.
  *
- * It deliberately cannot promise the heading fit will RUN: `headingCoverage`
- * and `degenerate` are properties of the solve, not of the geometry, so a
- * selection can pass here and still fall back. The caller's wording must say
- * "available", never "will run".
+ * It deliberately cannot promise the heading fit will RUN: `headingCoverage`,
+ * `degenerate` and `tooFewPoints` are properties of the solve, not of the
+ * geometry, so a selection can pass here and still fall back. The caller's
+ * wording must say "available", never "will run".
+ *
+ * The mismatch runs deeper than a single segment's fit failing quietly. With
+ * several segments, the real gate only reaches its own per-segment fit for
+ * segments that already passed geometry, and reports the FIRST segment (by
+ * array order) that carries any refusal, fit-level or geometry — so a segment
+ * that failed geometry can still supply the reason the gate shows even when a
+ * LATER segment is the one whose fit actually failed. This probe never runs
+ * that fit, so it counts the later segment's circuits and reports `sinusoid`
+ * for the same selection. Concretely: segment A fails geometry
+ * (`windows.refusal`), segment B passes geometry but its own solo fit is
+ * `degenerate` — the gate falls back with A's geometry-typed reason, while
+ * this probe reports `{ method: "sinusoid", circuits: B's circuits }`. So the
+ * caller must not assume the reason the gate eventually shows belongs to the
+ * segment this probe would have blamed, nor that a `sinusoid` verdict here
+ * survives the fit at all.
  */
 export function calibrationEligibility(
 	input: AutoCalibrationInput,
