@@ -553,7 +553,7 @@ the run's bounding-box centre, closing within 15 m, any backtrack beyond 90° re
 Criteria (PR #30 review round 63, F63-01 — the item carried none, so this one is opened here for
 a later round to read as tier A rather than re-derive it from the prose above):
 
-- [ ] A selection is credited the NEAREST whole number of circuits of track azimuth, and the 15 m
+- [x] A selection is credited the NEAREST whole number of circuits of track azimuth, and the 15 m
       closure check gates that count. What the check measures depends on the candidate, because
       the crossing is sought at `min(circuits x 360 deg, sweep)`: a candidate ABOVE the sweep is
       tested at the run's OWN last sample — whether the run ended within 15 m of its start — and a
@@ -568,9 +568,9 @@ a later round to read as tier A rather than re-derive it from the prose above):
       whose start/finish sits ~35 m from the centre of a 300x283 m bounding box the within-lap step
       spread is 2.4 / 9.5 / 15.3 deg (median / p90 / max), so a complete lap can read ~18 deg short
       while closing within 11 m. *origin: PR #30 review round 65, F65-01/F65-03; corrected rounds
-      66 and 67, F66-02/F67-01*
+      66 and 67, F66-01/F66-02/F67-01*
 
-- [ ] A run is split by GPS alone: an invalid fix, a non-increasing timestamp, or a gap over 3 s.
+- [x] A run is split by GPS alone: an invalid fix, a non-increasing timestamp, or a gap over 3 s.
       Fit eligibility — the 5 m/s floor and a pitot reading zero — gates which samples are
       FITTED, never the geometry, so a brief mid-lap ease-off with continuous GPS does not
       destroy a circuit. A run split by a GPS dropout over 3 s does still lose its circuits
