@@ -299,6 +299,50 @@ export function calibrationSeries(
 	return out;
 }
 
+export type CalibrationEligibility =
+	| { method: "sinusoid"; circuits: number }
+	| { method: "vdRatio"; reason: CalibrationRefusal };
+
+/**
+ * The GEOMETRY half of the gate, without the fit — cheap enough to run on every
+ * selection change so the button can say which method the selection is eligible
+ * for before it is clicked.
+ *
+ * It deliberately cannot promise the heading fit will RUN: `headingCoverage`
+ * and `degenerate` are properties of the solve, not of the geometry, so a
+ * selection can pass here and still fall back. The caller's wording must say
+ * "available", never "will run".
+ */
+export function calibrationEligibility(
+	input: AutoCalibrationInput,
+): CalibrationEligibility {
+	if (!input.measuredAirSpeed)
+		return { method: "vdRatio", reason: "noMeasuredAirSpeed" };
+	if (input.headingSegments.length === 0)
+		return { method: "vdRatio", reason: "noWholeCircuit" };
+
+	const prepared = input.headingSegments.map(prepareSegment);
+	if (prepared.every((p) => !p.hasUsableFix))
+		return { method: "vdRatio", reason: "noUsablePositions" };
+
+	let circuits = 0;
+	let firstRefusal: CalibrationRefusal | null = null;
+	for (const segment of prepared) {
+		if (!segment.hasUsableFix) {
+			firstRefusal ??= "noUsablePositions";
+			continue;
+		}
+		if (segment.windows.refusal) {
+			firstRefusal ??= segment.windows.refusal;
+			continue;
+		}
+		circuits += segment.windows.circuits;
+	}
+	return circuits > 0
+		? { method: "sinusoid", circuits }
+		: { method: "vdRatio", reason: firstRefusal ?? "noWholeCircuit" };
+}
+
 export function calculateAutoAirSpeedCalibration(
 	input: AutoCalibrationInput,
 ): AutoCalibrationOutcome {

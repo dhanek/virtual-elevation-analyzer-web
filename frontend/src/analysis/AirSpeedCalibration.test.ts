@@ -4,7 +4,9 @@ import {
 	AIR_SPEED_CALIBRATION_MIN_PERCENT,
 	calculateAutoAirSpeedCalibration,
 	calculateAutoAirSpeedCalibrationPercent,
+	calibrationEligibility,
 	calibrationSeries,
+	type AutoCalibrationInput,
 	type AutoCalibrationOutcome,
 	type HeadingCalibrationSegment,
 } from "./AirSpeedCalibration";
@@ -361,6 +363,43 @@ describe("calculateAutoAirSpeedCalibration", () => {
 			kind: "clamped",
 			unclampedPercent: expect.closeTo(30, 6),
 		});
+	});
+});
+
+describe("calibrationEligibility", () => {
+	const probeAndRun = (input: AutoCalibrationInput) => ({
+		probe: calibrationEligibility(input),
+		outcome: calculateAutoAirSpeedCalibration(input),
+	});
+
+	it("reports the circuit count the full run reaches", () => {
+		const { probe, outcome } = probeAndRun({
+			measuredAirSpeed: true,
+			headingSegments: [lap({ circuits: 3 })],
+			vdSegments: [],
+		});
+		if (outcome.method !== "sinusoid")
+			throw new Error("expected a heading fit");
+		expect(probe).toEqual({ method: "sinusoid", circuits: outcome.circuits });
+	});
+
+	it("names the same refusal the report would show, without a channel", () => {
+		const { probe, outcome } = probeAndRun({
+			measuredAirSpeed: false,
+			headingSegments: [lap({ circuits: 3 })],
+			vdSegments: [],
+		});
+		expect(probe).toEqual({ method: "vdRatio", reason: "noMeasuredAirSpeed" });
+		expect(outcome.method).not.toBe("sinusoid");
+	});
+
+	it("names the geometry refusal on an open arc", () => {
+		const { probe } = probeAndRun({
+			measuredAirSpeed: true,
+			headingSegments: [lap({ circuits: 0.5 })],
+			vdSegments: [],
+		});
+		expect(probe).toEqual({ method: "vdRatio", reason: "noWholeCircuit" });
 	});
 });
 
