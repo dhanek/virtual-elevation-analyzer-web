@@ -248,6 +248,20 @@ function windowsOf(
 	});
 }
 
+function sliceTrack(
+	track: ReturnType<typeof syntheticTrack>,
+	from: number,
+	to: number,
+): ReturnType<typeof syntheticTrack> {
+	return {
+		timestamps: track.timestamps.slice(from, to),
+		velocity: track.velocity.slice(from, to),
+		airSpeed: track.airSpeed.slice(from, to),
+		positionLat: track.positionLat.slice(from, to),
+		positionLong: track.positionLong.slice(from, to),
+	};
+}
+
 describe("circuitWindows", () => {
 	it("keeps complete oval circuits and closes them on the start ray", () => {
 		const result = windowsOf(syntheticTrack({ circuits: 6.5 }));
@@ -332,14 +346,14 @@ describe("circuitWindows", () => {
 		expect(windowsOf(syntheticTrack({ circuits: 7 })).circuits).toBe(7);
 	});
 
-	it("still refuses a lap left open by more than one sample", () => {
-		expect(windowsOf(syntheticTrack({ circuits: 0.98 }))).toMatchObject({
+	it("still refuses a lap whose endpoint never returns to its start", () => {
+		expect(windowsOf(syntheticTrack({ circuits: 0.95 }))).toMatchObject({
 			circuits: 0,
 			refusal: "noWholeCircuit",
 		});
 	});
 
-	it("scales the tolerance to the circuit: a 250 m track at 15 m/s", () => {
+	it("counts a small, fast circuit where one sample is 15 m of travel", () => {
 		const track = syntheticTrack({
 			circuits: 1,
 			straightMeters: 44,
@@ -347,6 +361,22 @@ describe("circuitWindows", () => {
 			speed: () => 15,
 		});
 		expect(windowsOf(track)).toMatchObject({ circuits: 1 });
+	});
+
+	it("counts a lap whose window ends where the azimuth turns fastest", () => {
+		// F65-01: a window cut from a longer ride, starting mid-straight — the
+		// point of this oval closest to its own bounding-box centre, where the
+		// azimuth rate is 2.2x the median step. It ends 11.3 m short of its own
+		// start, which is 15.8 deg of azimuth against a median step of 6.34 deg,
+		// so the median tolerance under-covers it by 2.5x and the closure check
+		// does not.
+		const result = windowsOf(
+			sliceTrack(syntheticTrack({ circuits: 3 }), 5, 50),
+		);
+		expect(result.circuits).toBe(1);
+		expect(result.refusal).toBeUndefined();
+		expect(result.windows[0].closureMeters).toBeGreaterThan(10);
+		expect(result.windows[0].closureMeters).toBeLessThan(15);
 	});
 });
 
