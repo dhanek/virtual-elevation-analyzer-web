@@ -533,8 +533,13 @@ function windowForRun(
 	// cannot bound it — that candidate's limit clamps to the run's own last
 	// sample, so its closure test reads "did the lap end near its start", which
 	// every closed lap passes, and it credited every lap one turn too many. The
-	// closure check still gates EVERY candidate: the crossing at that many turns
-	// must lie within MAX_CLOSURE_METERS of the window start. Falling back to the
+	// closure check still gates every candidate, but what it measures depends on
+	// the candidate, because `limit` clamps to the sweep: a candidate ABOVE the
+	// sweep is tested at the run's own last sample ("did the run end near its
+	// start"), and one within it at a genuine crossing that many turns in. The
+	// nearest whole turn is the first kind whenever it rounds up, so it is the
+	// ROUNDING, never the closure check, that holds its deficit to half a turn —
+	// which is the bound `ceil` had none of. Falling back to the
 	// whole turn below keeps a 1.6-lap run at 1 circuit and keeps a spiral
 	// refused.
 	const sweep = signed[signed.length - 1];
