@@ -534,7 +534,8 @@ function windowForRun(
 	// below it keeps a 1.5-lap run at 1 circuit and keeps a spiral refused.
 	const sweep = signed[signed.length - 1];
 	const whole = Math.floor(sweep / 360);
-	for (const circuits of [whole + 1, whole]) {
+	const nearest = Math.round(sweep / 360);
+	for (const circuits of nearest > whole ? [nearest, whole] : [whole]) {
 		if (circuits < 1) break;
 		const limit = Math.min(circuits * 360, sweep);
 		const cross = signed.findIndex((value) => value >= limit);

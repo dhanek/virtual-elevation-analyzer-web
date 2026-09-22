@@ -363,6 +363,17 @@ describe("circuitWindows", () => {
 		expect(windowsOf(track)).toMatchObject({ circuits: 1 });
 	});
 
+	it("counts one turn for a lap that oversweeps and ends on its own start", () => {
+		// F66-01: sweep 365.41 deg, 5.41 deg past a whole turn, ending 8.67 m from
+		// the start. Crediting the turn ABOVE the sweep measures closure at the
+		// run's own endpoint, which every closed lap passes, so the count has to
+		// be the NEAREST whole turn, not the one above.
+		const result = windowsOf(syntheticTrack({ circuits: 1.02 }));
+		expect(result.circuits).toBe(1);
+		expect(result.windows).toHaveLength(1);
+		expect(result.windows[0].closureMeters).toBeLessThan(1);
+	});
+
 	it("counts a lap whose window ends where the azimuth turns fastest", () => {
 		// F65-01: a window cut from a longer ride, starting mid-straight — the
 		// point of this oval closest to its own bounding-box centre, where the
