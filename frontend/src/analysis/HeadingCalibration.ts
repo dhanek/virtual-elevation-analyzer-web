@@ -528,10 +528,15 @@ function windowForRun(
 	// real venue whose start/finish sits ~35 m from the centre of a 300x283 m box,
 	// the within-lap step spread is 2.4° / 9.5° / 15.3° (median / p90 / max) and a
 	// complete lap reads up to 18° short while ending 11 m from its start. So the
-	// last, partial turn is counted when — and only when — the crossing lies
-	// within MAX_CLOSURE_METERS of the window start. The closure check is the
-	// authority; there is no azimuth tolerance. Falling back to the whole turns
-	// below it keeps a 1.5-lap run at 1 circuit and keeps a spiral refused.
+	// count is the NEAREST whole turn: the rounding is what bounds the granted
+	// deficit, at half a turn, and it costs no constant. The turn ABOVE the sweep
+	// cannot bound it — that candidate's limit clamps to the run's own last
+	// sample, so its closure test reads "did the lap end near its start", which
+	// every closed lap passes, and it credited every lap one turn too many. The
+	// closure check still gates EVERY candidate: the crossing at that many turns
+	// must lie within MAX_CLOSURE_METERS of the window start. Falling back to the
+	// whole turn below keeps a 1.6-lap run at 1 circuit and keeps a spiral
+	// refused.
 	const sweep = signed[signed.length - 1];
 	const whole = Math.floor(sweep / 360);
 	const nearest = Math.round(sweep / 360);
