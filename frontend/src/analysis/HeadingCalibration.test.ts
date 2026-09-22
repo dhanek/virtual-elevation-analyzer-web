@@ -56,6 +56,26 @@ function ok<T extends { ok: boolean }>(fit: T): Extract<T, { ok: true }> {
 	return fit as Extract<T, { ok: true }>;
 }
 
+/**
+ * `syntheticTrack` reports GPS, not heading — derive it the same way the
+ * production caller (`AirSpeedCalibration.ts`) does, rather than duplicating
+ * `segmentOf`'s sweep-shaped fixture for a track that has no `heading` field.
+ */
+function scaleFitSegmentOf(
+	track: ReturnType<typeof syntheticTrack>,
+): ScaleFitSegment {
+	return {
+		velocity: track.velocity,
+		airSpeed: track.airSpeed,
+		headingDeg: headingFromGps(
+			track.positionLat,
+			track.positionLong,
+			track.timestamps,
+		),
+		mask: track.velocity.map(() => true),
+	};
+}
+
 describe("isValidFix", () => {
 	it("rejects the parser's (0, 0) sentinel, non-finite and out-of-range values", () => {
 		expect(isValidFix(0, 0)).toBe(false);
@@ -179,6 +199,32 @@ describe("fitSharedScale", () => {
 			ok: false,
 			reason: "degenerate",
 		});
+	});
+
+	it("exposes the wind coefficients the residuals were computed from", () => {
+		const track = syntheticTrack({ circuits: 3 });
+		const fit = ok(fitSharedScale([scaleFitSegmentOf(track)]));
+
+		const { a, b } = fit.coefficients[0];
+		// windSpeed = scale * hypot(a, b) and windDirDeg = atan2(b, a): the
+		// coefficients must be consistent with the wind the fit already reports.
+		expect(Math.hypot(a, b) * fit.scale).toBeCloseTo(
+			fit.winds[0].windSpeed,
+			10,
+		);
+
+		// And they must reproduce the fit's own residuals, sample for sample.
+		const segment = scaleFitSegmentOf(track);
+		for (let i = 0; i < fit.residuals[0].length; i++) {
+			const expected = fit.residuals[0][i];
+			if (!Number.isFinite(expected)) continue;
+			const theta = (segment.headingDeg[i] * Math.PI) / 180;
+			const modelled =
+				segment.velocity[i] / fit.scale +
+				a * Math.cos(theta) +
+				b * Math.sin(theta);
+			expect(segment.airSpeed[i] - modelled).toBeCloseTo(expected, 10);
+		}
 	});
 
 	it("refuses the pool when any one segment lacks heading coverage", () => {

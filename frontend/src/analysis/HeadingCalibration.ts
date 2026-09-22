@@ -127,6 +127,14 @@ export interface SharedScaleFit {
 	/** va_true = scale · va_meas. */
 	scale: number;
 	winds: SegmentWind[];
+	/**
+	 * Per segment, the fitted wind coefficients of `a·cos θ + b·sin θ` in
+	 * MEASURED air-speed units — the same units `residuals` is in. `winds`
+	 * is these two numbers in polar form, scaled to true air speed; the view
+	 * needs the cartesian pair to redraw the model, and gets it from here
+	 * rather than inverting `winds`.
+	 */
+	coefficients: Array<{ a: number; b: number }>;
 	/** Per segment, aligned to its input indices; NaN where the sample was not fitted. */
 	residuals: number[][];
 	residSd: number;
@@ -214,6 +222,10 @@ export function fitSharedScale(
 			windDirDeg: wrapDegrees(Math.atan2(b, a) / DEG),
 		};
 	});
+	const coefficients = segments.map((_, l): { a: number; b: number } => ({
+		a: beta[1 + 2 * l],
+		b: beta[2 + 2 * l],
+	}));
 
 	let sumSq = 0;
 	let sum = 0;
@@ -240,6 +252,7 @@ export function fitSharedScale(
 		n,
 		scale,
 		winds,
+		coefficients,
 		residuals,
 		residSd: Math.sqrt(Math.max(sumSq / n - mean * mean, 0)),
 	};
