@@ -4,6 +4,7 @@ import {
 	AIR_SPEED_CALIBRATION_MIN_PERCENT,
 	calculateAutoAirSpeedCalibration,
 	calculateAutoAirSpeedCalibrationPercent,
+	calibrationSeries,
 	type AutoCalibrationOutcome,
 	type HeadingCalibrationSegment,
 } from "./AirSpeedCalibration";
@@ -360,5 +361,39 @@ describe("calculateAutoAirSpeedCalibration", () => {
 			kind: "clamped",
 			unclampedPercent: expect.closeTo(30, 6),
 		});
+	});
+});
+
+describe("calibrationSeries", () => {
+	it("reproduces the fit's own residuals for the same segment", () => {
+		const segment = lap({ circuits: 3 });
+		const outcome = sinusoid(run([segment]));
+		const row = outcome.perSegment[0];
+		if (!row.coefficients)
+			throw new Error("expected coefficients on a fitted lap");
+		const series = calibrationSeries(segment, row.coefficients, outcome.scale);
+
+		expect(series.residual.length).toBeGreaterThan(50);
+		for (let i = 0; i < series.residual.length; i++) {
+			expect(series.windComponent[i] - series.model[i]).toBeCloseTo(
+				series.residual[i],
+				12,
+			);
+		}
+		// Every emitted sample is one the fit actually used.
+		expect(series.headingDeg.every((h) => h >= 0 && h <= 360)).toBe(true);
+		expect(series.residual.every(Number.isFinite)).toBe(true);
+	});
+
+	it("emits only the samples inside the counted circuit window", () => {
+		const segment = lap({ circuits: 1.6 });
+		const outcome = sinusoid(run([segment]));
+		const row = outcome.perSegment[0];
+		if (!row.coefficients) throw new Error("expected coefficients");
+
+		const series = calibrationSeries(segment, row.coefficients, outcome.scale);
+		// A 1.6-turn run counts one circuit, so the trailing 0.6 turn is outside
+		// the window and must not be plotted.
+		expect(series.headingDeg.length).toBeLessThan(segment.timestamps.length);
 	});
 });

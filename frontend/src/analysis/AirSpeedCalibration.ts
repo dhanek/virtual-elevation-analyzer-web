@@ -107,6 +107,8 @@ const WIND_CHANGE_WARN = 0.5;
 const MIN_RECOMMENDED_CIRCUITS = 6;
 /** Percentage points between segments' own fits (notes §3; k depends on position, §6.3). */
 const SEGMENT_SPREAD_WARN_PERCENT = 1.0;
+/** `HeadingCalibration.ts` keeps its own copy private; this module needs the same conversion for `calibrationSeries`. */
+const DEG = Math.PI / 180;
 
 export interface HeadingCalibrationSegment {
 	label: string;
@@ -145,6 +147,12 @@ interface SegmentCalibration {
 	/** From the applied joint model. */
 	windSpeed?: number;
 	windDirDeg?: number;
+	/**
+	 * The joint model's wind coefficients for this lap, in measured air-speed
+	 * units. Present exactly when the lap was fitted. `calibrationSeries` needs
+	 * these to redraw the model without refitting.
+	 */
+	coefficients?: { a: number; b: number };
 	refusal?: CalibrationRefusal;
 }
 
@@ -161,6 +169,12 @@ export type AutoCalibrationOutcome =
 	| {
 			method: "sinusoid";
 			percent: number;
+			/**
+			 * The joint fit's UNCLAMPED scale (va_true = scale · va_meas).
+			 * `percent` may have been clamped for the control; this is what the
+			 * model was drawn with, so the plot must use it.
+			 */
+			scale: number;
 			circuits: number;
 			perSegment: SegmentCalibration[];
 			warnings: CalibrationWarning[];
@@ -213,6 +227,67 @@ function prepareSegment(segment: HeadingCalibrationSegment): PreparedSegment {
 		windows,
 		fit: { velocity, airSpeed, headingDeg: heading, mask: windows.mask },
 	};
+}
+
+export interface CalibrationSeries {
+	label: string;
+	/** Fitted samples only, in sample order. */
+	headingDeg: number[];
+	/** va_meas − v / scale: measured air speed with the speed term removed. */
+	windComponent: number[];
+	/** a·cos θ + b·sin θ, the fitted wind model at that heading. */
+	model: number[];
+	/** windComponent − model; equals the fit's own residual for that sample. */
+	residual: number[];
+}
+
+/**
+ * The series the Calibration tab plots, derived from a fit that has already
+ * run. NOT a second fit: `coefficients` and `scale` come from the outcome, and
+ * everything here is arithmetic on them.
+ *
+ * It goes through `prepareSegment` rather than cutting the samples itself, so
+ * the plotted population is exactly the fitted one — same 5 m/s floor, same
+ * circuit window, same heading derivation. A view that re-derived that cut
+ * could silently draw a different set of samples than the fit saw.
+ */
+export function calibrationSeries(
+	segment: HeadingCalibrationSegment,
+	coefficients: { a: number; b: number },
+	scale: number,
+): CalibrationSeries {
+	const prepared = prepareSegment(segment);
+	const { velocity, airSpeed, headingDeg, mask } = prepared.fit;
+	const length = Math.min(
+		velocity.length,
+		airSpeed.length,
+		headingDeg.length,
+		mask.length,
+	);
+	const out: CalibrationSeries = {
+		label: segment.label,
+		headingDeg: [],
+		windComponent: [],
+		model: [],
+		residual: [],
+	};
+	for (let i = 0; i < length; i++) {
+		const v = velocity[i];
+		const va = airSpeed[i];
+		const theta = headingDeg[i];
+		if (mask[i] !== true) continue;
+		if (!Number.isFinite(v) || !Number.isFinite(va) || !Number.isFinite(theta))
+			continue;
+		const radians = theta * DEG;
+		const windComponent = va - v / scale;
+		const model =
+			coefficients.a * Math.cos(radians) + coefficients.b * Math.sin(radians);
+		out.headingDeg.push(theta);
+		out.windComponent.push(windComponent);
+		out.model.push(model);
+		out.residual.push(windComponent - model);
+	}
+	return out;
 }
 
 export function calculateAutoAirSpeedCalibration(
@@ -272,6 +347,7 @@ export function calculateAutoAirSpeedCalibration(
 	pool.forEach(({ row, segment }, l) => {
 		row.windSpeed = joint.winds[l].windSpeed;
 		row.windDirDeg = joint.winds[l].windDirDeg;
+		row.coefficients = joint.coefficients[l];
 		circuits += segment.windows.circuits;
 
 		const gust = gustIndex(
@@ -309,5 +385,12 @@ export function calculateAutoAirSpeedCalibration(
 	if (percent !== unclampedPercent)
 		warnings.push({ kind: "clamped", unclampedPercent });
 
-	return { method: "sinusoid", percent, circuits, perSegment: rows, warnings };
+	return {
+		method: "sinusoid",
+		percent,
+		scale: joint.scale,
+		circuits,
+		perSegment: rows,
+		warnings,
+	};
 }

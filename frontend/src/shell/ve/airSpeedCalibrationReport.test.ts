@@ -12,6 +12,7 @@ import {
 const pooled: AutoCalibrationOutcome = {
 	method: "sinusoid",
 	percent: 8.04,
+	scale: 1.0804,
 	circuits: 12,
 	perSegment: [
 		{
