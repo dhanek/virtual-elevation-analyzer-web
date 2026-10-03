@@ -66,6 +66,20 @@ describe("calculateAutoAirSpeedCalibrationPercent", () => {
 		expect(calibration).toBeCloseTo(10, 6);
 	});
 
+	it("rides each step at the mean of the speeds at its two ends", () => {
+		// 9 -> 11 -> 13 m/s covers 10 m then 12 m: 22 m of ground against 20 m
+		// of air. The end-of-step speeds would say 24 m and suggest 20%.
+		const calibration = calculateAutoAirSpeedCalibrationPercent([
+			{
+				timestamps: [0, 1, 2],
+				groundSpeed: [9, 11, 13],
+				apparentSpeed: [10, 10, 10],
+			},
+		]);
+
+		expect(calibration).toBeCloseTo(10, 6);
+	});
+
 	it("clamps extreme suggestions to configured bounds", () => {
 		const high = calculateAutoAirSpeedCalibrationPercent([
 			{

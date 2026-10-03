@@ -121,9 +121,15 @@ const PRECISION = 10;
  *
  * The air total is the number a SECOND application of the calibration
  * multiplier moves; the ground total is the control that must stay put.
+ *
+ * RE-BASELINED 2026-10-03 from 14.076827100000003 and 14.497571: each step of
+ * the virtual distance is now ridden at the mean of the speeds at its two ends
+ * (`stepMeanSpeed`), not the speed at its end. Over a segment that moves the
+ * total by half the difference between its first and last speed, times one
+ * step: +4.7 m of air and −1.3 m of ground over the seven segments.
  */
-const VD_AIR_KM_TOTAL = 14.076827100000003;
-const VD_GROUND_KM_TOTAL = 14.497571;
+const VD_AIR_KM_TOTAL = 14.08150485;
+const VD_GROUND_KM_TOTAL = 14.496252999999998;
 
 type WindMode = "fit" | "constant";
 

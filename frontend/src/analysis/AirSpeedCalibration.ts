@@ -1,3 +1,5 @@
+import { stepMeanSpeed } from "./VirtualDistance";
+
 export const DEFAULT_AIR_SPEED_CALIBRATION_PERCENT = 0.0;
 export const AIR_SPEED_CALIBRATION_MIN_PERCENT = -20.0;
 export const AIR_SPEED_CALIBRATION_MAX_PERCENT = 20.0;
@@ -56,15 +58,10 @@ export function calculateAutoAirSpeedCalibrationPercent(
 				continue;
 			}
 
-			const airSpeed = apparentSpeed[index];
-			if (Number.isFinite(airSpeed) && airSpeed > 0) {
-				virtualDistanceAir += airSpeed * dt;
-			}
-
-			const speed = groundSpeed[index];
-			if (Number.isFinite(speed) && speed > 0) {
-				virtualDistanceGround += speed * dt;
-			}
+			virtualDistanceAir +=
+				stepMeanSpeed(apparentSpeed[index - 1], apparentSpeed[index]) * dt;
+			virtualDistanceGround +=
+				stepMeanSpeed(groundSpeed[index - 1], groundSpeed[index]) * dt;
 		}
 	}
 

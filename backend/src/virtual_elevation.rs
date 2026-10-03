@@ -444,22 +444,32 @@ impl VirtualElevationCalculator {
             return (0.0, 0.0, 0.0);
         }
 
-        // Calculate VD from trim_start to trim_end (both VD start at 0 at trim_start)
+        // A missing or non-positive speed sample counts as zero.
+        let counted = |speed: f64| {
+            if !speed.is_nan() && speed > 0.0 {
+                speed
+            } else {
+                0.0
+            }
+        };
+
+        // Calculate VD from trim_start to trim_end (both VD start at 0 at trim_start).
+        // A distance belongs to its sample's timestamp, the end of the step, so
+        // the step is ridden at the mean of the speeds at its two ends — the
+        // distance the VE step uses (`step_mean`).
         for i in (start_idx + 1)..=end_idx {
             let dt = self.data.timestamps[i] - self.data.timestamps[i - 1];
             if dt > 0.0 && dt < 10.0 {
                 // Sanity check for time step
                 // Apparent velocity distance (already includes wind, just apply calibration)
-                let apparent_speed = self.data.wind_speed[i] * self.air_speed_calibration;
-                if !apparent_speed.is_nan() && apparent_speed > 0.0 {
-                    vd_wind += apparent_speed * dt;
-                }
+                let apparent_before = self.data.wind_speed[i - 1] * self.air_speed_calibration;
+                let apparent_after = self.data.wind_speed[i] * self.air_speed_calibration;
+                vd_wind += 0.5 * (counted(apparent_before) + counted(apparent_after)) * dt;
 
                 // Ground speed distance
-                let ground_speed = self.data.velocity[i];
-                if !ground_speed.is_nan() && ground_speed > 0.0 {
-                    vd_ground += ground_speed * dt;
-                }
+                let ground_before = self.data.velocity[i - 1];
+                let ground_after = self.data.velocity[i];
+                vd_ground += 0.5 * (counted(ground_before) + counted(ground_after)) * dt;
             }
         }
 
@@ -1619,6 +1629,53 @@ mod tests {
         assert_eq!(result.virtual_distance_air(), 0.0);
         assert_eq!(result.virtual_distance_ground(), 0.0);
         assert_eq!(result.vd_difference_percent(), 0.0);
+    }
+
+    /// Virtual distance is the distance ridden by the timestamp it is reported
+    /// for. Speeding up steadily from 8 to 18 m/s in 20 s covers
+    /// 13 m/s · 20 s = 260 m, and through air moving 2 m/s faster, 300 m:
+    ///   %Δ = (300 − 260) / 260 · 100 = 15.385 %
+    ///
+    /// Summing the speed at the end of each step gives 265 m and 305 m.
+    #[test]
+    fn virtual_distance_is_the_distance_ridden_while_accelerating() {
+        const SAMPLES: usize = 21; // 20 s at 1 Hz
+
+        let timestamps: Vec<f64> = (0..SAMPLES).map(|i| i as f64).collect();
+        let velocity: Vec<f64> = timestamps.iter().map(|&t| 8.0 + 0.5 * t).collect();
+        let air_speed: Vec<f64> = velocity.iter().map(|&v| v + 2.0).collect();
+        let data = VEData::new(
+            timestamps,
+            vec![0.0; SAMPLES],
+            velocity,
+            vec![],
+            vec![],
+            vec![100.0; SAMPLES],
+            vec![0.0; SAMPLES],
+            air_speed,
+        );
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        let result = calc.calculate_virtual_elevation(CDA, CRR, 0, SAMPLES - 1);
+
+        let vd_air = result.virtual_distance_air();
+        let vd_ground = result.virtual_distance_ground();
+        let pct = result.vd_difference_percent();
+
+        assert!(
+            (vd_ground - 260.0).abs() < 1e-9,
+            "VD_ground should be 260 m, got {}",
+            vd_ground
+        );
+        assert!(
+            (vd_air - 300.0).abs() < 1e-9,
+            "VD_air should be 300 m, got {}",
+            vd_air
+        );
+        assert!(
+            (pct - 40.0 / 260.0 * 100.0).abs() < 1e-9,
+            "Δ% should be 15.385, got {}",
+            pct
+        );
     }
 
     /// A uniform per-datapoint CdA array should produce the same VE profile as
