@@ -224,6 +224,28 @@
 	height: clamp(360px, 62vh, 700px);
 }
 
+/* The Calibration tab: one fit figure with every lap overlaid, taller than a
+   --tall plot because the legend and the residual strip share its box. Laps the
+   fit refused are listed beneath it as quiet text. */
+.ve-calibration__laps {
+	margin-bottom: var(--space-md);
+}
+
+.ve-plot-container__plot--calibration-fit {
+	height: clamp(380px, 64vh, 720px);
+}
+
+.ve-calibration__lap-refused {
+	margin-top: var(--space-xs);
+	color: var(--color-text-muted);
+}
+
+/* One row per lap on a short value axis: a strip, not a pane. */
+.ve-plot-container__plot--agreement {
+	height: clamp(200px, 28vh, 320px);
+	margin-bottom: var(--space-md);
+}
+
 /* Auto-converge lock pair, rendered under the Crr slider in every sidebar.
    Present-and-hidden until the Section-3 checkbox enables it (the [hidden]
    attribute; binding happens once, from the render). */
@@ -363,6 +385,18 @@
 .ve-parameter__auto-btn {
 	width: 100%;
 	margin-top: var(--space-sm);
+}
+
+.ve-parameter__hint,
+.ve-parameter__report {
+	margin-top: var(--space-sm);
+	font-size: 0.85em;
+	color: var(--color-text-muted);
+}
+
+.ve-parameter__report-headline,
+.ve-parameter__report-warning {
+	font-weight: 600;
 }
 
 /* Air-speed time-offset panel on the wind tab (de-inlined from

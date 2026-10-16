@@ -489,7 +489,14 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 	});
 
 	it("puts VD in the strip and draws it on click", async () => {
-		expect(tabStrip()).toEqual(["ve", "wind", "power", "vd", "convergence"]);
+		expect(tabStrip()).toEqual([
+			"ve",
+			"wind",
+			"power",
+			"vd",
+			"convergence",
+			"calibration",
+		]);
 
 		clickTab("vd");
 		await settle();
@@ -511,7 +518,14 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 			await selectWindSource(source);
 
 			expect(vdButtonHidden()).toBe(false);
-			expect(tabStrip()).toEqual(["ve", "wind", "power", "vd", "convergence"]);
+			expect(tabStrip()).toEqual([
+				"ve",
+				"wind",
+				"power",
+				"vd",
+				"convergence",
+				"calibration",
+			]);
 			expect(activeTabId()).toBe("vd-tab");
 			// And it is REDRAWN for the new source, not left showing the old one.
 			expect(drawTargets).toContain("vdPlot");

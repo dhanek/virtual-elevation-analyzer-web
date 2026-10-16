@@ -26,9 +26,11 @@ import type { OutAndBackSection } from "../../utils/GpsLapDetection";
 import type { OutAndBackVEProfile } from "./types";
 
 import {
-	calculateAutoAirSpeedCalibrationPercent,
+	calculateAutoAirSpeedCalibration,
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
+import { headingCalibrationInput } from "../analysis/autoCalibration";
+import { renderCalibrationTab } from "../ve/calibrationTab";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
@@ -69,6 +71,7 @@ import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { convergenceTabMarkup } from "../analysis/convergenceTab";
+import { calibrationTabMarkup } from "../ve/calibrationTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
@@ -504,6 +507,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 																: ""
 														}
                             <button class="ve-tab-button" data-tab="convergence">Convergence</button>
+                            <button class="ve-tab-button" data-tab="calibration"${fitWindVisibilityAttrs(selectedWindSource)}>Calibration</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -578,6 +582,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
                         ${convergenceTabMarkup()}
+                        ${calibrationTabMarkup()}
                     </div>
                 </div>
             </div>
@@ -721,6 +726,7 @@ export async function showOutAndBackVEPlot(
 		power: () => renderOutAndBackPowerPlot(profiles),
 		vd: () => renderOutAndBackVdPlot(profiles),
 		convergence: requestConvergenceRedraw,
+		calibration: renderCalibrationTab,
 	});
 
 	// Setup action footer buttons
@@ -819,16 +825,17 @@ export function setupOutAndBackSliderSync(
 				end: range.endIdx,
 			})),
 		getSyncErrorSeries: () => syncErrorSeries(appState),
-		getAutoCalibrationPercent: () =>
-			calculateAutoAirSpeedCalibrationPercent(
-				buildAutoCalibrationSegmentsFromRanges(
+		getAutoCalibration: () =>
+			calculateAutoAirSpeedCalibration({
+				...headingCalibrationInput(appState),
+				vdSegments: buildAutoCalibrationSegmentsFromRanges(
 					appState,
 					ranges(),
 					getNormalizedActivityArrays,
 					resolveWindSeries,
 					extractSegmentData,
 				),
-			),
+			}),
 	});
 }
 

@@ -28,6 +28,7 @@ import {
 	formatLapDistance,
 	type OutAndBackSection,
 } from "../../utils/GpsLapDetection";
+import { DEFAULT_AIR_SPEED_CALIBRATION_PERCENT } from "../../analysis/AirSpeedCalibration";
 import { saveMapTrimSettings } from "../../analysis/MultiSegmentSettings";
 import { calculateAutoRho } from "../ve";
 import { scheduleStandardAutoRho } from "../ve/standardAutoRhoScheduler";
@@ -552,6 +553,15 @@ export function resetAnalysisForNewActivity(): void {
 	// And the provenance of those presets, so a previous activity's saved-settings
 	// `true` cannot be reported against a fresh load's defaults.
 	trimPresetsFromSavedSettings = false;
+
+	// A fitted sensor scale belongs to the ride it was fitted on. Carried onto a
+	// new activity it silently recalibrates someone else's sensor: the new ride's
+	// first Analyze computes its VE with the previous ride's percent, and the
+	// slider renders that foreign value from state, so the UI agrees with itself
+	// and nothing looks wrong. The saved-settings restore
+	// (`renderStandardVe.ts:331-332`) still runs AFTER this, at Analyze time, so a
+	// file WITH stored settings keeps getting its own value back.
+	appState.airSpeedCalibrationPercent = DEFAULT_AIR_SPEED_CALIBRATION_PERCENT;
 
 	// The detections those selections indexed into. All are derived from the
 	// activity that has just been replaced.

@@ -31,6 +31,12 @@ export default defineConfig(() => ({
 			? "/virtual-elevation-analyzer-web/"
 			: "/",
 	root: ".",
+	// Plotly's CommonJS source (see `plotlyBundle.ts`) reads Node's `global`
+	// — `has-hover` evaluates `typeof global.matchMedia` at module load, which
+	// throws a ReferenceError in a browser and takes the whole chunk down. The
+	// prebuilt dists hid this behind webpack's shim; building from source, the
+	// identifier has to be rewritten at compile time instead.
+	define: { global: "globalThis" },
 	plugins: [wasmReloadPlugin(PKG_DIR)],
 	build: {
 		outDir: "../dist",

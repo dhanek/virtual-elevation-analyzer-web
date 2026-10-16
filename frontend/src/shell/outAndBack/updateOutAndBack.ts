@@ -3,6 +3,7 @@
  *
  * Verbatim lift from main.ts -- update logic for out-and-back mode.
  */
+import { renderCalibrationTab } from "../ve/calibrationTab";
 import type { AppState } from "../../state/AppState";
 import type {
 	ModeUpdateCallbacks,
@@ -96,6 +97,7 @@ export function createOutAndBackUpdateCallbacks(
 				power: () => renderOutAndBackPowerPlot(sectionProfiles),
 				vd: () => renderOutAndBackVdPlot(sectionProfiles),
 				convergence: requestConvergenceRedraw,
+				calibration: renderCalibrationTab,
 			});
 		},
 

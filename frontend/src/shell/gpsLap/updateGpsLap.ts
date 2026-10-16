@@ -13,6 +13,7 @@
  * LapVEProfile, which stat helpers compute the aggregate, and which four render
  * functions draw it.
  */
+import { renderCalibrationTab } from "../ve/calibrationTab";
 import type { AppState } from "../../state/AppState";
 import type {
 	ModeAggregateStats,
@@ -263,6 +264,7 @@ export function createGpsLapUpdateCallbacks(
 				power: () => renderGpsLapPowerPlot(lapProfiles),
 				vd: () => renderGpsLapVdPlot(lapProfiles),
 				convergence: requestConvergenceRedraw,
+				calibration: renderCalibrationTab,
 			});
 		},
 

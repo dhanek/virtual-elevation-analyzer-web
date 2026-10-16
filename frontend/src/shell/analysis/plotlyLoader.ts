@@ -10,32 +10,37 @@
  * bump — so the dependency is bundled instead, the same move `67bc5fc` made for
  * Leaflet's CSS when it dropped unpkg from the CSP.
  *
- * `plotly.js-cartesian-dist` is pinned to 2.27.0 — the version the CDN tag
- * named, and the version `plotly.js-basic-dist` was pinned to before it — so
- * both moves were sourcing changes, not version bumps. Basic was swapped for
- * cartesian to get the `contour` trace the Convergence tab draws; cartesian
- * adds contour, heatmap, histogram, box, violin and image over basic's bar,
- * pie and scatter, and nothing else.
+ * `plotly.js` is pinned exactly to 2.27.0 — the version the CDN tag named,
+ * and the version the prebuilt `plotly.js-basic-dist` and then
+ * `plotly.js-cartesian-dist` were pinned to before it — so every move so far
+ * has been a sourcing change, not a version bump. The prebuilt partial dists
+ * stopped fitting when the Calibration tab wanted a polar wind rose: cartesian
+ * has no polar traces, and the full dist adds ~646 kB gzipped for traces the
+ * app never draws. So the bundle is built from Plotly's source instead
+ * (`plotlyBundle.ts`): core (which carries `scatter`) plus `contour` and
+ * `scatterpolar`, registered explicitly, and nothing else.
  *
- * The CSP constraint that made basic "deliberate" still holds for cartesian.
- * Plotly's real `unsafe-eval` requirement lives in the gl/regl traces, which
- * cartesian excludes; the only `new Function` in the whole cartesian bundle is
- * webpack's `return this` global shim (plotly-cartesian.js:103567), which is
- * dead under a module build. Verified two ways: the built chunk grepped for
- * `new Function` and `eval(`, and the site loaded against `index.html`'s
- * `script-src 'self' 'wasm-unsafe-eval'` with no CSP report.
+ * The CSP constraint that made basic "deliberate" still holds. Plotly's real
+ * `unsafe-eval` requirement lives in the gl/regl traces, which this build
+ * excludes; the cartesian dist's one `new Function` was webpack's `return
+ * this` global shim, and a source build through Vite has no webpack runtime at
+ * all. Verified by grepping the built chunk for `new Function` and `eval(`
+ * (none). The price of building from source is that Plotly's CommonJS reads
+ * Node's `global` at load time, which `vite.config.ts` rewrites to
+ * `globalThis` — see the `define` there.
  *
  * The global assignment is not decoration. `gpsLapPlots.ts` and its siblings
  * read `(window as any).Plotly` directly rather than taking the resolved handle,
  * so the global has to keep being populated until those call sites are
  * converted to imports.
  *
- * DYNAMIC `import()`, not a static one. Plotly is ~1.27 MB minified — a static
- * import puts it in the entry chunk and roughly quadruples first load (basic
- * measured 448 kB -> 1445 kB raw, 119 kB -> 460 kB gzipped; cartesian's chunk
- * is 1,273 kB / 430 kB gzipped against a 465 kB / 123 kB entry, measured
- * 2026-09-01 — the +27% over basic is the contour/heatmap code the Convergence
- * tab uses). Splitting it out keeps the original
+ * DYNAMIC `import()`, not a static one. Plotly is over a megabyte minified — a
+ * static import puts it in the entry chunk and roughly quadruples first load
+ * (basic measured 448 kB -> 1445 kB raw, 119 kB -> 460 kB gzipped). The
+ * cartesian dist's chunk was 1,273 kB / 430 kB gzipped; this source build's is
+ * 1,085 kB / 374 kB gzipped (Vite's report, measured 2026-10-16) — smaller,
+ * polar included, because it drops the heatmap, histogram, box, violin, image,
+ * bar and pie traces nothing here draws. Splitting it out keeps the original
  * design intent of the CDN tag — nothing is fetched until an analysis actually
  * needs to plot — while sourcing it from the build instead of a third party.
  * The promise is cached so concurrent callers share one chunk fetch.
@@ -57,7 +62,7 @@ export function waitForPlotly(): Promise<PlotlyHandle> {
 	}
 
 	if (!pending) {
-		pending = import("plotly.js-cartesian-dist")
+		pending = import("./plotlyBundle")
 			.then((module) => {
 				const Plotly = module.default;
 				(window as unknown as Record<string, unknown>).Plotly = Plotly;

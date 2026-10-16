@@ -1,4 +1,5 @@
 import { log } from "../../utils/log";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { resizePlotlyGraphsIn } from "./plotlyResize";
 
 /**
@@ -11,6 +12,7 @@ export interface TabRenderMap {
 	vd?: () => void;
 	ve?: () => void;
 	convergence?: () => void;
+	calibration?: () => void;
 }
 
 // Latest render callbacks. Kept in a module ref so repeated setupTabSwitching
@@ -74,6 +76,9 @@ export function activateTab(tabName: string): void {
 	) {
 		log.debug("Tab switching: rendering convergence tab");
 		currentRenderMap.convergence();
+	} else if (tabName === "calibration" && currentRenderMap.calibration) {
+		log.debug("Tab switching: rendering calibration tab");
+		currentRenderMap.calibration();
 	}
 
 	// The pane is visible now and its plots have been redrawn, so this is the
@@ -161,6 +166,10 @@ export function setTabRenderMap(renderMap: TabRenderMap = {}): void {
  */
 export function resetTabRenderMapForNewPanel(): void {
 	currentRenderMap = {};
+	// The Calibration tab remembers the last Auto Adjust run in module state,
+	// but the report it mirrors lives in the sidebar markup that is being
+	// rebuilt. Dropping it here covers all three modes in one place.
+	setCalibrationTabState(null);
 }
 
 /**
