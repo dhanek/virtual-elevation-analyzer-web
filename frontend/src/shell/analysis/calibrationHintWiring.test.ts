@@ -10,13 +10,23 @@ import type { HeadingCalibrationSegment } from "../../analysis/AirSpeedCalibrati
 
 const input = vi.hoisted(() => ({
 	segments: [] as HeadingCalibrationSegment[],
+	throws: false,
 }));
 
+const logError = vi.hoisted(() => vi.fn());
+vi.mock("../../utils/log", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../../utils/log")>();
+	return { ...original, log: { ...original.log, error: logError } };
+});
+
 vi.mock("./autoCalibration", () => ({
-	headingCalibrationInput: () => ({
-		measuredAirSpeed: true,
-		headingSegments: input.segments,
-	}),
+	headingCalibrationInput: () => {
+		if (input.throws) throw new Error("boom");
+		return {
+			measuredAirSpeed: true,
+			headingSegments: input.segments,
+		};
+	},
 }));
 
 import type { AppState } from "../../state/AppState";
@@ -37,6 +47,8 @@ describe("calibration method hint wiring", () => {
 		});
 	});
 	afterEach(() => {
+		input.throws = false;
+		logError.mockClear();
 		resetModeUpdateRequests();
 		document.body.innerHTML = "";
 	});
@@ -54,5 +66,15 @@ describe("calibration method hint wiring", () => {
 		input.segments = [];
 		requestModeUpdate("mapTrim");
 		expect(hint()?.textContent).toContain("Distance ratio only");
+	});
+
+	it("hides the hint and logs an error when the probe throws", () => {
+		input.throws = true;
+		requestModeUpdate("segmentSelection");
+		expect(hint()?.hidden).toBe(true);
+		expect(logError).toHaveBeenCalledWith(
+			expect.stringContaining("refreshCalibrationMethodHint"),
+			expect.any(Error),
+		);
 	});
 });

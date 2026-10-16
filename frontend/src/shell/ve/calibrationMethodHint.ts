@@ -59,7 +59,7 @@ export function refreshCalibrationMethodHint(appState: AppState): void {
 		);
 	} catch (err) {
 		// A hint is never worth breaking a selection change over.
-		log.debug(
+		log.error(
 			"refreshCalibrationMethodHint: could not probe the selection",
 			err,
 		);
