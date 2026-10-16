@@ -2,7 +2,7 @@
  * The Calibration tab's figures: one fit figure with every fitted lap
  * overlaid (the wind component of measured air speed against compass heading,
  * each lap's fitted sinusoid over it and its residual beneath); then the
- * per-lap scales against the pooled one; then the per-lap wind vectors. A lap
+ * per-lap scales against the pooled one; then the per-lap winds on a compass rose. A lap
  * has the same colour in all three.
  *
  * Why the wind COMPONENT and not raw air speed: the model is
@@ -12,9 +12,11 @@
  * explain — so a departure from the curve is a departure of the MODEL, which is
  * what the reader is being asked to judge.
  *
- * Every trace is a plain `type: "scatter"`: the app bundles the cartesian-only
- * Plotly build, so a polar subplot or a WebGL trace would pass unit tests and
- * then fail to render in the browser.
+ * Every trace is a plain `type: "scatter"` except the wind rose's
+ * `scatterpolar`: the app's Plotly (`plotlyBundle.ts`) registers core,
+ * `contour` and `scatterpolar` and nothing else, so any other trace type —
+ * a bar, a heatmap, anything WebGL — would pass unit tests and then render as
+ * nothing in the browser.
  *
  * House builder shape: pure `(input) => {data, layout, config}`, no DOM, no
  * Plotly reference, and no `layout.height`/`layout.width` — the container CSS
@@ -213,25 +215,38 @@ export interface CalibrationWindInput {
 	}>;
 }
 
+/**
+ * Radial ticks for the wind rose: at most three, on a 0.5 / 1 / 2 / 5 m/s
+ * step, so the labels along the north spoke never crowd into each other the
+ * way Plotly's automatic ticks do on a small rose.
+ */
+const windTicks = (extent: number): number[] => {
+	const step =
+		[0.5, 1, 2, 5, 10].find((candidate) => extent / candidate <= 3) ?? 10;
+	const ticks: number[] = [];
+	for (let r = step; r <= extent + 1e-9; r += step) ticks.push(r);
+	return ticks;
+};
+
 export function buildCalibrationWindFigure(
 	input: CalibrationWindInput,
 ): PlotDefinition {
-	// θ is the meteorological "from" direction, so (E, N) = (W·sin θ, W·cos θ)
-	// points toward where the wind COMES FROM, not where it blows to.
+	// θ is the meteorological "from" direction, drawn on a compass (north up,
+	// clockwise), so each spoke points toward where the wind COMES FROM, not
+	// where it blows to.
 	const maxSpeed = Math.max(0, ...input.laps.map((lap) => lap.windSpeed));
 	const extent = Math.max(1, Math.ceil(maxSpeed * 1.2 * 2) / 2);
 	return {
 		data: input.laps.map((lap, i) => {
 			const color = calibrationLapColor(i);
-			const radians = (lap.windDirDeg * Math.PI) / 180;
 			return {
-				name: lap.label,
-				type: "scatter",
-				mode: "lines+markers+text",
-				x: [0, lap.windSpeed * Math.sin(radians)],
-				y: [0, lap.windSpeed * Math.cos(radians)],
-				text: ["", lap.label],
-				textposition: "top center",
+				// Named in a legend, not at the tip: laps on one ride mostly see
+				// the same wind, so their tips cluster and tip labels overprint.
+				name: `${lap.label} · ${lap.windSpeed.toFixed(1)} m/s from ${Math.round(lap.windDirDeg)}°`,
+				type: "scatterpolar",
+				mode: "lines+markers",
+				r: [0, lap.windSpeed],
+				theta: [lap.windDirDeg, lap.windDirDeg],
 				line: { width: 2, color },
 				marker: {
 					color,
@@ -243,19 +258,26 @@ export function buildCalibrationWindFigure(
 		}),
 		layout: {
 			title: { text: "Wind per lap (from)", font: { size: 13 } },
-			showlegend: false,
-			margin: { l: 48, r: 12, t: 34, b: 40 },
-			xaxis: {
-				title: { text: "E (m/s)" },
-				range: [-extent, extent],
-				zeroline: true,
-			},
-			yaxis: {
-				title: { text: "N (m/s)" },
-				range: [-extent, extent],
-				scaleanchor: "x",
-				scaleratio: 1,
-				zeroline: true,
+			showlegend: true,
+			legend: { orientation: "h", y: -0.1 },
+			margin: { l: 40, r: 40, t: 44, b: 30 },
+			polar: {
+				angularaxis: {
+					direction: "clockwise",
+					rotation: 90,
+					tickvals: [0, 90, 180, 270],
+					ticktext: ["N", "E", "S", "W"],
+				},
+				radialaxis: {
+					range: [0, extent],
+					tickvals: windTicks(extent),
+					ticksuffix: " m/s",
+					tickfont: { size: 10 },
+					// Along the north-east diagonal rather than the north spoke
+					// the angular "N" label sits on.
+					angle: 45,
+					tickangle: 45,
+				},
 			},
 		},
 		config: getDefaultPlotConfig(),

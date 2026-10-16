@@ -14,7 +14,7 @@
  * that fails in two ways, and both were on screen:
  *
  *   - `Plots.resize` guards on `gd.layout.width && gd.layout.height`
- *     (plotly-cartesian.js:48489). These layouts set height but never width, so the
+ *     (plotly.js src/plots/plots.js:81). These layouts set height but never width, so the
  *     guard let it through and the next two lines DELETE both and re-autosize —
  *     into a box whose height came from the plot. Measured: 350 px -> 26 px,
  *     and 26 px again on every later resize.

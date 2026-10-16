@@ -186,56 +186,100 @@ describe("buildCalibrationWindFigure", () => {
 		{ windSpeed: 1.8, windDirDeg: 32, warned: true },
 	];
 
-	it("draws each lap as a vector from the origin to (E, N)", () => {
+	it("draws each lap as a polar spoke from the centre out to its wind", () => {
 		expect(figure.data).toHaveLength(2);
 		laps.forEach((lap, i) => {
 			const trace = figure.data[i] as {
 				type: string;
-				x: number[];
-				y: number[];
+				r: number[];
+				theta: number[];
 			};
-			const rad = (lap.windDirDeg * Math.PI) / 180;
-			expect(trace.type).toBe("scatter");
-			expect(trace.x[0]).toBe(0);
-			expect(trace.y[0]).toBe(0);
-			expect(trace.x[1]).toBeCloseTo(lap.windSpeed * Math.sin(rad), 9);
-			expect(trace.y[1]).toBeCloseTo(lap.windSpeed * Math.cos(rad), 9);
+			expect(trace.type).toBe("scatterpolar");
+			expect(trace.r).toEqual([0, lap.windSpeed]);
+			expect(trace.theta).toEqual([lap.windDirDeg, lap.windDirDeg]);
 		});
 	});
 
-	it("marks the warned laps distinctly at the tip", () => {
-		const symbol = (i: number) =>
-			(figure.data[i].marker as { symbol: string[] }).symbol[1];
-		expect(symbol(0)).toBe("circle");
-		expect(symbol(1)).toBe("circle-x");
+	it("colours each lap with the shared lap colour", () => {
+		figure.data.forEach((trace, i) => {
+			expect((trace.line as { color: string }).color).toBe(
+				calibrationLapColor(i),
+			);
+		});
 	});
 
-	it("locks the aspect so directions are true", () => {
-		const yaxis = figure.layout.yaxis as {
-			scaleanchor: string;
-			scaleratio: number;
+	it("names each lap and its wind in the legend, not at the tip", () => {
+		expect(figure.layout.showlegend).toBe(true);
+		expect(figure.data[0].name).toBe("Lap 2 · 1.2 m/s from 52°");
+		expect(figure.data[0].mode).toBe("lines+markers");
+	});
+
+	it("marks the warned laps distinctly at the tip, and only the tip", () => {
+		const marker = (i: number) =>
+			figure.data[i].marker as { symbol: string[]; size: number[] };
+		expect(marker(0).symbol[1]).toBe("circle");
+		expect(marker(1).symbol[1]).toBe("circle-x");
+		expect(marker(0).size[0]).toBe(0);
+	});
+
+	it("reads as a compass: north up, clockwise", () => {
+		const polar = figure.layout.polar as {
+			angularaxis: { direction: string; rotation: number; ticktext: string[] };
 		};
-		expect(yaxis.scaleanchor).toBe("x");
-		expect(yaxis.scaleratio).toBe(1);
+		expect(polar.angularaxis.direction).toBe("clockwise");
+		expect(polar.angularaxis.rotation).toBe(90);
+		expect(polar.angularaxis.ticktext).toEqual(["N", "E", "S", "W"]);
 	});
 
-	it("centres the origin with symmetric axes", () => {
-		const x = figure.layout.xaxis as { range: number[] };
-		const y = figure.layout.yaxis as { range: number[] };
-		expect(x.range[0]).toBe(-x.range[1]);
-		expect(y.range[0]).toBe(-y.range[1]);
-		expect(x.range[1]).toBeGreaterThanOrEqual(1.8);
+	it("starts the radius at zero and keeps the radial labels sparse", () => {
+		const radial = (
+			figure.layout.polar as {
+				radialaxis: { range: number[]; tickvals: number[] };
+			}
+		).radialaxis;
+		expect(radial.range[0]).toBe(0);
+		expect(radial.range[1]).toBeGreaterThanOrEqual(1.8);
+		expect(radial.tickvals.length).toBeGreaterThan(0);
+		expect(radial.tickvals.length).toBeLessThanOrEqual(3);
+		expect(Math.max(...radial.tickvals)).toBeLessThanOrEqual(radial.range[1]);
+	});
+
+	it("keeps the radial labels sparse for a strong wind too", () => {
+		const strong = buildCalibrationWindFigure({
+			laps: [
+				{ label: "Lap 1", windSpeed: 9.3, windDirDeg: 200, warned: false },
+			],
+		});
+		const radial = (
+			strong.layout.polar as {
+				radialaxis: { range: number[]; tickvals: number[] };
+			}
+		).radialaxis;
+		expect(radial.tickvals.length).toBeLessThanOrEqual(3);
+		expect(radial.range[1]).toBeGreaterThanOrEqual(9.3);
 	});
 });
 
-describe("cartesian-only bundle", () => {
-	it("every trace is a plain scatter (no polar, no WebGL)", () => {
-		const traces = [fitFigure(), agreementFigure(), windFigure()].flatMap(
-			(f) => f.data,
-		);
+describe("trace types the bundled Plotly registers", () => {
+	/**
+	 * `plotlyBundle.ts` registers core (scatter), contour and scatterpolar only;
+	 * any other type passes these tests and renders as nothing in the browser.
+	 * Polar is allowed for the wind rose alone — the fit and agreement figures
+	 * share cartesian axes with their siblings.
+	 */
+	it("the fit and agreement figures are plain scatter", () => {
+		const traces = [fitFigure(), agreementFigure()].flatMap((f) => f.data);
 		expect(traces.length).toBeGreaterThan(0);
 		for (const trace of traces) {
 			expect(trace.type).toBe("scatter");
+		}
+	});
+
+	it("the wind figure is scatterpolar", () => {
+		const traces = windFigure().data;
+		expect(traces.length).toBeGreaterThan(0);
+		for (const trace of traces) {
+			expect(trace.type).toBe("scatterpolar");
 		}
 	});
 });
