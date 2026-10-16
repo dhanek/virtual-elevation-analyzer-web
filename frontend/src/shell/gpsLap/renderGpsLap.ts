@@ -25,9 +25,11 @@ import type { ShellServices } from "../analysis/types";
 import type { LapVEProfile } from "./types";
 
 import {
-	calculateAutoAirSpeedCalibrationPercent,
+	calculateAutoAirSpeedCalibration,
 	formatAirSpeedCalibrationPercent,
 } from "../../analysis/AirSpeedCalibration";
+import { headingCalibrationInput } from "../analysis/autoCalibration";
+import { renderCalibrationTab } from "../ve/calibrationTab";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
@@ -69,6 +71,7 @@ import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { convergenceTabMarkup } from "../analysis/convergenceTab";
+import { calibrationTabMarkup } from "../ve/calibrationTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
@@ -456,6 +459,7 @@ export async function showGpsLapVEPlot(
 		power: () => renderGpsLapPowerPlot(lapProfiles),
 		vd: () => renderGpsLapVdPlot(lapProfiles),
 		convergence: requestConvergenceRedraw,
+		calibration: renderCalibrationTab,
 	});
 
 	// Setup action footer buttons
@@ -575,16 +579,17 @@ export function setupGpsLapSliderHandlers(
 		// Every mode keeps its own segment source for the auto calibration: the
 		// difference between the three is DATA, not control flow, so it is an
 		// option here rather than a mode `if` inside the binder (D-02).
-		getAutoCalibrationPercent: () =>
-			calculateAutoAirSpeedCalibrationPercent(
-				buildAutoCalibrationSegmentsFromRanges(
+		getAutoCalibration: () =>
+			calculateAutoAirSpeedCalibration({
+				...headingCalibrationInput(appState),
+				vdSegments: buildAutoCalibrationSegmentsFromRanges(
 					appState,
 					ranges(),
 					getNormalizedActivityArrays,
 					resolveWindSeries,
 					extractSegmentData,
 				),
-			),
+			}),
 	});
 }
 
@@ -780,6 +785,7 @@ export function buildGpsLapVeAnalysisTemplate(
 																: ""
 														}
                             <button class="ve-tab-button" data-tab="convergence">Convergence</button>
+                            <button class="ve-tab-button" data-tab="calibration"${fitWindVisibilityAttrs(selectedWindSource)}>Calibration</button>
                         </div>
 
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -864,6 +870,7 @@ export function buildGpsLapVeAnalysisTemplate(
 														: ""
 												}
                         ${convergenceTabMarkup()}
+                        ${calibrationTabMarkup()}
                     </div>
                 </div>
             </div>

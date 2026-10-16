@@ -72,3 +72,32 @@ Fails when:  an unannotated `.map(… => ({ … }))` produces a result that reac
              arrives through an inferred callback return.
 Seen in:     F33-02, F37-01.
 ```
+
+### A threshold validated only on synthetic fixtures
+
+```
+Read:        the numeric constants in src/analysis/HeadingCalibration.ts and
+             src/analysis/AirSpeedCalibration.ts — MAX_CLOSURE_METERS, MAX_BACKTRACK_DEG,
+             MAX_SAMPLE_GAP_SECONDS, MIN_RECOMMENDED_CIRCUITS, SEGMENT_SPREAD_WARN_PERCENT —
+             against the fixtures that justify them,
+             src/analysis/__fixtures__/syntheticTrack.ts and the sweeps in
+             HeadingCalibration.test.ts and AirSpeedCalibration.test.ts.
+Fails when:  a threshold is derived from a synthetic fixture and every later test of it is
+             another synthetic fixture, so the property that decides the real case is absent
+             from the whole sweep and the sweep cannot report its own blind spot. THE RULE:
+             a numeric threshold introduced with a fixture-derived justification must be
+             re-measured on at least one real ride before the criterion that names it can be
+             ticked, and the real-ride figure is stated beside the fixture figure.
+             THE TELL: the justification cites figures from an idealised geometry — a smooth
+             oval, a uniform rate, a whole number of laps — and the prose calls the result
+             "typical".
+Seen in:     PR #30. F63-03 sized the circuit-sweep tolerance as the run's MEDIAN azimuth step
+             and justified it from smooth ovals (6.3 deg on a 451 m oval, 18.8 deg on a 250 m
+             track), where the azimuth rate is near-uniform. Round 64's deep pass asked exactly
+             the right question — does the tolerance under-cover a lap that ends in a corner? —
+             swept synthetic ovals and an idealised 845 m lap, and answered "nothing found".
+             On a real venue whose start/finish sits ~35 m from the centre of a 300x283 m
+             bounding box the within-lap step spread is 2.4 / 9.5 / 15.3 deg (median / p90 /
+             max), a 6:1 range, and two of four complete laps were refused (F65-01). The
+             conclusion was sound about its fixtures and wrong about the venue.
+```

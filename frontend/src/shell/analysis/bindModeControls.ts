@@ -36,7 +36,10 @@
  * controls — the same reasoning that put the controls in a table in the first
  * place. Nothing outside this file calls `configureModeUpdateRequests`.
  */
-import { clampAirSpeedCalibrationPercent } from "../../analysis/AirSpeedCalibration";
+import {
+	clampAirSpeedCalibrationPercent,
+	type AutoCalibrationOutcome,
+} from "../../analysis/AirSpeedCalibration";
 import { calculateAirSpeedSyncError } from "../../analysis/WindSourceResolver";
 import type { AnalysisModeId } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
@@ -44,10 +47,17 @@ import { log } from "../../utils/log";
 import { syncRangeAndNumber } from "../dom/rangeNumberPair";
 import { bindWindSourceRadios } from "../dom/windSource";
 import { bindAutoConvergeLocks } from "../ve/autoConvergeLocks";
+import {
+	AIR_SPEED_CALIBRATION_REPORT_ID,
+	renderCalibrationReport,
+} from "../ve/airSpeedCalibrationReport";
+import { refreshCalibrationMethodHint } from "../ve/calibrationMethodHint";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { bindCrrTempControls } from "../ve/crrTempControls";
 import { bindElevationDiffControls } from "../ve/elevationDiffControls";
 import { bindWindHeightControls } from "../ve/windHeightControls";
 import { bindElevationSmoothingToggle } from "./elevationProfileCycle";
+import { headingCalibrationInput } from "./autoCalibration";
 import { controlsForMode, type ModeControlSpec } from "./modeControlTable";
 import {
 	displayCdaBounds,
@@ -128,12 +138,10 @@ export interface BindModeControlsOptions {
 	getOffsetMetricWindows?: () => OffsetMetricWindow[];
 	getSyncErrorSeries?: () => { groundSpeed: number[]; airSpeed: number[] };
 	/**
-	 * Compute this mode's auto air-speed calibration. The segments it is derived
-	 * from are mode-specific (Standard: the trim window; GPS: the lap or section
-	 * ranges), so the row stays declarative and the arithmetic stays with the
-	 * mode. Returning null means "no usable answer" and the control does nothing.
+	 * This mode's Auto Adjust outcome. Null only from test stubs; production
+	 * returns an explicit `none` outcome instead of nothing (review R10).
 	 */
-	getAutoCalibrationPercent?: () => number | null;
+	getAutoCalibration?: () => AutoCalibrationOutcome | null;
 }
 
 /**
@@ -189,6 +197,12 @@ export function bindModeControls(
 		spec: ModeControlSpec,
 		trimWindow?: { start: number; end: number },
 	): void {
+		// The stale-report check used to live here. It moved into
+		// `requestModeUpdate` itself (review finding 1/2): this function is only
+		// reached by binder-driven rows, while Section 3's `mapTrim` and
+		// `segmentSelection` reasons call `requestModeUpdate` directly and never
+		// passed through here at all. See `REPORT_INVALIDATING_REASONS` in
+		// `requestModeUpdate.ts`.
 		requestModeUpdate(spec.reason);
 
 		if (spec.movesMap && trimWindow && options.mapCanFollow?.()) {
@@ -400,8 +414,8 @@ export function bindModeControls(
 			case "calibration": {
 				const value = clampAirSpeedCalibrationPercent(rawValue);
 				writeBoth(spec, value, 1);
-				// Lives in AppState, deliberately not a persisted parameter: it is a
-				// runtime adjustment, not something the file carries.
+				// Lives in AppState and is saved with the lap settings
+				// (`saveCurrentMultiSegmentSettings`, `buildSaveResultData`).
 				appState.airSpeedCalibrationPercent = value;
 				finish(spec);
 				return;
@@ -456,9 +470,45 @@ export function bindModeControls(
 			case "button": {
 				const button = element(spec.elements.buttonId);
 				button?.addEventListener("click", () => {
-					const percent = options.getAutoCalibrationPercent?.();
-					if (percent === null || percent === undefined) return;
-					const value = clampAirSpeedCalibrationPercent(percent);
+					const reportElement = document.getElementById(
+						AIR_SPEED_CALIBRATION_REPORT_ID,
+					);
+					// A throw here used to leave the click looking like a dead
+					// control — nothing logged, nothing on screen (finding 4). It is
+					// caught and surfaced instead, with no change to the outcomes
+					// handled below on the success path.
+					let outcome: AutoCalibrationOutcome | null;
+					try {
+						outcome = options.getAutoCalibration?.() ?? null;
+					} catch (err) {
+						log.error(
+							`bindModeControls(${modeId}): getAutoCalibration threw`,
+							err,
+						);
+						if (reportElement) {
+							reportElement.replaceChildren();
+							const line = document.createElement("div");
+							line.className = "ve-parameter__report-warning";
+							line.textContent =
+								"Auto Adjust failed to compute a calibration. See the console for details.";
+							reportElement.appendChild(line);
+							reportElement.hidden = false;
+						}
+						return;
+					}
+					if (!outcome) return;
+					// The segments the estimator was given, so the Calibration tab draws the
+					// run the report describes (same appState, same function the three modes
+					// feed the estimator with).
+					setCalibrationTabState({
+						outcome,
+						segments: headingCalibrationInput(appState).headingSegments,
+					});
+					if (outcome.method === "none") {
+						renderCalibrationReport(reportElement, outcome);
+						return;
+					}
+					const value = clampAirSpeedCalibrationPercent(outcome.percent);
 					// From THIS ROW's own elements, not hard-coded ids.
 					const slider = spec.elements.rangeId
 						? input(spec.elements.rangeId)
@@ -469,6 +519,7 @@ export function bindModeControls(
 					if (slider) slider.value = value.toFixed(1);
 					if (number) number.value = value.toFixed(1);
 					appState.airSpeedCalibrationPercent = value;
+					renderCalibrationReport(reportElement, outcome);
 					finish(spec);
 				});
 				attached = !!button;
@@ -538,6 +589,9 @@ export function bindModeControls(
 			refreshOffsetMetric(spec);
 		}
 	}
+
+	// The initial selection exists before any change; describe it too.
+	refreshCalibrationMethodHint(appState);
 
 	return { modeId, bound, skipped };
 }

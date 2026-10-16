@@ -39,12 +39,48 @@ import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
 import { getSelectedWindSource, toWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
+import {
+	AIR_SPEED_CALIBRATION_REPORT_ID,
+	clearCalibrationReport,
+} from "../ve/airSpeedCalibrationReport";
+import { refreshCalibrationMethodHint } from "../ve/calibrationMethodHint";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
 import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
 import { syncDrivenControls } from "./drivenControls";
 import { scheduleRecompute } from "./recomputeRunner";
 import { updateModeVEPlots } from "./updateModeVEPlots";
+
+/**
+ * Controls whose change alters what the Auto Adjust report describes (D5: a
+ * current-selection report).
+ *
+ * Moved here from `bindModeControls.ts`'s `finish()` (review R10 / final-wave
+ * finding 1-2): `finish()` is only reached by BINDER-DRIVEN rows, but Section
+ * 3 raises `mapTrim` (a map-trim drag, `section3Orchestration.ts`
+ * `commitMapTrim`) and `segmentSelection` (a narrowed GPS-lap/out-and-back
+ * selection, `recomputePanelForSelection`) by calling this function directly,
+ * bypassing `finish()` entirely. A stale-report check that lived only in
+ * `finish()` never saw either one, so a map-trim drag or an unticked lap left
+ * the report describing the window/selection that had just been replaced.
+ * `requestModeUpdate` is the one funnel every reason actually passes through,
+ * so the check lives here now.
+ *
+ * `autoAdjustCalibration` is deliberately EXCLUDED: the button's own click
+ * handler renders the fresh report and only THEN calls `finish()` ->
+ * `requestModeUpdate("autoAdjustCalibration")`, so including it here would
+ * have the button's own recompute erase the report it had just written.
+ */
+export const REPORT_INVALIDATING_REASONS: ReadonlySet<ModeUpdateReason> =
+	new Set<ModeUpdateReason>([
+		"trim",
+		"calibration",
+		"airSpeedOffset",
+		"windSource",
+		"mapTrim",
+		"segmentSelection",
+	]);
 
 export interface ModeUpdateRequestDeps {
 	appState: AppState;
@@ -198,6 +234,16 @@ function resolveActiveModeHandler(
 }
 
 /**
+ * The segments the NEXT update pass will compute, trim applied, for whichever
+ * panel is on screen. Auto Adjust reads these so the calibration describes the
+ * same laps and windows the VE plots do (velodrome plan, review R2).
+ */
+export function activeUpdateSegments(appState: AppState): ModeSegment[] {
+	const handler = resolveActiveModeHandler(appState);
+	return withTrim(appState, handler, handler.getUpdateSegments(appState));
+}
+
+/**
  * Ask for a VE update.
  *
  * Every bound control funnels through here, and so does the parameters form.
@@ -205,6 +251,19 @@ function resolveActiveModeHandler(
  * drag that fires this fifty times still ends on one pass over the newest values.
  */
 export function requestModeUpdate(reason: ModeUpdateReason): void {
+	// Unconditional, matching the old `finish()` ordering: the report is
+	// invalidated before any of the guards below can bail the request out, so a
+	// reason that changes what it describes always clears it, on or off screen.
+	if (REPORT_INVALIDATING_REASONS.has(reason)) {
+		setCalibrationTabState(null);
+		clearCalibrationReport(
+			document.getElementById(AIR_SPEED_CALIBRATION_REPORT_ID),
+		);
+		// The hint describes the selection, not a past run: it updates where the
+		// report clears.
+		if (deps) refreshCalibrationMethodHint(deps.appState);
+	}
+
 	if (!deps) {
 		log.debug(`requestModeUpdate(${reason}): not configured yet`);
 		return;

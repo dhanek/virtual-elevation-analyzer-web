@@ -48,10 +48,25 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
 	getGpsAnalysisMode: () => modeState.gps,
 }));
 
+/**
+ * The Calibration tab's store, observed but not replaced: the spy calls
+ * through, so the funnel's own clearing keeps working in every case below.
+ */
+vi.mock("../ve/calibrationTab", async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import("../ve/calibrationTab")>();
+	return {
+		...original,
+		setCalibrationTabState: vi.fn(original.setCalibrationTabState),
+	};
+});
+
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { veViewMatchesSelection } from "../ve/veSelectionGuard";
+import { headingCalibrationInput } from "./autoCalibration";
 import { bindModeControls } from "./bindModeControls";
 import { MODE_CONTROL_TABLE, type ModeControlSpec } from "./modeControlTable";
 import {
@@ -59,7 +74,10 @@ import {
 	registerModeUpdateCallbacks,
 } from "./modeUpdateCallbacks";
 import { configureParameterMerge } from "./parametersSync";
-import { resetModeUpdateRequests } from "./requestModeUpdate";
+import {
+	requestModeUpdate,
+	resetModeUpdateRequests,
+} from "./requestModeUpdate";
 
 const SAMPLE_COUNT = 400;
 const LAST_INDEX = SAMPLE_COUNT - 1;
@@ -153,6 +171,7 @@ function renderPanel(): void {
 			<input type="range" id="airSpeedCalibrationSlider" min="-20" max="20" step="0.1" value="5">
 			<input type="number" id="airSpeedCalibrationValue" value="5.0">
 			<button id="autoAdjustCalibration">Auto</button>
+			<div id="airSpeedCalibrationReport" hidden></div>
 
 			<input type="range" id="airSpeedOffsetSlider" min="-10" max="10" step="1" value="0">
 			<input type="number" id="airSpeedOffsetValue" value="0">
@@ -233,7 +252,11 @@ function setup(overrides: Partial<AppState> = {}): Harness {
 			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 		}),
-		getAutoCalibrationPercent: () => 3.5,
+		getAutoCalibration: () => ({
+			method: "vdRatio",
+			percent: 3.5,
+			fallback: "noMeasuredAirSpeed",
+		}),
 	});
 
 	return { appState, trimMapUpdates };
@@ -663,6 +686,148 @@ describe("standard: the air-speed offset row is bound and writes its readout", (
 	});
 });
 
+describe("standard: the Auto Adjust report describes the current selection", () => {
+	const report = () => el("airSpeedCalibrationReport");
+
+	it("applies the percent and reveals the report", () => {
+		const { appState } = setup();
+		el("autoAdjustCalibration").click();
+		expect(el("airSpeedCalibrationValue").value).toBe("3.5");
+		expect(appState.airSpeedCalibrationPercent).toBe(3.5);
+		expect(report().hidden).toBe(false);
+		expect(report().textContent).toContain("Distance ratio: +3.5 %");
+	});
+
+	it.each([
+		["the trim window", "trimStartSlider", "10"],
+		["the calibration slider", "airSpeedCalibrationSlider", "1.0"],
+		["the air-speed offset", "airSpeedOffsetSlider", "3"],
+	])("is cleared by %s", (_name, id, value) => {
+		setup();
+		el("autoAdjustCalibration").click();
+		const control = el(id);
+		control.value = value;
+		control.dispatchEvent(new Event("input"));
+		expect(report().hidden).toBe(true);
+	});
+
+	it("is cleared by the wind source", () => {
+		setup();
+		el("autoAdjustCalibration").click();
+		const constant = document.querySelector<HTMLInputElement>(
+			'input[name="windSource"][value="constant"]',
+		);
+		constant?.click();
+		expect(report().hidden).toBe(true);
+	});
+
+	it("survives a CdA change, which does not change what it describes", () => {
+		setup();
+		el("autoAdjustCalibration").click();
+		const cda = el("cdaSlider");
+		cda.value = "0.30";
+		cda.dispatchEvent(new Event("input"));
+		expect(report().hidden).toBe(false);
+	});
+
+	/**
+	 * FINDINGS 1 & 2 (final whole-branch review, R10's named failure mode).
+	 *
+	 * `mapTrim` (a map-trim drag) and `segmentSelection` (a narrowed GPS-lap or
+	 * out-and-back selection) are raised by Section 3 calling `requestModeUpdate`
+	 * DIRECTLY — see `section3Orchestration.ts`'s `commitMapTrim` (:1822) and
+	 * `recomputePanelForSelection` (:460) — never through this binder's
+	 * `finish()`. Section 3 itself is not rendered in this file's harness (only
+	 * the mode panel is), so the two reasons are driven here the same way
+	 * production drives them: a direct call to the one funnel every reason
+	 * actually passes through, with the funnel already configured by `setup()`'s
+	 * `bindModeControls` call. This is the natural home for the assertion — the
+	 * report-lifetime cases above already live here, and the funnel this table
+	 * exercises is real; only Section 3's own DOM wiring is out of scope for this
+	 * file.
+	 */
+	it.each([
+		["a map-trim drag", "mapTrim"],
+		["a narrowed segment selection", "segmentSelection"],
+	] as const)(
+		"is cleared by %s, which bypasses finish() entirely",
+		(_name, reason) => {
+			setup();
+			el("autoAdjustCalibration").click();
+			expect(report().hidden).toBe(false);
+
+			requestModeUpdate(reason);
+
+			expect(report().hidden).toBe(true);
+		},
+	);
+
+	it("hands the Calibration tab the outcome and the segments it was fitted on", () => {
+		const { appState } = setup();
+		vi.mocked(setCalibrationTabState).mockClear();
+
+		el("autoAdjustCalibration").click();
+
+		expect(setCalibrationTabState).toHaveBeenCalledWith({
+			outcome: {
+				method: "vdRatio",
+				percent: 3.5,
+				fallback: "noMeasuredAirSpeed",
+			},
+			segments: headingCalibrationInput(appState).headingSegments,
+		});
+	});
+
+	it("is NOT cleared by its own autoAdjustCalibration update", () => {
+		// The button's handler calls `renderCalibrationReport` and THEN
+		// `finish()` -> `requestModeUpdate("autoAdjustCalibration")`. If that
+		// reason were in the invalidating set, every click would erase the
+		// report it had just written.
+		setup();
+		el("autoAdjustCalibration").click();
+		expect(report().hidden).toBe(false);
+
+		requestModeUpdate("autoAdjustCalibration");
+
+		expect(report().hidden).toBe(false);
+	});
+});
+
+/**
+ * FINDING 4 (final whole-branch review): a throw from `getAutoCalibration`
+ * used to be indistinguishable from a dead control -- nothing logged, nothing
+ * on screen. The click handler now catches it, logs it, and surfaces a
+ * message in the report element instead of swallowing it silently.
+ */
+describe("standard: the Auto Adjust click handler does not swallow a throw", () => {
+	it("logs the error and shows a message rather than doing nothing", () => {
+		renderPanel();
+		primitive.mockClear();
+		const appState = makeAppState();
+		clearModeUpdateCallbacks();
+		registerModeUpdateCallbacks("standard", () => noopCallbacks);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		bindModeControls({
+			appState,
+			modeId: "standard",
+			saveSettings: () => {},
+			getAutoCalibration: () => {
+				throw new Error("boom");
+			},
+		});
+
+		expect(() => el("autoAdjustCalibration").click()).not.toThrow();
+		expect(errorSpy).toHaveBeenCalled();
+
+		const report = el("airSpeedCalibrationReport");
+		expect(report.hidden).toBe(false);
+		expect(report.textContent).toMatch(/Auto Adjust failed/i);
+
+		errorSpy.mockRestore();
+	});
+});
+
 /**
  * THE FULL CONTROL x MODE PRODUCT.
  *
@@ -764,7 +929,11 @@ function setupMode(modeCase: ModeCase): AppState {
 			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 		}),
-		getAutoCalibrationPercent: () => 3.5,
+		getAutoCalibration: () => ({
+			method: "vdRatio",
+			percent: 3.5,
+			fallback: "noMeasuredAirSpeed",
+		}),
 	});
 
 	return appState;

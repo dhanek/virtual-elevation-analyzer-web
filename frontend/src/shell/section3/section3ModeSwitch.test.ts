@@ -1610,6 +1610,28 @@ describe("loading a new activity resets the analysis", () => {
 	});
 
 	/**
+	 * A FITTED SENSOR SCALE BELONGS TO THE RIDE IT WAS FITTED ON.
+	 *
+	 * `airSpeedCalibrationPercent` was initialised once at `AppState`
+	 * construction and never reset afterwards, so an Auto Adjust result from
+	 * ride A survived into ride B's first Analyze and B's VE was computed with
+	 * A's sensor calibration — with the slider rendering that foreign value from
+	 * state, so nothing on screen looked wrong.
+	 *
+	 * The non-zero value first is the whole point: asserting 0 on a state that
+	 * was already 0 passes against the defect.
+	 */
+	it("resets the air-speed calibration percent", () => {
+		const appState = makeAppState();
+		configure(appState, makeUpdateAnalyzeButton(appState), vi.fn());
+		appState.airSpeedCalibrationPercent = 4.9;
+
+		resetAnalysisForNewActivity();
+
+		expect(appState.airSpeedCalibrationPercent).toBe(0);
+	});
+
+	/**
 	 * A FILE WITH EXACTLY ONE LAP HAS NO CHOICE TO MAKE.
 	 *
 	 * Charging the user a click for the only lap there is made the empty

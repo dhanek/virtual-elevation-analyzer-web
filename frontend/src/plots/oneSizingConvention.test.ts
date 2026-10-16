@@ -28,6 +28,11 @@ import {
 } from "./StandardPlotBuilders";
 import { createPlotContext } from "./PlotContext";
 import { buildClosureContourFigure } from "./ConvergencePlotBuilders";
+import {
+	buildCalibrationAgreementFigure,
+	buildCalibrationFitFigure,
+	buildCalibrationWindFigure,
+} from "./CalibrationPlotBuilders";
 
 const LENGTH = 20;
 const context = createPlotContext(LENGTH, 2, 17);
@@ -120,6 +125,41 @@ const figures: Array<[string, { layout: Record<string, unknown> }]> = [
 			band: null,
 			targetLabel: "DEM",
 			gridSteps: 41,
+		}),
+	],
+	[
+		"calibrationFitPlot",
+		buildCalibrationFitFigure({
+			pooledPercent: 0.5,
+			laps: [
+				{
+					series: {
+						label: "Lap 2",
+						headingDeg: [0, 90],
+						velocity: [10, 10],
+						windComponent: [1, 0],
+						model: [1, 0],
+						residual: [0, 0],
+					},
+					percent: 0.5,
+					coefficients: { a: 1, b: 0 },
+					windSpeed: 1,
+					windDirDeg: 0,
+				},
+			],
+		}),
+	],
+	[
+		"calibrationAgreementPlot",
+		buildCalibrationAgreementFigure({
+			pooledPercent: 0.2,
+			laps: [{ label: "Lap 2", percent: 0.5 }],
+		}),
+	],
+	[
+		"calibrationWindPlot",
+		buildCalibrationWindFigure({
+			laps: [{ label: "Lap 2", windSpeed: 1, windDirDeg: 45, warned: false }],
 		}),
 	],
 ];
