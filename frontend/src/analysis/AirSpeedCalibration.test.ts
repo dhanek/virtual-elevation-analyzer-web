@@ -106,6 +106,15 @@ function lap(
 	return { label, ...track };
 }
 
+/**
+ * Whole circuits, so the geometry passes; but no sample carries positive air
+ * speed, so the lap's own fit is left with nothing to fit and refuses.
+ */
+function lapWithNegatedAirSpeed(label: string): HeadingCalibrationSegment {
+	const segment = lap({ circuits: 3 }, label);
+	return { ...segment, airSpeed: Array.from(segment.airSpeed, (a) => -a) };
+}
+
 function vdOf(segments: HeadingCalibrationSegment[]) {
 	return segments.map((s) => ({
 		timestamps: s.timestamps,
@@ -400,6 +409,29 @@ describe("calibrationEligibility", () => {
 			vdSegments: [],
 		});
 		expect(probe).toEqual({ method: "vdRatio", reason: "noWholeCircuit" });
+	});
+
+	it("passes a lap whose fit then refuses it", () => {
+		const { probe, outcome } = probeAndRun({
+			measuredAirSpeed: true,
+			headingSegments: [lapWithNegatedAirSpeed("Lap 2")],
+			vdSegments: [],
+		});
+		expect(probe).toEqual({ method: "sinusoid", circuits: 3 });
+		expect(outcome).toEqual({ method: "none", reason: "tooFewPoints" });
+	});
+
+	it("blames the fit, not the geometry, when neither lap survives", () => {
+		const { probe, outcome } = probeAndRun({
+			measuredAirSpeed: true,
+			headingSegments: [
+				lap({ circuits: 0.5 }),
+				lapWithNegatedAirSpeed("Lap 2"),
+			],
+			vdSegments: [],
+		});
+		expect(probe).toEqual({ method: "sinusoid", circuits: 3 });
+		expect(outcome).toEqual({ method: "none", reason: "tooFewPoints" });
 	});
 });
 

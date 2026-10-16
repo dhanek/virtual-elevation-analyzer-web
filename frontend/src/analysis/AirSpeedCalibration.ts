@@ -299,6 +299,14 @@ export function calibrationSeries(
 	return out;
 }
 
+/** The refusals a segment can only earn by reaching its own fit. */
+const FIT_REFUSALS: ReadonlySet<CalibrationRefusal> =
+	new Set<CalibrationRefusal>([
+		"tooFewPoints",
+		"headingCoverage",
+		"degenerate",
+	]);
+
 export type CalibrationEligibility =
 	| { method: "sinusoid"; circuits: number }
 	| { method: "vdRatio"; reason: CalibrationRefusal };
@@ -315,18 +323,19 @@ export type CalibrationEligibility =
  *
  * The mismatch runs deeper than a single segment's fit failing quietly. With
  * several segments, the real gate only reaches its own per-segment fit for
- * segments that already passed geometry, and reports the FIRST segment (by
- * array order) that carries any refusal, fit-level or geometry — so a segment
- * that failed geometry can still supply the reason the gate shows even when a
- * LATER segment is the one whose fit actually failed. This probe never runs
- * that fit, so it counts the later segment's circuits and reports `sinusoid`
- * for the same selection. Concretely: segment A fails geometry
+ * segments that already passed geometry. When NO segment survives its solo
+ * fit, the gate reports the first fit-typed refusal (`tooFewPoints`,
+ * `headingCoverage`, `degenerate`) by array order, and only when there is none
+ * the first refusal of any kind; when some segments survive but the JOINT fit
+ * fails, it reports the joint fit's own reason instead. This probe never runs
+ * either fit, so it counts the circuits of a segment whose fit then fails and
+ * reports `sinusoid` for that selection. Concretely: segment A fails geometry
  * (`windows.refusal`), segment B passes geometry but its own solo fit is
- * `degenerate` — the gate falls back with A's geometry-typed reason, while
- * this probe reports `{ method: "sinusoid", circuits: B's circuits }`. So the
- * caller must not assume the reason the gate eventually shows belongs to the
- * segment this probe would have blamed, nor that a `sinusoid` verdict here
- * survives the fit at all.
+ * refused — the gate falls back with B's fit-typed reason, while this probe
+ * reports `{ method: "sinusoid", circuits: B's circuits }`, and with A alone
+ * it would have reported A's geometry reason. So the caller must not assume a
+ * `sinusoid` verdict here survives the fit at all, nor that the reason the gate
+ * eventually shows is the one this probe would have named.
  */
 export function calibrationEligibility(
 	input: AutoCalibrationInput,
@@ -405,7 +414,13 @@ export function calculateAutoAirSpeedCalibration(
 	}
 
 	if (pool.length === 0) {
-		return fallback(rows.find((r) => r.refusal)?.refusal ?? "noWholeCircuit");
+		// A segment that reached its own fit and was refused there says more
+		// than one that never got that far: prefer its reason, whatever the
+		// order the segments arrived in.
+		const refused =
+			rows.find((r) => r.refusal && FIT_REFUSALS.has(r.refusal)) ??
+			rows.find((r) => r.refusal);
+		return fallback(refused?.refusal ?? "noWholeCircuit");
 	}
 	const joint = fitSharedScale(pool.map((p) => p.segment.fit));
 	if (!joint.ok) return fallback(joint.reason);
