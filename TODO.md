@@ -556,6 +556,48 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
       maintainer 2026-09-04*
 
+- [ ] **[M] Mask air-speed sensor shadowing before Auto Adjust and the CdA fit.** Something in
+      front of the air-speed sensor (hands or forearms leaning on the bars) deflects the flow, so
+      the sensor reads low while power and ground speed are unchanged. Neither the k fit (PR #30)
+      nor the VE/CdA path notices; both treat the low reading as a real drop in air speed.
+
+      *Evidence (2026-10-14, all 8 outdoor-velodrome sessions scanned offline):*
+      - **2026-08-14 session, lap 6 (breakaway), last 49 s.** Measured air speed 4–9 km/h below
+        ground speed; power 232 → 223 W and ground speed 37.9 → 38.1 km/h, both flat. Closure CdA
+        over the tail jumps 0.282 → 0.366 with measured air speed but stays at 0.296 → 0.279 with
+        ground speed only. The rider confirmed leaning on the bars. Effect: lap CdA 0.293 (gated)
+        against 0.284 on the 5 whole circuits before the event, about +6 %.
+      - **2026-05-19 session, lap 6, 412–452 s into the lap.** Air speed about 20 km/h at
+        38 km/h ground speed, power flat. Lap CdA about +2.5 %.
+      - No other window in the 8 sessions exceeds the wind band.
+
+      *Detector.* For every sliding one-circuit window (the same circuit windows Auto Adjust
+      already builds), compute D = Σv³ / Σ(va²·v), with va the resolved, offset-aligned air
+      speed. D equals CdA(air speed) / CdA(ground speed) for that window; power cancels, and so
+      does k when D is taken relative to the session median. Steady wind keeps D/median within
+      about ±10 % (5–95 % of windows: ±9–12 %); the two shadow events read +46 % and +75 %. Flag
+      windows with D/median − 1 > 0.25 and mask their samples.
+
+      *Hooks.*
+      1. Auto Adjust: drop masked samples from the `usable` mask in `prepareSegment`
+         (`AirSpeedCalibration.ts`) before `fitSharedScale`.
+      2. VE/CdA: masked seconds can NOT simply be dropped, because removing samples breaks
+         closure. Substitute air speed = ground speed + the fitted wind component from that lap's
+         heading fit (a·cos θ + b·sin θ, scaled by k).
+      3. Report: a warning naming the lap and the masked seconds, and a marker in the Calibration
+         tab.
+
+      *Open questions.*
+      - Threshold 0.25: one value for every sensor, or per sensor family? Both events were on the
+        ACE; check the `wind_speed`/`wind_yaw` path too.
+      - Rides with no circuit windows (out-and-back, open road): skip the detector, or use pair
+        windows?
+      - How much k moves on the two affected laps once masked: not yet measured.
+
+      *Done when:* both events above are flagged and masked; nothing else on the 8 velodrome
+      sessions is flagged; the 2026-08-14 lap 6 CdA lands near 0.284; the warning appears in the
+      app.
+
 
 ---
 
