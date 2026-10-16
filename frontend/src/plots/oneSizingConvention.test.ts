@@ -30,7 +30,7 @@ import { createPlotContext } from "./PlotContext";
 import { buildClosureContourFigure } from "./ConvergencePlotBuilders";
 import {
 	buildCalibrationAgreementFigure,
-	buildCalibrationLapFigure,
+	buildCalibrationFitFigure,
 	buildCalibrationWindFigure,
 } from "./CalibrationPlotBuilders";
 
@@ -128,20 +128,25 @@ const figures: Array<[string, { layout: Record<string, unknown> }]> = [
 		}),
 	],
 	[
-		"calibrationLapPlot",
-		buildCalibrationLapFigure({
-			series: {
-				label: "Lap 2",
-				headingDeg: [0, 90],
-				velocity: [10, 10],
-				windComponent: [1, 0],
-				model: [1, 0],
-				residual: [0, 0],
-			},
-			percent: 0.5,
-			coefficients: { a: 1, b: 0 },
-			windSpeed: 1,
-			windDirDeg: 0,
+		"calibrationFitPlot",
+		buildCalibrationFitFigure({
+			pooledPercent: 0.5,
+			laps: [
+				{
+					series: {
+						label: "Lap 2",
+						headingDeg: [0, 90],
+						velocity: [10, 10],
+						windComponent: [1, 0],
+						model: [1, 0],
+						residual: [0, 0],
+					},
+					percent: 0.5,
+					coefficients: { a: 1, b: 0 },
+					windSpeed: 1,
+					windDirDeg: 0,
+				},
+			],
 		}),
 	],
 	[

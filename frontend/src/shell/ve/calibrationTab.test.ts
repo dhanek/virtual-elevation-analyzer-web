@@ -100,7 +100,7 @@ describe("calibrationTab", () => {
 		expect(plotted).toHaveLength(0);
 	});
 
-	it("draws a figure per fitted lap, the agreement and the wind", async () => {
+	it("draws one fit figure for all laps, the agreement and the wind", async () => {
 		setCalibrationTabState({
 			outcome: {
 				method: "sinusoid",
@@ -114,8 +114,9 @@ describe("calibrationTab", () => {
 		});
 		renderCalibrationTab();
 		await flush();
-		// two laps + agreement + wind
-		expect(plotted).toHaveLength(4);
+		// one fit figure (both laps) + agreement + wind
+		expect(plotted).toHaveLength(3);
+		expect(drawnData[0]).toHaveLength(6);
 	});
 
 	it("titles an unfitted lap with its refusal and skips the agreement for one lap", async () => {
@@ -143,8 +144,12 @@ describe("calibrationTab", () => {
 		expect(pane()?.textContent).toContain(
 			"Lap 2: not fitted, the circuits do not return to their start",
 		);
-		// one lap figure + wind, no agreement
+		// one fit figure + wind, no agreement
 		expect(plotted).toHaveLength(2);
+		const lapsBox = document.getElementById("calibrationLaps");
+		expect(
+			lapsBox?.querySelectorAll(".ve-calibration__lap-refused"),
+		).toHaveLength(1);
 	});
 });
 
@@ -219,11 +224,12 @@ describe("calibrationTab repaint and reset", () => {
 		});
 		renderCalibrationTab();
 		await flush();
-		// two laps + agreement + wind, and no lap is reported unfitted
-		expect(plotted).toHaveLength(4);
+		// one fit figure + agreement + wind, and no lap is reported unfitted
+		expect(plotted).toHaveLength(3);
 		expect(pane()?.textContent).not.toContain("not fitted");
-		const samples = (figure: number) => drawnData[figure]?.[0]?.x?.length;
-		expect(samples(0)).not.toBe(samples(1));
+		const samples = (trace: number) => drawnData[0]?.[trace]?.x?.length;
+		// each lap's cloud is trace 0 and 3
+		expect(samples(0)).not.toBe(samples(3));
 	});
 
 	it("draws the pooled line at the fit's own value when the percent was clamped", async () => {
@@ -240,8 +246,8 @@ describe("calibrationTab repaint and reset", () => {
 		});
 		renderCalibrationTab();
 		await flush();
-		// laps first, then the agreement
-		expect(drawnLayouts[2]?.shapes?.[0]?.x0).toBeCloseTo(30, 9);
+		// fit figure first, then the agreement
+		expect(drawnLayouts[1]?.shapes?.[0]?.x0).toBeCloseTo(30, 9);
 	});
 
 	it("is dropped when the panel is rebuilt", () => {

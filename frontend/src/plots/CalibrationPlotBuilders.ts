@@ -1,8 +1,9 @@
 /**
- * The Calibration tab's figures: per lap, the wind component of measured air
- * speed against compass heading with the fitted sinusoid over it and the
- * residual beneath; then the per-lap scales against the pooled one; then the
- * per-lap wind vectors.
+ * The Calibration tab's figures: one fit figure with every fitted lap
+ * overlaid (the wind component of measured air speed against compass heading,
+ * each lap's fitted sinusoid over it and its residual beneath); then the
+ * per-lap scales against the pooled one; then the per-lap wind vectors. A lap
+ * has the same colour in all three.
  *
  * Why the wind COMPONENT and not raw air speed: the model is
  * `va = k·v + a·cos θ + b·sin θ`, so raw air speed also moves with ground
@@ -25,76 +26,113 @@ import {
 } from "./StandardPlotBuilders";
 import type { CalibrationSeries } from "../analysis/AirSpeedCalibration";
 
-const MEASURED_COLOR = "#4c8dff";
 const MODEL_COLOR = "#ff8a3d";
 
 /** Minus sign, not hyphen: matches the report's own number formatting. */
 const signedPercent = (value: number): string =>
 	`${value < 0 ? "−" : "+"}${Math.abs(value).toFixed(1)} %`;
 
-export interface CalibrationLapFigureInput {
-	series: CalibrationSeries;
-	/** This lap's own fitted percent, for the title. */
-	percent: number;
-	/** The lap's fitted wind coefficients, straight from the outcome row. */
-	coefficients: { a: number; b: number };
-	windSpeed: number;
-	windDirDeg: number;
+/**
+ * One colour per lap, by the lap's position among the FITTED laps. The fit,
+ * agreement and wind figures all call this with the same index, so a lap keeps
+ * its colour from one figure to the next. Wraps after eight laps.
+ */
+const LAP_PALETTE = [
+	"#4c8dff",
+	"#ff8a3d",
+	"#2fbf71",
+	"#e5484d",
+	"#a974ff",
+	"#d4b106",
+	"#17b8c4",
+	"#e56fb0",
+];
+
+export const calibrationLapColor = (index: number): string =>
+	LAP_PALETTE[index % LAP_PALETTE.length];
+
+export interface CalibrationFitFigureInput {
+	/** The fit's own pooled percent, for the title. */
+	pooledPercent: number;
+	/** Fitted laps only; a lap's position here sets its colour. */
+	laps: Array<{
+		series: CalibrationSeries;
+		/** The lap's fitted wind coefficients, straight from the outcome row. */
+		coefficients: { a: number; b: number };
+		/** This lap's own fitted percent. */
+		percent: number;
+		windSpeed: number;
+		windDirDeg: number;
+	}>;
 }
 
-export function buildCalibrationLapFigure(
-	input: CalibrationLapFigureInput,
+export function buildCalibrationFitFigure(
+	input: CalibrationFitFigureInput,
 ): PlotDefinition {
-	const { series, coefficients } = input;
 	// The model is smooth; draw it on its own grid rather than through the
 	// samples, which arrive in ride order and would zig-zag across the axis.
 	const theta: number[] = [];
-	const value: number[] = [];
-	for (let d = 0; d <= 360; d += 2) {
-		const radians = (d * Math.PI) / 180;
-		theta.push(d);
-		value.push(
-			coefficients.a * Math.cos(radians) + coefficients.b * Math.sin(radians),
-		);
-	}
+	for (let d = 0; d <= 360; d += 2) theta.push(d);
 
-	return {
-		data: [
+	const data = input.laps.flatMap((lap, i) => {
+		const { series, coefficients } = lap;
+		const color = calibrationLapColor(i);
+		const group = series.label;
+		const value = theta.map((d) => {
+			const radians = (d * Math.PI) / 180;
+			return (
+				coefficients.a * Math.cos(radians) + coefficients.b * Math.sin(radians)
+			);
+		});
+		return [
 			{
-				name: "measured",
+				name: `${group} measured`,
+				legendgroup: group,
+				showlegend: false,
 				type: "scatter",
 				mode: "markers",
 				x: series.headingDeg,
 				y: series.windComponent,
-				marker: { size: 4, color: MEASURED_COLOR, opacity: 0.55 },
-				hovertemplate: "%{x:.0f}° · %{y:.2f} m/s<extra></extra>",
+				marker: { size: 4, color, opacity: 0.35 },
+				hovertemplate: `${group}: %{x:.0f}° · %{y:.2f} m/s<extra></extra>`,
 			},
 			{
-				name: "model",
+				// The one legend entry per lap: toggling it hides the lap's cloud,
+				// curve and residual together through the shared legendgroup.
+				name: `${group} · ${signedPercent(lap.percent)} · ${lap.windSpeed.toFixed(1)} m/s from ${Math.round(lap.windDirDeg)}°`,
+				legendgroup: group,
+				showlegend: true,
 				type: "scatter",
 				mode: "lines",
 				x: theta,
 				y: value,
-				line: { color: MODEL_COLOR, width: 2 },
+				line: { color, width: 2 },
 				hoverinfo: "skip",
 			},
 			{
-				name: "residual",
+				name: `${group} residual`,
+				legendgroup: group,
+				showlegend: false,
 				type: "scatter",
 				mode: "markers",
 				x: series.headingDeg,
 				y: series.residual,
 				yaxis: "y2",
-				marker: { size: 3, color: MEASURED_COLOR, opacity: 0.45 },
-				hovertemplate: "%{x:.0f}° · residual %{y:.2f} m/s<extra></extra>",
+				marker: { size: 3, color, opacity: 0.35 },
+				hovertemplate: `${group}: %{x:.0f}° · residual %{y:.2f} m/s<extra></extra>`,
 			},
-		],
+		];
+	});
+
+	return {
+		data,
 		layout: {
 			title: {
-				text: `${series.label}: ${signedPercent(input.percent)} · wind ${input.windSpeed.toFixed(1)} m/s from ${Math.round(input.windDirDeg)}°`,
+				text: `Heading fit per lap · pooled ${signedPercent(input.pooledPercent)}`,
 				font: { size: 13 },
 			},
-			showlegend: false,
+			showlegend: true,
+			legend: { orientation: "h", y: -0.2 },
 			margin: { l: 48, r: 12, t: 34, b: 34 },
 			xaxis: {
 				// Anchored to the residual strip, so the compass ticks and the
@@ -134,7 +172,10 @@ export function buildCalibrationAgreementFigure(
 				mode: "markers",
 				x: input.laps.map((lap) => lap.percent),
 				y: input.laps.map((lap) => lap.label),
-				marker: { size: 10, color: MEASURED_COLOR },
+				marker: {
+					size: 10,
+					color: input.laps.map((_, i) => calibrationLapColor(i)),
+				},
 				hovertemplate: "%{y}: %{x:.2f} %<extra></extra>",
 			},
 		],
@@ -180,7 +221,8 @@ export function buildCalibrationWindFigure(
 	const maxSpeed = Math.max(0, ...input.laps.map((lap) => lap.windSpeed));
 	const extent = Math.max(1, Math.ceil(maxSpeed * 1.2 * 2) / 2);
 	return {
-		data: input.laps.map((lap) => {
+		data: input.laps.map((lap, i) => {
+			const color = calibrationLapColor(i);
 			const radians = (lap.windDirDeg * Math.PI) / 180;
 			return {
 				name: lap.label,
@@ -190,8 +232,9 @@ export function buildCalibrationWindFigure(
 				y: [0, lap.windSpeed * Math.cos(radians)],
 				text: ["", lap.label],
 				textposition: "top center",
-				line: { width: 2 },
+				line: { width: 2, color },
 				marker: {
+					color,
 					size: [0, 10],
 					symbol: ["circle", lap.warned ? "circle-x" : "circle"],
 				},

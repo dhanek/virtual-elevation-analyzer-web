@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { CalibrationSeries } from "../analysis/AirSpeedCalibration";
 import {
 	buildCalibrationAgreementFigure,
-	buildCalibrationLapFigure,
+	buildCalibrationFitFigure,
+	calibrationLapColor,
 	buildCalibrationWindFigure,
 } from "./CalibrationPlotBuilders";
 
@@ -30,13 +31,25 @@ const series = (): CalibrationSeries => {
 	};
 };
 
-const lapFigure = () =>
-	buildCalibrationLapFigure({
-		series: series(),
-		percent: -1.4,
-		coefficients: { a: 1.2, b: 0 },
-		windSpeed: 1.2,
-		windDirDeg: 52,
+const lapInput = (
+	label: string,
+	coefficients: { a: number; b: number },
+	percent: number,
+) => ({
+	series: { ...series(), label },
+	percent,
+	coefficients,
+	windSpeed: 1.2,
+	windDirDeg: 52,
+});
+
+const fitFigure = () =>
+	buildCalibrationFitFigure({
+		pooledPercent: 0.2,
+		laps: [
+			lapInput("Lap 2", { a: 1.2, b: 0 }, -1.4),
+			lapInput("Lap 3", { a: 0.4, b: -0.7 }, 0.0),
+		],
 	});
 
 const agreementFigure = () =>
@@ -57,50 +70,73 @@ const windFigure = () =>
 		],
 	});
 
-describe("buildCalibrationLapFigure", () => {
-	const figure = lapFigure();
+type FitTrace = {
+	name: string;
+	type: string;
+	legendgroup: string;
+	showlegend: boolean;
+	yaxis?: string;
+	x: number[];
+	y: number[];
+	marker?: { color: string };
+	line?: { color: string };
+};
 
-	it("draws measured samples, the model curve and the residual strip", () => {
-		expect(figure.data).toHaveLength(3);
-		expect(figure.data.map((t) => t.name)).toEqual([
-			"measured",
-			"model",
-			"residual",
-		]);
+describe("buildCalibrationFitFigure", () => {
+	const figure = fitFigure();
+	const traces = figure.data as unknown as FitTrace[];
+	const lapTraces = (i: number) => traces.slice(i * 3, i * 3 + 3);
+
+	it("draws three traces per lap: cloud, curve, residual", () => {
+		expect(traces).toHaveLength(6);
 	});
 
-	it("draws the curve from the passed coefficients", () => {
-		const model = figure.data[1] as { x: number[]; y: number[] };
-		expect(model.y[model.x.indexOf(0)]).toBeCloseTo(1.2, 9);
-		const withB = buildCalibrationLapFigure({
-			series: series(),
-			percent: 0,
-			coefficients: { a: 0.4, b: -0.7 },
-			windSpeed: 1,
-			windDirDeg: 0,
-		}).data[1] as { x: number[]; y: number[] };
-		expect(withB.y[withB.x.indexOf(0)]).toBeCloseTo(0.4, 9);
-		expect(withB.y[withB.x.indexOf(90)]).toBeCloseTo(-0.7, 9);
+	it("groups a lap's traces and lists only its curve in the legend", () => {
+		["Lap 2", "Lap 3"].forEach((label, i) => {
+			const [cloud, curve, resid] = lapTraces(i);
+			for (const t of [cloud, curve, resid]) expect(t.legendgroup).toBe(label);
+			expect(curve.showlegend).toBe(true);
+			expect(cloud.showlegend).toBe(false);
+			expect(resid.showlegend).toBe(false);
+		});
+		expect(traces[1].name).toBe("Lap 2 · −1.4 % · 1.2 m/s from 52°");
+		expect(figure.layout.showlegend).toBe(true);
 	});
 
-	it("puts the residual strip on its own axis, below the fit", () => {
-		expect(figure.data[2].yaxis).toBe("y2");
+	it("draws each curve from its own coefficients", () => {
+		const at = (t: FitTrace, d: number) => t.y[t.x.indexOf(d)];
+		expect(at(traces[1], 0)).toBeCloseTo(1.2, 9);
+		expect(at(traces[1], 90)).toBeCloseTo(0, 9);
+		expect(at(traces[4], 0)).toBeCloseTo(0.4, 9);
+		expect(at(traces[4], 90)).toBeCloseTo(-0.7, 9);
+	});
+
+	it("puts every residual on y2, below the fit", () => {
+		expect(traces[2].yaxis).toBe("y2");
+		expect(traces[5].yaxis).toBe("y2");
+		expect(traces[0].yaxis).toBeUndefined();
 		const y = figure.layout.yaxis as { domain: number[] };
 		const y2 = figure.layout.yaxis2 as { domain: number[] };
 		expect(y.domain[0]).toBeGreaterThan(y2.domain[1]);
 	});
 
 	it("labels the heading axis under the residual strip", () => {
-		const x = figure.layout.xaxis as { anchor: string };
-		expect(x.anchor).toBe("y2");
+		expect((figure.layout.xaxis as { anchor: string }).anchor).toBe("y2");
 	});
 
-	it("names the lap, its percent and its wind in the title", () => {
+	it("colours by lap position, in all three of a lap's traces", () => {
+		[0, 1].forEach((i) => {
+			const [cloud, curve, resid] = lapTraces(i);
+			expect(cloud.marker?.color).toBe(calibrationLapColor(i));
+			expect(curve.line?.color).toBe(calibrationLapColor(i));
+			expect(resid.marker?.color).toBe(calibrationLapColor(i));
+		});
+		expect(calibrationLapColor(0)).not.toBe(calibrationLapColor(1));
+	});
+
+	it("titles the figure with the pooled percent", () => {
 		const title = figure.layout.title as { text: string };
-		expect(title.text).toContain("Lap 2");
-		expect(title.text).toContain("−1.4 %");
-		expect(title.text).toContain("1.2 m/s");
-		expect(title.text).toContain("52°");
+		expect(title.text).toBe("Heading fit per lap · pooled +0.2 %");
 	});
 
 	it("leaves the box to the container CSS", () => {
@@ -111,6 +147,19 @@ describe("buildCalibrationLapFigure", () => {
 	it("spans a full turn on the heading axis", () => {
 		const axis = figure.layout.xaxis as { range: number[] };
 		expect(axis.range).toEqual([0, 360]);
+	});
+
+	it("gives the same lap the same colour in the agreement and wind figures", () => {
+		const agreement = agreementFigure().data[0].marker as { color: string[] };
+		const wind = windFigure().data as unknown as Array<{
+			line: { color: string };
+			marker: { color: string };
+		}>;
+		[0, 1].forEach((i) => {
+			expect(agreement.color[i]).toBe(calibrationLapColor(i));
+			expect(wind[i].line.color).toBe(calibrationLapColor(i));
+			expect(wind[i].marker.color).toBe(calibrationLapColor(i));
+		});
 	});
 });
 
@@ -181,7 +230,7 @@ describe("buildCalibrationWindFigure", () => {
 
 describe("cartesian-only bundle", () => {
 	it("every trace is a plain scatter (no polar, no WebGL)", () => {
-		const traces = [lapFigure(), agreementFigure(), windFigure()].flatMap(
+		const traces = [fitFigure(), agreementFigure(), windFigure()].flatMap(
 			(f) => f.data,
 		);
 		expect(traces.length).toBeGreaterThan(0);

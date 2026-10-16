@@ -17,7 +17,8 @@ import {
 } from "../../analysis/AirSpeedCalibration";
 import {
 	buildCalibrationAgreementFigure,
-	buildCalibrationLapFigure,
+	type CalibrationFitFigureInput,
+	buildCalibrationFitFigure,
 	buildCalibrationWindFigure,
 } from "../../plots/CalibrationPlotBuilders";
 import type { PlotDefinition } from "../../plots/StandardPlotBuilders";
@@ -102,20 +103,17 @@ function plotBox(parent: HTMLElement, cls: string): HTMLDivElement {
 	return box;
 }
 
-/** A lap the fit refused keeps its grid cell, as a panel titled with why. */
-function refusedLapPanel(
+/** A lap the fit refused is listed beneath the fit figure, as a quiet line. */
+function refusedLapLine(
 	label: string,
 	refusal: CalibrationRefusal | undefined,
 ): HTMLDivElement {
-	const panel = document.createElement("div");
-	panel.className = "ve-calibration__lap-empty";
-	const title = document.createElement("div");
-	title.className = "ve-calibration__lap-empty-title";
-	title.textContent = `${label}: not fitted, ${
+	const line = document.createElement("div");
+	line.className = "ve-calibration__lap-refused";
+	line.textContent = `${label}: not fitted, ${
 		refusal ? REFUSAL_TEXT[refusal] : "nothing to draw for this lap"
 	}`;
-	panel.appendChild(title);
-	return panel;
+	return line;
 }
 
 export function renderCalibrationTab(): void {
@@ -147,6 +145,8 @@ export function renderCalibrationTab(): void {
 		),
 	);
 	const figures: Array<{ host: HTMLElement; figure: PlotDefinition }> = [];
+	const fitLaps: CalibrationFitFigureInput["laps"] = [];
+	const refusedLines: HTMLElement[] = [];
 	const agreementLaps: Array<{ label: string; percent: number }> = [];
 	const windLaps: Array<{
 		label: string;
@@ -166,18 +166,15 @@ export function renderCalibrationTab(): void {
 			row.windDirDeg === undefined ||
 			!segment
 		) {
-			lapsBox.appendChild(refusedLapPanel(row.label, row.refusal));
+			refusedLines.push(refusedLapLine(row.label, row.refusal));
 			continue;
 		}
-		figures.push({
-			host: plotBox(lapsBox, "ve-plot-container__plot--calibration-lap"),
-			figure: buildCalibrationLapFigure({
-				series: calibrationSeries(segment, row.coefficients, outcome.scale),
-				percent: row.percent,
-				windSpeed: row.windSpeed,
-				windDirDeg: row.windDirDeg,
-				coefficients: row.coefficients,
-			}),
+		fitLaps.push({
+			series: calibrationSeries(segment, row.coefficients, outcome.scale),
+			percent: row.percent,
+			windSpeed: row.windSpeed,
+			windDirDeg: row.windDirDeg,
+			coefficients: row.coefficients,
 		});
 		agreementLaps.push({ label: row.label, percent: row.percent });
 		windLaps.push({
@@ -187,6 +184,17 @@ export function renderCalibrationTab(): void {
 			warned: warned.has(row.label),
 		});
 	}
+	if (fitLaps.length > 0) {
+		figures.push({
+			host: plotBox(lapsBox, "ve-plot-container__plot--calibration-fit"),
+			figure: buildCalibrationFitFigure({
+				// Same unclamped value as the agreement line below.
+				pooledPercent: (outcome.scale - 1) * 100,
+				laps: fitLaps,
+			}),
+		});
+	}
+	for (const line of refusedLines) lapsBox.appendChild(line);
 	if (agreementLaps.length >= 2) {
 		figures.push({
 			host: plotBox(agreementBox, "ve-plot-container__plot--agreement"),

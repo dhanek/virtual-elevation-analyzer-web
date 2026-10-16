@@ -224,32 +224,20 @@
 	height: clamp(360px, 62vh, 700px);
 }
 
-/* The Calibration tab: one small multiple per lap, two to a row on a desktop
-   and one on a phone, so each is shorter than a pane-wide --tall plot. A lap
-   the fit refused keeps its cell as a titled empty panel of the same height,
-   so the grid does not reflow around it. */
+/* The Calibration tab: one fit figure with every lap overlaid, taller than a
+   --tall plot because the legend and the residual strip share its box. Laps the
+   fit refused are listed beneath it as quiet text. */
 .ve-calibration__laps {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
-	gap: var(--space-md);
 	margin-bottom: var(--space-md);
 }
 
-.ve-plot-container__plot--calibration-lap,
-.ve-calibration__lap-empty {
-	height: clamp(280px, 40vh, 420px);
+.ve-plot-container__plot--calibration-fit {
+	height: clamp(380px, 64vh, 720px);
 }
 
-.ve-calibration__lap-empty {
-	box-sizing: border-box;
-	border: 1px dashed var(--color-border-strong);
-	border-radius: var(--radius-md);
-	padding: var(--space-md);
+.ve-calibration__lap-refused {
+	margin-top: var(--space-xs);
 	color: var(--color-text-muted);
-}
-
-.ve-calibration__lap-empty-title {
-	font-weight: 600;
 }
 
 /* One row per lap on a short value axis: a strip, not a pane. */
