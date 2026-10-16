@@ -365,6 +365,12 @@
 	margin-top: var(--space-sm);
 }
 
+.ve-parameter__hint {
+	margin-top: var(--space-sm);
+	font-size: 0.85em;
+	color: var(--color-text-muted);
+}
+
 .ve-parameter__report {
 	margin-top: var(--space-sm);
 	font-size: 0.85em;

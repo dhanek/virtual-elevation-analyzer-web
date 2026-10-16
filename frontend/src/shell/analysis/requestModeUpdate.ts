@@ -43,6 +43,7 @@ import {
 	AIR_SPEED_CALIBRATION_REPORT_ID,
 	clearCalibrationReport,
 } from "../ve/airSpeedCalibrationReport";
+import { refreshCalibrationMethodHint } from "../ve/calibrationMethodHint";
 import { setCalibrationTabState } from "../ve/calibrationTab";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
@@ -258,6 +259,9 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 		clearCalibrationReport(
 			document.getElementById(AIR_SPEED_CALIBRATION_REPORT_ID),
 		);
+		// The hint describes the selection, not a past run: it updates where the
+		// report clears.
+		if (deps) refreshCalibrationMethodHint(deps.appState);
 	}
 
 	if (!deps) {

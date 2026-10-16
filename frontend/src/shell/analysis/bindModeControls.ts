@@ -51,6 +51,7 @@ import {
 	AIR_SPEED_CALIBRATION_REPORT_ID,
 	renderCalibrationReport,
 } from "../ve/airSpeedCalibrationReport";
+import { refreshCalibrationMethodHint } from "../ve/calibrationMethodHint";
 import { setCalibrationTabState } from "../ve/calibrationTab";
 import { bindCrrTempControls } from "../ve/crrTempControls";
 import { bindElevationDiffControls } from "../ve/elevationDiffControls";
@@ -588,6 +589,9 @@ export function bindModeControls(
 			refreshOffsetMetric(spec);
 		}
 	}
+
+	// The initial selection exists before any change; describe it too.
+	refreshCalibrationMethodHint(appState);
 
 	return { modeId, bound, skipped };
 }
