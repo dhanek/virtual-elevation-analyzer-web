@@ -20,7 +20,7 @@ export interface CalibrationReportText {
 	warnings: string[];
 }
 
-const REFUSAL_TEXT: Record<CalibrationRefusal, string> = {
+export const REFUSAL_TEXT: Record<CalibrationRefusal, string> = {
 	noMeasuredAirSpeed: "this ride carries no measured wind channel",
 	noUsablePositions: "the selection has no usable GPS positions",
 	noWholeCircuit: "the selection holds no complete circuit",

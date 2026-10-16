@@ -51,10 +51,12 @@ import {
 	AIR_SPEED_CALIBRATION_REPORT_ID,
 	renderCalibrationReport,
 } from "../ve/airSpeedCalibrationReport";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { bindCrrTempControls } from "../ve/crrTempControls";
 import { bindElevationDiffControls } from "../ve/elevationDiffControls";
 import { bindWindHeightControls } from "../ve/windHeightControls";
 import { bindElevationSmoothingToggle } from "./elevationProfileCycle";
+import { headingCalibrationInput } from "./autoCalibration";
 import { controlsForMode, type ModeControlSpec } from "./modeControlTable";
 import {
 	displayCdaBounds,
@@ -494,6 +496,13 @@ export function bindModeControls(
 						return;
 					}
 					if (!outcome) return;
+					// The segments the estimator was given, so the Calibration tab draws the
+					// run the report describes (same appState, same function the three modes
+					// feed the estimator with).
+					setCalibrationTabState({
+						outcome,
+						segments: headingCalibrationInput(appState).headingSegments,
+					});
 					if (outcome.method === "none") {
 						renderCalibrationReport(reportElement, outcome);
 						return;

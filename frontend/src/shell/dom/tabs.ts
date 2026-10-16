@@ -11,6 +11,7 @@ export interface TabRenderMap {
 	vd?: () => void;
 	ve?: () => void;
 	convergence?: () => void;
+	calibration?: () => void;
 }
 
 // Latest render callbacks. Kept in a module ref so repeated setupTabSwitching
@@ -74,6 +75,9 @@ export function activateTab(tabName: string): void {
 	) {
 		log.debug("Tab switching: rendering convergence tab");
 		currentRenderMap.convergence();
+	} else if (tabName === "calibration" && currentRenderMap.calibration) {
+		log.debug("Tab switching: rendering calibration tab");
+		currentRenderMap.calibration();
 	}
 
 	// The pane is visible now and its plots have been redrawn, so this is the

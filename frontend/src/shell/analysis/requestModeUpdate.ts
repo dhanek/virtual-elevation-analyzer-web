@@ -43,6 +43,7 @@ import {
 	AIR_SPEED_CALIBRATION_REPORT_ID,
 	clearCalibrationReport,
 } from "../ve/airSpeedCalibrationReport";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { mapTrimToSegments } from "../ve/standardSegments";
 import type { ModeUpdateReason } from "./modeControlTable";
 import { getModeUpdateCallbacks } from "./modeUpdateCallbacks";
@@ -253,6 +254,7 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 	// invalidated before any of the guards below can bail the request out, so a
 	// reason that changes what it describes always clears it, on or off screen.
 	if (REPORT_INVALIDATING_REASONS.has(reason)) {
+		setCalibrationTabState(null);
 		clearCalibrationReport(
 			document.getElementById(AIR_SPEED_CALIBRATION_REPORT_ID),
 		);

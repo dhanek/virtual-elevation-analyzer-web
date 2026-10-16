@@ -4,6 +4,7 @@ import { MapVisualization } from "../../components/MapVisualization";
 import { AnalysisParametersComponent } from "../../components/AnalysisParameters";
 import { calculateAutoAirSpeedCalibration } from "../../analysis/AirSpeedCalibration";
 import { headingCalibrationInput } from "../analysis/autoCalibration";
+import { renderCalibrationTab } from "./calibrationTab";
 import {
 	createDistancePlotContext,
 	createPlotContext,
@@ -234,6 +235,7 @@ function createStandardUpdateCallbacks(
 			power: () => drawPower(profiles),
 			vd: () => drawVd(profiles),
 			convergence: requestConvergenceRedraw,
+			calibration: renderCalibrationTab,
 		});
 	}
 
