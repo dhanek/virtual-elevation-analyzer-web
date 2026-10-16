@@ -42,6 +42,7 @@ dependency column below says what actually has to wait.
 | ~~**G**~~ | ~~Test infrastructure~~ | — | **Done** 2026-09-02, scripts run end to end |
 | ~~**H**~~ | ~~On-screen results view~~ | — | **Done** 2026-08-31, checked in the app |
 | ~~**I**~~ | ~~Port PR #8 (solver, convergence plot, baro lag, settings export) onto `main`~~ | — | **Done** 2026-09-14 — ported and merged as #29; PR #8 closed as superseded. All six items met; the Python `ve_batch` package and its workflow were deliberately not ported |
+| **J** | Honest uncertainty: repeats, power sensitivity, error-model fit | S–L per item | — |
 | — | Standalone work | varies | — |
 
 Every bundle above is now **committed** on `refactoring`; the per-bundle Done entries below still
@@ -367,6 +368,85 @@ comments re-verified at the ported tip.
 
 **Not ported — part (a):** the Python `ve_batch` package and its `python.yml` workflow. Ruling
 2026-09-14: dropped; the CLI in I2 is the scripting surface.
+
+---
+
+## Bundle J · Honest uncertainty
+
+*Effort: S–L per item. Why together: every item changes what the app claims about how well CdA and
+Crr are known, and they share the Convergence tab and the results view. J1 is cheap and fixes a
+misleading label on its own; J2 is the foundation the others are judged against.*
+
+**Origin:** offline analysis of the VE-testing discussion (repeats vs RMSE), 2026-09-26/27, on three
+hill sessions (6 legs each, same rider and tyres), a shuttle ride and the earlier velodrome
+sessions. Scripts and numbers live in the gitignored `vw-demo/analysis/aerosensor_20260921/`
+(`repeat_precision`, `power_scale_*`, `power_crr_explainer`, `objective_repeatability`,
+`kalman_shared_objective`, `gps_timing`, `power_timing`). What they established:
+
+- **Profile RMS does not measure precision.** Three sessions with RMS 0.26–0.27 m gave Crr
+  0.0016–0.0037. A leg's RMS does not predict its error (Spearman −0.07, n=18); the best-fitting
+  leg gave the most deviant CdA. Naive fit standard errors are 10–40× smaller than the
+  repeat-to-repeat scatter.
+- **Power scale error lands on Crr.** Per 1 % power: Crr ±0.0006 (15–40 % of its value), CdA
+  ∓0.005 (<2 %, ≈4 W at 40 km/h), while the minimum RMS changes by <1 cm, so the fit gives no
+  warning. Coasting legs fix CdA + ~9·Crr (at ~40 km/h) independently of power.
+- **Timing:** GPS position is in sync with power/speed (0 s best, sharply). Power timing matters:
+  1 s moves Crr by 0.0003–0.0005; one head unit preferred a +1–2 s power shift.
+- **A state-space (Kalman) fit** — per-leg random walk + terrain error shared across legs
+  (~8 cm, ~100 m correlation) + a jump mixture for gusts/GPS glitches — is the only estimator
+  tested whose own standard errors matched the repeat scatter (z 1.10 CdA / 0.90 Crr). It is ~3×
+  less sensitive to a one-off 30 cm VE step. It does not remove between-day shifts (2.2–2.5σ),
+  which are systematic.
+
+Items, in order:
+
+- [ ] **J1 [S] Relabel the Convergence tab's minimum + 5 cm contour, and show the ±1 % power
+      arrow.** The contour reads as an uncertainty region; it is a fit-tolerance band.
+      *Criteria:* the legend/tooltip says "minimum + 5 cm — not a confidence interval"; the plot
+      shows where the optimum moves for power −1 % / +1 % (refit at `efficiency × 0.99` and
+      `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the reference ride in every mode
+      that renders the tab.
+
+- [ ] **J2 [M] Repeat-based spread: a standalone fit per lap (or per out-and-back pair) next to
+      the joint fit.** Buckley's criterion made visible: independent repeats solved alone.
+      *Criteria:* for a selection of ≥2 laps/pairs the results view lists each one's CdA/Crr/RMS
+      and the SD across them with n and degrees of freedom; a single lap shows "repeat spread not
+      estimable" rather than zero; also a variant at fixed Crr (CdA-only per lap), since that is
+      the comparison-testing use; the joint fit is unchanged.
+
+- [ ] **J3 [S] Power-independent CdA for comparisons.** Show CdA + k·Crr, where k = 2·m·g /
+      (ρ·v̄²) is taken from the coasting legs' mean speed (≈9 at 40 km/h), and/or CdA at a user-fixed
+      Crr, so sessions can be compared without the power-scale ambiguity.
+      *Criteria:* the value is shown only when the selection contains coasting legs (power below
+      a threshold for most of the leg); k is displayed with the speed it came from; on the three
+      hill sessions it reproduces the offline result (between-session spread shrinks relative to
+      raw CdA).
+
+- [ ] **J4 [M] Timing checks for power and GPS relative to speed.** The air-speed lag already
+      exists; power and position are assumed synchronous.
+      *Criteria:* an optional whole-second sweep (−3…+3 s) for power and for position, scored on
+      held-out laps/pairs, never on in-sample RMS; the result is reported, not applied silently
+      (the same rule as `baro_lag_seconds`); no fractional interpolated shifts.
+
+- [ ] **J5 [S] Systematic-error budget in the results view.** Next to the statistical spread,
+      show what ±1 % power, ±1 kg mass, ±0.5 m DEM rise and ±1 % air density do to CdA/Crr
+      (one refit each).
+      *Criteria:* labelled as sensitivities, not measured uncertainties; each row is a real refit
+      through the same pipeline; the header never combines them into a single "±".
+
+- [ ] **J6 [L] Kalman error-model fit as an "honest uncertainty" step (Rust).** Per-leg random
+      walk + shared terrain state (AR(1), correlation length chosen by likelihood) + jump
+      mixture, noise levels estimated once per selection by maximum likelihood, then CdA/Crr
+      with standard errors from the likelihood curvature.
+      *Criteria:* matches the offline reference within 1e-4 on CdA and 1e-5 on Crr for the three
+      hill sessions; runs on demand, not on every slider move (offline Python: ~7 s per fit;
+      target <1 s in WASM); reports SE with n repeats; falls back with a named reason for fewer
+      than 2 legs; a golden test covers the jump path (a GPS-glitch leg must not move the
+      estimate the way plain RMS does).
+
+*Not app work, recorded for the protocol help text:* coast at several speeds (power-free CdA/Crr
+separation); zero-offset the power meter each session; weigh on the day; calibrate air speed within
+the session; bracket comparisons A-B-A-B; share Crr across sessions only for the same tyres.
 
 ---
 
