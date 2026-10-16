@@ -3,6 +3,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HeadingCalibrationSegment } from "../../analysis/AirSpeedCalibration";
+import { resetTabRenderMapForNewPanel } from "../dom/tabs";
 import {
 	CALIBRATION_TAB_CONTENT_ID,
 	calibrationTabMarkup,
@@ -125,5 +126,52 @@ describe("calibrationTab", () => {
 		);
 		// one lap figure + wind, no agreement
 		expect(plotted).toHaveLength(2);
+	});
+});
+
+describe("calibrationTab repaint and reset", () => {
+	const pane = () => document.getElementById(CALIBRATION_TAB_CONTENT_ID);
+	const fitted = () => ({
+		outcome: {
+			method: "sinusoid" as const,
+			percent: 3,
+			scale: 1.03,
+			circuits: 1,
+			perSegment: [row("Lap 1", 3)],
+			warnings: [],
+		},
+		segments: [circleSegment("Lap 1")],
+	});
+
+	beforeEach(() => {
+		plotted.length = 0;
+		document.body.innerHTML = calibrationTabMarkup();
+		setCalibrationTabState(null);
+	});
+
+	it("redraws when the state changes under an active pane", async () => {
+		pane()?.classList.add("ve-tab-content--active");
+		setCalibrationTabState(fitted());
+		await flush();
+		expect(plotted).toHaveLength(2);
+		setCalibrationTabState(null);
+		expect(pane()?.textContent).toContain("Run Auto Adjust");
+		expect(document.getElementById("calibrationLaps")?.children).toHaveLength(
+			0,
+		);
+	});
+
+	it("draws nothing while the pane is inactive", async () => {
+		setCalibrationTabState(fitted());
+		await flush();
+		expect(plotted).toHaveLength(0);
+		expect(pane()?.textContent).not.toContain("Run Auto Adjust");
+	});
+
+	it("is dropped when the panel is rebuilt", () => {
+		setCalibrationTabState(fitted());
+		resetTabRenderMapForNewPanel();
+		renderCalibrationTab();
+		expect(pane()?.textContent).toContain("Run Auto Adjust");
 	});
 });

@@ -54,6 +54,13 @@ let drawCounter = 0;
 /** Remembers the last Auto Adjust run so the tab can draw it when opened. */
 export function setCalibrationTabState(next: CalibrationTabState | null): void {
 	state = next;
+	// The tab is not redrawn by anything else when the run changes under it.
+	if (
+		byId(CALIBRATION_TAB_CONTENT_ID)?.classList.contains(
+			"ve-tab-content--active",
+		)
+	)
+		renderCalibrationTab();
 }
 
 type PlotlyReact = {

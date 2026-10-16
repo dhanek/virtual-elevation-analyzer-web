@@ -1,4 +1,5 @@
 import { log } from "../../utils/log";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { resizePlotlyGraphsIn } from "./plotlyResize";
 
 /**
@@ -165,6 +166,10 @@ export function setTabRenderMap(renderMap: TabRenderMap = {}): void {
  */
 export function resetTabRenderMapForNewPanel(): void {
 	currentRenderMap = {};
+	// The Calibration tab remembers the last Auto Adjust run in module state,
+	// but the report it mirrors lives in the sidebar markup that is being
+	// rebuilt. Dropping it here covers all three modes in one place.
+	setCalibrationTabState(null);
 }
 
 /**
