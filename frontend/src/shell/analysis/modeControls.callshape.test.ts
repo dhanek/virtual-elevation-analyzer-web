@@ -48,10 +48,25 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
 	getGpsAnalysisMode: () => modeState.gps,
 }));
 
+/**
+ * The Calibration tab's store, observed but not replaced: the spy calls
+ * through, so the funnel's own clearing keeps working in every case below.
+ */
+vi.mock("../ve/calibrationTab", async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import("../ve/calibrationTab")>();
+	return {
+		...original,
+		setCalibrationTabState: vi.fn(original.setCalibrationTabState),
+	};
+});
+
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
+import { setCalibrationTabState } from "../ve/calibrationTab";
 import { veViewMatchesSelection } from "../ve/veSelectionGuard";
+import { headingCalibrationInput } from "./autoCalibration";
 import { bindModeControls } from "./bindModeControls";
 import { MODE_CONTROL_TABLE, type ModeControlSpec } from "./modeControlTable";
 import {
@@ -746,6 +761,22 @@ describe("standard: the Auto Adjust report describes the current selection", () 
 			expect(report().hidden).toBe(true);
 		},
 	);
+
+	it("hands the Calibration tab the outcome and the segments it was fitted on", () => {
+		const { appState } = setup();
+		vi.mocked(setCalibrationTabState).mockClear();
+
+		el("autoAdjustCalibration").click();
+
+		expect(setCalibrationTabState).toHaveBeenCalledWith({
+			outcome: {
+				method: "vdRatio",
+				percent: 3.5,
+				fallback: "noMeasuredAirSpeed",
+			},
+			segments: headingCalibrationInput(appState).headingSegments,
+		});
+	});
 
 	it("is NOT cleared by its own autoAdjustCalibration update", () => {
 		// The button's handler calls `renderCalibrationReport` and THEN

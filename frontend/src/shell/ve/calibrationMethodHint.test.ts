@@ -46,6 +46,23 @@ describe("renderCalibrationMethodHint", () => {
 		expect(hint()?.hidden).toBe(false);
 	});
 
+	it("leaves the text node alone when the line has not changed", async () => {
+		renderCalibrationMethodHint({ method: "sinusoid", circuits: 2 });
+		const element = hint();
+		if (!element) throw new Error("hint element missing");
+		const writes: MutationRecord[] = [];
+		const observer = new MutationObserver((records) => writes.push(...records));
+		observer.observe(element, {
+			childList: true,
+			characterData: true,
+			subtree: true,
+		});
+		renderCalibrationMethodHint({ method: "sinusoid", circuits: 2 });
+		await Promise.resolve();
+		observer.disconnect();
+		expect(writes).toHaveLength(0);
+	});
+
 	it("updates rather than clears when the selection changes", () => {
 		renderCalibrationMethodHint({ method: "sinusoid", circuits: 2 });
 		renderCalibrationMethodHint({

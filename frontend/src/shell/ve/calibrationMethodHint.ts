@@ -36,7 +36,10 @@ export function renderCalibrationMethodHint(
 ): void {
 	const element = document.getElementById(CALIBRATION_METHOD_HINT_ID);
 	if (!element) return;
-	element.textContent = eligibility ? calibrationHintText(eligibility) : "";
+	const text = eligibility ? calibrationHintText(eligibility) : "";
+	// Every selection change lands here; rewriting an unchanged line would
+	// have a live region announce it again.
+	if (element.textContent !== text) element.textContent = text;
 	element.hidden = eligibility === null;
 }
 

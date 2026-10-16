@@ -32,7 +32,14 @@ vi.mock("./autoCalibration", () => ({
 import type { AppState } from "../../state/AppState";
 import { CALIBRATION_METHOD_HINT_ID } from "../ve/calibrationMethodHint";
 import {
+	calibrationTabMarkup,
+	CALIBRATION_TAB_CONTENT_ID,
+	renderCalibrationTab,
+	setCalibrationTabState,
+} from "../ve/calibrationTab";
+import {
 	configureModeUpdateRequests,
+	REPORT_INVALIDATING_REASONS,
 	requestModeUpdate,
 	resetModeUpdateRequests,
 } from "./requestModeUpdate";
@@ -76,5 +83,39 @@ describe("calibration method hint wiring", () => {
 			expect.stringContaining("refreshCalibrationMethodHint"),
 			expect.any(Error),
 		);
+	});
+});
+
+/**
+ * The Calibration tab describes the run the report describes, so every reason
+ * that clears the report must clear the tab with it.
+ */
+describe("calibration tab clears with the report", () => {
+	const pane = () => document.getElementById(CALIBRATION_TAB_CONTENT_ID);
+
+	beforeEach(() => {
+		document.body.innerHTML = `<div id="${CALIBRATION_METHOD_HINT_ID}" hidden></div>${calibrationTabMarkup()}`;
+		configureModeUpdateRequests({
+			appState: { currentFitData: {} } as unknown as AppState,
+		});
+	});
+	afterEach(() => {
+		setCalibrationTabState(null);
+		resetModeUpdateRequests();
+		document.body.innerHTML = "";
+	});
+
+	it.each([...REPORT_INVALIDATING_REASONS])("on %s", (reason) => {
+		setCalibrationTabState({
+			outcome: { method: "vdRatio", percent: 4.9, fallback: "noWholeCircuit" },
+			segments: [],
+		});
+		renderCalibrationTab();
+		expect(pane()?.textContent).not.toContain("Run Auto Adjust");
+
+		requestModeUpdate(reason);
+		renderCalibrationTab();
+
+		expect(pane()?.textContent).toContain("Run Auto Adjust");
 	});
 });

@@ -72,7 +72,7 @@ import { updateModeVEPlots } from "./updateModeVEPlots";
  * `requestModeUpdate("autoAdjustCalibration")`, so including it here would
  * have the button's own recompute erase the report it had just written.
  */
-const REPORT_INVALIDATING_REASONS: ReadonlySet<ModeUpdateReason> =
+export const REPORT_INVALIDATING_REASONS: ReadonlySet<ModeUpdateReason> =
 	new Set<ModeUpdateReason>([
 		"trim",
 		"calibration",
