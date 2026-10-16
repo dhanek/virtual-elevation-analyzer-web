@@ -224,6 +224,40 @@
 	height: clamp(360px, 62vh, 700px);
 }
 
+/* The Calibration tab: one small multiple per lap, two to a row on a desktop
+   and one on a phone, so each is shorter than a pane-wide --tall plot. A lap
+   the fit refused keeps its cell as a titled empty panel of the same height,
+   so the grid does not reflow around it. */
+.ve-calibration__laps {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+	gap: var(--space-md);
+	margin-bottom: var(--space-md);
+}
+
+.ve-plot-container__plot--calibration-lap,
+.ve-calibration__lap-empty {
+	height: clamp(280px, 40vh, 420px);
+}
+
+.ve-calibration__lap-empty {
+	box-sizing: border-box;
+	border: 1px dashed var(--color-border-strong);
+	border-radius: var(--radius-md);
+	padding: var(--space-md);
+	color: var(--color-text-muted);
+}
+
+.ve-calibration__lap-empty-title {
+	font-weight: 600;
+}
+
+/* One row per lap on a short value axis: a strip, not a pane. */
+.ve-plot-container__plot--agreement {
+	height: clamp(200px, 28vh, 320px);
+	margin-bottom: var(--space-md);
+}
+
 /* Auto-converge lock pair, rendered under the Crr slider in every sidebar.
    Present-and-hidden until the Section-3 checkbox enables it (the [hidden]
    attribute; binding happens once, from the render). */
@@ -365,12 +399,7 @@
 	margin-top: var(--space-sm);
 }
 
-.ve-parameter__hint {
-	margin-top: var(--space-sm);
-	font-size: 0.85em;
-	color: var(--color-text-muted);
-}
-
+.ve-parameter__hint,
 .ve-parameter__report {
 	margin-top: var(--space-sm);
 	font-size: 0.85em;

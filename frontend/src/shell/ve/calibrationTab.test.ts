@@ -12,21 +12,37 @@ import {
 } from "./calibrationTab";
 
 const plotted: unknown[] = [];
+/** The traces and layout of each figure drawn, in the same order as `plotted`. */
+const drawnData: Array<Array<{ x?: unknown[] }>> = [];
+const drawnLayouts: Array<{ shapes?: Array<{ x0: number }> }> = [];
 vi.mock("../analysis/plotlyLoader", () => ({
 	waitForPlotly: () =>
 		Promise.resolve({
-			react: (host: unknown) => {
+			react: (
+				host: unknown,
+				data: Array<{ x?: unknown[] }>,
+				layout: { shapes?: Array<{ x0: number }> },
+			) => {
 				plotted.push(host);
+				drawnData.push(data);
+				drawnLayouts.push(layout);
 				return Promise.resolve();
 			},
 		}),
 }));
 
+/** Each purge call, with what its container still held when it was made. */
+const purged: Array<{ root: HTMLElement; held: Element[] }> = [];
+vi.mock("../dom/plotlyPurge", () => ({
+	purgePlotlyGraphsIn: (root: HTMLElement) => {
+		purged.push({ root, held: [...root.children] });
+	},
+}));
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** A small circular ride: constant speed, heading sweeping the compass. */
-function circleSegment(label: string): HeadingCalibrationSegment {
-	const n = 120;
+function circleSegment(label: string, n = 120): HeadingCalibrationSegment {
 	const timestamps = Array.from({ length: n + 1 }, (_, i) => i);
 	const lat: number[] = [];
 	const lon: number[] = [];
@@ -59,6 +75,9 @@ describe("calibrationTab", () => {
 
 	beforeEach(() => {
 		plotted.length = 0;
+		drawnData.length = 0;
+		drawnLayouts.length = 0;
+		purged.length = 0;
 		document.body.innerHTML = calibrationTabMarkup();
 		setCalibrationTabState(null);
 	});
@@ -145,6 +164,9 @@ describe("calibrationTab repaint and reset", () => {
 
 	beforeEach(() => {
 		plotted.length = 0;
+		drawnData.length = 0;
+		drawnLayouts.length = 0;
+		purged.length = 0;
 		document.body.innerHTML = calibrationTabMarkup();
 		setCalibrationTabState(null);
 	});
@@ -166,6 +188,60 @@ describe("calibrationTab repaint and reset", () => {
 		await flush();
 		expect(plotted).toHaveLength(0);
 		expect(pane()?.textContent).not.toContain("Run Auto Adjust");
+	});
+
+	it("purges the previous render's graphs before replacing them", async () => {
+		setCalibrationTabState(fitted());
+		renderCalibrationTab();
+		await flush();
+		const firstHosts = [...plotted];
+		expect(firstHosts).toHaveLength(2);
+		purged.length = 0;
+
+		renderCalibrationTab();
+
+		const purgedHosts = purged.flatMap((call) => call.held);
+		for (const host of firstHosts) expect(purgedHosts).toContain(host);
+	});
+
+	it("pairs rows with segments by position, not by label", async () => {
+		setCalibrationTabState({
+			outcome: {
+				method: "sinusoid",
+				percent: 3,
+				scale: 1.03,
+				circuits: 2,
+				perSegment: [row("Lap", 2.5), row("Lap", 3.5)],
+				warnings: [],
+			},
+			// Same label, different rides: a label lookup draws the first twice.
+			segments: [circleSegment("Lap", 120), circleSegment("Lap", 60)],
+		});
+		renderCalibrationTab();
+		await flush();
+		// two laps + agreement + wind, and no lap is reported unfitted
+		expect(plotted).toHaveLength(4);
+		expect(pane()?.textContent).not.toContain("not fitted");
+		const samples = (figure: number) => drawnData[figure]?.[0]?.x?.length;
+		expect(samples(0)).not.toBe(samples(1));
+	});
+
+	it("draws the pooled line at the fit's own value when the percent was clamped", async () => {
+		setCalibrationTabState({
+			outcome: {
+				method: "sinusoid",
+				percent: 20,
+				scale: 1.3,
+				circuits: 2,
+				perSegment: [row("Lap 1", 29), row("Lap 2", 31)],
+				warnings: [],
+			},
+			segments: [circleSegment("Lap 1"), circleSegment("Lap 2")],
+		});
+		renderCalibrationTab();
+		await flush();
+		// laps first, then the agreement
+		expect(drawnLayouts[2]?.shapes?.[0]?.x0).toBeCloseTo(30, 9);
 	});
 
 	it("is dropped when the panel is rebuilt", () => {

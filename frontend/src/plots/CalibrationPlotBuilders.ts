@@ -97,6 +97,10 @@ export function buildCalibrationLapFigure(
 			showlegend: false,
 			margin: { l: 48, r: 12, t: 34, b: 34 },
 			xaxis: {
+				// Anchored to the residual strip, so the compass ticks and the
+				// title sit at the bottom of the figure, not in the gap between
+				// the fit and the strip.
+				anchor: "y2",
 				title: { text: "heading (°)" },
 				range: [0, 360],
 				tickvals: [0, 90, 180, 270, 360],

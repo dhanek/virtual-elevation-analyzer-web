@@ -90,6 +90,11 @@ describe("buildCalibrationLapFigure", () => {
 		expect(y.domain[0]).toBeGreaterThan(y2.domain[1]);
 	});
 
+	it("labels the heading axis under the residual strip", () => {
+		const x = figure.layout.xaxis as { anchor: string };
+		expect(x.anchor).toBe("y2");
+	});
+
 	it("names the lap, its percent and its wind in the title", () => {
 		const title = figure.layout.title as { text: string };
 		expect(title.text).toContain("Lap 2");

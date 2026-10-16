@@ -11,6 +11,7 @@
  */
 import {
 	type AutoCalibrationOutcome,
+	type CalibrationRefusal,
 	calibrationSeries,
 	type HeadingCalibrationSegment,
 } from "../../analysis/AirSpeedCalibration";
@@ -22,6 +23,7 @@ import {
 import type { PlotDefinition } from "../../plots/StandardPlotBuilders";
 import { log } from "../../utils/log";
 import { waitForPlotly } from "../analysis/plotlyLoader";
+import { purgePlotlyGraphsIn } from "../dom/plotlyPurge";
 import { fitWindVisibilityAttrs } from "./windSourceVisibility";
 import { REFUSAL_TEXT } from "./airSpeedCalibrationReport";
 
@@ -78,7 +80,12 @@ function byId(id: string): HTMLElement | null {
 
 function clearPlots(): void {
 	for (const id of [LAPS_ID, AGREEMENT_ID, WIND_ID]) {
-		byId(id)?.replaceChildren();
+		const box = byId(id);
+		if (!box) continue;
+		// Every render makes fresh hosts, and `responsive: true` hangs a window
+		// resize listener on each graph that only `purge` takes off again.
+		purgePlotlyGraphsIn(box);
+		box.replaceChildren();
 	}
 }
 
@@ -93,6 +100,22 @@ function plotBox(parent: HTMLElement, cls: string): HTMLDivElement {
 	box.className = `ve-plot-container__plot ${cls}`;
 	parent.appendChild(box);
 	return box;
+}
+
+/** A lap the fit refused keeps its grid cell, as a panel titled with why. */
+function refusedLapPanel(
+	label: string,
+	refusal: CalibrationRefusal | undefined,
+): HTMLDivElement {
+	const panel = document.createElement("div");
+	panel.className = "ve-calibration__lap-empty";
+	const title = document.createElement("div");
+	title.className = "ve-calibration__lap-empty-title";
+	title.textContent = `${label}: not fitted, ${
+		refusal ? REFUSAL_TEXT[refusal] : "nothing to draw for this lap"
+	}`;
+	panel.appendChild(title);
+	return panel;
 }
 
 export function renderCalibrationTab(): void {
@@ -132,8 +155,10 @@ export function renderCalibrationTab(): void {
 		warned: boolean;
 	}> = [];
 
-	for (const row of outcome.perSegment) {
-		const segment = state.segments.find((s) => s.label === row.label);
+	// One row per segment, in the order the estimator was given them, so the
+	// index pairs them even when two laps share a label.
+	for (const [i, row] of outcome.perSegment.entries()) {
+		const segment = state.segments[i];
 		if (
 			row.percent === null ||
 			!row.coefficients ||
@@ -141,14 +166,11 @@ export function renderCalibrationTab(): void {
 			row.windDirDeg === undefined ||
 			!segment
 		) {
-			const panel = document.createElement("div");
-			panel.className = "ve-calibration__lap-empty";
-			panel.textContent = `${row.label}: not fitted, ${REFUSAL_TEXT[row.refusal ?? "degenerate"]}`;
-			lapsBox.appendChild(panel);
+			lapsBox.appendChild(refusedLapPanel(row.label, row.refusal));
 			continue;
 		}
 		figures.push({
-			host: plotBox(lapsBox, "ve-plot-container__plot--tall"),
+			host: plotBox(lapsBox, "ve-plot-container__plot--calibration-lap"),
 			figure: buildCalibrationLapFigure({
 				series: calibrationSeries(segment, row.coefficients, outcome.scale),
 				percent: row.percent,
@@ -167,9 +189,12 @@ export function renderCalibrationTab(): void {
 	}
 	if (agreementLaps.length >= 2) {
 		figures.push({
-			host: plotBox(agreementBox, ""),
+			host: plotBox(agreementBox, "ve-plot-container__plot--agreement"),
 			figure: buildCalibrationAgreementFigure({
-				pooledPercent: outcome.percent,
+				// The fit's own value, not the clamped `percent`: the lap points
+				// beside it are unclamped, and a clamped line would sit apart from
+				// laps that all agree with it.
+				pooledPercent: (outcome.scale - 1) * 100,
 				laps: agreementLaps,
 			}),
 		});
