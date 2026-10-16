@@ -53,7 +53,27 @@ export interface SegmentVirtualDistance extends VirtualDistanceTotals {
 }
 
 /**
- * Integrate exactly as given, accumulating from `trimStart`.
+ * The speed a step from one sample to the next is ridden at: the mean of the
+ * speeds at its two ends. A missing or non-positive sample counts as zero.
+ *
+ * A distance belongs to its sample's timestamp, the end of the step. The speed
+ * that carries the rider there from the previous sample is the one half way
+ * through the step — not the one at its end, which over-counts while speeding
+ * up and under-counts while slowing. The VE step takes its distance the same
+ * way (`step_mean`, virtual_elevation.rs), and every speed-to-distance sum in
+ * the app goes through here so they cannot differ.
+ */
+export function stepMeanSpeed(before: number, after: number): number {
+	return 0.5 * (countedSpeed(before) + countedSpeed(after));
+}
+
+function countedSpeed(speed: number): number {
+	return Number.isFinite(speed) && speed > 0 ? speed : 0;
+}
+
+/**
+ * Integrate exactly as given, accumulating from `trimStart`, each step at
+ * `stepMeanSpeed`.
  *
  * Shared by the figure and by every totals reading, so the numbers in the VD
  * header — and now in the stored result — can never disagree with the curve
@@ -71,12 +91,9 @@ export function integrateVirtualDistance(
 	for (let i = trimStart + 1; i < timestamps.length; i++) {
 		const dt = timestamps[i] - timestamps[i - 1];
 
-		const apparentSpeed = !isNaN(windSpeed[i]) ? windSpeed[i] : 0;
-		air[i] = air[i - 1] + (apparentSpeed > 0 ? apparentSpeed : 0) * dt;
-
-		const groundSpeed =
-			!isNaN(velocity[i]) && velocity[i] > 0 ? velocity[i] : 0;
-		ground[i] = ground[i - 1] + groundSpeed * dt;
+		air[i] = air[i - 1] + stepMeanSpeed(windSpeed[i - 1], windSpeed[i]) * dt;
+		ground[i] =
+			ground[i - 1] + stepMeanSpeed(velocity[i - 1], velocity[i]) * dt;
 	}
 
 	return { air, ground };

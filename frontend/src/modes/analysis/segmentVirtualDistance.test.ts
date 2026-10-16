@@ -13,7 +13,7 @@
  *
  * The fixture puts a 601-second wall-clock gap between the two laps for a
  * reason. It is what separates the honest answer from the tempting one: the
- * concatenated integral over the same two laps reads 8.648 km, because it
+ * concatenated integral over the same two laps reads 8.047 km, because it
  * charges the gap as if the rider had ridden it, while the two laps together
  * are 0.234 km. A test whose laps were adjacent in time could not tell the two
  * apart.
@@ -191,7 +191,8 @@ describe("multi-lap Standard stores per-lap virtual distances (entry (h))", () =
 		);
 
 		// What integrating the two laps end to end would give: the 601-second
-		// stop between them charged at lap 3's apparent wind.
+		// stop between them charged at the mean of the two laps' apparent wind,
+		// 13 m/s. 108 m + 7813 m + 126 m.
 		const concatenated = computeVirtualDistanceWindowTotals({
 			timestamps: [
 				...timestamps().slice(10, 20),
@@ -206,7 +207,7 @@ describe("multi-lap Standard stores per-lap virtual distances (entry (h))", () =
 			trimEnd: 19,
 		});
 
-		expect(concatenated.airKm).toBeCloseTo(8.648, 10);
+		expect(concatenated.airKm).toBeCloseTo(8.047, 10);
 		expect(perLapTotal).toBeCloseTo(0.234, 10);
 		expect(perLapTotal).toBeLessThan(concatenated.airKm / 10);
 	});

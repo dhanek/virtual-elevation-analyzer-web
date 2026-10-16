@@ -170,7 +170,7 @@ async function main(): Promise<void> {
 		"- The default resolution is the largest whose worst realistic scenario stays under ~300 ms.\n",
 	);
 	process.stdout.write(
-		"- If nothing does, the next lever is the algebraic sin(atan(x)) = x/sqrt(1+x^2) in GainKernel::gain,\n",
+		"- If nothing does, the next lever is the closed form of GainKernel::gain (linear in CdA and Crr: three sums),\n",
 	);
 	process.stdout.write(
 		"  behind a Rust test proving agreement with ve_elevation_diff — not a worker (deferred per PROJECT_STATUS.md).\n",

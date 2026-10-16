@@ -87,7 +87,13 @@ export const DEFAULT_PARAMETERS: AnalysisParameters = {
 	wind_speed: null, // m/s - null = no wind
 	wind_direction: null, // degrees - null = no wind
 	wind_speed_unit: "m/s", // unit for wind speed display
-	air_speed_offset: 2, // seconds - default: shift air speed 2s later for better sync
+	// Seconds; the ACE's air speed is late by about +2 to +2.5 s against ground
+	// speed. That is a sensor lag, measured channel against channel, so it does
+	// not depend on how the VE step uses the speeds. Rechecked 2026-10-16 after
+	// VE moved to step-mean speeds: the closure-optimal offset rose by 0.5 s
+	// (pooled +2.1 to +2.7 s; the calmest ride +1.6 to +2.1 s), into line with
+	// the sensor lag instead of half a second below it. +2 stays.
+	air_speed_offset: 2,
 	baro_lag_seconds: 0, // opt-in altitude latency correction (Edge 520 needs ~2)
 	velodrome: false, // zero altitude for track cycling
 	// Note: auto_lap_detection removed - GPS mode is now controlled via Section 3 UI

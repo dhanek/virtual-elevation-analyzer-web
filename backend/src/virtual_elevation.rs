@@ -190,30 +190,32 @@ struct VirtualSlopeResult {
 ///
 /// Covers samples `start + 1 ..= end` of the window only. That range is
 /// exact, not approximate: `build_virtual_elevation` accumulates
-/// `ve[i] = ve[i-1] + v_i·dt·sin(atan(slope_i))`, so `ve[end] - ve[start]`
+/// `ve[i] = ve[i-1] + v̄_i·dt·slope_i`, so `ve[end] - ve[start]`
 /// is the sum over `start + 1 ..= end` and sample `start` itself contributes
 /// nothing. Include it and every cell is off by one term.
+///
+/// `v̄_i` and `v̄a_i` are the step's mean ground and air speed (`step_mean`).
 struct GainKernel {
-    /// `v_i · dt` — the distance each sample's slope is multiplied by.
+    /// `v̄_i · dt` — the distance each sample's slope is multiplied by.
     step: Vec<f64>,
-    /// `w/(v·m·g) − a/g` — the CdA- and Crr-free part of the Chung slope.
+    /// `w/(v̄·m·g) − a/g` — the CdA- and Crr-free part of the Chung slope.
     base: Vec<f64>,
-    /// `ρ_i · va_i² / (2·m·g)` — the coefficient CdA multiplies.
+    /// `ρ_i · v̄a_i² / (2·m·g)` — the coefficient CdA multiplies.
     aero: Vec<f64>,
 }
 
 impl GainKernel {
     /// `ve[end] - ve[start]` at one (CdA, Crr).
     ///
-    /// Keeps `slope.atan().sin()` verbatim from `build_virtual_elevation`
-    /// rather than the algebraically identical `x / sqrt(1 + x²)`: the whole
-    /// value of the grid is that its minimum agrees with the number the VE
-    /// tab shows, and the two forms are not bit-identical.
+    /// Sums `step · slope` sample by sample, in `build_virtual_elevation`'s
+    /// order, rather than the algebraically identical three-sum closed form:
+    /// the whole value of the grid is that its minimum agrees with the number
+    /// the VE tab shows, and the two forms are not bit-identical.
     fn gain(&self, cda: f64, crr: f64) -> f64 {
         let mut sum = 0.0;
         for i in 0..self.step.len() {
             let slope = self.base[i] - cda * self.aero[i] - crr;
-            sum += self.step[i] * slope.atan().sin();
+            sum += self.step[i] * slope;
         }
         sum
     }
@@ -237,15 +239,34 @@ impl VirtualElevationCalculator {
         self.air_speed_calibration = calibration;
     }
 
-    /// Calculate acceleration using method from R code: a = diff(v^2)/(2*v[-1]*dt)
+    /// Mean of a channel over the step that ends at sample `index`: its value
+    /// half way between samples `index - 1` and `index`. Sample 0 has no step
+    /// before it and keeps its own value.
+    ///
+    /// A step runs from one sample to the next, and its kinetic-energy change
+    /// and the reference altitude are both taken between those two samples.
+    /// Drag and rolling loss must cover the same second: with the speed at
+    /// the end of the step they are counted half a second late, which reads
+    /// as extra drag while the rider speeds up and as less while slowing.
+    fn step_mean(values: &[f64], index: usize) -> f64 {
+        if index == 0 {
+            values[index]
+        } else {
+            0.5 * (values[index - 1] + values[index])
+        }
+    }
+
+    /// Acceleration over the step that ends at each sample: a = diff(v)/dt.
+    ///
+    /// This is the R code's a = diff(v^2)/(2*v*dt) with the step's mean speed
+    /// (`step_mean`) for v, so `a · v̄·dt / g` is still the exact
+    /// kinetic-energy height diff(v^2)/(2*g).
     fn calculate_acceleration(&self) -> Vec<f64> {
         let v = &self.data.velocity;
         let mut acceleration = vec![0.0; v.len()];
 
         for i in 1..v.len() {
-            if v[i] > 0.0 {
-                acceleration[i] = (v[i].powi(2) - v[i - 1].powi(2)) / (2.0 * v[i] * self.dt);
-            }
+            acceleration[i] = (v[i] - v[i - 1]) / self.dt;
         }
 
         // Replace NaN and infinite values with 0
@@ -423,22 +444,32 @@ impl VirtualElevationCalculator {
             return (0.0, 0.0, 0.0);
         }
 
-        // Calculate VD from trim_start to trim_end (both VD start at 0 at trim_start)
+        // A missing or non-positive speed sample counts as zero.
+        let counted = |speed: f64| {
+            if !speed.is_nan() && speed > 0.0 {
+                speed
+            } else {
+                0.0
+            }
+        };
+
+        // Calculate VD from trim_start to trim_end (both VD start at 0 at trim_start).
+        // A distance belongs to its sample's timestamp, the end of the step, so
+        // the step is ridden at the mean of the speeds at its two ends — the
+        // distance the VE step uses (`step_mean`).
         for i in (start_idx + 1)..=end_idx {
             let dt = self.data.timestamps[i] - self.data.timestamps[i - 1];
             if dt > 0.0 && dt < 10.0 {
                 // Sanity check for time step
                 // Apparent velocity distance (already includes wind, just apply calibration)
-                let apparent_speed = self.data.wind_speed[i] * self.air_speed_calibration;
-                if !apparent_speed.is_nan() && apparent_speed > 0.0 {
-                    vd_wind += apparent_speed * dt;
-                }
+                let apparent_before = self.data.wind_speed[i - 1] * self.air_speed_calibration;
+                let apparent_after = self.data.wind_speed[i] * self.air_speed_calibration;
+                vd_wind += 0.5 * (counted(apparent_before) + counted(apparent_after)) * dt;
 
                 // Ground speed distance
-                let ground_speed = self.data.velocity[i];
-                if !ground_speed.is_nan() && ground_speed > 0.0 {
-                    vd_ground += ground_speed * dt;
-                }
+                let ground_before = self.data.velocity[i - 1];
+                let ground_after = self.data.velocity[i];
+                vd_ground += 0.5 * (counted(ground_before) + counted(ground_after)) * dt;
             }
         }
 
@@ -472,10 +503,11 @@ impl VirtualElevationCalculator {
         let mut virtual_slope = Vec::with_capacity(self.data.velocity.len());
 
         for i in 0..self.data.velocity.len() {
-            let v = self.data.velocity[i].max(0.001); // Avoid division by zero
+            // Ground and air speed are the step's means (`step_mean`).
+            let v = Self::step_mean(&self.data.velocity, i).max(0.001); // Avoid division by zero
             let w = self.data.power[i] * self.params.eta;
             let a = acceleration[i];
-            let va = apparent_velocity[i];
+            let va = Self::step_mean(&apparent_velocity, i);
 
             // Use per-datapoint rho if available, otherwise use the parameter value
             let rho = self
@@ -503,12 +535,20 @@ impl VirtualElevationCalculator {
         }
     }
 
+    /// Accumulate `v̄_i · dt · slope_i`: the distance ridden in the step times
+    /// its slope.
+    ///
+    /// The slope comes from the energy balance along the road, where the
+    /// climbing power is `m·g·v·sin θ`. It is therefore already the height
+    /// gained per metre ridden (sin θ), not rise over run (tan θ), and takes
+    /// no `sin(atan(·))`: that would apply the angle twice and lose
+    /// `slope²/2` of the height, 0.7% on an 11.5% road.
     fn build_virtual_elevation(&self, virtual_slope: &[f64]) -> Vec<f64> {
         let mut virtual_elevation = Vec::with_capacity(virtual_slope.len());
         let mut cumulative_elevation = 0.0;
 
-        for (&velocity, &slope) in self.data.velocity.iter().zip(virtual_slope.iter()) {
-            cumulative_elevation += velocity * self.dt * slope.atan().sin();
+        for (i, &slope) in virtual_slope.iter().enumerate() {
+            cumulative_elevation += Self::step_mean(&self.data.velocity, i) * self.dt * slope;
             virtual_elevation.push(cumulative_elevation);
         }
 
@@ -642,10 +682,11 @@ impl VirtualElevationCalculator {
         let mut aero = Vec::with_capacity(count);
 
         for i in (start + 1)..=end {
-            let v = self.data.velocity[i].max(0.001); // Avoid division by zero
+            let step_velocity = Self::step_mean(&self.data.velocity, i);
+            let v = step_velocity.max(0.001); // Avoid division by zero
             let w = self.data.power[i] * self.params.eta;
             let a = acceleration[i];
-            let va = apparent_velocity[i];
+            let va = Self::step_mean(&apparent_velocity, i);
             let rho = self
                 .data
                 .rho_array
@@ -656,13 +697,13 @@ impl VirtualElevationCalculator {
             let power_term = w / (v * mg);
             let accel_term = a / 9.807;
             let aero_term = rho * va.powi(2) / (2.0 * mg);
-            let distance = self.data.velocity[i] * self.dt;
+            let distance = step_velocity * self.dt;
 
             // `calculate_virtual_slope_impl` zeroes a non-finite slope. Whether
             // the slope is finite does not depend on CdA or Crr (both finite,
             // CdA positive), so decide it once here: such a sample contributes
-            // `v·dt·sin(atan(0))` — zero, or NaN when the velocity itself is
-            // NaN — exactly as the profile does.
+            // `v̄·dt·0` — zero, or NaN when the step's speed is itself NaN —
+            // exactly as the profile does.
             if (power_term - aero_term - accel_term).is_finite() {
                 step.push(distance);
                 base.push(power_term - accel_term);
@@ -721,9 +762,9 @@ impl VirtualElevationCalculator {
     ///
     /// The kernel is built once; each CdA column folds CdA into the
     /// per-sample slope once and sweeps Crr as a scalar subtraction, so the
-    /// only cost that scales is `cda_steps × crr_steps × window` evaluations
-    /// of `atan` and `sin`. Cells are bit-identical to `ve_gain` at the same
-    /// coordinates: same operand order, same summation order.
+    /// only cost that scales is `cda_steps × crr_steps × window` multiply-adds.
+    /// Cells are bit-identical to `ve_gain` at the same coordinates: same
+    /// operand order, same summation order.
     #[wasm_bindgen]
     #[allow(clippy::too_many_arguments)]
     pub fn ve_gain_grid(
@@ -767,7 +808,7 @@ impl VirtualElevationCalculator {
                 let crr = crr_min + (j as f64) * crr_step;
                 let mut sum = 0.0;
                 for (&step, &slope) in kernel.step.iter().zip(column.iter()) {
-                    sum += step * (slope - crr).atan().sin();
+                    sum += step * (slope - crr);
                 }
                 grid.push(sum);
             }
@@ -1217,7 +1258,7 @@ mod tests {
     ///   aero slope        = CdA·ρ·va² / (2·m·g) = 0.3·1.225·225 / 1569.12 ≈ 0.05272
     ///   power slope       = P·η / (v·m·g) ≈ 0.02742
     ///   virtual slope     ≈ 0.02742 − 0.05272 − 0.004 ≈ −0.02930
-    ///   Δh per step       = v·dt·sin(atan(−0.0293)) ≈ −0.293 m
+    ///   Δh per step       = v·dt·(−0.0293) ≈ −0.293 m
     ///   final VE (cum)    ≈ −29 m over 100 steps
     #[test]
     fn headwind_via_params_makes_ve_negative() {
@@ -1310,9 +1351,10 @@ mod tests {
             + SYSTEM_MASS * G * V * target_slope;
         let p_input = p_mech / ETA;
 
-        // Build actual altitude that matches what the VE integrator produces:
-        // altitude[i] = base + i · delta_per_step (linear ramp).
-        let delta_per_step = V * 1.0 * target_slope.atan().sin();
+        // Build the altitude that power really climbs: `m·g·v·slope` lifts the
+        // rider `v·slope` each second, so altitude[i] = base + i · delta_per_step
+        // (linear ramp).
+        let delta_per_step = V * 1.0 * target_slope;
         let altitude: Vec<f64> = (0..N)
             .map(|i| 100.0 + (i as f64) * delta_per_step)
             .collect();
@@ -1359,6 +1401,111 @@ mod tests {
             "actual_elevation_diff ({}) should equal expected linear rise ({})",
             result.actual_elevation_diff(),
             expected_gain
+        );
+    }
+
+    /// The slope is height per metre ridden, so a steep climb gains exactly
+    /// the height its power lifts: `m·g·v·slope` of climbing power raises the
+    /// rider `v·slope` each second, at any gradient.
+    ///
+    /// At 10% over 99 steps of 10 m that is 99 m. Reading the slope as rise
+    /// over run — `v·dt·sin(atan(slope))` — gives 98.51 m.
+    #[test]
+    fn steep_climb_gains_the_height_its_power_lifts() {
+        let target_slope = 0.10_f64;
+
+        let p_mech = 0.5 * RHO * CDA * V.powi(3)
+            + CRR * SYSTEM_MASS * G * V
+            + SYSTEM_MASS * G * V * target_slope;
+        let data = constant_ride(p_mech / ETA, 0.0, vec![0.0; N]);
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+
+        let expected_gain = (N as f64 - 1.0) * V * target_slope;
+        let profile_gain = calc
+            .calculate_virtual_elevation(CDA, CRR, 0, N - 1)
+            .ve_elevation_diff();
+        assert!(
+            (profile_gain - expected_gain).abs() < 1e-9,
+            "a 10% climb should gain {} m, the profile gained {}",
+            expected_gain,
+            profile_gain
+        );
+        let kernel_gain = calc.ve_gain(CDA, CRR, 0, N - 1);
+        assert!(
+            (kernel_gain - expected_gain).abs() < 1e-9,
+            "a 10% climb should gain {} m, ve_gain gave {}",
+            expected_gain,
+            kernel_gain
+        );
+    }
+
+    /// Drag and rolling loss are taken over the same second as the
+    /// kinetic-energy change. A coast-down that speeds up steadily from 8 to
+    /// 18 m/s in 20 s has an exact energy balance:
+    ///   height lost = (v² − v0²) / (2·g)                 kinetic energy
+    ///               + CdA·ρ·(v⁴ − v0⁴) / (8·a·m·g)       ∫ ½·ρ·CdA·v³ dt
+    ///               + Crr·(v0·t + a·t²/2)                rolling
+    ///               = 13.256 + 11.813 + 1.040 = 26.109 m over 260 m
+    ///
+    /// With each step's mean speed the virtual elevation follows that to
+    /// 4 mm (the cube of the mean speed is not quite the mean of the cube).
+    /// With the speed at the end of each step, drag and rolling loss are
+    /// counted half a second late and the profile ends 0.65 m low.
+    #[test]
+    fn accelerating_coast_down_follows_the_energy_balance() {
+        const V0: f64 = 8.0; // m/s
+        const ACCEL: f64 = 0.5; // m/s²
+        const SAMPLES: usize = 21; // 20 s at 1 Hz, ending at 18 m/s
+
+        let speed = |t: f64| V0 + ACCEL * t;
+        let travelled = |t: f64| V0 * t + 0.5 * ACCEL * t * t;
+        let height_lost = |t: f64| {
+            let v = speed(t);
+            (v.powi(2) - V0.powi(2)) / (2.0 * G)
+                + CDA * RHO * (v.powi(4) - V0.powi(4)) / (8.0 * ACCEL * SYSTEM_MASS * G)
+                + CRR * travelled(t)
+        };
+
+        let timestamps: Vec<f64> = (0..SAMPLES).map(|i| i as f64).collect();
+        let velocity: Vec<f64> = timestamps.iter().map(|&t| speed(t)).collect();
+        let altitude: Vec<f64> = timestamps.iter().map(|&t| 100.0 - height_lost(t)).collect();
+        let distance: Vec<f64> = timestamps.iter().map(|&t| travelled(t)).collect();
+        let data = VEData::new(
+            timestamps,
+            vec![0.0; SAMPLES],
+            velocity,
+            vec![],
+            vec![],
+            altitude,
+            distance,
+            vec![0.0; SAMPLES],
+        );
+
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        let result = calc.calculate_virtual_elevation(CDA, CRR, 0, SAMPLES - 1);
+
+        let expected_gain = -height_lost((SAMPLES - 1) as f64);
+        assert!(
+            (expected_gain + 26.109).abs() < 1e-3,
+            "the energy balance should lose 26.109 m, got {}",
+            expected_gain
+        );
+        assert!(
+            (result.actual_elevation_diff() - expected_gain).abs() < 1e-9,
+            "actual_elevation_diff ({}) should equal the energy balance ({})",
+            result.actual_elevation_diff(),
+            expected_gain
+        );
+        assert!(
+            (result.ve_elevation_diff() - expected_gain).abs() < 0.01,
+            "ve_elevation_diff ({}) should follow the energy balance ({})",
+            result.ve_elevation_diff(),
+            expected_gain
+        );
+        assert!(
+            result.rmse() < 0.01,
+            "RMSE against the energy balance should be millimetres, got {}",
+            result.rmse()
         );
     }
 
@@ -1482,6 +1629,53 @@ mod tests {
         assert_eq!(result.virtual_distance_air(), 0.0);
         assert_eq!(result.virtual_distance_ground(), 0.0);
         assert_eq!(result.vd_difference_percent(), 0.0);
+    }
+
+    /// Virtual distance is the distance ridden by the timestamp it is reported
+    /// for. Speeding up steadily from 8 to 18 m/s in 20 s covers
+    /// 13 m/s · 20 s = 260 m, and through air moving 2 m/s faster, 300 m:
+    ///   %Δ = (300 − 260) / 260 · 100 = 15.385 %
+    ///
+    /// Summing the speed at the end of each step gives 265 m and 305 m.
+    #[test]
+    fn virtual_distance_is_the_distance_ridden_while_accelerating() {
+        const SAMPLES: usize = 21; // 20 s at 1 Hz
+
+        let timestamps: Vec<f64> = (0..SAMPLES).map(|i| i as f64).collect();
+        let velocity: Vec<f64> = timestamps.iter().map(|&t| 8.0 + 0.5 * t).collect();
+        let air_speed: Vec<f64> = velocity.iter().map(|&v| v + 2.0).collect();
+        let data = VEData::new(
+            timestamps,
+            vec![0.0; SAMPLES],
+            velocity,
+            vec![],
+            vec![],
+            vec![100.0; SAMPLES],
+            vec![0.0; SAMPLES],
+            air_speed,
+        );
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+        let result = calc.calculate_virtual_elevation(CDA, CRR, 0, SAMPLES - 1);
+
+        let vd_air = result.virtual_distance_air();
+        let vd_ground = result.virtual_distance_ground();
+        let pct = result.vd_difference_percent();
+
+        assert!(
+            (vd_ground - 260.0).abs() < 1e-9,
+            "VD_ground should be 260 m, got {}",
+            vd_ground
+        );
+        assert!(
+            (vd_air - 300.0).abs() < 1e-9,
+            "VD_air should be 300 m, got {}",
+            vd_air
+        );
+        assert!(
+            (pct - 40.0 / 260.0 * 100.0).abs() < 1e-9,
+            "Δ% should be 15.385, got {}",
+            pct
+        );
     }
 
     /// A uniform per-datapoint CdA array should produce the same VE profile as

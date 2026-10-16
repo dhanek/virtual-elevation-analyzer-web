@@ -54,6 +54,21 @@ describe("buildVirtualDistanceSeries", () => {
 		expect(result.airKm).toEqual([0, 0.015, 0.03]);
 		expect(result.groundKm).toEqual([0, 0.01, 0.02]);
 	});
+
+	it("rides each step at the mean of the speeds at its two ends", () => {
+		// 8 -> 10 -> 12 m/s covers 9 m then 11 m: 20 m by the last timestamp,
+		// where the end-of-step speeds would say 22 m. Air likewise, 24 m.
+		const result = buildVirtualDistanceSeries(
+			[0, 1, 2],
+			[8, 10, 12],
+			[10, 12, 14],
+		);
+
+		expect(result.groundKm[1]).toBeCloseTo(0.009, 12);
+		expect(result.groundKm[2]).toBeCloseTo(0.02, 12);
+		expect(result.airKm[1]).toBeCloseTo(0.011, 12);
+		expect(result.airKm[2]).toBeCloseTo(0.024, 12);
+	});
 });
 
 describe("buildSegmentSupplementarySeries", () => {

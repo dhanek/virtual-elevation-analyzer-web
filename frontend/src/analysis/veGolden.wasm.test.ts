@@ -121,9 +121,15 @@ const PRECISION = 10;
  *
  * The air total is the number a SECOND application of the calibration
  * multiplier moves; the ground total is the control that must stay put.
+ *
+ * RE-BASELINED 2026-10-03 from 14.076827100000003 and 14.497571: each step of
+ * the virtual distance is now ridden at the mean of the speeds at its two ends
+ * (`stepMeanSpeed`), not the speed at its end. Over a segment that moves the
+ * total by half the difference between its first and last speed, times one
+ * step: +4.7 m of air and −1.3 m of ground over the seven segments.
  */
-const VD_AIR_KM_TOTAL = 14.076827100000003;
-const VD_GROUND_KM_TOTAL = 14.497571;
+const VD_AIR_KM_TOTAL = 14.08150485;
+const VD_GROUND_KM_TOTAL = 14.496252999999998;
 
 type WindMode = "fit" | "constant";
 
@@ -640,50 +646,72 @@ describe.skipIf(!built || !fixturePresent)(
 		 * GPS-lap uses, so under Option B the two modes compute the same thing. Any
 		 * future divergence between the two blocks is a defect in one of them.
 		 */
+		/**
+		 * RE-BASELINED 2026-10-03 with the virtual-elevation step itself — a named
+		 * change to the calculation, not a refactor. Every literal in this block
+		 * moved except `veLength` and `actualElevationDiff`, and so did four fields
+		 * of each `GPS_LAP_AGGREGATION` row below (`meanRMSE`, `avgVeGain`,
+		 * `closingError`, `lapClosingErrorChecksum`). The previous values are the
+		 * lines the re-baselining commit removes.
+		 *
+		 * Why they moved (`build_virtual_elevation`, virtual_elevation.rs):
+		 *   - the step is `distance · slope`, no longer
+		 *     `distance · sin(atan(slope))`: the slope from the energy balance is
+		 *     already height per metre ridden;
+		 *   - ground and air speed are each step's mean, not the value at its end,
+		 *     so drag and rolling loss cover the same second as the kinetic-energy
+		 *     change.
+		 * The mean lap gain moves 8.636 -> 8.653 m (fit) and 4.908 -> 4.931 m
+		 * (constant).
+		 *
+		 * What did NOT move is the structure: the standard and gpsLap blocks are
+		 * still identical, and the mean elevation profile, which is a function of
+		 * distance and actual elevation only, is untouched.
+		 */
 		const GOLDEN: Record<string, GoldenCase> = {
 			"standard / fit / rho present": {
-				r2: 0.3135718941005455,
-				rmse: 5.163938255431569,
-				veElevationDiff: 8.635857151837952,
+				r2: 0.3067212558037738,
+				rmse: 5.172920987468613,
+				veElevationDiff: 8.652680218768442,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.13080271636508098,
-				veMid: 1.8930276578777034,
-				veLast: 18.64123262055564,
-				veChecksum: 7459.003136834831,
+				veFirst: 0.13081692826760943,
+				veMid: 1.8025055462569222,
+				veLast: 18.73989581266391,
+				veChecksum: 7505.803930382932,
 			},
 			"standard / fit / rho absent": {
-				r2: 0.31396442776478145,
-				rmse: 5.444012415025426,
-				veElevationDiff: 9.118447594906716,
+				r2: 0.3077073433594935,
+				rmse: 5.453020941074464,
+				veElevationDiff: 9.135144317012191,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.13300666843549439,
-				veMid: 1.9873054396522434,
-				veLast: 19.192691384772218,
-				veChecksum: 7859.641202644601,
+				veFirst: 0.1330216109808452,
+				veMid: 1.8976349610859862,
+				veLast: 19.290683423397514,
+				veChecksum: 7906.0059711648755,
 			},
 			"standard / constant / rho present": {
-				r2: 0.24966734009391217,
-				rmse: 3.065921297319822,
-				veElevationDiff: 4.90796476465448,
+				r2: 0.23485781827850843,
+				rmse: 3.053304414514336,
+				veElevationDiff: 4.930822944148953,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.08454169112765618,
-				veMid: 0.525320250493201,
-				veLast: 11.447807151240204,
-				veChecksum: 4274.079504001773,
+				veFirst: 0.08454552796609845,
+				veMid: 0.394904338738631,
+				veLast: 11.595049106861545,
+				veChecksum: 4305.599950080365,
 			},
 			"standard / constant / rho absent": {
-				r2: 0.2645543180169767,
-				rmse: 3.337191098428614,
-				veElevationDiff: 5.429462686581246,
+				r2: 0.2512537691188565,
+				rmse: 3.329853307526195,
+				veElevationDiff: 5.452163989316269,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.08735132354814168,
-				veMid: 0.6339384644627134,
-				veLast: 12.059466638124354,
-				veChecksum: 4707.914727056141,
+				veFirst: 0.08735555579690754,
+				veMid: 0.504790249503846,
+				veLast: 12.205685403433154,
+				veChecksum: 4739.157246502923,
 			},
 			// 'standard / compare / rho present|absent' USED TO LIVE HERE. They were
 			// a 50/50 BLEND of two whole-selection runs, produced by a hand-composed
@@ -691,92 +719,92 @@ describe.skipIf(!built || !fixturePresent)(
 			// leg against the `fit` and `constant` rows below, for all three modes —
 			// see `runCompare`. Retired values and reason: 07-GOLDEN-BASELINE.md.
 			"gpsLap / fit / rho present": {
-				r2: 0.3135718941005455,
-				rmse: 5.163938255431569,
-				veElevationDiff: 8.635857151837952,
+				r2: 0.3067212558037738,
+				rmse: 5.172920987468613,
+				veElevationDiff: 8.652680218768442,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.13080271636508098,
-				veMid: 1.8930276578777034,
-				veLast: 18.64123262055564,
-				veChecksum: 7459.003136834831,
+				veFirst: 0.13081692826760943,
+				veMid: 1.8025055462569222,
+				veLast: 18.73989581266391,
+				veChecksum: 7505.803930382932,
 			},
 			"gpsLap / fit / rho absent": {
-				r2: 0.31396442776478145,
-				rmse: 5.444012415025426,
-				veElevationDiff: 9.118447594906716,
+				r2: 0.3077073433594935,
+				rmse: 5.453020941074464,
+				veElevationDiff: 9.135144317012191,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.13300666843549439,
-				veMid: 1.9873054396522434,
-				veLast: 19.192691384772218,
-				veChecksum: 7859.641202644601,
+				veFirst: 0.1330216109808452,
+				veMid: 1.8976349610859862,
+				veLast: 19.290683423397514,
+				veChecksum: 7906.0059711648755,
 			},
 			"gpsLap / constant / rho present": {
-				r2: 0.24966734009391217,
-				rmse: 3.065921297319822,
-				veElevationDiff: 4.90796476465448,
+				r2: 0.23485781827850843,
+				rmse: 3.053304414514336,
+				veElevationDiff: 4.930822944148953,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.08454169112765618,
-				veMid: 0.525320250493201,
-				veLast: 11.447807151240204,
-				veChecksum: 4274.079504001773,
+				veFirst: 0.08454552796609845,
+				veMid: 0.394904338738631,
+				veLast: 11.595049106861545,
+				veChecksum: 4305.599950080365,
 			},
 			"gpsLap / constant / rho absent": {
-				r2: 0.2645543180169767,
-				rmse: 3.337191098428614,
-				veElevationDiff: 5.429462686581246,
+				r2: 0.2512537691188565,
+				rmse: 3.329853307526195,
+				veElevationDiff: 5.452163989316269,
 				actualElevationDiff: -0.14285714285714285,
 				veLength: 1442,
-				veFirst: 0.08735132354814168,
-				veMid: 0.6339384644627134,
-				veLast: 12.059466638124354,
-				veChecksum: 4707.914727056141,
+				veFirst: 0.08735555579690754,
+				veMid: 0.504790249503846,
+				veLast: 12.205685403433154,
+				veChecksum: 4739.157246502923,
 			},
 			"outAndBack / fit / rho present": {
-				r2: 0.23663811128037052,
-				rmse: 2.5665616731550385,
-				veElevationDiff: 4.318108702531325,
+				r2: 0.22937927836449573,
+				rmse: 2.5700696246116292,
+				veElevationDiff: 4.324852660071299,
 				actualElevationDiff: -0.07142857142857142,
 				veLength: 1442,
-				veFirst: 0.13080271636508098,
-				veMid: 0.4664237112543842,
-				veLast: 9.096511330968736,
-				veChecksum: 3693.674836894759,
+				veFirst: 0.13081692826760943,
+				veMid: 0.4702462582345378,
+				veLast: 9.088845058866331,
+				veChecksum: 3715.6996592290134,
 			},
 			"outAndBack / fit / rho absent": {
-				r2: 0.23625407922230043,
-				rmse: 2.7033292363874706,
-				veElevationDiff: 4.558366481255591,
+				r2: 0.22958456946687705,
+				rmse: 2.706990560214208,
+				veElevationDiff: 4.565062728405012,
 				actualElevationDiff: -0.07142857142857142,
 				veLength: 1442,
-				veFirst: 0.13300666843549439,
-				veMid: 0.49649120046216566,
-				veLast: 9.371555806705198,
-				veChecksum: 3894.979372637538,
+				veFirst: 0.1330216109808452,
+				veMid: 0.5002655799980051,
+				veLast: 9.363981112273859,
+				veChecksum: 3916.788168130386,
 			},
 			"outAndBack / constant / rho present": {
-				r2: 0.18038551601327346,
-				rmse: 1.534731117106101,
-				veElevationDiff: 2.481708024655112,
+				r2: 0.16379045670502168,
+				rmse: 1.5158931367727058,
+				veElevationDiff: 2.486963566868261,
 				actualElevationDiff: -0.07142857142857142,
 				veLength: 1442,
-				veFirst: 0.08454169112765618,
-				veMid: -0.0339774492845063,
-				veLast: 4.30530931973201,
-				veChecksum: 1936.4822330829263,
+				veFirst: 0.08454552796609845,
+				veMid: -0.007378683990731924,
+				veLast: 4.314084517159715,
+				veChecksum: 1940.2663520877406,
 			},
 			"outAndBack / constant / rho absent": {
-				r2: 0.18985744230377524,
-				rmse: 1.656348402207844,
-				veElevationDiff: 2.741150094809736,
+				r2: 0.17565181123292592,
+				rmse: 1.6391115710490263,
+				veElevationDiff: 2.7463907482066197,
 				actualElevationDiff: -0.07142857142857142,
 				veLength: 1442,
-				veFirst: 0.08735132354814168,
-				veMid: 0.0011447390494593451,
-				veLast: 4.621526001894558,
-				veChecksum: 2155.8332506962365,
+				veFirst: 0.08735555579690754,
+				veMid: 0.02746364058227923,
+				veLast: 4.630282086574423,
+				veChecksum: 2159.5770617801168,
 			},
 		};
 
@@ -818,11 +846,11 @@ describe.skipIf(!built || !fixturePresent)(
 				meanLast: 1064.1,
 				meanChecksum: 305170.45696907304,
 				meanR2: 0,
-				meanRMSE: 5.007569404339831,
-				avgVeGain: 8.635857151837952,
+				meanRMSE: 5.018232701080747,
+				avgVeGain: 8.652680218768442,
 				avgActualGain: 0.8857142857141298,
-				closingError: 60.45100006286566,
-				lapClosingErrorChecksum: 60.45100006286566,
+				closingError: 60.568761531379096,
+				lapClosingErrorChecksum: 60.568761531379096,
 			},
 			"fit / absent": {
 				meanLength: 287,
@@ -831,11 +859,11 @@ describe.skipIf(!built || !fixturePresent)(
 				meanLast: 1064.1,
 				meanChecksum: 305170.45696907304,
 				meanR2: 0,
-				meanRMSE: 5.287997565780452,
-				avgVeGain: 9.118447594906716,
+				meanRMSE: 5.298499646765068,
+				avgVeGain: 9.135144317012191,
 				avgActualGain: 0.8857142857141298,
-				closingError: 63.82913316434701,
-				lapClosingErrorChecksum: 63.82913316434701,
+				closingError: 63.94601021908534,
+				lapClosingErrorChecksum: 63.94601021908534,
 			},
 			"constant / present": {
 				meanLength: 287,
@@ -844,11 +872,11 @@ describe.skipIf(!built || !fixturePresent)(
 				meanLast: 1064.1,
 				meanChecksum: 305170.45696907304,
 				meanR2: 0,
-				meanRMSE: 2.8554621876852972,
-				avgVeGain: 4.90796476465448,
+				meanRMSE: 2.8557419722848425,
+				avgVeGain: 4.930822944148953,
 				avgActualGain: 0.8857142857141298,
-				closingError: 34.35575335258136,
-				lapClosingErrorChecksum: 34.35575335258136,
+				closingError: 34.51576060904267,
+				lapClosingErrorChecksum: 34.51576060904267,
 			},
 			"constant / absent": {
 				meanLength: 287,
@@ -857,11 +885,11 @@ describe.skipIf(!built || !fixturePresent)(
 				meanLast: 1064.1,
 				meanChecksum: 305170.45696907304,
 				meanR2: 0,
-				meanRMSE: 3.152730954554147,
-				avgVeGain: 5.429462686581246,
+				meanRMSE: 3.153135212424271,
+				avgVeGain: 5.452163989316269,
 				avgActualGain: 0.8857142857141298,
-				closingError: 38.00623880606872,
-				lapClosingErrorChecksum: 38.00623880606872,
+				closingError: 38.16514792521389,
+				lapClosingErrorChecksum: 38.16514792521389,
 			},
 		};
 

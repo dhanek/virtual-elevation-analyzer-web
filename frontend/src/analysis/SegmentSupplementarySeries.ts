@@ -1,4 +1,5 @@
 import type { AnalysisParameters } from "../components/AnalysisParameters";
+import { stepMeanSpeed } from "./VirtualDistance";
 import { resolveAppliedWindSpeed } from "./WindHeightTransfer";
 
 export interface SegmentSupplementarySeries {
@@ -158,12 +159,11 @@ export function buildVirtualDistanceSeries(
 			continue;
 		}
 
-		const apparentSpeed =
-			Number.isFinite(apparentWindSpeedMps[i]) && apparentWindSpeedMps[i] > 0
-				? apparentWindSpeedMps[i]
-				: 0;
-		const groundSpeed =
-			Number.isFinite(velocity[i]) && velocity[i] > 0 ? velocity[i] : 0;
+		const apparentSpeed = stepMeanSpeed(
+			apparentWindSpeedMps[i - 1],
+			apparentWindSpeedMps[i],
+		);
+		const groundSpeed = stepMeanSpeed(velocity[i - 1], velocity[i]);
 
 		airKm[i] = airKm[i - 1] + (apparentSpeed * dt) / 1000;
 		groundKm[i] = groundKm[i - 1] + (groundSpeed * dt) / 1000;

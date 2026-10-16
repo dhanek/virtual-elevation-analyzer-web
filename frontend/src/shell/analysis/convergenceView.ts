@@ -144,9 +144,9 @@ function buildProfileBasis(
 		return null;
 	}
 
-	// Probe at the bounds centre, secant steps of a quarter-range: wide
-	// enough to average the sin∘atan flattening over the plotted plane
-	// instead of measuring its slope at one point.
+	// Probe at the bounds centre, secant steps of a quarter-range. The VE
+	// step is affine in (CdA, Crr), so the secants are the same wherever
+	// they are taken; a wide step keeps them clear of rounding.
 	const cda0 = 0.5 * (input.cdaMin + input.cdaMax);
 	const crr0 = 0.5 * (input.crrMin + input.crrMax);
 	const cdaStep = 0.25 * (input.cdaMax - input.cdaMin);

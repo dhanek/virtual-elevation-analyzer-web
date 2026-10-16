@@ -151,14 +151,13 @@ export const PROFILE_FLAT_REASON =
  * around a probe point, resampled onto the common grid.
  *
  * The linearisation is what makes a full CdA × Crr surface affordable. Each
- * sample's VE increment is `step · sin(atan(base − cda·aero − crr))`
- * (`GainKernel`, virtual_elevation.rs) — affine in (CdA, Crr) up to the
- * sin∘atan flattening, which is under ~1% at riding slopes. So three exact
+ * sample's VE increment is `step · (base − cda·aero − crr)`
+ * (`GainKernel`, virtual_elevation.rs) — affine in (CdA, Crr). So three
  * WASM profiles (the probe point and one step along each axis) give
- * `VE(d) ≈ p0(d) + ΔCdA·jc(d) + ΔCrr·jr(d)`, the whole spread surface
- * becomes one quadratic form, and any grid resolution evaluates in
- * microseconds. The SOLVER keeps exact profiles along its ridge; the map
- * accepts the ~1% secant error in exchange for showing the whole plane.
+ * `VE(d) = p0(d) + ΔCdA·jc(d) + ΔCrr·jr(d)` to rounding, the whole spread
+ * surface becomes one quadratic form, and any grid resolution evaluates in
+ * microseconds. The SOLVER still evaluates profiles along its ridge; the map
+ * shows the whole plane from the three.
  */
 export interface ProfileBasisSegment {
 	/** Exact VE profile at the probe point, resampled onto the grid. */
