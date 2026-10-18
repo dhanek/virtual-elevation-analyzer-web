@@ -598,6 +598,31 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       sessions is flagged; the 2026-08-14 lap 6 CdA lands near 0.284; the warning appears in the
       app.
 
+- [ ] **[S] The VE step assumes one second between samples; FIT files are not resampled.**
+      `VirtualElevationCalculator` sets `dt: 1.0` (`virtual_elevation.rs:231`) and every VE step
+      uses it: the acceleration `(v[i] − v[i−1]) / self.dt` (`:269`), the elevation step
+      `v̄ · self.dt · slope` (`:551`) and the `GainKernel` distance (`:700`). Virtual distance, in
+      the same file, already uses the real gap between timestamps (`:461`). CSV files are
+      interpolated to 1 Hz on load (`ActivityLoader.ts`, `interpolateAllData`); FIT files are
+      passed through as recorded.
+
+      *When it matters:* Garmin smart recording (samples every 1–8 s), and recording gaps such as
+      auto-pause — one of the velodrome sessions in the PR #30 check has pauses of 93 s and 109 s
+      on two laps, each currently counted as a single second. On a 1-second recording nothing
+      changes.
+
+      *Shape of the fix:* use `dt_i = t[i] − t[i−1]` per step. The kinetic-energy height stays
+      exact for any `dt_i` (`a·v̄·dt_i = Δ(v²)/2`); the power term becomes `P[i]·dt_i`, which
+      assumes `P[i]` is the mean over that interval. A gap beyond a threshold contributes nothing,
+      as virtual distance already does with its `dt < 10` check — decide whether VE uses the same
+      10 s. `calculate_virtual_slope_impl`, `build_virtual_elevation`, `GainKernel` and
+      `ve_gain_grid` must change together, or the grid stops matching the VE tab bit for bit.
+
+      *Done when:* a Rust test feeds the same synthetic ride at 1 Hz and thinned to irregular
+      2–5 s steps and gets the same VE gain within the thinning error; a recording gap adds no
+      phantom work; every existing golden test still passes unchanged on 1 Hz data.
+      *origin: follow-up from the PR #31 review, 2026-10-18*
+
 
 ---
 
