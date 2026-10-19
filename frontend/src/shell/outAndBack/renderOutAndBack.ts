@@ -71,6 +71,7 @@ import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { convergenceTabMarkup } from "../analysis/convergenceTab";
+import { repeatsTabMarkup } from "../analysis/repeatsView";
 import { calibrationTabMarkup } from "../ve/calibrationTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
@@ -79,6 +80,7 @@ import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { requestModeUpdate } from "../analysis/requestModeUpdate";
 import { applyVeStatus } from "../../state/veStatus";
 import { requestConvergenceRedraw } from "../analysis/convergenceView";
+import { requestRepeatsRedraw } from "../analysis/repeatsView";
 
 /**
  * Calculate VE for Out and Back sections and show stacked plot
@@ -507,6 +509,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 																: ""
 														}
                             <button class="ve-tab-button" data-tab="convergence">Convergence</button>
+                            <button class="ve-tab-button" data-tab="repeats">Repeats</button>
                             <button class="ve-tab-button" data-tab="calibration"${fitWindVisibilityAttrs(selectedWindSource)}>Calibration</button>
                         </div>
 
@@ -582,6 +585,7 @@ export function buildOutAndBackVeAnalysisTemplate(
 
                         ${outAndBackVdTabMarkup(showVirtualDistanceTab, selectedWindSource)}
                         ${convergenceTabMarkup()}
+                        ${repeatsTabMarkup()}
                         ${calibrationTabMarkup()}
                     </div>
                 </div>
@@ -726,6 +730,7 @@ export async function showOutAndBackVEPlot(
 		power: () => renderOutAndBackPowerPlot(profiles),
 		vd: () => renderOutAndBackVdPlot(profiles),
 		convergence: requestConvergenceRedraw,
+		repeats: requestRepeatsRedraw,
 		calibration: renderCalibrationTab,
 	});
 

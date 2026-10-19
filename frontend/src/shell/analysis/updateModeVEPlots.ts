@@ -76,6 +76,7 @@ import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js
 import {
 	buildAutoConvergeSegments,
 	buildConvergenceUpdateInput,
+	buildRepeatUnits,
 	prepareSegments,
 } from "./segmentPreparation";
 
@@ -471,6 +472,15 @@ export async function updateModeVEPlots(
 								: "analysis profile (no DEM loaded)",
 			}),
 		);
+	}
+
+	if (callbacks.renderRepeats && isTabActive("repeats-tab")) {
+		// Three VE probes per segment, then closed-form fits: cheap, but only
+		// worth running while someone is looking at the table.
+		await callbacks.renderRepeats({
+			units: buildRepeatUnits(prepared, params),
+			fixedCrr: crr,
+		});
 	}
 
 	// Published for Store Result. Empty means every segment ran on the

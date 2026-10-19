@@ -53,6 +53,7 @@ import {
 	resolveDisplayCrr,
 } from "../../analysis/unsetParameterFallbacks";
 import { convergenceTabMarkup } from "../analysis/convergenceTab";
+import { repeatsTabMarkup } from "../analysis/repeatsView";
 import { calibrationTabMarkup } from "./calibrationTab";
 import { elevationSmoothingToggleMarkup } from "../analysis/elevationProfileCycle";
 import { bindLapViewToggle, lapViewToggleMarkup } from "./lapViewToggle";
@@ -537,6 +538,7 @@ export async function showVirtualElevationAnalysisInline(
 																: ""
 														}
                             <button class="ve-tab-button" data-tab="convergence">Convergence</button>
+                            <button class="ve-tab-button" data-tab="repeats">Repeats</button>
                             <button class="ve-tab-button" data-tab="calibration"${fitWindVisibilityAttrs(initialWindSource)}>Calibration</button>
                         </div>
                         <div class="ve-tab-content ve-tab-content--active" id="ve-tab">
@@ -612,6 +614,7 @@ export async function showVirtualElevationAnalysisInline(
                             ${plotXAxisToggleMarkup()}
                         </div>
                         ${convergenceTabMarkup()}
+                        ${repeatsTabMarkup()}
                         ${calibrationTabMarkup()}
                     </div>
                 </div>

@@ -42,6 +42,10 @@ import {
 	renderConvergenceView,
 	requestConvergenceRedraw,
 } from "../analysis/convergenceView";
+import {
+	requestRepeatsRedraw,
+	renderRepeatsView,
+} from "../analysis/repeatsView";
 
 /**
  * D2 — the mean elevation profile, cached ACROSS updates.
@@ -264,6 +268,7 @@ export function createGpsLapUpdateCallbacks(
 				power: () => renderGpsLapPowerPlot(lapProfiles),
 				vd: () => renderGpsLapVdPlot(lapProfiles),
 				convergence: requestConvergenceRedraw,
+				repeats: requestRepeatsRedraw,
 				calibration: renderCalibrationTab,
 			});
 		},
@@ -281,6 +286,7 @@ export function createGpsLapUpdateCallbacks(
 		},
 
 		renderConvergence: renderConvergenceView,
+		renderRepeats: renderRepeatsView,
 
 		renderMetrics() {
 			// GPS-lap's metric spans and summary table are painted inside

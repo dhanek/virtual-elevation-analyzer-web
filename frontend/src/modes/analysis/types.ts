@@ -1,4 +1,5 @@
 import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
+import type { RepeatUnitInput } from "../../analysis/RepeatSpread";
 import type { ElevationDiffSource } from "../../analysis/ClosureTarget";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -123,6 +124,9 @@ export interface ModeSegment {
 	 * Set where the ordinal is still correct — in `getUpdateSegments` — and read
 	 * downstream. `mapTrimToSegments` spreads the segment, so it survives the
 	 * trim mapping.
+	 *
+	 * Out-and-back sets the SECTION number on both of its legs, which is what
+	 * pairs them into one repeat on the Repeats tab (`buildRepeatUnits`).
 	 */
 	itemNumber?: number;
 	/**
@@ -359,6 +363,20 @@ export interface ModeUpdateCallbacks {
 	 * renderer (`shell/analysis/convergenceView.ts`).
 	 */
 	renderConvergence(input: ConvergenceUpdateInput): Promise<void> | void;
+	/**
+	 * The Repeats tab (each lap fitted alone, and the spread across laps).
+	 * Gated on `isTabActive("repeats-tab")`; all three modes delegate to the
+	 * one shared renderer (`shell/analysis/repeatsView.ts`). Optional: the
+	 * headless surface has no tab to draw.
+	 */
+	renderRepeats?(input: RepeatsUpdateInput): Promise<void> | void;
+}
+
+/** Everything `renderRepeats` needs. */
+export interface RepeatsUpdateInput {
+	units: RepeatUnitInput[];
+	/** The slider Crr the CdA-only variant holds fixed. */
+	fixedCrr: number;
 }
 
 export interface AnalysisModeHandler {

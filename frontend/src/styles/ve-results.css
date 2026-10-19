@@ -700,6 +700,25 @@
 	margin-right: var(--space-sm);
 }
 
+/* Repeats tab (repeatsView.ts): the lap table reuses .ve-lap-summary. */
+.ve-repeats__row--summary {
+	font-weight: 600;
+}
+
+.ve-repeats__note {
+	color: var(--color-text-muted);
+	font-style: italic;
+	text-align: center;
+}
+
+.ve-repeats__notice {
+	margin-bottom: var(--space-sm);
+}
+
+.ve-repeats__pooled {
+	margin-top: var(--space-md);
+}
+
 /* Out-and-back closing-error summary (de-inlined from renderOutAndBack.ts).
    Initially hidden via the shared .hidden utility in the markup; no display
    declaration here, so .hidden wins unaided. Off-palette #f5f5f5 kept. */

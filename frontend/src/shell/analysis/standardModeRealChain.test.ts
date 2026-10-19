@@ -495,6 +495,7 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 			"power",
 			"vd",
 			"convergence",
+			"repeats",
 			"calibration",
 		]);
 
@@ -524,6 +525,7 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 				"power",
 				"vd",
 				"convergence",
+				"repeats",
 				"calibration",
 			]);
 			expect(activeTabId()).toBe("vd-tab");
@@ -551,7 +553,13 @@ describe("standard (None): the STITCHED panel's VD tab", () => {
 		// `.ve-tab-content--active` are different axes and neither implies the
 		// other, which is exactly how a blank panel happens.
 		expect(vdButtonHidden()).toBe(true);
-		expect(tabStrip()).toEqual(["ve", "wind", "power", "convergence"]);
+		expect(tabStrip()).toEqual([
+			"ve",
+			"wind",
+			"power",
+			"convergence",
+			"repeats",
+		]);
 		expect((document.getElementById("vd-tab") as HTMLElement).hidden).toBe(
 			true,
 		);
@@ -646,7 +654,13 @@ describe("standard (None): the STACKED overlay's VD tab", () => {
 		await selectWindSource("constant");
 
 		expect(vdButtonHidden()).toBe(true);
-		expect(tabStrip()).toEqual(["ve", "wind", "power", "convergence"]);
+		expect(tabStrip()).toEqual([
+			"ve",
+			"wind",
+			"power",
+			"convergence",
+			"repeats",
+		]);
 		expect(activeTabId()).toBe("ve-tab");
 		expect(overlay.ve).toHaveBeenCalled();
 		expect(missingTargets).toEqual([]);

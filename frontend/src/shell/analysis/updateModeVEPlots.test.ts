@@ -100,6 +100,7 @@ function spyCallbacks() {
 		renderPower: 0,
 		renderVd: 0,
 		renderConvergence: 0,
+		renderRepeats: 0,
 		renderMetrics: 0,
 	};
 	const callbacks: ModeUpdateCallbacks = {
@@ -127,6 +128,9 @@ function spyCallbacks() {
 		},
 		renderConvergence: () => {
 			calls.renderConvergence++;
+		},
+		renderRepeats: () => {
+			calls.renderRepeats++;
 		},
 		renderMetrics: () => {
 			calls.renderMetrics++;
@@ -229,6 +233,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		// callback is the most expensive compute in the app, and it must not
 		// run while its pane is closed.
 		expect(calls.renderConvergence).toBe(0);
+		expect(calls.renderRepeats).toBe(0);
 	});
 
 	it("renders each of wind/power/vd exactly once when the tabs are active", async () => {
@@ -247,6 +252,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		expect(calls.renderPower).toBe(1);
 		expect(calls.renderVd).toBe(1);
 		expect(calls.renderConvergence).toBe(1);
+		expect(calls.renderRepeats).toBe(1);
 	});
 });
 

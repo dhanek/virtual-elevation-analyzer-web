@@ -10,7 +10,8 @@
  *   1. the update pass itself (`calculate_virtual_elevation` per segment);
  *   2. the Convergence tab's closure-error grid (`ve_gain_grid` per segment);
  *   3. the auto-converge solve, which bisects `ve_gain` across ALL prepared
- *      segments before the pass's CdA/Crr are even final.
+ *      segments before the pass's CdA/Crr are even final;
+ *   4. the Repeats tab's per-lap fits (`buildRepeatUnits`).
  *
  * `createVeCalculator` takes `cda`/`crr`, but those only land in the WASM-side
  * `VEParameters` record — the physics reads the ARGUMENTS of
@@ -29,6 +30,7 @@ import {
 	resolveClosureTarget,
 	type ElevationDiffSource,
 } from "../../analysis/ClosureTarget";
+import type { RepeatUnitInput } from "../../analysis/RepeatSpread";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -491,6 +493,85 @@ export function buildAutoConvergeSegments(
 			profileGroup: p.segment.legDirection,
 		};
 	});
+}
+
+/**
+ * The prepared segments as REPEATS for the Repeats tab (`RepeatSpread.ts`):
+ * one per lap, and one per out-and-back SECTION with its two legs together —
+ * a leg alone is half a repeat, and its VE carries the terrain once where the
+ * pair carries it out and back. The probes speak SLIDER-value Crr like the
+ * auto-converge closures, and use the primary calculator only (under
+ * `compare` the second wind source is a comparison, not a repeat).
+ */
+export function buildRepeatUnits(
+	prepared: PreparedSegment[],
+	params: AnalysisParameters,
+): RepeatUnitInput[] {
+	const units: RepeatUnitInput[] = [];
+	const sections = new Map<number, RepeatUnitInput>();
+	for (const p of prepared) {
+		const repeatLeg = {
+			veProfile: (cda: number, crr: number) =>
+				veProfileWindow(p, cda, resolveAppliedCrr(params, crr)),
+			elevation: elevationWindow(p, params.velodrome),
+		};
+		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
+		if (section === undefined) {
+			units.push({
+				key: p.segment.key,
+				label: p.segment.label,
+				legs: [repeatLeg],
+			});
+			continue;
+		}
+		const existing = sections.get(section);
+		if (existing) {
+			existing.legs.push(repeatLeg);
+		} else {
+			const unit = {
+				key: `section-${section}`,
+				label: `Section ${section}`,
+				legs: [repeatLeg],
+			};
+			sections.set(section, unit);
+			units.push(unit);
+		}
+	}
+	return units;
+}
+
+/**
+ * The reference elevation over the same window `veProfileWindow` returns,
+ * rebased to 0 at its start — what the VE tab's RMSE compares against: the
+ * calculator's altitude, flat under velodrome. Null where that RMSE is not
+ * computed either (no usable altitude: empty, all NaN or all zero —
+ * `has_usable_altitude`), or where a NaN inside the window would poison it.
+ */
+function elevationWindow(
+	p: PreparedSegment,
+	velodrome: boolean | undefined,
+): Float64Array | null {
+	const altitude = p.slice.altitude;
+	if (
+		altitude.length === 0 ||
+		altitude.every((x) => Number.isNaN(x)) ||
+		altitude.every((x) => x === 0)
+	) {
+		return null;
+	}
+	const end = Math.min(p.trimEnd, p.slice.timestamps.length - 1);
+	const start = Math.min(p.trimStart, Math.max(0, end));
+	if (end >= altitude.length) {
+		return null;
+	}
+	const out = new Float64Array(Math.max(0, end - start + 1));
+	for (let i = 0; i < out.length; i++) {
+		out[i] = velodrome ? 0 : altitude[start + i] - altitude[start];
+		if (!Number.isFinite(out[i])) {
+			return null;
+		}
+	}
+	return out;
 }
 
 /**

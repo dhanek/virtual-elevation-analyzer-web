@@ -42,6 +42,10 @@ import {
 	renderConvergenceView,
 	requestConvergenceRedraw,
 } from "../analysis/convergenceView";
+import {
+	requestRepeatsRedraw,
+	renderRepeatsView,
+} from "../analysis/repeatsView";
 import { computeStandardAggregate } from "./standardAggregate";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
@@ -235,6 +239,7 @@ function createStandardUpdateCallbacks(
 			power: () => drawPower(profiles),
 			vd: () => drawVd(profiles),
 			convergence: requestConvergenceRedraw,
+			repeats: requestRepeatsRedraw,
 			calibration: renderCalibrationTab,
 		});
 	}
@@ -262,6 +267,7 @@ function createStandardUpdateCallbacks(
 		renderPower: drawPower,
 		renderVd: drawVd,
 		renderConvergence: renderConvergenceView,
+		renderRepeats: renderRepeatsView,
 
 		renderMetrics(aggregate) {
 			// STANDARD'S AVERAGING IS UNCHANGED (07-04 ruling 2). Pre-refactor the

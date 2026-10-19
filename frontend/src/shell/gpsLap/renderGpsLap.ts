@@ -71,6 +71,7 @@ import { saveGpsLapScreenshot } from "./gpsLapScreenshot";
 import { bindLapViewToggle, lapViewToggleMarkup } from "../ve/lapViewToggle";
 import { virtualDistanceHeaderMarkup } from "../ve/vdHeader";
 import { convergenceTabMarkup } from "../analysis/convergenceTab";
+import { repeatsTabMarkup } from "../analysis/repeatsView";
 import { calibrationTabMarkup } from "../ve/calibrationTab";
 import { airSpeedOffsetControlMarkup } from "../ve/airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "../ve/airSpeedCalibrationControl";
@@ -81,6 +82,7 @@ import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 import { requestConvergenceRedraw } from "../analysis/convergenceView";
+import { requestRepeatsRedraw } from "../analysis/repeatsView";
 
 /**
  * Select the GPS-detected laps and put the stacked panel on screen.
@@ -459,6 +461,7 @@ export async function showGpsLapVEPlot(
 		power: () => renderGpsLapPowerPlot(lapProfiles),
 		vd: () => renderGpsLapVdPlot(lapProfiles),
 		convergence: requestConvergenceRedraw,
+		repeats: requestRepeatsRedraw,
 		calibration: renderCalibrationTab,
 	});
 
@@ -785,6 +788,7 @@ export function buildGpsLapVeAnalysisTemplate(
 																: ""
 														}
                             <button class="ve-tab-button" data-tab="convergence">Convergence</button>
+                            <button class="ve-tab-button" data-tab="repeats">Repeats</button>
                             <button class="ve-tab-button" data-tab="calibration"${fitWindVisibilityAttrs(selectedWindSource)}>Calibration</button>
                         </div>
 
@@ -870,6 +874,7 @@ export function buildGpsLapVeAnalysisTemplate(
 														: ""
 												}
                         ${convergenceTabMarkup()}
+                        ${repeatsTabMarkup()}
                         ${calibrationTabMarkup()}
                     </div>
                 </div>

@@ -94,6 +94,7 @@ export const outAndBackMode: AnalysisModeHandler = {
 		return resolveActiveOutAndBackSections(appState).flatMap((section) => [
 			{
 				key: `s${section.sectionNumber}-out`,
+				itemNumber: section.sectionNumber,
 				label: `Section ${section.sectionNumber} outbound`,
 				legDirection: "outbound",
 				range: {
@@ -103,6 +104,7 @@ export const outAndBackMode: AnalysisModeHandler = {
 			},
 			{
 				key: `s${section.sectionNumber}-in`,
+				itemNumber: section.sectionNumber,
 				label: `Section ${section.sectionNumber} inbound`,
 				legDirection: "inbound",
 				range: {
