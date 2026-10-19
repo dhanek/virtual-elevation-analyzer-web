@@ -415,11 +415,8 @@ Items, in order:
       hill sessions it reproduces the offline result (between-session spread shrinks relative to
       raw CdA).
 
-- [ ] **J4 [M] Timing checks for power and GPS relative to speed.** The air-speed lag already
-      exists; power and position are assumed synchronous.
-      *Criteria:* an optional whole-second sweep (−3…+3 s) for power and for position, scored on
-      held-out laps/pairs, never on in-sample RMS; the result is reported, not applied silently
-      (the same rule as `baro_lag_seconds`); no fractional interpolated shifts.
+- [x] **J4 [M] Timing checks for power and GPS relative to speed** — done 2026-10-19, in the
+      Repeats tab; see *Done → Timing check in the Repeats tab*.
 
 - [x] **J5 [S] Systematic-error budget** — done 2026-10-19, in the Repeats tab; see *Done →
       Systematic-error budget in the Repeats tab*.
@@ -621,6 +618,34 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
+### Timing check in the Repeats tab (J4) — 2026-10-19
+
+**The item this closes:** *Bundle J → J4 [M] Timing checks for power and GPS relative to speed.*
+Original criteria: an optional whole-second sweep (−3…+3 s) for power and for position, scored on
+held-out laps/pairs, never on in-sample RMS; the result is reported, not applied silently (the
+same rule as `baro_lag_seconds`); no fractional interpolated shifts.
+
+**Commit:** `3ae969f` on `claude/sharp-jepsen-922674`, PR #34.
+
+**What it does.** A "Timing check" section at the foot of the Repeats tab, run with a button
+(fourteen extra preparations per pass, so only once asked for). Power, and GPS position —
+latitude/longitude and the elevation reference that follows them — are shifted by whole seconds
+−3 … +3 on the air-speed offset's convention (+s = channel late by s; edges repeat the edge
+value). A table gives held-out RMS per shift for each channel and the Crr power implies; bullets
+give the verdict and "Reported only — nothing is applied." The air-speed offset is unchanged.
+
+**How.** Each shift prepares the selection again (`buildTimingSweepInputs`) and scores it with
+`heldOutScore`: every lap/section predicted by the pooled free fit to the others. A shift counts
+as the optimum only if it beats 0 s by 5 mm pooled AND improves every held-out repeat — pooled
+RMS alone let one badly fitting loop lap carry the verdict. Ties go to 0 s; best on ±3 s reads
+"best at the sweep edge"; fewer than two repeats "not estimable"; a ride not sampled at 1 s is
+refused. Tested on a synthetic ride with a known 2 s power lag.
+
+**Checked in the running app** (reference ride, laps 10+12+16): out-and-back, power and position
+both in sync — a clean V around 0 s, power moving Crr by ≈0.0008 per second; Standard laps, power
+best at +1 s on every lap (7 cm); GPS laps, no clear optimum (best at the sweep edge). A slider
+move with the check on measured 51 ms.
+
 ### Convergence tab: minimum + 5 cm, and the ±1 % power shift (J1) — 2026-10-19
 
 **The item this closes:** *Bundle J → J1 [S] Relabel the Convergence tab's minimum + 5 cm
@@ -629,7 +654,7 @@ contour, and show the ±1 % power arrow.* Original criteria: the legend/tooltip 
 (refit at `efficiency × 0.99` and `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the
 reference ride in every mode that renders the tab.
 
-**Commit:** `fbecd02` on `claude/j1-convergence-labels`, stacked on PR #34.
+**Commit:** `fbecd02` on `claude/sharp-jepsen-922674`, PR #34 (first opened as #35, folded into #34).
 
 **What it does.** The band label on the plot reads "minimum + 5 cm / not a confidence interval",
 and the readout under it "Minimum + 5 cm (not a confidence interval)". Two purple triangles mark
