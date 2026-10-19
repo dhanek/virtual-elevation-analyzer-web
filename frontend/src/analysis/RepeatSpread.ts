@@ -47,6 +47,18 @@ export interface RepeatLeg {
 	 * null when the leg has no usable profile to fit against.
 	 */
 	elevation: Float64Array | null;
+	/**
+	 * Travelled distance over the window, rebased to 0 (same length as
+	 * `elevation`). Optional: only the reference-rise sensitivity reads it,
+	 * and without it the ramp is spread by sample instead.
+	 */
+	distance?: Float64Array;
+	/**
+	 * +1 for a lap or an outbound leg, −1 for an inbound leg: an error in the
+	 * reference's rise along the road shows up reversed when the road is
+	 * ridden back. Absent means +1.
+	 */
+	riseSign?: 1 | -1;
 }
 
 export interface RepeatUnitInput {
@@ -71,6 +83,14 @@ export interface RepeatUnitFit {
 	/** CdA-only fit at the fixed Crr (the comparison-testing variant). */
 	cdaAtFixedCrr: number;
 	rmsAtFixedCrr: number;
+	/**
+	 * Correlation of the free fit's CdA and Crr estimates, −a·f / √(a·a f·f):
+	 * how far this repeat's speed profile lets it tell drag from rolling
+	 * resistance at all. Depends on the design only, not on the residuals.
+	 */
+	correlation: number;
+	/** Why the free fit should not be trusted on its own; null when it can. */
+	unstable: string | null;
 }
 
 /** Mean and repeat-to-repeat SD of one estimate. */
@@ -95,6 +115,11 @@ export interface PooledFit {
 	/** Repeats the clustered SE is built from, and its df (G − 1). */
 	clusters: number;
 	df: number;
+	/**
+	 * Estimate ± t(0.975, df) × clustered SE; null with the clustered SE. A
+	 * rough range at low df: the SE itself rests on G repeats.
+	 */
+	range95: { cda: [number, number]; crr: [number, number] } | null;
 }
 
 export interface RepeatSpreadResult {
@@ -117,6 +142,86 @@ export const REPEAT_SPREAD_NONE_REASON =
 
 /** Below this relative determinant a repeat cannot separate CdA from Crr. */
 const SINGULAR_RELATIVE_DETERMINANT = 1e-10;
+
+/**
+ * |corr(CdA, Crr)| at or above this marks a repeat's free fit unstable.
+ *
+ * At |r| = 0.99 the variance of each estimate is inflated 1 / (1 − r²) ≈ 50×
+ * over what an uncorrelated design would give from the same residuals: the
+ * repeat has almost no speed variation to tell drag from rolling resistance,
+ * so noise slides the pair along the ridge. Measured on the reference ride
+ * (2026-10-19): the six single laps (Standard and GPS-lap mode) sat at
+ * |r| 0.993–1.000 and their free fits were erratic (CdA −0.25 to 0.69); the
+ * five out-and-back sections sat at 0.930–0.985 and theirs stayed within
+ * 0.30–0.41. Within one leg both losses grow with distance whatever the
+ * pacing; what separates them is a change in AIR speed relative to ground
+ * speed — the head- and tailwind legs of a pair.
+ */
+export const UNSTABLE_CORRELATION = 0.99;
+
+/**
+ * A free Crr this close to a bound (as a fraction of the bound range) counts
+ * as "at" the bound.
+ */
+const BOUND_MARGIN = 0.02;
+
+export interface RepeatSpreadOptions {
+	/** The slider bounds: a free fit at or beyond them is flagged. */
+	cdaBounds?: readonly [number, number];
+	crrBounds?: readonly [number, number];
+}
+
+/** Two-sided 97.5 % Student-t quantiles, df 1–30. */
+const T_975 = [
+	12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201,
+	2.179, 2.16, 2.145, 2.131, 2.12, 2.11, 2.101, 2.093, 2.086, 2.08, 2.074,
+	2.069, 2.064, 2.06, 2.056, 2.052, 2.048, 2.045, 2.042,
+];
+
+/**
+ * t(0.975, df): the table to df 30, then the first Cornish–Fisher term
+ * z + (z³ + z) / (4·df), within 0.002 of the exact value from there on.
+ */
+export function tQuantile975(df: number): number {
+	if (!(df >= 1)) {
+		return NaN;
+	}
+	if (df <= T_975.length) {
+		return T_975[Math.floor(df) - 1];
+	}
+	const z = 1.959964;
+	return z + (z * z * z + z) / (4 * df);
+}
+
+function outside(
+	value: number,
+	bounds: readonly [number, number] | undefined,
+): boolean {
+	if (!bounds) {
+		return false;
+	}
+	const margin = BOUND_MARGIN * (bounds[1] - bounds[0]);
+	return value <= bounds[0] + margin || value >= bounds[1] - margin;
+}
+
+function unstableReason(
+	cda: number,
+	crr: number,
+	correlation: number,
+	options: RepeatSpreadOptions,
+): string | null {
+	const reasons: string[] = [];
+	if (outside(crr, options.crrBounds)) {
+		reasons.push("Crr at or beyond its bounds");
+	}
+	if (outside(cda, options.cdaBounds)) {
+		reasons.push("CdA at or beyond its bounds");
+	}
+	if (Math.abs(correlation) >= UNSTABLE_CORRELATION) {
+		reasons.push(`CdA and Crr ${Math.abs(correlation).toFixed(3)} correlated`);
+	}
+	return reasons.length > 0 ? reasons.join("; ") : null;
+}
 
 /** b, a, f and the target over one leg's window (`y = b − h`). */
 interface LegParts {
@@ -183,13 +288,23 @@ function sumsOf(legs: readonly LegParts[], fixedCrr: number | null): Sums {
 function solve(
 	legs: readonly LegParts[],
 	fixedCrr: number | null,
-): { cda: number; crr: number; inverse: number[][] } | null {
+): {
+	cda: number;
+	crr: number;
+	inverse: number[][];
+	correlation: number;
+} | null {
 	const s = sumsOf(legs, fixedCrr);
 	if (fixedCrr !== null) {
 		if (!(s.aa > 0)) {
 			return null;
 		}
-		return { cda: s.ay / s.aa, crr: fixedCrr, inverse: [[1 / s.aa]] };
+		return {
+			cda: s.ay / s.aa,
+			crr: fixedCrr,
+			inverse: [[1 / s.aa]],
+			correlation: NaN,
+		};
 	}
 	const det = s.aa * s.ff - s.af * s.af;
 	if (!(det > SINGULAR_RELATIVE_DETERMINANT * s.aa * s.ff)) {
@@ -202,6 +317,7 @@ function solve(
 			[s.ff / det, -s.af / det],
 			[-s.af / det, s.aa / det],
 		],
+		correlation: -s.af / Math.sqrt(s.aa * s.ff),
 	};
 }
 
@@ -303,6 +419,11 @@ function pooledFit(
 		};
 	}
 
+	const t = tQuantile975(clusters - 1);
+	const range = (value: number, se: number): [number, number] => [
+		value - t * se,
+		value + t * se,
+	];
 	return {
 		cda,
 		crr,
@@ -311,6 +432,12 @@ function pooledFit(
 		clusteredSe,
 		clusters,
 		df: Math.max(0, clusters - 1),
+		range95: clusteredSe
+			? {
+					cda: range(cda, clusteredSe.cda),
+					crr: range(crr, clusteredSe.crr),
+				}
+			: null,
 	};
 }
 
@@ -321,6 +448,7 @@ function pooledFit(
 export function computeRepeatSpread(
 	units: readonly RepeatUnitInput[],
 	fixedCrr: number,
+	options: RepeatSpreadOptions = {},
 ): RepeatSpreadResult {
 	const fits: RepeatUnitFit[] = [];
 	const usable: LegParts[][] = [];
@@ -336,6 +464,8 @@ export function computeRepeatSpread(
 			rms: NaN,
 			cdaAtFixedCrr: NaN,
 			rmsAtFixedCrr: NaN,
+			correlation: NaN,
+			unstable: null,
 		};
 		if (parts.length === 0 || parts.some((p) => p === null)) {
 			fits.push(blank);
@@ -360,6 +490,10 @@ export function computeRepeatSpread(
 			rms: free ? Math.sqrt(ssrOf(legs, free.cda, free.crr) / samples) : NaN,
 			cdaAtFixedCrr: fixed.cda,
 			rmsAtFixedCrr: Math.sqrt(ssrOf(legs, fixed.cda, fixedCrr) / samples),
+			correlation: free ? free.correlation : NaN,
+			unstable: free
+				? unstableReason(free.cda, free.crr, free.correlation, options)
+				: null,
 		});
 	}
 
@@ -382,4 +516,72 @@ export function computeRepeatSpread(
 					? REPEAT_SPREAD_SINGLE_REASON
 					: null,
 	};
+}
+
+/** One sensitivity: the units refitted with a single assumed input moved. */
+export interface SensitivityInput {
+	label: string;
+	units: readonly RepeatUnitInput[];
+}
+
+export interface SensitivityRow {
+	label: string;
+	/** Pooled free fit, perturbed minus base; NaN where either is missing. */
+	dCda: number;
+	dCrr: number;
+	/** Pooled CdA at the fixed Crr, perturbed minus base. */
+	dCdaAtFixedCrr: number;
+}
+
+/**
+ * How far the POOLED fits move when one assumed input moves. Each row is a
+ * full refit of its own units; rows are never combined (TODO J5: these are
+ * sensitivities, not measured uncertainties, and they are not independent).
+ */
+export function computeSensitivities(
+	base: RepeatSpreadResult,
+	inputs: readonly SensitivityInput[],
+): SensitivityRow[] {
+	return inputs.map(({ label, units }) => {
+		const moved = computeRepeatSpread(units, base.fixedCrr);
+		const delta = (a: number | undefined, b: number | undefined) =>
+			a !== undefined && b !== undefined ? a - b : NaN;
+		return {
+			label,
+			dCda: delta(moved.pooled?.cda, base.pooled?.cda),
+			dCrr: delta(moved.pooled?.crr, base.pooled?.crr),
+			dCdaAtFixedCrr: delta(moved.pooledFixed?.cda, base.pooledFixed?.cda),
+		};
+	});
+}
+
+/**
+ * The units with every leg's reference profile tilted by `riseM` over the
+ * leg: a ramp from 0 at the window start to `riseM · riseSign` at its end,
+ * spread by distance (by sample without one) — a reference whose net rise
+ * is off by `riseM`, the DEM-rise sensitivity of TODO J5.
+ */
+export function tiltReference(
+	units: readonly RepeatUnitInput[],
+	riseM: number,
+): RepeatUnitInput[] {
+	return units.map((unit): RepeatUnitInput => ({
+		...unit,
+		legs: unit.legs.map((leg): RepeatLeg => {
+			const h = leg.elevation;
+			if (!h || h.length < 2) {
+				return leg;
+			}
+			const d = leg.distance;
+			const span = d && d.length === h.length ? d[d.length - 1] : NaN;
+			const byDistance = Number.isFinite(span) && span > 0;
+			const rise = riseM * (leg.riseSign ?? 1);
+			const tilted = new Float64Array(h.length);
+			for (let i = 0; i < h.length; i++) {
+				const fraction = byDistance ? d![i] / span : i / (h.length - 1);
+				tilted[i] = h[i] + rise * fraction;
+			}
+			return { ...leg, elevation: tilted };
+		}),
+	}));
 }

@@ -4,6 +4,10 @@ import {
 	repeatStat,
 	REPEAT_SPREAD_NONE_REASON,
 	REPEAT_SPREAD_SINGLE_REASON,
+	computeSensitivities,
+	tiltReference,
+	tQuantile975,
+	UNSTABLE_CORRELATION,
 	type RepeatLeg,
 	type RepeatUnitInput,
 } from "./RepeatSpread";
@@ -253,5 +257,159 @@ describe("computeRepeatSpread", () => {
 		expect(result.units[0].status).toBe("singular");
 		expect(result.units[0].cdaAtFixedCrr).toBeCloseTo(0.3, 9);
 		expect(result.free.cda.n).toBe(0);
+	});
+});
+
+describe("tQuantile975", () => {
+	test("table values and the large-df approximation", () => {
+		expect(tQuantile975(2)).toBe(4.303);
+		expect(tQuantile975(30)).toBe(2.042);
+		expect(tQuantile975(60)).toBeCloseTo(2.0003, 2);
+		expect(tQuantile975(0)).toBeNaN();
+	});
+});
+
+/**
+ * One leg into a headwind or with a tailwind: the air speed, and so the drag
+ * per metre, differs between the two legs of an out-and-back while rolling
+ * loss per metre does not — what lets a pair tell the two apart. (Speed
+ * variation within one leg alone barely does: both losses still grow with
+ * distance, and |r| stays near 1.)
+ */
+function pacedLeg(wind: number): RepeatLeg {
+	const n = 300;
+	const a = new Float64Array(n);
+	const f = new Float64Array(n);
+	for (let i = 1; i < n; i++) {
+		const v = 10 + 2 * Math.sin(i / 25);
+		a[i] = a[i - 1] + (1.2 * (v + wind) * (v + wind) * v) / (2 * 80 * 9.807);
+		f[i] = f[i - 1] + v;
+	}
+	return {
+		veProfile: (cda, crr) =>
+			Float64Array.from({ length: n }, (_, i) => -cda * a[i] - crr * f[i]),
+		elevation: Float64Array.from(
+			{ length: n },
+			(_, i) => -0.3 * a[i] - 0.004 * f[i] + 0.01 * Math.sin(i),
+		),
+	};
+}
+
+describe("instability flag", () => {
+	test("a repeat with almost no speed variation is flagged by its correlation", () => {
+		// Speed barely varies: a and f nearly proportional, |r| → 1.
+		const n = 300;
+		const a = Float64Array.from(
+			{ length: n },
+			(_, i) => i * (0.6 + 1e-3 * Math.sin(i / 13)),
+		);
+		const f = Float64Array.from({ length: n }, (_, i) => i * 10);
+		const nearFlat: RepeatLeg = {
+			veProfile: (cda, crr) =>
+				Float64Array.from({ length: n }, (_, i) => -cda * a[i] - crr * f[i]),
+			elevation: Float64Array.from(
+				{ length: n },
+				(_, i) => -0.3 * a[i] - 0.004 * f[i] + 0.05 * Math.sin(i / 20),
+			),
+		};
+		const result = computeRepeatSpread([unit("Lap 1", [nearFlat])], 0.004);
+		const fit = result.units[0];
+		expect(Math.abs(fit.correlation)).toBeGreaterThanOrEqual(
+			UNSTABLE_CORRELATION,
+		);
+		expect(fit.unstable).toMatch(/correlated/);
+		// The fixed-Crr column is still there to read instead.
+		expect(Number.isFinite(fit.cdaAtFixedCrr)).toBe(true);
+	});
+
+	test("a well-separated repeat is not flagged; one past the Crr bound is", () => {
+		const good = computeRepeatSpread(
+			[unit("Section 1", [pacedLeg(4), pacedLeg(-4)])],
+			0.004,
+			{
+				cdaBounds: [0.15, 0.5],
+				crrBounds: [0.0015, 0.03],
+			},
+		);
+		expect(Math.abs(good.units[0].correlation)).toBeLessThan(
+			UNSTABLE_CORRELATION,
+		);
+		expect(good.units[0].unstable).toBeNull();
+
+		const beyond = computeRepeatSpread(
+			[unit("Lap 1", [leg(300, 0, 0.3, 0.04)])],
+			0.004,
+			{
+				crrBounds: [0.0015, 0.03],
+			},
+		);
+		expect(beyond.units[0].unstable).toMatch(/Crr at or beyond its bounds/);
+	});
+});
+
+describe("95 % range", () => {
+	test("is the estimate ± t(0.975, G − 1) × the clustered SE", () => {
+		const units = [0, 1, 2, 3].map((j) =>
+			unit(`Lap ${j + 1}`, [leg(400, j * 5, 0.3, 0.004, randomWalk(j + 3))]),
+		);
+		const pooled = computeRepeatSpread(units, 0.004).pooled!;
+		const t = tQuantile975(3);
+		expect(pooled.range95!.cda[0]).toBeCloseTo(
+			pooled.cda - t * pooled.clusteredSe!.cda,
+			12,
+		);
+		expect(pooled.range95!.crr[1]).toBeCloseTo(
+			pooled.crr + t * pooled.clusteredSe!.crr,
+			12,
+		);
+	});
+
+	test("absent with one repeat", () => {
+		const pooled = computeRepeatSpread(
+			[unit("Lap 1", [leg(200, 0, 0.3, 0.004)])],
+			0.004,
+		).pooled!;
+		expect(pooled.range95).toBeNull();
+	});
+});
+
+describe("sensitivities", () => {
+	test("a reference rise ramps each leg by distance, reversed on the way back", () => {
+		const base = leg(100, 0, 0.3, 0.004);
+		const out = {
+			...base,
+			distance: Float64Array.from({ length: 100 }, (_, i) => i * i),
+		};
+		const back = { ...out, riseSign: -1 as const };
+		const [tilted] = tiltReference([unit("Section 1", [out, back])], 0.5);
+		const end = 99;
+		expect(tilted.legs[0].elevation![end] - out.elevation![end]).toBeCloseTo(
+			0.5,
+			12,
+		);
+		expect(tilted.legs[1].elevation![end] - back.elevation![end]).toBeCloseTo(
+			-0.5,
+			12,
+		);
+		// By distance, not by sample: halfway in samples is a quarter of the way.
+		expect(tilted.legs[0].elevation![50] - out.elevation![50]).toBeCloseTo(
+			(0.5 * 2500) / 9801,
+			12,
+		);
+	});
+
+	test("rows are refit minus base; an unchanged input moves nothing", () => {
+		const units = [
+			unit("Lap 1", [leg(300, 0, 0.3, 0.004)]),
+			unit("Lap 2", [leg(300, 4, 0.3, 0.004)]),
+		];
+		const base = computeRepeatSpread(units, 0.004);
+		const [same, raised] = computeSensitivities(base, [
+			{ label: "same", units },
+			{ label: "rise", units: tiltReference(units, 0.5) },
+		]);
+		expect(same.dCda).toBe(0);
+		expect(same.dCrr).toBe(0);
+		expect(Math.abs(raised.dCda) + Math.abs(raised.dCrr)).toBeGreaterThan(0);
 	});
 });

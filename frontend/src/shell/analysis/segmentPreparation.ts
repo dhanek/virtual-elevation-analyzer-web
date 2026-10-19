@@ -30,7 +30,12 @@ import {
 	resolveClosureTarget,
 	type ElevationDiffSource,
 } from "../../analysis/ClosureTarget";
-import type { RepeatUnitInput } from "../../analysis/RepeatSpread";
+import {
+	tiltReference,
+	type RepeatLeg,
+	type RepeatUnitInput,
+	type SensitivityInput,
+} from "../../analysis/RepeatSpread";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
@@ -103,6 +108,12 @@ export interface PrepareSegmentsArgs {
 	closure: ClosureResolution;
 	/** Per-lap weather; absent or null runs every segment on `params`. */
 	weather?: SegmentWeatherSource | null;
+	/**
+	 * Multiplies every air density the calculators get — the rho series, the
+	 * per-lap weather rho and `params.rho` alike. Only the Repeats tab's ±1 %
+	 * density sensitivity sets it; absent means 1 and changes nothing.
+	 */
+	rhoScale?: number;
 }
 
 export interface ClosureResolution {
@@ -188,7 +199,8 @@ export function prepareSegments(args: PrepareSegmentsArgs): PreparedSegment[] {
 		if (rhoArray) {
 			const spans = indices.every((i) => i >= 0 && i < rhoArray.length);
 			if (spans) {
-				segmentRho = indices.map((i) => rhoArray[i]);
+				const scale = args.rhoScale ?? 1;
+				segmentRho = indices.map((i) => rhoArray[i] * scale);
 			} else {
 				log.warn(
 					`Air density series (${rhoArray.length}) does not span ${segment.label}; using constant rho`,
@@ -215,9 +227,13 @@ export function prepareSegments(args: PrepareSegmentsArgs): PreparedSegment[] {
 					args.weather.calcRho,
 				)
 			: null;
-		const segmentParams = weatherOverride
+		const weatheredParams = weatherOverride
 			? { ...params, ...weatherOverride }
 			: params;
+		const segmentParams =
+			args.rhoScale === undefined
+				? weatheredParams
+				: { ...weatheredParams, rho: weatheredParams.rho * args.rhoScale };
 
 		try {
 			const supplementarySeries = buildSegmentSupplementarySeries({
@@ -510,10 +526,12 @@ export function buildRepeatUnits(
 	const units: RepeatUnitInput[] = [];
 	const sections = new Map<number, RepeatUnitInput>();
 	for (const p of prepared) {
-		const repeatLeg = {
+		const repeatLeg: RepeatLeg = {
 			veProfile: (cda: number, crr: number) =>
 				veProfileWindow(p, cda, resolveAppliedCrr(params, crr)),
 			elevation: elevationWindow(p, params.velodrome),
+			distance: profileDistanceWindow(p.slice.distance, p.trimStart, p.trimEnd),
+			riseSign: p.segment.legDirection === "inbound" ? -1 : 1,
 		};
 		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
 		if (section === undefined) {
@@ -538,6 +556,52 @@ export function buildRepeatUnits(
 		}
 	}
 	return units;
+}
+
+/**
+ * The Repeats tab's systematic-error budget (TODO J5): the same selection
+ * prepared again with ONE assumed input moved, through `prepareSegments` and
+ * `buildRepeatUnits` like the base pass — a real refit per row, not a
+ * derivative. Power moves through the drivetrain efficiency (it multiplies
+ * power and nothing else); density through `rhoScale`, so the per-lap
+ * weather rho and the rho series move with it. The reference rise needs no
+ * calculator: it tilts the profile the fit compares against.
+ */
+export function buildRepeatSensitivities(
+	args: PrepareSegmentsArgs,
+	units: RepeatUnitInput[],
+): SensitivityInput[] {
+	const base = args.params;
+	const refit = (
+		label: string,
+		patch: Partial<AnalysisParameters>,
+		rhoScale?: number,
+	): SensitivityInput => {
+		const params = { ...base, ...patch };
+		return {
+			label,
+			units: buildRepeatUnits(
+				prepareSegments({ ...args, params, rhoScale }),
+				params,
+			),
+		};
+	};
+	return [
+		refit("Power +1 %", { eta: base.eta * 1.01 }),
+		refit("Power −1 %", { eta: base.eta * 0.99 }),
+		refit("Mass +1 kg", { system_mass: base.system_mass + 1 }),
+		refit("Mass −1 kg", { system_mass: base.system_mass - 1 }),
+		refit("Air density +1 %", {}, 1.01),
+		refit("Air density −1 %", {}, 0.99),
+		{
+			label: "Elevation rise +0.5 m",
+			units: tiltReference(units, 0.5),
+		},
+		{
+			label: "Elevation rise −0.5 m",
+			units: tiltReference(units, -0.5),
+		},
+	];
 }
 
 /**

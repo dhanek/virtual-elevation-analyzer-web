@@ -13,6 +13,9 @@
  */
 import {
 	computeRepeatSpread,
+	computeSensitivities,
+	REPEAT_SPREAD_NONE_REASON,
+	type SensitivityRow,
 	type PooledFit,
 	type RepeatSpreadResult,
 	type RepeatStat,
@@ -77,7 +80,19 @@ function unitRow(fit: RepeatUnitFit): string {
 		fit.status === "no-profile"
 			? [cell("—"), cell("—")]
 			: [cell(fixed(fit.cdaAtFixedCrr, 4)), cell(fixed(fit.rmsAtFixedCrr, 3))];
-	return `<tr class="ve-lap-summary__row">${cell(escapeHtml(fit.label), LABEL)}${free.join("")}${fixedCrr.join("")}</tr>`;
+	// An unstable free fit keeps its numbers — hiding them would hide why
+	// the spread is wide — but is marked, and the note under the table
+	// points to the fixed-Crr column.
+	const label = fit.unstable
+		? `${escapeHtml(fit.label)} <span class="ve-repeats__unstable" title="Unstable: ${fit.unstable}">⚠</span>`
+		: escapeHtml(fit.label);
+	const rowClass = fit.unstable
+		? "ve-lap-summary__row ve-repeats__row--unstable"
+		: "ve-lap-summary__row";
+	const correlation = Number.isFinite(fit.correlation)
+		? ` title="corr(CdA, Crr) of this repeat's free fit: ${fit.correlation.toFixed(3)}"`
+		: "";
+	return `<tr class="${rowClass}"><td class="ve-lap-summary__cell${LABEL}"${correlation}>${label}</td>${free.join("")}${fixedCrr.join("")}</tr>`;
 }
 
 function sdText(stat: RepeatStat, digits: number): string {
@@ -89,7 +104,7 @@ function summaryRows(result: RepeatSpreadResult): string {
 	const mean = `<tr class="ve-lap-summary__row ve-repeats__row--summary">${cell("Mean", LABEL)}${cell(
 		fixed(free.cda.mean, 4),
 	)}${cell(fixed(free.crr.mean, 5))}${cell("")}${cell(fixed(fixedStats.cda.mean, 4))}${cell("")}</tr>`;
-	const sd = `<tr class="ve-lap-summary__row ve-repeats__row--summary">${cell("SD across repeats", LABEL)}${cell(
+	const sd = `<tr class="ve-lap-summary__row ve-repeats__row--summary">${cell("SD", LABEL)}${cell(
 		sdText(free.cda, 4),
 	)}${cell(sdText(free.crr, 5))}${cell("")}${cell(sdText(fixedStats.cda, 4))}${cell("")}</tr>`;
 	const n = `<tr class="ve-lap-summary__row ve-repeats__row--summary">${cell("n / df", LABEL)}${cell(
@@ -104,52 +119,78 @@ function seText(value: number, digits: number): string {
 	return Number.isFinite(value) ? `± ${value.toFixed(digits)}` : "—";
 }
 
-function pooledLine(
+function pooledRow(
 	label: string,
 	pooled: PooledFit,
 	parameter: "cda" | "crr",
 	digits: number,
 ): string {
-	const value = pooled[parameter];
 	const naive = pooled.naiveSe[parameter];
 	const clustered = pooled.clusteredSe?.[parameter] ?? NaN;
 	const ratio =
 		Number.isFinite(clustered) && naive > 0
-			? ` (${(clustered / naive).toFixed(1)}× the naive)`
-			: "";
-	const clusteredText = pooled.clusteredSe
-		? `${seText(clustered, digits)} clustered over ${pooled.clusters} repeats, df ${pooled.df}${ratio}`
-		: `clustered SE ${NOT_ESTIMABLE}`;
-	return `<div class="ve-metrics-compact__line">${label} ${value.toFixed(digits)}: ${seText(
-		naive,
-		digits,
-	)} naive · ${clusteredText}</div>`;
+			? `${(clustered / naive).toFixed(1)}×`
+			: "—";
+	const range = pooled.range95?.[parameter];
+	return `<tr class="ve-lap-summary__row">${cell(label, LABEL)}${cell(
+		pooled[parameter].toFixed(digits),
+	)}${cell(seText(naive, digits))}${cell(
+		pooled.clusteredSe ? seText(clustered, digits) : NOT_ESTIMABLE,
+	)}${cell(ratio)}${cell(
+		range ? `${range[0].toFixed(digits)} – ${range[1].toFixed(digits)}` : "—",
+	)}</tr>`;
 }
 
-function pooledBlock(result: RepeatSpreadResult): string {
-	const lines: string[] = [];
+function pooledBlock(result: RepeatSpreadResult, noun: string): string {
+	const rows: string[] = [];
 	if (result.pooled) {
-		lines.push(pooledLine("Pooled CdA", result.pooled, "cda", 4));
-		lines.push(pooledLine("Pooled Crr", result.pooled, "crr", 5));
+		rows.push(pooledRow("CdA", result.pooled, "cda", 4));
+		rows.push(pooledRow("Crr", result.pooled, "crr", 5));
 	}
 	if (result.pooledFixed) {
-		lines.push(
-			pooledLine(
-				`Pooled CdA at Crr ${result.fixedCrr.toFixed(4)}`,
+		rows.push(
+			pooledRow(
+				`CdA @ Crr ${result.fixedCrr.toFixed(4)}`,
 				result.pooledFixed,
 				"cda",
 				4,
 			),
 		);
 	}
-	if (lines.length === 0) {
+	if (rows.length === 0) {
 		return "";
 	}
-	return `<div class="ve-metrics-compact ve-repeats__pooled">
-    <div class="ve-metrics-compact__line"><strong>All repeats in one profile fit</strong></div>
-    ${lines.join("")}
-    <div class="ve-metrics-compact__line ve-metrics-compact__caveat">The naive SE assumes independent 1 s residuals, which VE residuals are not. The clustered SE counts each repeat as one unit; with few repeats (low df) it is itself a rough estimate.</div>
-</div>`;
+	const pooled = result.pooled ?? result.pooledFixed!;
+	const notes = pooled.clusteredSe
+		? [
+				"Naive SE: treats every second as independent — too optimistic.",
+				`Clustered SE: each ${noun} counts once (n ${pooled.clusters}, df ${pooled.df}).`,
+				...(pooled.df < 5
+					? [`95 % range: rough with only ${pooled.clusters} ${noun}s.`]
+					: []),
+			]
+		: [`Clustered SE needs 2 or more ${noun}s.`];
+	return `${heading(`All ${noun}s together`)}
+<table class="ve-lap-summary__table ve-repeats__table">
+    <thead>
+        <tr class="ve-lap-summary__row ve-lap-summary__row--head">
+            ${headCell("", LABEL)}${headCell("Estimate")}${headCell("Naive SE")}${headCell("Clustered SE")}${headCell("× naive")}${headCell("95 % range")}
+        </tr>
+    </thead>
+    <tbody>${rows.join("")}</tbody>
+</table>
+${bullets(notes)}`;
+}
+
+function heading(title: string, subtitle = ""): string {
+	return `<div class="ve-lap-summary__title ve-repeats__section-title"><strong>${title}</strong>${subtitle ? ` <span class="ve-repeats__sub">${subtitle}</span>` : ""}</div>`;
+}
+
+function bullets(items: readonly string[]): string {
+	if (items.length === 0) {
+		return "";
+	}
+	return `<ul class="ve-repeats__notes">${items.map((item) => `<li>${item}</li>`).join("")}</ul>`;
 }
 
 function escapeHtml(text: string): string {
@@ -159,23 +200,81 @@ function escapeHtml(text: string): string {
 		.replace(/>/g, "&gt;");
 }
 
-/** The tab's whole content for one result. */
-function repeatsMarkup(result: RepeatSpreadResult): string {
-	const crrLabel = `CdA @ Crr ${result.fixedCrr.toFixed(4)}`;
-	const notice = result.notEstimableReason
-		? `<div class="ve-metrics-compact__line ve-metrics-compact__caveat ve-repeats__notice">${result.notEstimableReason}</div>`
-		: "";
-	return `<div class="ve-lap-summary__title"><strong>Each repeat fitted alone</strong> — profile RMS fit per lap (out-and-back: per section, both legs). The spread across repeats is the honest error bar.</div>
-${notice}
+function signed(value: number, digits: number): string {
+	if (!Number.isFinite(value)) {
+		return "—";
+	}
+	const text = Math.abs(value).toFixed(digits);
+	// A delta that rounds to zero carries no sign: "−0.00000" reads as a
+	// direction the refit did not find.
+	if (Number(text) === 0) {
+		return text;
+	}
+	return value < 0 ? `−${text}` : `+${text}`;
+}
+
+function sensitivityBlock(
+	rows: readonly SensitivityRow[],
+	fixedCrr: number,
+): string {
+	if (rows.length === 0) {
+		return "";
+	}
+	const body = rows
+		.map(
+			(row) =>
+				`<tr class="ve-lap-summary__row">${cell(row.label, LABEL)}${cell(
+					signed(row.dCda, 4),
+				)}${cell(signed(row.dCrr, 5))}${cell(signed(row.dCdaAtFixedCrr, 4))}</tr>`,
+		)
+		.join("");
+	return `${heading("If an input is off", "— shift of the all-together fit")}
 <table class="ve-lap-summary__table ve-repeats__table">
     <thead>
         <tr class="ve-lap-summary__row ve-lap-summary__row--head">
-            ${headCell("Repeat", LABEL)}${headCell("CdA")}${headCell("Crr")}${headCell("RMS (m)")}${headCell(crrLabel)}${headCell("RMS (m)")}
+            ${headCell("Input", LABEL)}${headCell("ΔCdA")}${headCell("ΔCrr")}${headCell(`ΔCdA @ Crr ${fixedCrr.toFixed(4)}`)}
+        </tr>
+    </thead>
+    <tbody>${body}</tbody>
+</table>
+${bullets(["Sensitivities, not error bars — don't add them up."])}`;
+}
+
+/** The tab's whole content for one result. */
+function repeatsMarkup(
+	result: RepeatSpreadResult,
+	sensitivities: readonly SensitivityRow[],
+): string {
+	const crrLabel = `CdA @ Crr ${result.fixedCrr.toFixed(4)}`;
+	// Out-and-back repeats are sections; everything else is a lap.
+	const noun = result.units.some((unit) => unit.key.startsWith("section-"))
+		? "section"
+		: "lap";
+	const notes: string[] = [];
+	if (result.notEstimableReason === REPEAT_SPREAD_NONE_REASON) {
+		notes.push("No elevation profile to fit against.");
+	} else if (result.notEstimableReason) {
+		notes.push(`One ${noun}: no spread to measure — select 2 or more.`);
+	} else {
+		notes.push(`SD across ${noun}s = the honest error bar.`);
+	}
+	if (result.units.some((fit) => fit.unstable)) {
+		notes.push(
+			`⚠ = this ${noun} can't separate CdA from Crr (hover for why). Use its CdA @ Crr.`,
+		);
+	}
+	return `${heading(`Each ${noun} on its own`)}
+<table class="ve-lap-summary__table ve-repeats__table">
+    <thead>
+        <tr class="ve-lap-summary__row ve-lap-summary__row--head">
+            ${headCell(noun === "section" ? "Section" : "Lap", LABEL)}${headCell("CdA")}${headCell("Crr")}${headCell("RMS (m)")}${headCell(crrLabel)}${headCell("RMS (m)")}
         </tr>
     </thead>
     <tbody>${result.units.map(unitRow).join("")}${summaryRows(result)}</tbody>
 </table>
-${pooledBlock(result)}`;
+${bullets(notes)}
+${pooledBlock(result, noun)}
+${sensitivityBlock(sensitivities, result.fixedCrr)}`;
 }
 
 export function renderRepeatsView(input: RepeatsUpdateInput): void {
@@ -186,7 +285,14 @@ export function renderRepeatsView(input: RepeatsUpdateInput): void {
 	if (!container) {
 		return;
 	}
+	const result = computeRepeatSpread(input.units, input.fixedCrr, {
+		cdaBounds: input.cdaBounds,
+		crrBounds: input.crrBounds,
+	});
 	container.innerHTML = repeatsMarkup(
-		computeRepeatSpread(input.units, input.fixedCrr),
+		result,
+		result.pooled || result.pooledFixed
+			? computeSensitivities(result, input.sensitivities)
+			: [],
 	);
 }

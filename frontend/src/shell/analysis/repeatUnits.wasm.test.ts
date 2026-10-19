@@ -11,11 +11,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { initSync } from "@wasm/virtual_elevation_analyzer.js";
-import { computeRepeatSpread } from "../../analysis/RepeatSpread";
+import {
+	computeRepeatSpread,
+	computeSensitivities,
+} from "../../analysis/RepeatSpread";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { ModeSegment } from "../../modes/analysis/types";
-import { buildRepeatUnits, prepareSegments } from "./segmentPreparation";
+import {
+	buildRepeatSensitivities,
+	buildRepeatUnits,
+	prepareSegments,
+} from "./segmentPreparation";
 
 const WASM_PATH = fileURLToPath(
 	new URL("../../../pkg/virtual_elevation_analyzer_bg.wasm", import.meta.url),
@@ -67,9 +74,9 @@ const PARAMS = {
 	ambient_temp_c: 8,
 } as AnalysisParameters;
 
-function prepare(segments: ModeSegment[]) {
+function prepareArgs(segments: ModeSegment[]) {
 	const normalized = ride();
-	return prepareSegments({
+	return {
 		segments,
 		normalized: normalized as any,
 		altitude: normalized.altitude,
@@ -83,12 +90,16 @@ function prepare(segments: ModeSegment[]) {
 		cda: 0.3,
 		appliedCrr: resolveAppliedCrr(PARAMS, 0.005),
 		closure: {
-			source: "manual",
+			source: "manual" as const,
 			demAltitude: null,
 			baroAltitude: null,
 			manualDiffMetres: 0,
 		},
-	});
+	};
+}
+
+function prepare(segments: ModeSegment[]) {
+	return prepareSegments(prepareArgs(segments));
 }
 
 const LAPS: ModeSegment[] = [0, 1, 2, 3].map((lap) => ({
@@ -189,5 +200,26 @@ describe.skipIf(!built)("Repeats tab fits on the real calculator", () => {
 		expect(result.units[0].status).toBe("ok");
 		expect(result.free.cda.sd).toBeNull();
 		expect(result.notEstimableReason).toMatch(/not estimable/);
+	});
+
+	it("sensitivities are real refits: +1 % density is exactly CdA / 1.01", () => {
+		const args = prepareArgs(LAPS);
+		const units = buildRepeatUnits(prepareSegments(args), PARAMS);
+		const base = computeRepeatSpread(units, 0.005);
+		const rows = computeSensitivities(
+			base,
+			buildRepeatSensitivities(args, units),
+		);
+		const byLabel = new Map(rows.map((row) => [row.label, row]));
+		const density = byLabel.get("Air density +1 %")!;
+		// CdA enters only as CdA·ρ, so the refit must land on CdA / 1.01.
+		expect(density.dCdaAtFixedCrr).toBeCloseTo(
+			base.pooledFixed!.cda / 1.01 - base.pooledFixed!.cda,
+			9,
+		);
+		expect(density.dCrr).toBeCloseTo(0, 9);
+		// More power at the wheel needs more resistance to explain it.
+		expect(byLabel.get("Power +1 %")!.dCdaAtFixedCrr).toBeGreaterThan(0);
+		expect(rows).toHaveLength(8);
 	});
 });

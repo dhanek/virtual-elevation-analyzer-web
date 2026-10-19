@@ -23,6 +23,12 @@ function leg(seed: number, cda: number, crr: number): RepeatLeg {
 	};
 }
 
+const EXTRA = {
+	cdaBounds: [0.15, 0.5] as [number, number],
+	crrBounds: [0.0015, 0.03] as [number, number],
+	sensitivities: [],
+};
+
 const text = () => document.getElementById("repeats-tab")!.textContent ?? "";
 
 beforeEach(() => {
@@ -38,16 +44,29 @@ describe("renderRepeatsView", () => {
 				legs: [leg(j, cda, 0.004)],
 			})),
 			fixedCrr: 0.004,
+			...EXTRA,
 		});
-		const rows = document.querySelectorAll("#repeats-tab tbody tr");
+		const [lapTable, pooledTable] =
+			document.querySelectorAll("#repeats-tab table");
+		const rows = lapTable.querySelectorAll("tbody tr");
 		// Three laps, then mean, SD and n / df.
 		expect(rows).toHaveLength(6);
 		expect(text()).toContain("Lap 3");
 		expect(text()).toContain("CdA @ Crr 0.0040");
-		expect(text()).toContain("SD across repeats");
+		expect(rows[4].querySelector("td")!.textContent).toBe("SD");
 		expect(rows[5].textContent).toContain("3 / 2");
-		expect(text()).toContain("naive");
-		expect(text()).toContain("clustered over 3 repeats, df 2");
+		// Pooled: free CdA, free Crr, CdA at fixed Crr — each with both SEs
+		// and a 95 % range.
+		const pooledRows = pooledTable.querySelectorAll("tbody tr");
+		expect(pooledRows).toHaveLength(3);
+		for (const row of pooledRows) {
+			const cells = [...row.querySelectorAll("td")].map((c) => c.textContent);
+			expect(cells[2]).toMatch(/^± /);
+			expect(cells[3]).toMatch(/^± /);
+			expect(cells[5]).toMatch(/ – /);
+		}
+		expect(text()).toContain("each lap counts once (n 3, df 2)");
+		expect(text()).toContain("rough with only 3 laps");
 		expect(text()).not.toContain("not estimable");
 	});
 
@@ -55,22 +74,70 @@ describe("renderRepeatsView", () => {
 		renderRepeatsView({
 			units: [{ key: "lap-1", label: "Lap 1", legs: [leg(0, 0.3, 0.004)] }],
 			fixedCrr: 0.004,
+			...EXTRA,
 		});
 		const sdRow = [...document.querySelectorAll("#repeats-tab tbody tr")].find(
-			(row) => row.textContent?.includes("SD across repeats"),
+			(row) => row.querySelector("td")?.textContent === "SD",
 		)!;
 		expect(sdRow.textContent).toContain("not estimable");
 		expect(sdRow.textContent).not.toMatch(/0\.0000/);
-		expect(text()).toContain("Repeat spread not estimable");
-		expect(text()).toContain("clustered SE not estimable");
+		expect(text()).toContain("One lap: no spread to measure");
+		expect(text()).toContain("Clustered SE needs 2 or more laps.");
+		const pooledRow = document
+			.querySelectorAll("#repeats-tab table")[1]
+			.querySelector("tbody tr")!;
+		expect(pooledRow.textContent).toContain("not estimable");
 	});
 
 	it("escapes the repeat label", () => {
 		renderRepeatsView({
 			units: [{ key: "x", label: "<b>Lap</b>", legs: [leg(0, 0.3, 0.004)] }],
 			fixedCrr: 0.004,
+			...EXTRA,
 		});
 		expect(document.querySelector("#repeats-tab b")).toBeNull();
 		expect(text()).toContain("<b>Lap</b>");
+	});
+
+	it("an unstable repeat is marked and pointed at the fixed-Crr column", () => {
+		// A free Crr beyond the Crr bound marks the row.
+		renderRepeatsView({
+			units: [
+				{ key: "lap-1", label: "Lap 1", legs: [leg(0, 0.3, 0.04)] },
+				{ key: "lap-2", label: "Lap 2", legs: [leg(1, 0.3, 0.004)] },
+			],
+			fixedCrr: 0.004,
+			...EXTRA,
+		});
+		const rows = document
+			.querySelectorAll("#repeats-tab table")[0]
+			.querySelectorAll("tbody tr");
+		expect(rows[0].textContent).toContain("⚠");
+		expect(text()).toContain("can't separate CdA from Crr");
+		expect(text()).toContain("Use its CdA @ Crr");
+	});
+
+	it("sensitivities are signed rows, labelled, never combined", () => {
+		const units = [0.29, 0.3].map((cda, j) => ({
+			key: `lap-${j + 1}`,
+			label: `Lap ${j + 1}`,
+			legs: [leg(j, cda, 0.004)],
+		}));
+		renderRepeatsView({
+			units,
+			fixedCrr: 0.004,
+			...EXTRA,
+			sensitivities: [{ label: "Unchanged", units }],
+		});
+		expect(text()).toContain("If an input is off");
+		expect(text()).toContain(
+			"Sensitivities, not error bars — don't add them up.",
+		);
+		const sensitivityRow = document
+			.querySelectorAll("#repeats-tab table")[2]
+			.querySelector("tbody tr")!;
+		expect(sensitivityRow.textContent).toContain("Unchanged");
+		expect(sensitivityRow.textContent).toContain("0.0000");
+		expect(sensitivityRow.textContent).not.toMatch(/[+−]0\.0000/);
 	});
 });

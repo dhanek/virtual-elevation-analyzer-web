@@ -1,5 +1,8 @@
 import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
-import type { RepeatUnitInput } from "../../analysis/RepeatSpread";
+import type {
+	RepeatUnitInput,
+	SensitivityInput,
+} from "../../analysis/RepeatSpread";
 import type { ElevationDiffSource } from "../../analysis/ClosureTarget";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -377,6 +380,11 @@ export interface RepeatsUpdateInput {
 	units: RepeatUnitInput[];
 	/** The slider Crr the CdA-only variant holds fixed. */
 	fixedCrr: number;
+	/** Slider bounds; a free per-repeat fit at or beyond them is flagged. */
+	cdaBounds: [number, number];
+	crrBounds: [number, number];
+	/** One refit per assumed-input change (TODO J5). */
+	sensitivities: SensitivityInput[];
 }
 
 export interface AnalysisModeHandler {

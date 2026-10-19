@@ -711,12 +711,32 @@
 	text-align: center;
 }
 
-.ve-repeats__notice {
-	margin-bottom: var(--space-sm);
+
+.ve-repeats__unstable {
+	margin-left: var(--space-sm);
+	color: var(--color-text-secondary);
+	font-size: 0.8em;
+	white-space: nowrap;
 }
 
-.ve-repeats__pooled {
-	margin-top: var(--space-md);
+.ve-repeats__row--unstable .ve-lap-summary__cell:nth-child(-n + 4):not(:first-child) {
+	color: var(--color-text-muted);
+}
+
+.ve-repeats__sub {
+	color: var(--color-text-muted);
+	font-weight: 400;
+}
+
+.ve-repeats__notes {
+	margin: var(--space-xs) 0 0;
+	padding-left: 1.2em;
+	font-size: 0.85rem;
+	color: var(--color-text-secondary);
+}
+
+.ve-repeats__section-title {
+	margin-top: var(--space-lg);
 }
 
 /* Out-and-back closing-error summary (de-inlined from renderOutAndBack.ts).
