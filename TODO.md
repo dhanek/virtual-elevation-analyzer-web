@@ -374,7 +374,7 @@ comments re-verified at the ported tip.
 ## Bundle J · Honest uncertainty
 
 *Effort: S–L per item. Why together: every item changes what the app claims about how well CdA and
-Crr are known, and they share the Convergence tab and the results view. J1 is cheap and fixes a
+Crr are known, and they share the Convergence tab and the results view. J1 (done) is cheap and fixes a
 misleading label on its own; J2 (done) is the foundation the others are judged against.*
 
 **Origin:** offline analysis of the VE-testing discussion (repeats vs RMSE), 2026-09-26/27, on three
@@ -400,12 +400,9 @@ sessions. Scripts and numbers live in the gitignored `vw-demo/analysis/aerosenso
 
 Items, in order:
 
-- [ ] **J1 [S] Relabel the Convergence tab's minimum + 5 cm contour, and show the ±1 % power
-      arrow.** The contour reads as an uncertainty region; it is a fit-tolerance band.
-      *Criteria:* the legend/tooltip says "minimum + 5 cm — not a confidence interval"; the plot
-      shows where the optimum moves for power −1 % / +1 % (refit at `efficiency × 0.99` and
-      `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the reference ride in every mode
-      that renders the tab.
+- [x] **J1 [S] Relabel the Convergence tab's minimum + 5 cm contour, and show the ±1 % power
+      arrow** — done 2026-10-19, see *Done → Convergence tab: minimum + 5 cm, and the ±1 % power
+      shift*.
 
 - [x] **J2 [M] Repeat-based spread** — done 2026-10-19, see *Done → Repeats tab: each lap
       fitted alone*.
@@ -623,6 +620,33 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Convergence tab: minimum + 5 cm, and the ±1 % power shift (J1) — 2026-10-19
+
+**The item this closes:** *Bundle J → J1 [S] Relabel the Convergence tab's minimum + 5 cm
+contour, and show the ±1 % power arrow.* Original criteria: the legend/tooltip says "minimum +
+5 cm — not a confidence interval"; the plot shows where the optimum moves for power −1 % / +1 %
+(refit at `efficiency × 0.99` and `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the
+reference ride in every mode that renders the tab.
+
+**Commit:** `fbecd02` on `claude/j1-convergence-labels`, stacked on PR #34.
+
+**What it does.** The band label on the plot reads "minimum + 5 cm / not a confidence interval",
+and the readout under it "Minimum + 5 cm (not a confidence interval)". Two purple triangles mark
+the optimum at power −1 % / +1 %, joined by a dashed line through the best fit; their hover and a
+second readout line give ΔCdA / ΔCrr. When the optimum sits on the grid edge both say the shift is
+clipped by the bounds. No optimum (flat ridge), no markers.
+
+**How.** The selection is prepared again at efficiency × 0.99 / × 1.01 (`prepareWithEtaScale`,
+lazy, only on a gains-cache miss). Power enters the VE step only through η·P, so each segment's
+closure gain moves by one constant at every (CdA, Crr): the cached grids are re-pooled against
+`target − δ`, and the profile surface's probe profile moves by the per-sample difference. A
+real-WASM test checks base grid + δ against a grid recomputed at × 1.01 to 1e-9.
+
+**Checked in the running app** (reference ride, laps 10+12+16): out-and-back, closure and profile
+surfaces — optimum on the Crr floor (0.0015), power ±1 % moves CdA ±0.0043 and Crr not at all,
+flagged as clipped; GPS laps — flat ridge, no optimum, no markers; Standard — optimum on the CdA
+floor, shifts lopsided and flagged as clipped.
 
 ### Systematic-error budget in the Repeats tab (J5) — 2026-10-19
 
