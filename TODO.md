@@ -424,11 +424,8 @@ Items, in order:
       held-out laps/pairs, never on in-sample RMS; the result is reported, not applied silently
       (the same rule as `baro_lag_seconds`); no fractional interpolated shifts.
 
-- [ ] **J5 [S] Systematic-error budget in the results view.** Next to the statistical spread,
-      show what ±1 % power, ±1 kg mass, ±0.5 m DEM rise and ±1 % air density do to CdA/Crr
-      (one refit each).
-      *Criteria:* labelled as sensitivities, not measured uncertainties; each row is a real refit
-      through the same pipeline; the header never combines them into a single "±".
+- [x] **J5 [S] Systematic-error budget** — done 2026-10-19, in the Repeats tab; see *Done →
+      Systematic-error budget in the Repeats tab*.
 
 - [ ] **J6 [L] Kalman error-model fit as an "honest uncertainty" step (Rust).** Per-leg random
       walk + shared terrain state (AR(1), correlation length chosen by likelihood) + jump
@@ -627,6 +624,34 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
+### Systematic-error budget in the Repeats tab (J5) — 2026-10-19
+
+**The item this closes:** *Bundle J → J5 [S] Systematic-error budget in the results view.*
+Original wording: next to the statistical spread, show what ±1 % power, ±1 kg mass, ±0.5 m DEM
+rise and ±1 % air density do to CdA/Crr (one refit each). *Criteria:* labelled as
+sensitivities, not measured uncertainties; each row is a real refit through the same pipeline;
+the header never combines them into a single "±".
+
+**Commit:** `225aa38` on `claude/sharp-jepsen-922674`, PR #34.
+
+**What it does.** Under the pooled fit, a "Sensitivities — not measured uncertainties" table:
+ΔCdA, ΔCrr and ΔCdA at the slider Crr of the POOLED fit for power ±1 % (efficiency × 1.01 /
+0.99), mass ±1 kg, air density ±1 % and reference rise ±0.5 m per leg. Each row is signed and
+stands alone; nothing sums them.
+
+**How.** Power, mass and density rows rerun `prepareSegments` + `buildRepeatUnits` with one input
+moved (`buildRepeatSensitivities`) — new calculators, the same closed-form fit. Density moves
+through a `rhoScale` on `prepareSegments` so the rho series, the per-lap weather rho and
+`params.rho` all move together. The rise row tilts each leg's reference by a ramp to ±0.5 m over
+its distance, reversed on an inbound leg (`tiltReference`); in GPS-lap mode, where a lap closes
+at 0 m, it reads as a reference profile tilted by 0.5 m. Computed only while the tab is open; a
+slider move with the tab open measured 37 ms against 35 ms on the VE tab.
+
+**Checked in the running app** (reference ride, out-and-back, 5 sections): power +1 % moved Crr
++0.00061 and CdA −0.0030, matching the offline per-1 % figures (Crr ±0.0006, CdA ∓0.005);
+density +1 % moved CdA by exactly −1 % (tested as CdA / 1.01 to 1e-9 in
+`repeatUnits.wasm.test.ts`) and Crr by 0.
+
 ### Repeats tab: each lap fitted alone (J2) — 2026-10-19
 
 **The item this closes:** *Bundle J → J2 [M] Repeat-based spread: a standalone fit per lap (or
@@ -660,6 +685,16 @@ column. Free per-lap fits are unstable on this ride (one GPS lap gave CdA −0.2
 negative Crr) while CdA at fixed Crr held within an SD of 0.008–0.05 — the reason the fixed-Crr
 variant exists. With 3–5 repeats the clustered SE ranged 0.5–7× the naive one; at that df it is
 itself rough, and the tab says so.
+
+**Follow-ups in the same PR (2026-10-19, `225aa38`).** *Unstable flag:* a repeat's free fit is marked
+"⚠ unstable" when its free Crr or CdA sits at or beyond the slider bounds (within 2 % of the
+range) or when |corr(CdA, Crr)| of its fit is ≥ 0.99 (`UNSTABLE_CORRELATION`), with a note that
+this is expected and points to the fixed-Crr column. On the reference ride the six single laps sat
+at |r| 0.993–1.000 with erratic free fits and the five out-and-back sections at 0.930–0.985 with
+steady ones: within one leg both losses grow with distance whatever the pacing, and it is the
+head-/tailwind change between the legs of a pair that separates them. *95 % range:* the pooled
+table shows estimate ± t(0.975, G − 1) × clustered SE next to the naive SE, marked rough below
+df 5.
 
 ### Velodrome auto-calibration — 2026-09-15
 
