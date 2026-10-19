@@ -163,7 +163,11 @@ describe("renderRepeatsView", () => {
 					shift,
 					units,
 				}));
-				return { power: rows, position: rows };
+				return {
+					power: rows,
+					position: rows,
+					positionLabel: "Elevation reference",
+				};
 			},
 		};
 		renderRepeatsView(input);
@@ -176,6 +180,18 @@ describe("renderRepeatsView", () => {
 		expect(built).toBe(1);
 		expect(text()).toContain("Power: in sync — 0 s scores best.");
 		expect(text()).toContain("Reported only — nothing is applied.");
+		// The position row is named after what moved, everywhere it appears.
+		expect(text()).toContain(
+			"— is power or elevation reference out of step with speed?",
+		);
+		const headers = [
+			...document
+				.querySelectorAll("#repeats-tab table")[2]
+				.querySelectorAll("thead th"),
+		].map((th) => th.textContent);
+		expect(headers).toContain("Elevation reference: held-out RMS (m)");
+		expect(text()).toContain("Elevation reference: in sync — 0 s scores best.");
+		expect(text()).not.toContain("GPS");
 		// Laps, pooled, timing (no sensitivities passed here).
 		expect(document.querySelectorAll("#repeats-tab table")).toHaveLength(3);
 	});

@@ -15,6 +15,7 @@ import {
 	computeRepeatSpread,
 	computeSensitivities,
 } from "../../analysis/RepeatSpread";
+import { computeTimingSweep, TIMING_SHIFTS } from "../../analysis/TimingSweep";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { ModeSegment } from "../../modes/analysis/types";
@@ -22,6 +23,7 @@ import {
 	buildConvergenceUpdateInput,
 	buildRepeatSensitivities,
 	buildRepeatUnits,
+	buildTimingSweepInputs,
 	prepareSegments,
 } from "./segmentPreparation";
 
@@ -222,6 +224,69 @@ describe.skipIf(!built)("Repeats tab fits on the real calculator", () => {
 		// More power at the wheel needs more resistance to explain it.
 		expect(byLabel.get("Power +1 %")!.dCdaAtFixedCrr).toBeGreaterThan(0);
 		expect(rows).toHaveLength(8);
+	});
+
+	it("timing check: an air-speed ride's position row is the elevation reference, and its sweep finds the late baro", () => {
+		const base = prepareArgs(LAPS);
+		const airSpeed = {
+			...base,
+			// A usable air-speed series: wind never reaches the kernel via GPS.
+			wind: {
+				windSpeed: (base.normalized.velocity as number[]).map((v) => v + 2),
+				selectedWindSource: "fit",
+			} as any,
+			params: { ...PARAMS, wind_speed: 0 },
+		};
+		// The road this ride really climbed: its own VE at CdA 0.3, Crr 0.005,
+		// over one whole-ride segment, so a lag is the only thing to find.
+		const [whole] = prepareSegments({
+			...airSpeed,
+			segments: [
+				{
+					key: "all",
+					label: "All",
+					itemNumber: 1,
+					range: { startIdx: 0, endIdx: COUNT - 1 },
+				},
+			],
+		});
+		const ve = whole.calculator.calculate_virtual_elevation(
+			0.3,
+			resolveAppliedCrr(PARAMS, 0.005),
+			0,
+			COUNT - 1,
+		);
+		const road = Array.from(ve.virtual_elevation, (h) => 100 + h);
+		ve.free();
+		const inputs = buildTimingSweepInputs(
+			{
+				...airSpeed,
+				// Baro 2 s late; latitude/longitude untouched.
+				altitude: road.map((_, i) => road[Math.max(0, i - 2)]),
+			},
+			TIMING_SHIFTS,
+			"fit-raw",
+		)!;
+		expect(inputs.positionLabel).toBe("Elevation reference");
+		expect(inputs.positionLabel).not.toContain("GPS");
+		expect(computeTimingSweep(inputs.position, 0.005).verdict).toMatchObject({
+			kind: "best",
+			shift: 2,
+		});
+	});
+
+	it("timing check: with constant wind and no wind series, lat/lon reach the kernel", () => {
+		const args = {
+			...prepareArgs(LAPS),
+			params: { ...PARAMS, wind_speed: 3, wind_direction: 90 },
+		};
+		expect(
+			buildTimingSweepInputs(args, TIMING_SHIFTS, "fit-raw")!.positionLabel,
+		).toBe("GPS position + elevation reference");
+		expect(
+			buildTimingSweepInputs(args, TIMING_SHIFTS, "dem-raw-nearest")!
+				.positionLabel,
+		).toBe("GPS position");
 	});
 
 	it("Convergence power shift: base grid + shift equals the grid recomputed at efficiency × 1.01", () => {

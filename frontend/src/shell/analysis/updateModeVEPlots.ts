@@ -502,7 +502,8 @@ export async function updateModeVEPlots(
 			// Six more preparations (TODO J5) — paid only with the tab open.
 			sensitivities: buildRepeatSensitivities(prepareArgs, units),
 			// Fourteen more preparations (TODO J4) — only once asked for.
-			timing: () => buildTimingSweepInputs(prepareArgs, TIMING_SHIFTS),
+			timing: () =>
+				buildTimingSweepInputs(prepareArgs, TIMING_SHIFTS, elevation.profile),
 		});
 	}
 

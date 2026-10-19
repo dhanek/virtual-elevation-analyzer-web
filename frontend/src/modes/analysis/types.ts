@@ -404,7 +404,17 @@ export interface RepeatsUpdateInput {
 	 * calls it once the user has asked for the check. Null result: the ride
 	 * is not sampled at 1 s. Optional so callers without it show no section.
 	 */
-	timing?: () => Record<"power" | "position", TimingShiftInput[]> | null;
+	timing?: () => TimingSweepInputs | null;
+}
+
+/**
+ * The timing sweep's two channels (TODO J4), and the name the position row
+ * goes by — what that sweep actually moves (`buildTimingSweepInputs`).
+ */
+export interface TimingSweepInputs {
+	power: TimingShiftInput[];
+	position: TimingShiftInput[];
+	positionLabel: string;
 }
 
 export interface AnalysisModeHandler {

@@ -628,10 +628,12 @@ same rule as `baro_lag_seconds`); no fractional interpolated shifts.
 **Commit:** `3ae969f` on `claude/sharp-jepsen-922674`, PR #34.
 
 **What it does.** A "Timing check" section at the foot of the Repeats tab, run with a button
-(fourteen extra preparations per pass, so only once asked for). Power, and GPS position —
-latitude/longitude and the elevation reference that follows them — are shifted by whole seconds
-−3 … +3 on the air-speed offset's convention (+s = channel late by s; edges repeat the edge
-value). A table gives held-out RMS per shift for each channel and the Crr power implies; bullets
+(fourteen extra preparations per pass, so only once asked for). Power, and position —
+latitude/longitude and the resolved elevation profile — are shifted by whole seconds −3 … +3 on
+the air-speed offset's convention (+s = channel late by s; edges repeat the edge
+value). The position row is labelled by what actually moves ("Elevation reference" under the
+recorded profile when wind does not reach the kernel through GPS, "GPS position" under a DEM
+profile). A table gives held-out RMS per shift for each channel and the Crr power implies; bullets
 give the verdict and "Reported only — nothing is applied." The air-speed offset is unchanged.
 
 **How.** Each shift prepares the selection again (`buildTimingSweepInputs`) and scores it with
@@ -683,7 +685,8 @@ the header never combines them into a single "±".
 
 **Commit:** `225aa38` on `claude/sharp-jepsen-922674`, PR #34.
 
-**What it does.** Under the pooled fit, a "Sensitivities — not measured uncertainties" table:
+**What it does.** Under the pooled fit, an "If an input is off — shift of the all-together fit"
+table, captioned "Sensitivities, not error bars — don't add them up.":
 ΔCdA, ΔCrr and ΔCdA at the slider Crr of the POOLED fit for power ±1 % (efficiency × 1.01 /
 0.99), mass ±1 kg, air density ±1 % and reference rise ±0.5 m per leg. Each row is signed and
 stands alone; nothing sums them.

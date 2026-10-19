@@ -291,19 +291,22 @@ function timingBlock(
 	if (!timing) {
 		return "";
 	}
-	const title = heading(
-		"Timing check",
-		"— is power or GPS position out of step with speed?",
-	);
+	const titleFor = (channel: string) =>
+		heading("Timing check", `— is power or ${channel} out of step with speed?`);
 	if (!timingRequested) {
-		return `${title}
+		// Lazy sweep: no inputs yet to name what the position row moves.
+		return `${titleFor("position")}
 <button type="button" class="ve-repeats__timing-run" id="${TIMING_BUTTON_ID}">Run timing check</button>
 ${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit to the others.`])}`;
 	}
 	const inputs = timing();
 	if (!inputs) {
-		return `${title}${bullets(["Needs 1 s samples."])}`;
+		return `${titleFor("position")}${bullets(["Needs 1 s samples."])}`;
 	}
+	const positionLabel = inputs.positionLabel;
+	const title = titleFor(
+		positionLabel.charAt(0).toLowerCase() + positionLabel.slice(1),
+	);
 	const power = computeTimingSweep(inputs.power, fixedCrr);
 	const position = computeTimingSweep(inputs.position, fixedCrr);
 	const bestOf = (result: TimingResult) =>
@@ -330,14 +333,14 @@ ${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit t
 <table class="ve-lap-summary__table ve-repeats__table">
     <thead>
         <tr class="ve-lap-summary__row ve-lap-summary__row--head">
-            ${headCell("Shift", LABEL)}${headCell("Power: held-out RMS (m)")}${headCell("Power: Crr")}${headCell("Position: held-out RMS (m)")}
+            ${headCell("Shift", LABEL)}${headCell("Power: held-out RMS (m)")}${headCell("Power: Crr")}${headCell(`${positionLabel}: held-out RMS (m)`)}
         </tr>
     </thead>
     <tbody>${body}</tbody>
 </table>
 ${bullets([
 	verdictText("Power", power, noun),
-	verdictText("Position", position, noun),
+	verdictText(positionLabel, position, noun),
 	`+s = channel is late by s seconds. Held-out RMS: each ${noun} predicted from the others.`,
 	"Reported only — nothing is applied.",
 ])}`;

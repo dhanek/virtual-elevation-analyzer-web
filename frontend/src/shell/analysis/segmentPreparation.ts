@@ -36,6 +36,7 @@ import {
 	type RepeatUnitInput,
 	type SensitivityInput,
 } from "../../analysis/RepeatSpread";
+import type { ElevationDisplayProfile } from "../../analysis/elevationProfiles";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import type { TimingShiftInput } from "../../analysis/TimingSweep";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
@@ -48,6 +49,7 @@ import {
 import type {
 	ConvergenceUpdateInput,
 	ModeSegment,
+	TimingSweepInputs,
 } from "../../modes/analysis/types";
 import type { WindSource } from "../../state/AppState";
 import { log } from "../../utils/log";
@@ -664,10 +666,20 @@ function shiftWholeSamples(series: number[], shift: number): number[] {
 
 /**
  * The timing sweep's inputs (TODO J4): the selection prepared again with
- * POWER, or GPS POSITION, moved by each whole-second shift, as Repeats units.
- * Position means latitude/longitude (wind direction) and the elevation
- * reference that follows the road under them — what the fit compares
- * against. Speed, air speed and everything else stay put.
+ * POWER, or POSITION, moved by each whole-second shift, as Repeats units.
+ * Speed, air speed and everything else stay put.
+ *
+ * The position sweep moves latitude/longitude AND the resolved altitude
+ * (`args.altitude`) together. Latitude/longitude reach the calculator only
+ * through the effective-wind path, so they matter only when some prepared
+ * segment has no usable wind series (no finite non-zero sample), a finite
+ * non-zero wind speed and a wind direction (its per-lap weather, else
+ * `params`), and position samples at all. The row's label follows what
+ * really moves: under `fit-raw` it is "Elevation reference" when
+ * latitude/longitude do not reach the calculator, "GPS position + elevation
+ * reference" when they do; under a DEM profile — sampled at latitude/
+ * longitude, so shifting it is shifting position along the road — it is
+ * "GPS position".
  *
  * Null when the ride is not sampled at 1 s: a sample shift is then not a
  * second, and the VE step already assumes one second between samples.
@@ -675,7 +687,8 @@ function shiftWholeSamples(series: number[], shift: number): number[] {
 export function buildTimingSweepInputs(
 	args: PrepareSegmentsArgs,
 	shifts: readonly number[],
-): Record<"power" | "position", TimingShiftInput[]> | null {
+	elevationProfile: ElevationDisplayProfile,
+): TimingSweepInputs | null {
 	const t = args.normalized.timestamps;
 	const steps: number[] = [];
 	for (let i = 1; i < t.length; i++) {
@@ -686,36 +699,60 @@ export function buildTimingSweepInputs(
 	if (Math.abs(median - 1) > 1e-6) {
 		return null;
 	}
-	const unitsWith = (
+	const prepareWith = (
 		normalized: NormalizedActivityArrays,
 		altitude: number[],
-	): RepeatUnitInput[] =>
-		buildRepeatUnits(
-			prepareSegments({ ...args, normalized, altitude }),
-			args.params,
+	): { prepared: PreparedSegment[]; units: RepeatUnitInput[] } => {
+		const prepared = prepareSegments({ ...args, normalized, altitude });
+		return { prepared, units: buildRepeatUnits(prepared, args.params) };
+	};
+	let shiftZeroPosition: PreparedSegment[] = [];
+	const position = shifts.map((shift): TimingShiftInput => {
+		const { prepared, units } = prepareWith(
+			{
+				...args.normalized,
+				positionLat: shiftWholeSamples(args.normalized.positionLat, shift),
+				positionLong: shiftWholeSamples(args.normalized.positionLong, shift),
+			},
+			shiftWholeSamples(args.altitude, shift),
 		);
+		if (shift === 0) {
+			shiftZeroPosition = prepared;
+		}
+		return { shift, units };
+	});
+	const latLonReachKernel = shiftZeroPosition.some((p) => {
+		const windSpeed = p.weather?.windSpeed ?? args.params.wind_speed;
+		const windDirection =
+			p.weather?.windDirection ?? args.params.wind_direction;
+		return (
+			!p.slice.windSpeed.some((w) => Number.isFinite(w) && w !== 0) &&
+			Number.isFinite(windSpeed) &&
+			windSpeed !== 0 &&
+			windDirection != null &&
+			p.slice.positionLat.length > 0 &&
+			p.slice.positionLong.length > 0
+		);
+	});
+	const positionLabel =
+		elevationProfile !== "fit-raw"
+			? "GPS position"
+			: latLonReachKernel
+				? "GPS position + elevation reference"
+				: "Elevation reference";
 	return {
 		power: shifts.map((shift): TimingShiftInput => ({
 			shift,
-			units: unitsWith(
+			units: prepareWith(
 				{
 					...args.normalized,
 					power: shiftWholeSamples(args.normalized.power, shift),
 				},
 				args.altitude,
-			),
+			).units,
 		})),
-		position: shifts.map((shift): TimingShiftInput => ({
-			shift,
-			units: unitsWith(
-				{
-					...args.normalized,
-					positionLat: shiftWholeSamples(args.normalized.positionLat, shift),
-					positionLong: shiftWholeSamples(args.normalized.positionLong, shift),
-				},
-				shiftWholeSamples(args.altitude, shift),
-			),
-		})),
+		position,
+		positionLabel,
 	};
 }
 
