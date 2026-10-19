@@ -595,14 +595,19 @@ export function tiltReference(
  * carry to the next lap. Null with fewer than two usable repeats, or when a
  * fit on the others is singular.
  */
-export function heldOutScore(
-	units: readonly RepeatUnitInput[],
-): { rms: number; repeats: number; perRepeatRms: number[] } | null {
+export function heldOutScore(units: readonly RepeatUnitInput[]): {
+	rms: number;
+	repeats: number;
+	/** Each held-out repeat's own RMS, keyed by `RepeatUnitInput.key`. */
+	perRepeatRms: Map<string, number>;
+} | null {
 	const usable: LegParts[][] = [];
+	const keys: string[] = [];
 	for (const unit of units) {
 		const parts = unit.legs.map(legParts);
 		if (parts.length > 0 && parts.every((p) => p !== null)) {
 			usable.push(parts as LegParts[]);
+			keys.push(unit.key);
 		}
 	}
 	if (usable.length < 2) {
@@ -610,7 +615,7 @@ export function heldOutScore(
 	}
 	let ssr = 0;
 	let samples = 0;
-	const perRepeatRms: number[] = [];
+	const perRepeatRms = new Map<string, number>();
 	for (let h = 0; h < usable.length; h++) {
 		const others = usable.filter((_, i) => i !== h).flat();
 		const fit = solve(others, null);
@@ -620,7 +625,7 @@ export function heldOutScore(
 		const own = ssrOf(usable[h], fit.cda, fit.crr);
 		ssr += own;
 		samples += samplesOf(usable[h]);
-		perRepeatRms.push(Math.sqrt(own / samplesOf(usable[h])));
+		perRepeatRms.set(keys[h], Math.sqrt(own / samplesOf(usable[h])));
 	}
 	return {
 		rms: Math.sqrt(ssr / samples),

@@ -127,4 +127,26 @@ describe("computeTimingSweep", () => {
 			repeats: 4,
 		});
 	});
+
+	test("a shift that scores a different set of laps is never an optimum", () => {
+		// At +2 s (the true lag) one lap drops out: its reference is gone.
+		const rows = sweep(2).map(({ shift, units }) => ({
+			shift,
+			units:
+				shift === 2
+					? units.map((unit, j) =>
+							j === 3
+								? {
+										...unit,
+										legs: unit.legs.map((leg) => ({ ...leg, elevation: null })),
+									}
+								: unit,
+						)
+					: units,
+		}));
+		expect(computeTimingSweep(rows, 0.005).verdict).toMatchObject({
+			kind: "flat",
+			shift: 2,
+		});
+	});
 });

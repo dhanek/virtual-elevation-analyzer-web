@@ -40,8 +40,8 @@ interface TimingRow {
 	shift: number;
 	/** Held-out RMS (m); NaN where not estimable. */
 	heldOutRms: number;
-	/** Each held-out repeat's own RMS, in repeat order. */
-	perRepeatRms: number[];
+	/** Each held-out repeat's own RMS, keyed by repeat. */
+	perRepeatRms: Map<string, number>;
 	/** The pooled fit over all laps at this shift. */
 	cda: number;
 	crr: number;
@@ -76,7 +76,7 @@ export function computeTimingSweep(
 		return {
 			shift,
 			heldOutRms: score ? score.rms : NaN,
-			perRepeatRms: score ? score.perRepeatRms : [],
+			perRepeatRms: score ? score.perRepeatRms : new Map(),
 			cda: pooled?.cda ?? NaN,
 			crr: pooled?.crr ?? NaN,
 		};
@@ -100,10 +100,21 @@ function judge(rows: readonly TimingRow[]): TimingVerdict {
 	if (best.shift === 0 || zero.heldOutRms <= best.heldOutRms) {
 		return { kind: "zero" };
 	}
-	const repeats = zero.perRepeatRms.length;
-	const better = best.perRepeatRms.filter(
-		(rms, i) => rms < zero.perRepeatRms[i],
-	).length;
+	// Compared lap by lap BY KEY: a shift can make a lap unusable (its
+	// reference or power runs off the data), and a positional comparison
+	// would then pit one lap against another. A shift that does not score
+	// the same laps as 0 s cannot be called better on every lap.
+	const repeats = zero.perRepeatRms.size;
+	let better = 0;
+	for (const [key, rms] of best.perRepeatRms) {
+		const atZero = zero.perRepeatRms.get(key);
+		if (atZero !== undefined && rms < atZero) {
+			better++;
+		}
+	}
+	if (best.perRepeatRms.size !== repeats) {
+		better = Math.min(better, repeats - 1);
+	}
 	if (gainM < TIMING_MIN_GAIN_M || better < repeats) {
 		return { kind: "flat", shift: best.shift, gainM, better, repeats };
 	}
