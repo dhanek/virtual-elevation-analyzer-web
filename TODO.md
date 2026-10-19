@@ -375,7 +375,7 @@ comments re-verified at the ported tip.
 
 *Effort: S–L per item. Why together: every item changes what the app claims about how well CdA and
 Crr are known, and they share the Convergence tab and the results view. J1 is cheap and fixes a
-misleading label on its own; J2 is the foundation the others are judged against.*
+misleading label on its own; J2 (done) is the foundation the others are judged against.*
 
 **Origin:** offline analysis of the VE-testing discussion (repeats vs RMSE), 2026-09-26/27, on three
 hill sessions (6 legs each, same rider and tyres), a shuttle ride and the earlier velodrome
@@ -407,12 +407,8 @@ Items, in order:
       `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the reference ride in every mode
       that renders the tab.
 
-- [ ] **J2 [M] Repeat-based spread: a standalone fit per lap (or per out-and-back pair) next to
-      the joint fit.** Buckley's criterion made visible: independent repeats solved alone.
-      *Criteria:* for a selection of ≥2 laps/pairs the results view lists each one's CdA/Crr/RMS
-      and the SD across them with n and degrees of freedom; a single lap shows "repeat spread not
-      estimable" rather than zero; also a variant at fixed Crr (CdA-only per lap), since that is
-      the comparison-testing use; the joint fit is unchanged.
+- [x] **J2 [M] Repeat-based spread** — done 2026-10-19, see *Done → Repeats tab: each lap
+      fitted alone*.
 
 - [ ] **J3 [S] Power-independent CdA for comparisons.** Show CdA + k·Crr, where k = 2·m·g /
       (ρ·v̄²) is taken from the coasting legs' mean speed (≈9 at 40 km/h), and/or CdA at a user-fixed
@@ -630,6 +626,40 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Repeats tab: each lap fitted alone (J2) — 2026-10-19
+
+**The item this closes:** *Bundle J → J2 [M] Repeat-based spread: a standalone fit per lap (or
+per out-and-back pair) next to the joint fit.* Original criteria: for a selection of ≥2
+laps/pairs the results view lists each one's CdA/Crr/RMS and the SD across them with n and
+degrees of freedom; a single lap shows "repeat spread not estimable" rather than zero; also a
+variant at fixed Crr (CdA-only per lap), since that is the comparison-testing use; the joint fit
+is unchanged.
+
+**Commit:** `1b5f374` on `claude/sharp-jepsen-922674`.
+
+**What it does.** A new **Repeats** tab in all three modes (`shell/analysis/repeatsView.ts`, maths
+in `analysis/RepeatSpread.ts`). One row per repeat — a lap, or an out-and-back SECTION with both
+legs fitted together (`buildRepeatUnits`; out-and-back legs now carry `itemNumber` = section
+number). Each row: free CdA / Crr / RMS, and CdA / RMS at the slider Crr. Under them: mean, SD
+across repeats, n / df; one repeat reads "not estimable". Below: the same fit pooled over every
+repeat with its naive SE and the repeat-clustered sandwich SE (G/(G−1) factor, df G−1), for both
+the free fit and CdA-at-fixed-Crr.
+
+**How.** VE is exactly linear in (CdA, Crr) since #31, so three calculator probes per leg give
+each fit in closed form, in slider-space Crr (the temperature correction is a pure multiplier).
+The objective is the VE tab's anchored profile RMS over the trim window, so a row's RMS equals the
+VE tab's RMSE with the sliders at that row's values (`repeatUnits.wasm.test.ts`, to 1e-9). Gated
+on the tab being open, like Convergence. Readout only: sliders, auto-converge and the Rust
+kernels are untouched, so `ve_gain` / `ve_gain_grid` are bit-identical.
+
+**Checked in the running app** (reference ride, laps 10+12+16, 2026-10-19): all three modes
+render; a single lap shows "not estimable" for the SD and the clustered SE; lap 10's RMS at its
+fixed-Crr CdA matched the VE tab's RMSE (2.65 m); moving the Crr slider updates the fixed-Crr
+column. Free per-lap fits are unstable on this ride (one GPS lap gave CdA −0.25, Standard mode
+negative Crr) while CdA at fixed Crr held within an SD of 0.008–0.05 — the reason the fixed-Crr
+variant exists. With 3–5 repeats the clustered SE ranged 0.5–7× the naive one; at that df it is
+itself rough, and the tab says so.
 
 ### Velodrome auto-calibration — 2026-09-15
 
