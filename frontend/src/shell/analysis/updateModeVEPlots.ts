@@ -41,6 +41,7 @@ import {
 	type AutoConvergeResolution,
 } from "../../analysis/AutoConverge";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { TIMING_SHIFTS } from "../../analysis/TimingSweep";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
 import type {
@@ -78,6 +79,7 @@ import {
 	buildConvergenceUpdateInput,
 	buildRepeatSensitivities,
 	buildRepeatUnits,
+	buildTimingSweepInputs,
 	prepareSegments,
 	type PrepareSegmentsArgs,
 } from "./segmentPreparation";
@@ -499,6 +501,8 @@ export async function updateModeVEPlots(
 			],
 			// Six more preparations (TODO J5) — paid only with the tab open.
 			sensitivities: buildRepeatSensitivities(prepareArgs, units),
+			// Fourteen more preparations (TODO J4) — only once asked for.
+			timing: () => buildTimingSweepInputs(prepareArgs, TIMING_SHIFTS),
 		});
 	}
 

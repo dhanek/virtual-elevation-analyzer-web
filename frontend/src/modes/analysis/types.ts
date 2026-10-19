@@ -3,6 +3,7 @@ import type {
 	RepeatUnitInput,
 	SensitivityInput,
 } from "../../analysis/RepeatSpread";
+import type { TimingShiftInput } from "../../analysis/TimingSweep";
 import type { ElevationDiffSource } from "../../analysis/ClosureTarget";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -398,6 +399,12 @@ export interface RepeatsUpdateInput {
 	crrBounds: [number, number];
 	/** One refit per assumed-input change (TODO J5). */
 	sensitivities: SensitivityInput[];
+	/**
+	 * The timing sweep's inputs (TODO J4), built only when called — the view
+	 * calls it once the user has asked for the check. Null result: the ride
+	 * is not sampled at 1 s. Optional so callers without it show no section.
+	 */
+	timing?: () => Record<"power" | "position", TimingShiftInput[]> | null;
 }
 
 export interface AnalysisModeHandler {

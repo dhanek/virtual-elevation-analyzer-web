@@ -21,6 +21,10 @@ import {
 	type RepeatStat,
 	type RepeatUnitFit,
 } from "../../analysis/RepeatSpread";
+import {
+	computeTimingSweep,
+	type TimingResult,
+} from "../../analysis/TimingSweep";
 import type { RepeatsUpdateInput } from "../../modes/analysis/types";
 import { requestModeUpdate } from "./requestModeUpdate";
 
@@ -240,10 +244,110 @@ function sensitivityBlock(
 ${bullets(["Sensitivities, not error bars — don't add them up."])}`;
 }
 
+/**
+ * Whether the user has asked for the timing check in this session. It costs
+ * fourteen extra preparations per pass, so it runs only from then on.
+ */
+let timingRequested = false;
+
+/** Test seam. */
+export function resetTimingRequest(): void {
+	timingRequested = false;
+}
+
+const TIMING_BUTTON_ID = "repeatsTimingRun";
+
+function shiftLabel(shift: number): string {
+	return shift > 0 ? `+${shift} s` : shift < 0 ? `−${-shift} s` : "0 s";
+}
+
+function verdictText(
+	channel: string,
+	result: TimingResult,
+	noun: string,
+): string {
+	const v = result.verdict;
+	switch (v.kind) {
+		case "not-estimable":
+			return `${channel}: not estimable — needs 2 or more ${noun}s.`;
+		case "zero":
+			return `${channel}: in sync — 0 s scores best.`;
+		case "flat":
+			return v.better < v.repeats
+				? `${channel}: no clear optimum — ${shiftLabel(v.shift)} scores ${(v.gainM * 100).toFixed(1)} cm better than 0 s but helps only ${v.better} of ${v.repeats} ${noun}s.`
+				: `${channel}: no clear optimum — ${shiftLabel(v.shift)} is only ${(v.gainM * 100).toFixed(1)} cm better than 0 s.`;
+		case "edge":
+			return `${channel}: no clear optimum — best at the sweep edge (${shiftLabel(v.shift)}).`;
+		case "best":
+			return `${channel}: best at ${shiftLabel(v.shift)} — ${(v.gainM * 100).toFixed(1)} cm better than 0 s, on every ${noun}.`;
+	}
+}
+
+function timingBlock(
+	timing: RepeatsUpdateInput["timing"],
+	fixedCrr: number,
+	noun: string,
+): string {
+	if (!timing) {
+		return "";
+	}
+	const title = heading(
+		"Timing check",
+		"— is power or GPS position out of step with speed?",
+	);
+	if (!timingRequested) {
+		return `${title}
+<button type="button" class="ve-repeats__timing-run" id="${TIMING_BUTTON_ID}">Run timing check</button>
+${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit to the others.`])}`;
+	}
+	const inputs = timing();
+	if (!inputs) {
+		return `${title}${bullets(["Needs 1 s samples."])}`;
+	}
+	const power = computeTimingSweep(inputs.power, fixedCrr);
+	const position = computeTimingSweep(inputs.position, fixedCrr);
+	const bestOf = (result: TimingResult) =>
+		result.verdict.kind === "best" || result.verdict.kind === "zero"
+			? result.verdict.kind === "best"
+				? result.verdict.shift
+				: 0
+			: null;
+	const powerBest = bestOf(power);
+	const positionBest = bestOf(position);
+	const mark = (text: string, on: boolean) =>
+		on ? `<strong>${text}</strong>` : text;
+	const body = power.rows
+		.map((row, i) => {
+			const pos = position.rows[i];
+			return `<tr class="ve-lap-summary__row">${cell(shiftLabel(row.shift), LABEL)}${cell(
+				mark(fixed(row.heldOutRms, 3), row.shift === powerBest),
+			)}${cell(fixed(row.crr, 5))}${cell(
+				mark(fixed(pos.heldOutRms, 3), pos.shift === positionBest),
+			)}</tr>`;
+		})
+		.join("");
+	return `${title}
+<table class="ve-lap-summary__table ve-repeats__table">
+    <thead>
+        <tr class="ve-lap-summary__row ve-lap-summary__row--head">
+            ${headCell("Shift", LABEL)}${headCell("Power: held-out RMS (m)")}${headCell("Power: Crr")}${headCell("Position: held-out RMS (m)")}
+        </tr>
+    </thead>
+    <tbody>${body}</tbody>
+</table>
+${bullets([
+	verdictText("Power", power, noun),
+	verdictText("Position", position, noun),
+	`+s = channel is late by s seconds. Held-out RMS: each ${noun} predicted from the others.`,
+	"Reported only — nothing is applied.",
+])}`;
+}
+
 /** The tab's whole content for one result. */
 function repeatsMarkup(
 	result: RepeatSpreadResult,
 	sensitivities: readonly SensitivityRow[],
+	timing: RepeatsUpdateInput["timing"],
 ): string {
 	const crrLabel = `CdA @ Crr ${result.fixedCrr.toFixed(4)}`;
 	// Out-and-back repeats are sections; everything else is a lap.
@@ -274,7 +378,8 @@ function repeatsMarkup(
 </table>
 ${bullets(notes)}
 ${pooledBlock(result, noun)}
-${sensitivityBlock(sensitivities, result.fixedCrr)}`;
+${sensitivityBlock(sensitivities, result.fixedCrr)}
+${timingBlock(timing, result.fixedCrr, noun)}`;
 }
 
 export function renderRepeatsView(input: RepeatsUpdateInput): void {
@@ -294,5 +399,10 @@ export function renderRepeatsView(input: RepeatsUpdateInput): void {
 		result.pooled || result.pooledFixed
 			? computeSensitivities(result, input.sensitivities)
 			: [],
+		input.timing,
 	);
+	document.getElementById(TIMING_BUTTON_ID)?.addEventListener("click", () => {
+		timingRequested = true;
+		requestRepeatsRedraw();
+	});
 }

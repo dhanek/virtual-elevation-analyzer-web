@@ -585,3 +585,46 @@ export function tiltReference(
 		}),
 	}));
 }
+
+/**
+ * Out-of-sample score of a set of repeats: each usable repeat in turn is
+ * held out, the pooled free fit is made on the others, and the held-out
+ * repeat's anchored profile residual is taken at those values. The score is
+ * the RMS over every held-out sample — a number in-sample RMS cannot fake,
+ * because a shift that only lets the fit chase one lap's noise does not
+ * carry to the next lap. Null with fewer than two usable repeats, or when a
+ * fit on the others is singular.
+ */
+export function heldOutScore(
+	units: readonly RepeatUnitInput[],
+): { rms: number; repeats: number; perRepeatRms: number[] } | null {
+	const usable: LegParts[][] = [];
+	for (const unit of units) {
+		const parts = unit.legs.map(legParts);
+		if (parts.length > 0 && parts.every((p) => p !== null)) {
+			usable.push(parts as LegParts[]);
+		}
+	}
+	if (usable.length < 2) {
+		return null;
+	}
+	let ssr = 0;
+	let samples = 0;
+	const perRepeatRms: number[] = [];
+	for (let h = 0; h < usable.length; h++) {
+		const others = usable.filter((_, i) => i !== h).flat();
+		const fit = solve(others, null);
+		if (!fit) {
+			return null;
+		}
+		const own = ssrOf(usable[h], fit.cda, fit.crr);
+		ssr += own;
+		samples += samplesOf(usable[h]);
+		perRepeatRms.push(Math.sqrt(own / samplesOf(usable[h])));
+	}
+	return {
+		rms: Math.sqrt(ssr / samples),
+		repeats: usable.length,
+		perRepeatRms,
+	};
+}

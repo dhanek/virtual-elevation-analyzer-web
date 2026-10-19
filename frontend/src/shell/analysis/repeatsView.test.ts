@@ -3,7 +3,11 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RepeatLeg } from "../../analysis/RepeatSpread";
-import { renderRepeatsView, repeatsTabMarkup } from "./repeatsView";
+import {
+	renderRepeatsView,
+	repeatsTabMarkup,
+	resetTimingRequest,
+} from "./repeatsView";
 
 /** A leg whose VE is linear in (CdA, Crr), fitted exactly by (cda, crr). */
 function leg(seed: number, cda: number, crr: number): RepeatLeg {
@@ -32,6 +36,7 @@ const EXTRA = {
 const text = () => document.getElementById("repeats-tab")!.textContent ?? "";
 
 beforeEach(() => {
+	resetTimingRequest();
 	document.body.innerHTML = repeatsTabMarkup();
 });
 
@@ -139,5 +144,39 @@ describe("renderRepeatsView", () => {
 		expect(sensitivityRow.textContent).toContain("Unchanged");
 		expect(sensitivityRow.textContent).toContain("0.0000");
 		expect(sensitivityRow.textContent).not.toMatch(/[+−]0\.0000/);
+	});
+
+	it("the timing check waits for the button, then shows the sweep and says nothing is applied", () => {
+		const units = [0.29, 0.3, 0.31].map((cda, j) => ({
+			key: `lap-${j + 1}`,
+			label: `Lap ${j + 1}`,
+			legs: [leg(j, cda, 0.004)],
+		}));
+		let built = 0;
+		const input = {
+			units,
+			fixedCrr: 0.004,
+			...EXTRA,
+			timing: () => {
+				built++;
+				const rows = [-3, -2, -1, 0, 1, 2, 3].map((shift) => ({
+					shift,
+					units,
+				}));
+				return { power: rows, position: rows };
+			},
+		};
+		renderRepeatsView(input);
+		expect(built).toBe(0);
+		const button = document.getElementById("repeatsTimingRun")!;
+		expect(button.textContent).toBe("Run timing check");
+		button.click();
+		// The click asks the funnel for a pass; render that pass directly.
+		renderRepeatsView(input);
+		expect(built).toBe(1);
+		expect(text()).toContain("Power: in sync — 0 s scores best.");
+		expect(text()).toContain("Reported only — nothing is applied.");
+		// Laps, pooled, timing (no sensitivities passed here).
+		expect(document.querySelectorAll("#repeats-tab table")).toHaveLength(3);
 	});
 });

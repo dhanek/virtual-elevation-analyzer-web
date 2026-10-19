@@ -37,6 +37,7 @@ import {
 	type SensitivityInput,
 } from "../../analysis/RepeatSpread";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
+import type { TimingShiftInput } from "../../analysis/TimingSweep";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import type { WindSeriesResolution } from "../../analysis/WindSourceResolver";
@@ -644,6 +645,78 @@ export function buildRepeatSensitivities(
 			units: tiltReference(units, -0.5),
 		},
 	];
+}
+
+/**
+ * `series` moved by whole samples on the air-speed offset's convention
+ * (`applyAirSpeedOffset`): +s means the channel is LATE by s and sample i
+ * takes the value from i + s. The ends repeat the edge value rather than
+ * NaN — a NaN power sample would zero its VE step, and a NaN reference
+ * sample would drop the lap, so the shifts would compare different laps.
+ */
+function shiftWholeSamples(series: number[], shift: number): number[] {
+	if (shift === 0 || series.length === 0) {
+		return series;
+	}
+	const last = series.length - 1;
+	return series.map((_, i) => series[Math.min(last, Math.max(0, i + shift))]);
+}
+
+/**
+ * The timing sweep's inputs (TODO J4): the selection prepared again with
+ * POWER, or GPS POSITION, moved by each whole-second shift, as Repeats units.
+ * Position means latitude/longitude (wind direction) and the elevation
+ * reference that follows the road under them — what the fit compares
+ * against. Speed, air speed and everything else stay put.
+ *
+ * Null when the ride is not sampled at 1 s: a sample shift is then not a
+ * second, and the VE step already assumes one second between samples.
+ */
+export function buildTimingSweepInputs(
+	args: PrepareSegmentsArgs,
+	shifts: readonly number[],
+): Record<"power" | "position", TimingShiftInput[]> | null {
+	const t = args.normalized.timestamps;
+	const steps: number[] = [];
+	for (let i = 1; i < t.length; i++) {
+		steps.push(t[i] - t[i - 1]);
+	}
+	steps.sort((a, b) => a - b);
+	const median = steps.length > 0 ? steps[Math.floor(steps.length / 2)] : NaN;
+	if (Math.abs(median - 1) > 1e-6) {
+		return null;
+	}
+	const unitsWith = (
+		normalized: NormalizedActivityArrays,
+		altitude: number[],
+	): RepeatUnitInput[] =>
+		buildRepeatUnits(
+			prepareSegments({ ...args, normalized, altitude }),
+			args.params,
+		);
+	return {
+		power: shifts.map((shift): TimingShiftInput => ({
+			shift,
+			units: unitsWith(
+				{
+					...args.normalized,
+					power: shiftWholeSamples(args.normalized.power, shift),
+				},
+				args.altitude,
+			),
+		})),
+		position: shifts.map((shift): TimingShiftInput => ({
+			shift,
+			units: unitsWith(
+				{
+					...args.normalized,
+					positionLat: shiftWholeSamples(args.normalized.positionLat, shift),
+					positionLong: shiftWholeSamples(args.normalized.positionLong, shift),
+				},
+				shiftWholeSamples(args.altitude, shift),
+			),
+		})),
+	};
 }
 
 /**

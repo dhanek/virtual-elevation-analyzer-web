@@ -735,6 +735,16 @@
 	color: var(--color-text-secondary);
 }
 
+.ve-repeats__timing-run {
+	margin-top: var(--space-xs);
+	padding: var(--space-xs) var(--space-md);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface-white);
+	color: var(--color-text);
+	cursor: pointer;
+}
+
 .ve-repeats__section-title {
 	margin-top: var(--space-lg);
 }
