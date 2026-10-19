@@ -359,7 +359,12 @@ export interface BuildConvergenceUpdateInputArgs {
 	 * Honest on-screen name for the source — the caller knows whether 'dem'
 	 * actually found a DEM channel or fell back to the analysis profile.
 	 */
-	targetLabel: string;
+	targetLabel: string; /**
+	 * The same selection prepared again at efficiency × `etaScale`, for the
+	 * ±1 % power markers (TODO J1). Called lazily, only when the view
+	 * recomputes its grids. Absent: no markers.
+	 */
+	prepareWithEtaScale?: (etaScale: number) => PreparedSegment[];
 }
 
 /**
@@ -432,6 +437,22 @@ export function buildConvergenceUpdateInput(
 		profileMode: args.profileMode,
 	});
 
+	// One extra preparation per scale, shared by every segment and made only
+	// if the view asks (a gains-cache miss).
+	const perturbed = new Map<number, Map<string, PreparedSegment>>();
+	const preparedAt = (etaScale: number) => {
+		let byKey = perturbed.get(etaScale);
+		if (!byKey && args.prepareWithEtaScale) {
+			byKey = new Map(
+				args
+					.prepareWithEtaScale(etaScale)
+					.map((q): [string, PreparedSegment] => [q.segment.key, q]),
+			);
+			perturbed.set(etaScale, byKey);
+		}
+		return byKey;
+	};
+
 	return {
 		segments: prepared.map((p): ConvergenceUpdateInput["segments"][number] => ({
 			key: p.segment.key,
@@ -456,6 +477,27 @@ export function buildConvergenceUpdateInput(
 				p.trimEnd,
 			),
 			profileGroup: p.segment.legDirection,
+			powerShift: args.prepareWithEtaScale
+				? (etaScale) => {
+						const q = preparedAt(etaScale)?.get(p.segment.key);
+						if (!q) {
+							return null;
+						}
+						// Any (CdA, Crr) gives the same difference; (0, 0) is
+						// the plainest.
+						const base = veProfileWindow(p, 0, 0);
+						const moved = veProfileWindow(q, 0, 0);
+						if (base.length !== moved.length) {
+							return null;
+						}
+						return {
+							gain:
+								q.calculator.ve_gain(0, 0, q.trimStart, q.trimEnd) -
+								p.calculator.ve_gain(0, 0, p.trimStart, p.trimEnd),
+							profile: moved.map((v, i) => v - base[i]),
+						};
+					}
+				: undefined,
 		})),
 		cda: args.cda,
 		crr: args.crr,

@@ -9,6 +9,10 @@
  * pooled surface the plot is drawn from, on every draw. Baking numbers into
  * a template freezes them (see `shell/ve/vdHeader.ts`, defect 1).
  *
+ * Labelled "minimum + 5 cm (not a confidence interval)" (TODO J1): the band
+ * is a fit tolerance, not a statement of precision. When the power-moved
+ * optima are known, a second line gives their ΔCdA / ΔCrr.
+ *
  * The offsets are shown separately below and above the optimum rather than
  * as one symmetric ±: the valley is a tilted trough, and the band is wider
  * on one side than the other. When the band runs into the grid edge the
@@ -19,6 +23,11 @@ import {
 	formatBandLabel,
 	type ClosureBand,
 } from "../../analysis/ClosureSurface";
+import {
+	formatPowerDelta,
+	POWER_CLIPPED_NOTE,
+	type PowerMoves,
+} from "../../plots/ConvergencePlotBuilders";
 import { VD_NOT_APPLICABLE, span } from "../ve/vdHeader";
 
 /** Container the readout owns outright. Empty in the templates on purpose. */
@@ -35,6 +44,10 @@ export interface ConvergenceBandReadoutInput {
 	toleranceM: number;
 	/** What the surface measures; names the metric honestly. */
 	metric?: "closure" | "profileSpread";
+	/** Where the optimum lands at power −1 % / +1 % (TODO J1). */
+	powerMoves?: PowerMoves | null;
+	/** The optimum sits on the grid edge, so the power shifts are clipped. */
+	clipped?: boolean;
 }
 
 /** "0.312 (−0.008 / +0.011)" — value, then the offsets below and above it. */
@@ -71,18 +84,35 @@ export function renderConvergenceBandReadout(
 
 	const line = document.createElement("div");
 	line.className = "ve-metrics-compact__line";
-	const metricNoun =
-		input.metric === "profileSpread"
-			? "best profile agreement"
-			: "best closure";
 	line.append(
-		`Within ${formatBandLabel(input.toleranceM)} of ${metricNoun}: `,
+		`Minimum + ${formatBandLabel(input.toleranceM)} (not a confidence interval): `,
 		"CdA ",
 		span("convergenceBandCda", cdaText),
 		"Crr ",
 		span("convergenceBandCrr", crrText),
 	);
 	container.append(line);
+
+	if (band && input.powerMoves) {
+		const power = document.createElement("div");
+		power.className = "ve-metrics-compact__line";
+		power.append(
+			"Power −1 %: ",
+			span(
+				"convergencePowerDown",
+				formatPowerDelta(band.best, input.powerMoves.down),
+			),
+			"Power +1 %: ",
+			span(
+				"convergencePowerUp",
+				formatPowerDelta(band.best, input.powerMoves.up),
+			),
+		);
+		if (input.clipped) {
+			power.append(`(${POWER_CLIPPED_NOTE})`);
+		}
+		container.append(power);
+	}
 
 	if (band?.touchesEdge) {
 		const caveat = document.createElement("div");

@@ -19,6 +19,7 @@ import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { ModeSegment } from "../../modes/analysis/types";
 import {
+	buildConvergenceUpdateInput,
 	buildRepeatSensitivities,
 	buildRepeatUnits,
 	prepareSegments,
@@ -221,5 +222,50 @@ describe.skipIf(!built)("Repeats tab fits on the real calculator", () => {
 		// More power at the wheel needs more resistance to explain it.
 		expect(byLabel.get("Power +1 %")!.dCdaAtFixedCrr).toBeGreaterThan(0);
 		expect(rows).toHaveLength(8);
+	});
+
+	it("Convergence power shift: base grid + shift equals the grid recomputed at efficiency × 1.01", () => {
+		const args = prepareArgs(LAPS);
+		const prepared = prepareSegments(args);
+		const withEta = (etaScale: number) =>
+			prepareSegments({
+				...args,
+				params: { ...PARAMS, eta: PARAMS.eta * etaScale },
+			});
+		const input = buildConvergenceUpdateInput({
+			prepared,
+			params: PARAMS,
+			prepareWithEtaScale: withEta,
+			windSource: "constant",
+			airSpeedCalibrationPercent: 0,
+			activeDisplayProfile: null,
+			rhoArray: null,
+			cda: 0.3,
+			crr: 0.005,
+			appliedCrr: resolveAppliedCrr(PARAMS, 0.005),
+			profileMode: false,
+			targetSource: "manual",
+			targetLabel: "manual Δh",
+		});
+		const moved = withEta(1.01);
+		input.segments.forEach((segment, j) => {
+			const shift = segment.powerShift!(1.01)!;
+			const base = segment.veGainGrid(0.2, 0.4, 5, 0.002, 0.008, 5);
+			const q = moved[j];
+			const recomputed = q.calculator.ve_gain_grid(
+				0.2,
+				0.4,
+				5,
+				0.002,
+				0.008,
+				5,
+				q.trimStart,
+				q.trimEnd,
+			);
+			for (let i = 0; i < base.length; i++) {
+				expect(base[i] + shift.gain).toBeCloseTo(recomputed[i], 9);
+			}
+			expect(shift.gain).toBeGreaterThan(0);
+		});
 	});
 });

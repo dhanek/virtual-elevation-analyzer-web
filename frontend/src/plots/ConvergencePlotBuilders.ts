@@ -21,7 +21,15 @@
  * THE BAND is drawn as a genuine iso-line of the pooled surface (a second
  * contour trace pinned to one level), not as an ellipse fitted to it: the
  * valley is a tilted trough, and a fitted ellipse would draw a symmetry the
- * surface does not have. The "5 cm" label sits on the band's right edge.
+ * surface does not have. Its label, on the band's right edge, says what it
+ * is — "minimum + 5 cm", NOT a confidence interval (TODO J1): it bounds how
+ * far the fit can move before the pooled error rises 5 cm, which says nothing
+ * about how precisely the data pin the optimum.
+ *
+ * THE POWER MARKERS show where the optimum lands with power −1 % / +1 %
+ * (drivetrain efficiency × 0.99 / × 1.01): a power-scale error moves the fit
+ * while barely changing the minimum error, so the surface itself gives no
+ * warning of it.
  */
 import {
 	formatBandLabel,
@@ -62,9 +70,50 @@ export interface ConvergencePlotInput {
 	 * (metres), same drawing — only the words change. Defaults to closure.
 	 */
 	metric?: ConvergenceMetric;
+	/** The optimum at power −1 % / +1 %; null or absent: not drawn. */
+	powerMoves?: PowerMoves | null;
 }
 
 export type ConvergenceMetric = "closure" | "profileSpread";
+
+interface ParameterPoint {
+	cda: number;
+	crr: number;
+}
+
+export interface PowerMoves {
+	down: ParameterPoint;
+	up: ParameterPoint;
+}
+
+/**
+ * When the optimum sits on the grid edge the moved optima are held by the same
+ * bound, so the shift along that axis reads smaller (often 0) than it is.
+ */
+export const POWER_CLIPPED_NOTE =
+	"optimum on the grid edge — the shift is clipped by the bounds";
+
+/** Colour of the ±1 % power markers and their connecting line. */
+const POWER_COLOR = "#6b46c1";
+
+function signedDelta(value: number, digits: number): string {
+	const text = Math.abs(value).toFixed(digits);
+	if (Number(text) === 0) {
+		return text;
+	}
+	return value < 0 ? `−${text}` : `+${text}`;
+}
+
+/** "ΔCdA −0.003, ΔCrr +0.0006" from the best fit to `moved`. */
+export function formatPowerDelta(
+	best: ParameterPoint,
+	moved: ParameterPoint,
+): string {
+	return `ΔCdA ${signedDelta(moved.cda - best.cda, 4)}, ΔCrr ${signedDelta(
+		moved.crr - best.crr,
+		5,
+	)}`;
+}
 
 /** Colour shared by the band's iso-line and its label. */
 const BAND_COLOR = "#ff7f0e";
@@ -166,6 +215,33 @@ export function buildClosureContourFigure(
 		});
 	}
 
+	const moves = surface.best ? input.powerMoves : null;
+	if (moves && surface.best) {
+		const best = surface.best;
+		data.push({
+			type: "scatter",
+			mode: "lines+markers",
+			name: "Power ±1 %",
+			x: [moves.down.cda, best.cda, moves.up.cda],
+			y: [moves.down.crr, best.crr, moves.up.crr],
+			line: { color: POWER_COLOR, width: 1.5, dash: "dash" },
+			marker: {
+				symbol: ["triangle-down", "circle", "triangle-up"],
+				size: [10, 0, 10],
+				color: POWER_COLOR,
+				line: { color: "white", width: 1 },
+			},
+			text: [
+				`Power −1 % (efficiency × 0.99): ${formatPowerDelta(best, moves.down)}`,
+				"",
+				`Power +1 % (efficiency × 1.01): ${formatPowerDelta(best, moves.up)}`,
+			],
+			hovertemplate: `%{text}<br>CdA %{x:.3f} m², Crr %{y:.4f}${
+				surface.clipped ? `<br>${POWER_CLIPPED_NOTE}` : ""
+			}<extra></extra>`,
+		});
+	}
+
 	data.push({
 		type: "scatter",
 		mode: "markers",
@@ -185,11 +261,12 @@ export function buildClosureContourFigure(
 	const annotations: Array<Record<string, unknown>> = [];
 	if (band) {
 		annotations.push({
-			text: formatBandLabel(band.toleranceM),
+			text: `minimum + ${formatBandLabel(band.toleranceM)}<br>not a confidence interval`,
 			x: band.cdaHigh,
 			y: band.best.crr,
 			xanchor: "left",
 			yanchor: "middle",
+			align: "left",
 			xshift: 4,
 			showarrow: false,
 			font: { size: 11, color: BAND_COLOR },

@@ -52,7 +52,10 @@ import {
 	resampleProfile,
 	type ProfileBasisSegment,
 } from "../../analysis/ProfileSpread";
-import type { ConvergenceMetric } from "../../plots/ConvergencePlotBuilders";
+import type {
+	ConvergenceMetric,
+	PowerMoves,
+} from "../../plots/ConvergencePlotBuilders";
 import type { ConvergenceUpdateInput } from "../../modes/analysis/types";
 import { buildClosureContourFigure } from "../../plots/ConvergencePlotBuilders";
 import { log } from "../../utils/log";
@@ -61,10 +64,21 @@ import { CONVERGENCE_PLOT_ID } from "./convergenceTab";
 import { waitForPlotly } from "./plotlyLoader";
 import { requestModeUpdate } from "./requestModeUpdate";
 
+/** Power ±1 %, as drivetrain-efficiency multipliers (TODO J1). */
+const POWER_SCALES = { down: 0.99, up: 1.01 } as const;
+type PowerSide = keyof typeof POWER_SCALES;
+
+/** One segment's shift under each power scale; null when unavailable. */
+type PowerShifts = Record<PowerSide, number> | null;
+
 interface CachedGains {
 	gainsSignature: string;
-	/** Segments that produced a usable grid, in prepared order. */
-	kept: Array<{ key: string; gains: Float64Array }>;
+	/**
+	 * Segments that produced a usable grid, in prepared order, with how far
+	 * their closure gain moves at power −1 % / +1 % (a constant per segment:
+	 * power enters the VE step only through η·P).
+	 */
+	kept: Array<{ key: string; gains: Float64Array; powerGain: PowerShifts }>;
 	cdaValues: number[];
 	crrValues: number[];
 	gridSteps: number;
@@ -78,6 +92,8 @@ interface CachedPool {
 	segmentCount: number;
 	/** What `surface.z` measures — drives the figure's labels. */
 	metric: ConvergenceMetric;
+	/** Where the optimum lands at power −1 % / +1 %; null where it does not. */
+	powerMoves: PowerMoves | null;
 }
 
 /**
@@ -106,6 +122,8 @@ interface CachedProfileBasis {
 			p0: Float64Array;
 			jc: Float64Array;
 			jr: Float64Array;
+			/** p0's shift at power −1 % / +1 %, resampled; null: unavailable. */
+			powerProfile: Record<PowerSide, Float64Array> | null;
 		}>;
 	} | null;
 }
@@ -113,6 +131,28 @@ interface CachedProfileBasis {
 let cachedGains: CachedGains | null = null;
 let cachedPool: CachedPool | null = null;
 let cachedProfileBasis: CachedProfileBasis | null = null;
+
+/**
+ * The optimum of each power-moved surface, or null when the base surface has
+ * no optimum to move from or a moved one has none.
+ */
+function powerMovesFrom(
+	base: ClosureSurfaceResult,
+	movedSurface: (side: PowerSide) => ClosureSurfaceResult,
+): PowerMoves | null {
+	if (!base.best) {
+		return null;
+	}
+	const down = movedSurface("down").best;
+	const up = movedSurface("up").best;
+	if (!down || !up) {
+		return null;
+	}
+	return {
+		down: { cda: down.cda, crr: down.crr },
+		up: { cda: up.cda, crr: up.crr },
+	};
+}
 
 /** Test seam. */
 export function resetConvergenceSurfaceCache(): void {
@@ -174,12 +214,21 @@ function buildProfileBasis(
 			jc[i] = (pc[i] - p0[i]) / cdaStep;
 			jr[i] = (pr[i] - p0[i]) / crrStep;
 		}
+		const down = segment.powerShift?.(POWER_SCALES.down);
+		const up = segment.powerShift?.(POWER_SCALES.up);
 		segments.push({
 			key: segment.key,
 			group: segment.profileGroup ?? "",
 			p0: resampleProfile(distance, p0, grid),
 			jc: resampleProfile(distance, jc, grid),
 			jr: resampleProfile(distance, jr, grid),
+			powerProfile:
+				down && up && down.profile.length === distance.length
+					? {
+							down: resampleProfile(distance, down.profile, grid),
+							up: resampleProfile(distance, up.profile, grid),
+						}
+					: null,
 		});
 	}
 	if (segments.length === 0) {
@@ -236,7 +285,13 @@ export async function renderConvergenceView(
 				);
 				continue;
 			}
-			kept.push({ key: segment.key, gains });
+			const down = segment.powerShift?.(POWER_SCALES.down);
+			const up = segment.powerShift?.(POWER_SCALES.up);
+			kept.push({
+				key: segment.key,
+				gains,
+				powerGain: down && up ? { down: down.gain, up: up.gain } : null,
+			});
 		}
 
 		cachedGains = {
@@ -281,6 +336,7 @@ export async function renderConvergenceView(
 		let surface: ClosureSurfaceResult;
 		let segmentCount: number;
 		let metric: ConvergenceMetric;
+		let powerMoves: PowerMoves | null = null;
 		const basis = input.profileMode ? cachedProfileBasis?.basis : null;
 		if (basis) {
 			// The anchored spread surface: one quadratic form, evaluated at
@@ -304,12 +360,47 @@ export async function renderConvergenceView(
 			const z = cachedGains.crrValues.map((crr) =>
 				cachedGains!.cdaValues.map((cda) => spreadAt(cda, crr)),
 			);
+			const profileSurface = (
+				segments: ProfileBasisSegment[],
+			): ClosureSurfaceResult => {
+				const at = anchoredSpreadEvaluator(
+					segments,
+					basis.grid,
+					basis.cda0,
+					basis.crr0,
+				);
+				const zz = cachedGains!.crrValues.map((crr) =>
+					cachedGains!.cdaValues.map((cda) => at(cda, crr)),
+				);
+				return surfaceFromZ(
+					zz,
+					cachedGains!.cdaValues,
+					cachedGains!.crrValues,
+					{
+						ridgeFlatnessFloorM: PROFILE_FLATNESS_FLOOR_M,
+						flatReason: PROFILE_FLAT_REASON,
+					},
+				);
+			};
 			surface = surfaceFromZ(z, cachedGains.cdaValues, cachedGains.crrValues, {
 				ridgeFlatnessFloorM: PROFILE_FLATNESS_FLOOR_M,
 				flatReason: PROFILE_FLAT_REASON,
 			});
 			segmentCount = targeted.length;
 			metric = "profileSpread";
+			// Power ±1 %: the same surface with every profile moved by its
+			// power shift. Every segment must have one, or the markers would
+			// describe a different selection.
+			powerMoves = basis.segments.every((entry) => entry.powerProfile)
+				? powerMovesFrom(surface, (side) =>
+						profileSurface(
+							basis.segments.map((entry, i): ProfileBasisSegment => ({
+								...targeted[i],
+								p0: entry.p0.map((v, j) => v + entry.powerProfile![side][j]),
+							})),
+						),
+					)
+				: null;
 		} else {
 			const segmentGains: SegmentGain[] = cachedGains.kept.map(
 				(entry): SegmentGain => ({
@@ -324,6 +415,22 @@ export async function renderConvergenceView(
 			);
 			segmentCount = segmentGains.length;
 			metric = "closure";
+			// Power ±1 %: a gain that rises by δ against a fixed target is the
+			// same error as the old gain against target − δ, so the cached
+			// grids are re-pooled, not recomputed.
+			const kept = cachedGains.kept;
+			powerMoves = kept.every((entry) => entry.powerGain)
+				? powerMovesFrom(surface, (side) =>
+						poolClosureSurface(
+							kept.map((entry, i): SegmentGain => ({
+								gains: entry.gains,
+								target: segmentGains[i].target - entry.powerGain![side],
+							})),
+							cachedGains!.cdaValues,
+							cachedGains!.crrValues,
+						),
+					)
+				: null;
 		}
 
 		cachedPool = {
@@ -337,6 +444,7 @@ export async function renderConvergenceView(
 			),
 			segmentCount,
 			metric,
+			powerMoves,
 		};
 	}
 
@@ -350,6 +458,7 @@ export async function renderConvergenceView(
 		targetLabel: input.targetLabel,
 		band: cachedPool.band,
 		metric: cachedPool.metric,
+		powerMoves: cachedPool.powerMoves,
 	});
 
 	// Written from the same pooled surface the map is drawn from, before the
@@ -358,6 +467,8 @@ export async function renderConvergenceView(
 		band: cachedPool.band,
 		toleranceM: DEFAULT_CLOSURE_BAND_TOLERANCE_M,
 		metric: cachedPool.metric,
+		powerMoves: cachedPool.powerMoves,
+		clipped: cachedPool.surface.clipped,
 	});
 
 	const Plotly = (await waitForPlotly()) as {

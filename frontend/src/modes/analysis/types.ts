@@ -307,6 +307,19 @@ interface ConvergenceSegmentInput {
 	profileDistance?: Float64Array;
 	/** Profile comparison group (out-and-back leg direction). */
 	profileGroup?: string;
+	/**
+	 * The same segment prepared at drivetrain efficiency × `etaScale` — power
+	 * scaled, nothing else — as what that does to it: the closure gain moves
+	 * by a constant (`gain`), the window profile by `profile` (rebased like
+	 * `veProfile`). Power enters the VE step only through η·P, so the shift is
+	 * the same at every (CdA, Crr) and the grid need not be recomputed. Null
+	 * when the segment did not survive the second preparation. Optional:
+	 * absent means the ±1 % power markers are not drawn.
+	 */
+	powerShift?(etaScale: number): {
+		gain: number;
+		profile: Float64Array;
+	} | null;
 }
 
 /**

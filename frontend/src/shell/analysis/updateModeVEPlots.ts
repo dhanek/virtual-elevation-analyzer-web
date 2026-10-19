@@ -447,6 +447,11 @@ export async function updateModeVEPlots(
 			buildConvergenceUpdateInput({
 				prepared,
 				params,
+				prepareWithEtaScale: (etaScale) =>
+					prepareSegments({
+						...prepareArgs,
+						params: { ...params, eta: params.eta * etaScale },
+					}),
 				windSource: args.windSource,
 				airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
 				activeDisplayProfile: appState.activeDisplayProfile,

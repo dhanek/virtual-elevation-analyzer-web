@@ -37,7 +37,9 @@ describe("renderConvergenceBandReadout", () => {
 	it("writes the best fit with the offsets below and above it, per axis", () => {
 		render(band());
 		const container = document.getElementById(CONVERGENCE_BAND_ID)!;
-		expect(container.textContent).toContain("Within 5 cm of best closure");
+		expect(container.textContent).toContain(
+			"Minimum + 5 cm (not a confidence interval)",
+		);
 		expect(document.getElementById("convergenceBandCda")!.textContent).toBe(
 			"0.312 (−0.008 / +0.011) m²",
 		);
@@ -57,7 +59,9 @@ describe("renderConvergenceBandReadout", () => {
 	it("shows n/a for both axes when there is no optimum", () => {
 		render(null);
 		const container = document.getElementById(CONVERGENCE_BAND_ID)!;
-		expect(container.textContent).toContain("Within 5 cm of best closure");
+		expect(container.textContent).toContain(
+			"Minimum + 5 cm (not a confidence interval)",
+		);
 		expect(document.getElementById("convergenceBandCda")!.textContent).toBe(
 			"n/a",
 		);
@@ -83,5 +87,42 @@ describe("renderConvergenceBandReadout", () => {
 describe("formatBandValue", () => {
 	it("prints the value then the distance to each bound", () => {
 		expect(formatBandValue(0.3, 0.29, 0.32, 3)).toBe("0.300 (−0.010 / +0.020)");
+	});
+
+	it("adds where the optimum moves at power ±1 %", () => {
+		renderConvergenceBandReadout({
+			band: band(),
+			toleranceM: 0.05,
+			powerMoves: {
+				down: { cda: 0.315, crr: 0.0044 },
+				up: { cda: 0.309, crr: 0.0056 },
+			},
+		});
+		expect(document.getElementById("convergencePowerDown")!.textContent).toBe(
+			"ΔCdA +0.0030, ΔCrr −0.00060",
+		);
+		expect(document.getElementById("convergencePowerUp")!.textContent).toBe(
+			"ΔCdA −0.0030, ΔCrr +0.00060",
+		);
+	});
+
+	it("draws no power line without the moved optima", () => {
+		render(band());
+		expect(document.getElementById("convergencePowerDown")).toBeNull();
+	});
+
+	it("says the power shift is clipped when the optimum is on the grid edge", () => {
+		renderConvergenceBandReadout({
+			band: band(),
+			toleranceM: 0.05,
+			clipped: true,
+			powerMoves: {
+				down: { cda: 0.315, crr: 0.0044 },
+				up: { cda: 0.309, crr: 0.0056 },
+			},
+		});
+		expect(document.getElementById(CONVERGENCE_BAND_ID)!.textContent).toContain(
+			"the shift is clipped by the bounds",
+		);
 	});
 });
