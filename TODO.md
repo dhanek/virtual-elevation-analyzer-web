@@ -648,8 +648,7 @@ both in sync — a clean V around 0 s, power moving Crr by ≈0.0008 per second;
 best at +1 s on every lap (7 cm); GPS laps, no clear optimum (best at the sweep edge). A slider
 move with the check on measured 51 ms.
 
-**Follow-up — a reference too flat to time (2026-10-20, `claude/timing-flat-reference-guard`,
-stacked on PR #34).** On the reference ACE air-speed ride the position row read "best at −1 s —
+**Follow-up — a reference too flat to time (2026-10-20, folded into PR #34).** On the reference ACE air-speed ride the position row read "best at −1 s —
 21.9 cm better than 0 s, on every lap". Investigated: an artefact. With the altitude held constant
 every shift scores the same, ±5 s smoothing of the altitude removes the optimum, it does not move
 with the air-speed lag (0…5 s) and persists with no wind at all; across seven ACE air-speed rides the
