@@ -23,6 +23,7 @@ import {
 } from "../../analysis/RepeatSpread";
 import {
 	computeTimingSweep,
+	TIMING_MIN_RELIEF_M,
 	type TimingResult,
 } from "../../analysis/TimingSweep";
 import type { RepeatsUpdateInput } from "../../modes/analysis/types";
@@ -278,6 +279,8 @@ function verdictText(
 				: `${channel}: no clear optimum — ${shiftLabel(v.shift)} is only ${(v.gainM * 100).toFixed(1)} cm better than 0 s.`;
 		case "edge":
 			return `${channel}: no clear optimum — best at the sweep edge (${shiftLabel(v.shift)}).`;
+		case "flat-reference":
+			return `${channel}: no clear optimum — the reference rises and falls only ${Number.isFinite(v.reliefM) ? v.reliefM.toFixed(1) : "—"} m per ${noun} (under ${TIMING_MIN_RELIEF_M} m), too flat to time.`;
 		case "best":
 			return `${channel}: best at ${shiftLabel(v.shift)} — ${(v.gainM * 100).toFixed(1)} cm better than 0 s, on every ${noun}.`;
 	}
@@ -311,7 +314,9 @@ ${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit t
 			: positionLabel.charAt(0).toLowerCase() + positionLabel.slice(1),
 	);
 	const power = computeTimingSweep(inputs.power, fixedCrr);
-	const position = computeTimingSweep(inputs.position, fixedCrr);
+	const position = computeTimingSweep(inputs.position, fixedCrr, {
+		requireRelief: true,
+	});
 	const bestOf = (result: TimingResult) =>
 		result.verdict.kind === "best" || result.verdict.kind === "zero"
 			? result.verdict.kind === "best"

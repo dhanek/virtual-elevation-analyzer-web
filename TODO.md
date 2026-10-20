@@ -648,6 +648,21 @@ both in sync — a clean V around 0 s, power moving Crr by ≈0.0008 per second;
 best at +1 s on every lap (7 cm); GPS laps, no clear optimum (best at the sweep edge). A slider
 move with the check on measured 51 ms.
 
+**Follow-up — a reference too flat to time (2026-10-20, `claude/timing-flat-reference-guard`,
+stacked on PR #34).** On the reference ACE air-speed ride the position row read "best at −1 s —
+21.9 cm better than 0 s, on every lap". Investigated: an artefact. With the altitude held constant
+every shift scores the same, ±5 s smoothing of the altitude removes the optimum, it does not move
+with the air-speed lag (0…5 s) and persists with no wind at all; across seven ACE air-speed rides the
+best shift takes every sign (−3 … +3). The laps' barometric reference spans only 1.4–3.4 m in 0.2 m
+steps, so the sweep scores the rebase anchor and the quantisation, and "on every lap" passes by
+chance with five laps. The air-speed lag default (+2 s) stays. Fix: the position row's verdict
+(`computeTimingSweep(…, { requireRelief: true })`) reads "no clear optimum — the reference rises and
+falls only X m per lap (under 5 m), too flat to time" when the median repeat's reference relief
+(max − min) at 0 s is under `TIMING_MIN_RELIEF_M` = 5 m, and nothing in its column is bolded. The
+threshold sits between the flat ACE rides (0.8–3.4 m per lap, all seven) and the three hill rides
+(32.6–34.6 m per repeat). The power row is unchanged. Not done: the ±5 s smoothing test, which
+would need a second sweep; relief alone already separates every ride measured.
+
 ### Convergence tab: minimum + 5 cm, and the ±1 % power shift (J1) — 2026-10-19
 
 **The item this closes:** *Bundle J → J1 [S] Relabel the Convergence tab's minimum + 5 cm

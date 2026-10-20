@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { RepeatUnitInput } from "./RepeatSpread";
 import {
 	computeTimingSweep,
+	TIMING_MIN_RELIEF_M,
 	TIMING_SHIFTS,
 	type TimingShiftInput,
 } from "./TimingSweep";
@@ -148,5 +149,65 @@ describe("computeTimingSweep", () => {
 			kind: "flat",
 			shift: 2,
 		});
+	});
+
+	/**
+	 * The same ride scaled to a given relief: VE is linear in power, drag and
+	 * rolling terms, so scaling the reference and the model together keeps
+	 * the lag, and only the relief and the RMS shrink. `step` quantises the
+	 * reference as a barometer does (0.2 m on the ACE).
+	 */
+	const scaled = (lag: number, reliefM: number, step = 0) => {
+		const relief = (units: RepeatUnitInput[]) =>
+			Math.max(...units[0].legs[0].elevation!) -
+			Math.min(...units[0].legs[0].elevation!);
+		const k = reliefM / relief(unitsAt(0, lag));
+		return TIMING_SHIFTS.map((shift) => ({
+			shift,
+			units: unitsAt(shift, lag).map((unit) => ({
+				...unit,
+				legs: unit.legs.map((leg) => ({
+					veProfile: (cda: number, crr: number) =>
+						leg.veProfile(cda, crr).map((h) => k * h),
+					elevation: leg.elevation!.map((h) =>
+						step > 0 ? Math.round((k * h) / step) * step : k * h,
+					),
+				})),
+			})),
+		}));
+	};
+
+	test("a reference too flat to time reads no optimum, whatever scores best", () => {
+		// 2.5 m per lap in 0.2 m steps, like the reference ACE ride's laps.
+		const rows = scaled(1, 2.5, 0.2);
+		// Without the guard the sweep would call it.
+		expect(computeTimingSweep(rows, 0.005).verdict).toMatchObject({
+			kind: "best",
+			shift: 1,
+		});
+		const verdict = computeTimingSweep(rows, 0.005, {
+			requireRelief: true,
+		}).verdict;
+		expect(verdict.kind).toBe("flat-reference");
+		expect(verdict).toMatchObject({ reliefM: expect.closeTo(2.5, 0) });
+	});
+
+	test("a hill reference still gets its optimum", () => {
+		// 33 m per repeat, as on the hill rides.
+		const result = computeTimingSweep(scaled(2, 33, 0.2), 0.005, {
+			requireRelief: true,
+		});
+		expect(result.verdict).toMatchObject({ kind: "best", shift: 2 });
+		expect(TIMING_MIN_RELIEF_M).toBeLessThan(33);
+	});
+
+	test("the relief guard leaves not-estimable alone", () => {
+		const one = scaled(1, 2.5).map(({ shift, units }) => ({
+			shift,
+			units: units.slice(0, 1),
+		}));
+		expect(
+			computeTimingSweep(one, 0.005, { requireRelief: true }).verdict,
+		).toEqual({ kind: "not-estimable" });
 	});
 });

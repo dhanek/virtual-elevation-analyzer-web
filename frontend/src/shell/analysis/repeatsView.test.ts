@@ -221,4 +221,47 @@ describe("renderRepeatsView", () => {
 		);
 		expect(text()).not.toContain("gPS");
 	});
+
+	it("says the position row's reference is too flat to time, leaving power alone", () => {
+		// The same laps scaled to ≈2 m of relief: a flat circuit.
+		const units = [0.29, 0.3, 0.31].map((cda, j) => {
+			const base = leg(j, cda, 0.004);
+			return {
+				key: `lap-${j + 1}`,
+				label: `Lap ${j + 1}`,
+				legs: [
+					{
+						veProfile: (c: number, k: number) =>
+							base.veProfile(c, k).map((h) => 0.05 * h),
+						elevation: base.elevation!.map((h) => 0.05 * h),
+					},
+				],
+			};
+		});
+		const rows = [-3, -2, -1, 0, 1, 2, 3].map((shift) => ({ shift, units }));
+		const input = {
+			units,
+			fixedCrr: 0.004,
+			...EXTRA,
+			timing: () => ({
+				power: rows,
+				position: rows,
+				positionLabel: "Elevation reference",
+			}),
+		};
+		renderRepeatsView(input);
+		document.getElementById("repeatsTimingRun")!.click();
+		renderRepeatsView(input);
+		expect(text()).toContain("Power: in sync — 0 s scores best.");
+		expect(text()).toMatch(
+			/Elevation reference: no clear optimum — the reference rises and falls only \d\.\d m per lap \(under 5 m\), too flat to time\./,
+		);
+		// Nothing bolded in the position column.
+		const positionCells = [
+			...document
+				.querySelectorAll("#repeats-tab table")[2]
+				.querySelectorAll("tbody tr td:last-child"),
+		];
+		expect(positionCells.some((td) => td.querySelector("strong"))).toBe(false);
+	});
 });

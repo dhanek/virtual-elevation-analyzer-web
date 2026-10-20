@@ -31,6 +31,19 @@ export const TIMING_SHIFTS = [-3, -2, -1, 0, 1, 2, 3] as const;
  */
 const TIMING_MIN_GAIN_M = 0.005;
 
+/**
+ * A reference that barely rises or falls cannot time anything: shifting it
+ * moves next to nothing, and what the sweep then scores is noise — which
+ * sample the rebase anchors on, the barometer's 0.2 m steps. On the
+ * reference ACE ride (flat 2.7 km laps, 1.4–3.4 m per lap) the position row
+ * read "best at −1 s, 21.9 cm better, on every lap"; a constant altitude
+ * scores every shift the same, and ±5 s smoothing removes the optimum. Seven
+ * flat ACE air-speed rides span 0.8–3.4 m per lap with best shifts of every
+ * sign; the hill repeats span 32.6–34.6 m. Below this median relief (max −
+ * min of the reference within a repeat), the row reads too flat to time.
+ */
+export const TIMING_MIN_RELIEF_M = 5;
+
 export interface TimingShiftInput {
 	shift: number;
 	units: readonly RepeatUnitInput[];
@@ -59,6 +72,8 @@ type TimingVerdict =
 			repeats: number;
 	  }
 	| { kind: "edge"; shift: number }
+	/** The reference's median relief per repeat (m) is too small to time. */
+	| { kind: "flat-reference"; reliefM: number }
 	| { kind: "not-estimable" };
 
 export interface TimingResult {
@@ -69,6 +84,11 @@ export interface TimingResult {
 export function computeTimingSweep(
 	shifts: readonly TimingShiftInput[],
 	fixedCrr: number,
+	/**
+	 * Judge the shifted channel against the reference's relief at 0 s: set
+	 * where the reference itself is what moves (the position row).
+	 */
+	options: { requireRelief?: boolean } = {},
 ): TimingResult {
 	const rows = shifts.map(({ shift, units }): TimingRow => {
 		const score = heldOutScore(units);
@@ -81,7 +101,46 @@ export function computeTimingSweep(
 			crr: pooled?.crr ?? NaN,
 		};
 	});
-	return { rows, verdict: judge(rows) };
+	const verdict = judge(rows);
+	if (options.requireRelief && verdict.kind !== "not-estimable") {
+		const zero = shifts.find(({ shift }) => shift === 0);
+		const reliefM = zero ? medianRelief(zero.units) : NaN;
+		if (!(reliefM >= TIMING_MIN_RELIEF_M)) {
+			return { rows, verdict: { kind: "flat-reference", reliefM } };
+		}
+	}
+	return { rows, verdict };
+}
+
+/** Median over repeats of the largest max − min of any leg's reference. */
+function medianRelief(units: readonly RepeatUnitInput[]): number {
+	const reliefs: number[] = [];
+	for (const unit of units) {
+		let relief = NaN;
+		for (const { elevation } of unit.legs) {
+			if (!elevation || elevation.length === 0) {
+				continue;
+			}
+			let lo = Infinity;
+			let hi = -Infinity;
+			for (const h of elevation) {
+				lo = Math.min(lo, h);
+				hi = Math.max(hi, h);
+			}
+			relief = Number.isFinite(relief) ? Math.max(relief, hi - lo) : hi - lo;
+		}
+		if (Number.isFinite(relief)) {
+			reliefs.push(relief);
+		}
+	}
+	if (reliefs.length === 0) {
+		return NaN;
+	}
+	reliefs.sort((a, b) => a - b);
+	const mid = Math.floor(reliefs.length / 2);
+	return reliefs.length % 2
+		? reliefs[mid]
+		: (reliefs[mid - 1] + reliefs[mid]) / 2;
 }
 
 function judge(rows: readonly TimingRow[]): TimingVerdict {
