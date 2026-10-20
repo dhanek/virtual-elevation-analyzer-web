@@ -12,6 +12,7 @@ export interface TabRenderMap {
 	vd?: () => void;
 	ve?: () => void;
 	convergence?: () => void;
+	repeats?: () => void;
 	calibration?: () => void;
 }
 
@@ -76,6 +77,9 @@ export function activateTab(tabName: string): void {
 	) {
 		log.debug("Tab switching: rendering convergence tab");
 		currentRenderMap.convergence();
+	} else if (tabName === "repeats" && currentRenderMap.repeats) {
+		log.debug("Tab switching: rendering repeats tab");
+		currentRenderMap.repeats();
 	} else if (tabName === "calibration" && currentRenderMap.calibration) {
 		log.debug("Tab switching: rendering calibration tab");
 		currentRenderMap.calibration();

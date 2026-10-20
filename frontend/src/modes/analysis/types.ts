@@ -1,4 +1,9 @@
 import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
+import type {
+	RepeatUnitInput,
+	SensitivityInput,
+} from "../../analysis/RepeatSpread";
+import type { TimingShiftInput } from "../../analysis/TimingSweep";
 import type { ElevationDiffSource } from "../../analysis/ClosureTarget";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
@@ -123,6 +128,9 @@ export interface ModeSegment {
 	 * Set where the ordinal is still correct — in `getUpdateSegments` — and read
 	 * downstream. `mapTrimToSegments` spreads the segment, so it survives the
 	 * trim mapping.
+	 *
+	 * Out-and-back sets the SECTION number on both of its legs, which is what
+	 * pairs them into one repeat on the Repeats tab (`buildRepeatUnits`).
 	 */
 	itemNumber?: number;
 	/**
@@ -300,6 +308,19 @@ interface ConvergenceSegmentInput {
 	profileDistance?: Float64Array;
 	/** Profile comparison group (out-and-back leg direction). */
 	profileGroup?: string;
+	/**
+	 * The same segment prepared at drivetrain efficiency × `etaScale` — power
+	 * scaled, nothing else — as what that does to it: the closure gain moves
+	 * by a constant (`gain`), the window profile by `profile` (rebased like
+	 * `veProfile`). Power enters the VE step only through η·P, so the shift is
+	 * the same at every (CdA, Crr) and the grid need not be recomputed. Null
+	 * when the segment did not survive the second preparation. Optional:
+	 * absent means the ±1 % power markers are not drawn.
+	 */
+	powerShift?(etaScale: number): {
+		gain: number;
+		profile: Float64Array;
+	} | null;
 }
 
 /**
@@ -359,6 +380,41 @@ export interface ModeUpdateCallbacks {
 	 * renderer (`shell/analysis/convergenceView.ts`).
 	 */
 	renderConvergence(input: ConvergenceUpdateInput): Promise<void> | void;
+	/**
+	 * The Repeats tab (each lap fitted alone, and the spread across laps).
+	 * Gated on `isTabActive("repeats-tab")`; all three modes delegate to the
+	 * one shared renderer (`shell/analysis/repeatsView.ts`). Optional: the
+	 * headless surface has no tab to draw.
+	 */
+	renderRepeats?(input: RepeatsUpdateInput): Promise<void> | void;
+}
+
+/** Everything `renderRepeats` needs. */
+export interface RepeatsUpdateInput {
+	units: RepeatUnitInput[];
+	/** The slider Crr the CdA-only variant holds fixed. */
+	fixedCrr: number;
+	/** Slider bounds; a free per-repeat fit at or beyond them is flagged. */
+	cdaBounds: [number, number];
+	crrBounds: [number, number];
+	/** One refit per assumed-input change (TODO J5). */
+	sensitivities: SensitivityInput[];
+	/**
+	 * The timing sweep's inputs (TODO J4), built only when called — the view
+	 * calls it once the user has asked for the check. Null result: the ride
+	 * is not sampled at 1 s. Optional so callers without it show no section.
+	 */
+	timing?: () => TimingSweepInputs | null;
+}
+
+/**
+ * The timing sweep's two channels (TODO J4), and the name the position row
+ * goes by — what that sweep actually moves (`buildTimingSweepInputs`).
+ */
+export interface TimingSweepInputs {
+	power: TimingShiftInput[];
+	position: TimingShiftInput[];
+	positionLabel: string;
 }
 
 export interface AnalysisModeHandler {

@@ -41,6 +41,7 @@ import {
 	type AutoConvergeResolution,
 } from "../../analysis/AutoConverge";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
+import { TIMING_SHIFTS } from "../../analysis/TimingSweep";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
 import type {
@@ -76,7 +77,11 @@ import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js
 import {
 	buildAutoConvergeSegments,
 	buildConvergenceUpdateInput,
+	buildRepeatSensitivities,
+	buildRepeatUnits,
+	buildTimingSweepInputs,
 	prepareSegments,
+	type PrepareSegmentsArgs,
 } from "./segmentPreparation";
 
 export interface UpdateModeVEPlotsArgs {
@@ -250,7 +255,7 @@ export async function updateModeVEPlots(
 		manualDiffMetres: closureSelection.manualDiffMetres,
 	};
 
-	const prepared = prepareSegments({
+	const prepareArgs: PrepareSegmentsArgs = {
 		segments,
 		normalized,
 		altitude: elevation.altitude,
@@ -265,7 +270,8 @@ export async function updateModeVEPlots(
 			series: appState.weatherSeries,
 			calcRho: AirDensityCalculator.calculate_air_density,
 		},
-	});
+	};
+	const prepared = prepareSegments(prepareArgs);
 
 	// (4) AUTO-CONVERGE (confirmed semantics: a locked slider is DRIVEN along
 	//     the closure ridge, not frozen). Resolved HERE, not in the funnel,
@@ -443,6 +449,11 @@ export async function updateModeVEPlots(
 			buildConvergenceUpdateInput({
 				prepared,
 				params,
+				prepareWithEtaScale: (etaScale) =>
+					prepareSegments({
+						...prepareArgs,
+						params: { ...params, eta: params.eta * etaScale },
+					}),
 				windSource: args.windSource,
 				airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
 				activeDisplayProfile: appState.activeDisplayProfile,
@@ -471,6 +482,29 @@ export async function updateModeVEPlots(
 								: "analysis profile (no DEM loaded)",
 			}),
 		);
+	}
+
+	if (callbacks.renderRepeats && isTabActive("repeats-tab")) {
+		// Three VE probes per segment, then closed-form fits: cheap, but only
+		// worth running while someone is looking at the table.
+		const units = buildRepeatUnits(prepared, params);
+		await callbacks.renderRepeats({
+			units,
+			fixedCrr: crr,
+			cdaBounds: [
+				params.cda_min ?? DEFAULT_PARAMETERS.cda_min,
+				params.cda_max ?? DEFAULT_PARAMETERS.cda_max,
+			],
+			crrBounds: [
+				params.crr_min ?? DEFAULT_PARAMETERS.crr_min,
+				params.crr_max ?? DEFAULT_PARAMETERS.crr_max,
+			],
+			// Six more preparations (TODO J5) — paid only with the tab open.
+			sensitivities: buildRepeatSensitivities(prepareArgs, units),
+			// Fourteen more preparations (TODO J4) — only once asked for.
+			timing: () =>
+				buildTimingSweepInputs(prepareArgs, TIMING_SHIFTS, elevation.profile),
+		});
 	}
 
 	// Published for Store Result. Empty means every segment ran on the

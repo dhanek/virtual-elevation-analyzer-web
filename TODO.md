@@ -374,8 +374,8 @@ comments re-verified at the ported tip.
 ## Bundle J · Honest uncertainty
 
 *Effort: S–L per item. Why together: every item changes what the app claims about how well CdA and
-Crr are known, and they share the Convergence tab and the results view. J1 is cheap and fixes a
-misleading label on its own; J2 is the foundation the others are judged against.*
+Crr are known, and they share the Convergence tab and the results view. J1 (done) is cheap and fixes a
+misleading label on its own; J2 (done) is the foundation the others are judged against.*
 
 **Origin:** offline analysis of the VE-testing discussion (repeats vs RMSE), 2026-09-26/27, on three
 hill sessions (6 legs each, same rider and tyres), a shuttle ride and the earlier velodrome
@@ -400,19 +400,12 @@ sessions. Scripts and numbers live in the gitignored `vw-demo/analysis/aerosenso
 
 Items, in order:
 
-- [ ] **J1 [S] Relabel the Convergence tab's minimum + 5 cm contour, and show the ±1 % power
-      arrow.** The contour reads as an uncertainty region; it is a fit-tolerance band.
-      *Criteria:* the legend/tooltip says "minimum + 5 cm — not a confidence interval"; the plot
-      shows where the optimum moves for power −1 % / +1 % (refit at `efficiency × 0.99` and
-      `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the reference ride in every mode
-      that renders the tab.
+- [x] **J1 [S] Relabel the Convergence tab's minimum + 5 cm contour, and show the ±1 % power
+      arrow** — done 2026-10-19, see *Done → Convergence tab: minimum + 5 cm, and the ±1 % power
+      shift*.
 
-- [ ] **J2 [M] Repeat-based spread: a standalone fit per lap (or per out-and-back pair) next to
-      the joint fit.** Buckley's criterion made visible: independent repeats solved alone.
-      *Criteria:* for a selection of ≥2 laps/pairs the results view lists each one's CdA/Crr/RMS
-      and the SD across them with n and degrees of freedom; a single lap shows "repeat spread not
-      estimable" rather than zero; also a variant at fixed Crr (CdA-only per lap), since that is
-      the comparison-testing use; the joint fit is unchanged.
+- [x] **J2 [M] Repeat-based spread** — done 2026-10-19, see *Done → Repeats tab: each lap
+      fitted alone*.
 
 - [ ] **J3 [S] Power-independent CdA for comparisons.** Show CdA + k·Crr, where k = 2·m·g /
       (ρ·v̄²) is taken from the coasting legs' mean speed (≈9 at 40 km/h), and/or CdA at a user-fixed
@@ -422,17 +415,11 @@ Items, in order:
       hill sessions it reproduces the offline result (between-session spread shrinks relative to
       raw CdA).
 
-- [ ] **J4 [M] Timing checks for power and GPS relative to speed.** The air-speed lag already
-      exists; power and position are assumed synchronous.
-      *Criteria:* an optional whole-second sweep (−3…+3 s) for power and for position, scored on
-      held-out laps/pairs, never on in-sample RMS; the result is reported, not applied silently
-      (the same rule as `baro_lag_seconds`); no fractional interpolated shifts.
+- [x] **J4 [M] Timing checks for power and GPS relative to speed** — done 2026-10-19, in the
+      Repeats tab; see *Done → Timing check in the Repeats tab*.
 
-- [ ] **J5 [S] Systematic-error budget in the results view.** Next to the statistical spread,
-      show what ±1 % power, ±1 kg mass, ±0.5 m DEM rise and ±1 % air density do to CdA/Crr
-      (one refit each).
-      *Criteria:* labelled as sensitivities, not measured uncertainties; each row is a real refit
-      through the same pipeline; the header never combines them into a single "±".
+- [x] **J5 [S] Systematic-error budget** — done 2026-10-19, in the Repeats tab; see *Done →
+      Systematic-error budget in the Repeats tab*.
 
 - [ ] **J6 [L] Kalman error-model fit as an "honest uncertainty" step (Rust).** Per-leg random
       walk + shared terrain state (AR(1), correlation length chosen by likelihood) + jump
@@ -630,6 +617,150 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Timing check in the Repeats tab (J4) — 2026-10-19
+
+**The item this closes:** *Bundle J → J4 [M] Timing checks for power and GPS relative to speed.*
+Original criteria: an optional whole-second sweep (−3…+3 s) for power and for position, scored on
+held-out laps/pairs, never on in-sample RMS; the result is reported, not applied silently (the
+same rule as `baro_lag_seconds`); no fractional interpolated shifts.
+
+**Commit:** `3ae969f` on `claude/sharp-jepsen-922674`, PR #34.
+
+**What it does.** A "Timing check" section at the foot of the Repeats tab, run with a button
+(fourteen extra preparations per pass, so only once asked for). Power, and position —
+latitude/longitude and the resolved elevation profile — are shifted by whole seconds −3 … +3 on
+the air-speed offset's convention (+s = channel late by s; edges repeat the edge
+value). The position row is labelled by what actually moves ("Elevation reference" under the
+recorded profile when wind does not reach the kernel through GPS, "GPS position" under a DEM
+profile). A table gives held-out RMS per shift for each channel and the Crr power implies; bullets
+give the verdict and "Reported only — nothing is applied." The air-speed offset is unchanged.
+
+**How.** Each shift prepares the selection again (`buildTimingSweepInputs`) and scores it with
+`heldOutScore`: every lap/section predicted by the pooled free fit to the others. A shift counts
+as the optimum only if it beats 0 s by 5 mm pooled AND improves every held-out repeat — pooled
+RMS alone let one badly fitting loop lap carry the verdict. Ties go to 0 s; best on ±3 s reads
+"best at the sweep edge"; fewer than two repeats "not estimable"; a ride not sampled at 1 s is
+refused. Tested on a synthetic ride with a known 2 s power lag.
+
+**Checked in the running app** (reference ride, laps 10+12+16): out-and-back, power and position
+both in sync — a clean V around 0 s, power moving Crr by ≈0.0008 per second; Standard laps, power
+best at +1 s on every lap (7 cm); GPS laps, no clear optimum (best at the sweep edge). A slider
+move with the check on measured 51 ms.
+
+**Follow-up — a reference too flat to time (2026-10-20, folded into PR #34).** On the reference ACE air-speed ride the position row read "best at −1 s —
+21.9 cm better than 0 s, on every lap". Investigated: an artefact. With the altitude held constant
+every shift scores the same, ±5 s smoothing of the altitude removes the optimum, it does not move
+with the air-speed lag (0…5 s) and persists with no wind at all; across seven ACE air-speed rides the
+best shift takes every sign (−3 … +3). The laps' barometric reference spans only 1.4–3.4 m in 0.2 m
+steps, so the sweep scores the rebase anchor and the quantisation, and "on every lap" passes by
+chance with five laps. The air-speed lag default (+2 s) stays. Fix: the position row's verdict
+(`computeTimingSweep(…, { requireRelief: true })`) reads "no clear optimum — the reference rises and
+falls only X m per lap (under 5 m), too flat to time" when the median repeat's reference relief
+(max − min) at 0 s is under `TIMING_MIN_RELIEF_M` = 5 m, and nothing in its column is bolded. The
+threshold sits between the flat ACE rides (0.8–3.4 m per lap, all seven) and the three hill rides
+(32.6–34.6 m per repeat). The power row is unchanged. Not done: the ±5 s smoothing test, which
+would need a second sweep; relief alone already separates every ride measured.
+
+### Convergence tab: minimum + 5 cm, and the ±1 % power shift (J1) — 2026-10-19
+
+**The item this closes:** *Bundle J → J1 [S] Relabel the Convergence tab's minimum + 5 cm
+contour, and show the ±1 % power arrow.* Original criteria: the legend/tooltip says "minimum +
+5 cm — not a confidence interval"; the plot shows where the optimum moves for power −1 % / +1 %
+(refit at `efficiency × 0.99` and `× 1.01`), with the ΔCdA/ΔCrr in the tooltip; checked on the
+reference ride in every mode that renders the tab.
+
+**Commit:** `fbecd02` on `claude/sharp-jepsen-922674`, PR #34 (first opened as #35, folded into #34).
+
+**What it does.** The band label on the plot reads "minimum + 5 cm / not a confidence interval",
+and the readout under it "Minimum + 5 cm (not a confidence interval)". Two purple triangles mark
+the optimum at power −1 % / +1 %, joined by a dashed line through the best fit; their hover and a
+second readout line give ΔCdA / ΔCrr. When the optimum sits on the grid edge both say the shift is
+clipped by the bounds. No optimum (flat ridge), no markers.
+
+**How.** The selection is prepared again at efficiency × 0.99 / × 1.01 (`prepareWithEtaScale`,
+lazy, only on a gains-cache miss). Power enters the VE step only through η·P, so each segment's
+closure gain moves by one constant at every (CdA, Crr): the cached grids are re-pooled against
+`target − δ`, and the profile surface's probe profile moves by the per-sample difference. A
+real-WASM test checks base grid + δ against a grid recomputed at × 1.01 to 1e-9.
+
+**Checked in the running app** (reference ride, laps 10+12+16): out-and-back, closure and profile
+surfaces — optimum on the Crr floor (0.0015), power ±1 % moves CdA ±0.0043 and Crr not at all,
+flagged as clipped; GPS laps — flat ridge, no optimum, no markers; Standard — optimum on the CdA
+floor, shifts lopsided and flagged as clipped.
+
+### Systematic-error budget in the Repeats tab (J5) — 2026-10-19
+
+**The item this closes:** *Bundle J → J5 [S] Systematic-error budget in the results view.*
+Original wording: next to the statistical spread, show what ±1 % power, ±1 kg mass, ±0.5 m DEM
+rise and ±1 % air density do to CdA/Crr (one refit each). *Criteria:* labelled as
+sensitivities, not measured uncertainties; each row is a real refit through the same pipeline;
+the header never combines them into a single "±".
+
+**Commit:** `225aa38` on `claude/sharp-jepsen-922674`, PR #34.
+
+**What it does.** Under the pooled fit, an "If an input is off — shift of the all-together fit"
+table, captioned "Sensitivities, not error bars — don't add them up.":
+ΔCdA, ΔCrr and ΔCdA at the slider Crr of the POOLED fit for power ±1 % (efficiency × 1.01 /
+0.99), mass ±1 kg, air density ±1 % and reference rise ±0.5 m per leg. Each row is signed and
+stands alone; nothing sums them.
+
+**How.** Power, mass and density rows rerun `prepareSegments` + `buildRepeatUnits` with one input
+moved (`buildRepeatSensitivities`) — new calculators, the same closed-form fit. Density moves
+through a `rhoScale` on `prepareSegments` so the rho series, the per-lap weather rho and
+`params.rho` all move together. The rise row tilts each leg's reference by a ramp to ±0.5 m over
+its distance, reversed on an inbound leg (`tiltReference`); in GPS-lap mode, where a lap closes
+at 0 m, it reads as a reference profile tilted by 0.5 m. Computed only while the tab is open; a
+slider move with the tab open measured 37 ms against 35 ms on the VE tab.
+
+**Checked in the running app** (reference ride, out-and-back, 5 sections): power +1 % moved Crr
++0.00061 and CdA −0.0030, matching the offline per-1 % figures (Crr ±0.0006, CdA ∓0.005);
+density +1 % moved CdA by exactly −1 % (tested as CdA / 1.01 to 1e-9 in
+`repeatUnits.wasm.test.ts`) and Crr by 0.
+
+### Repeats tab: each lap fitted alone (J2) — 2026-10-19
+
+**The item this closes:** *Bundle J → J2 [M] Repeat-based spread: a standalone fit per lap (or
+per out-and-back pair) next to the joint fit.* Original criteria: for a selection of ≥2
+laps/pairs the results view lists each one's CdA/Crr/RMS and the SD across them with n and
+degrees of freedom; a single lap shows "repeat spread not estimable" rather than zero; also a
+variant at fixed Crr (CdA-only per lap), since that is the comparison-testing use; the joint fit
+is unchanged.
+
+**Commit:** `1b5f374` on `claude/sharp-jepsen-922674`.
+
+**What it does.** A new **Repeats** tab in all three modes (`shell/analysis/repeatsView.ts`, maths
+in `analysis/RepeatSpread.ts`). One row per repeat — a lap, or an out-and-back SECTION with both
+legs fitted together (`buildRepeatUnits`; out-and-back legs now carry `itemNumber` = section
+number). Each row: free CdA / Crr / RMS, and CdA / RMS at the slider Crr. Under them: mean, SD
+across repeats, n / df; one repeat reads "not estimable". Below: the same fit pooled over every
+repeat with its naive SE and the repeat-clustered sandwich SE (G/(G−1) factor, df G−1), for both
+the free fit and CdA-at-fixed-Crr.
+
+**How.** VE is exactly linear in (CdA, Crr) since #31, so three calculator probes per leg give
+each fit in closed form, in slider-space Crr (the temperature correction is a pure multiplier).
+The objective is the VE tab's anchored profile RMS over the trim window, so a row's RMS equals the
+VE tab's RMSE with the sliders at that row's values (`repeatUnits.wasm.test.ts`, to 1e-9). Gated
+on the tab being open, like Convergence. Readout only: sliders, auto-converge and the Rust
+kernels are untouched, so `ve_gain` / `ve_gain_grid` are bit-identical.
+
+**Checked in the running app** (reference ride, laps 10+12+16, 2026-10-19): all three modes
+render; a single lap shows "not estimable" for the SD and the clustered SE; lap 10's RMS at its
+fixed-Crr CdA matched the VE tab's RMSE (2.65 m); moving the Crr slider updates the fixed-Crr
+column. Free per-lap fits are unstable on this ride (one GPS lap gave CdA −0.25, Standard mode
+negative Crr) while CdA at fixed Crr held within an SD of 0.008–0.05 — the reason the fixed-Crr
+variant exists. With 3–5 repeats the clustered SE ranged 0.5–7× the naive one; at that df it is
+itself rough, and the tab says so.
+
+**Follow-ups in the same PR (2026-10-19, `225aa38`).** *Unstable flag:* a repeat's free fit is marked
+"⚠ unstable" when its free Crr or CdA sits at or beyond the slider bounds (within 2 % of the
+range) or when |corr(CdA, Crr)| of its fit is ≥ 0.99 (`UNSTABLE_CORRELATION`), with a note that
+this is expected and points to the fixed-Crr column. On the reference ride the six single laps sat
+at |r| 0.993–1.000 with erratic free fits and the five out-and-back sections at 0.930–0.985 with
+steady ones: within one leg both losses grow with distance whatever the pacing, and it is the
+head-/tailwind change between the legs of a pair that separates them. *95 % range:* the pooled
+table shows estimate ± t(0.975, G − 1) × clustered SE next to the naive SE, marked rough below
+df 5.
 
 ### Velodrome auto-calibration — 2026-09-15
 

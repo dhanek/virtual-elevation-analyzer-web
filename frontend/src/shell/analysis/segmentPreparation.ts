@@ -10,7 +10,8 @@
  *   1. the update pass itself (`calculate_virtual_elevation` per segment);
  *   2. the Convergence tab's closure-error grid (`ve_gain_grid` per segment);
  *   3. the auto-converge solve, which bisects `ve_gain` across ALL prepared
- *      segments before the pass's CdA/Crr are even final.
+ *      segments before the pass's CdA/Crr are even final;
+ *   4. the Repeats tab's per-lap fits (`buildRepeatUnits`).
  *
  * `createVeCalculator` takes `cda`/`crr`, but those only land in the WASM-side
  * `VEParameters` record — the physics reads the ARGUMENTS of
@@ -29,7 +30,15 @@ import {
 	resolveClosureTarget,
 	type ElevationDiffSource,
 } from "../../analysis/ClosureTarget";
+import {
+	tiltReference,
+	type RepeatLeg,
+	type RepeatUnitInput,
+	type SensitivityInput,
+} from "../../analysis/RepeatSpread";
+import type { ElevationDisplayProfile } from "../../analysis/elevationProfiles";
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
+import type { TimingShiftInput } from "../../analysis/TimingSweep";
 import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplementarySeries";
 import { createVeCalculator } from "../../analysis/VeCalculatorFactory";
 import type { WindSeriesResolution } from "../../analysis/WindSourceResolver";
@@ -40,6 +49,7 @@ import {
 import type {
 	ConvergenceUpdateInput,
 	ModeSegment,
+	TimingSweepInputs,
 } from "../../modes/analysis/types";
 import type { WindSource } from "../../state/AppState";
 import { log } from "../../utils/log";
@@ -101,6 +111,12 @@ export interface PrepareSegmentsArgs {
 	closure: ClosureResolution;
 	/** Per-lap weather; absent or null runs every segment on `params`. */
 	weather?: SegmentWeatherSource | null;
+	/**
+	 * Multiplies every air density the calculators get — the rho series, the
+	 * per-lap weather rho and `params.rho` alike. Only the Repeats tab's ±1 %
+	 * density sensitivity sets it; absent means 1 and changes nothing.
+	 */
+	rhoScale?: number;
 }
 
 export interface ClosureResolution {
@@ -186,7 +202,8 @@ export function prepareSegments(args: PrepareSegmentsArgs): PreparedSegment[] {
 		if (rhoArray) {
 			const spans = indices.every((i) => i >= 0 && i < rhoArray.length);
 			if (spans) {
-				segmentRho = indices.map((i) => rhoArray[i]);
+				const scale = args.rhoScale ?? 1;
+				segmentRho = indices.map((i) => rhoArray[i] * scale);
 			} else {
 				log.warn(
 					`Air density series (${rhoArray.length}) does not span ${segment.label}; using constant rho`,
@@ -213,9 +230,13 @@ export function prepareSegments(args: PrepareSegmentsArgs): PreparedSegment[] {
 					args.weather.calcRho,
 				)
 			: null;
-		const segmentParams = weatherOverride
+		const weatheredParams = weatherOverride
 			? { ...params, ...weatherOverride }
 			: params;
+		const segmentParams =
+			args.rhoScale === undefined
+				? weatheredParams
+				: { ...weatheredParams, rho: weatheredParams.rho * args.rhoScale };
 
 		try {
 			const supplementarySeries = buildSegmentSupplementarySeries({
@@ -341,7 +362,12 @@ export interface BuildConvergenceUpdateInputArgs {
 	 * Honest on-screen name for the source — the caller knows whether 'dem'
 	 * actually found a DEM channel or fell back to the analysis profile.
 	 */
-	targetLabel: string;
+	targetLabel: string; /**
+	 * The same selection prepared again at efficiency × `etaScale`, for the
+	 * ±1 % power markers (TODO J1). Called lazily, only when the view
+	 * recomputes its grids. Absent: no markers.
+	 */
+	prepareWithEtaScale?: (etaScale: number) => PreparedSegment[];
 }
 
 /**
@@ -414,6 +440,22 @@ export function buildConvergenceUpdateInput(
 		profileMode: args.profileMode,
 	});
 
+	// One extra preparation per scale, shared by every segment and made only
+	// if the view asks (a gains-cache miss).
+	const perturbed = new Map<number, Map<string, PreparedSegment>>();
+	const preparedAt = (etaScale: number) => {
+		let byKey = perturbed.get(etaScale);
+		if (!byKey && args.prepareWithEtaScale) {
+			byKey = new Map(
+				args
+					.prepareWithEtaScale(etaScale)
+					.map((q): [string, PreparedSegment] => [q.segment.key, q]),
+			);
+			perturbed.set(etaScale, byKey);
+		}
+		return byKey;
+	};
+
 	return {
 		segments: prepared.map((p): ConvergenceUpdateInput["segments"][number] => ({
 			key: p.segment.key,
@@ -438,6 +480,27 @@ export function buildConvergenceUpdateInput(
 				p.trimEnd,
 			),
 			profileGroup: p.segment.legDirection,
+			powerShift: args.prepareWithEtaScale
+				? (etaScale) => {
+						const q = preparedAt(etaScale)?.get(p.segment.key);
+						if (!q) {
+							return null;
+						}
+						// Any (CdA, Crr) gives the same difference; (0, 0) is
+						// the plainest.
+						const base = veProfileWindow(p, 0, 0);
+						const moved = veProfileWindow(q, 0, 0);
+						if (base.length !== moved.length) {
+							return null;
+						}
+						return {
+							gain:
+								q.calculator.ve_gain(0, 0, q.trimStart, q.trimEnd) -
+								p.calculator.ve_gain(0, 0, p.trimStart, p.trimEnd),
+							profile: moved.map((v, i) => v - base[i]),
+						};
+					}
+				: undefined,
 		})),
 		cda: args.cda,
 		crr: args.crr,
@@ -491,6 +554,240 @@ export function buildAutoConvergeSegments(
 			profileGroup: p.segment.legDirection,
 		};
 	});
+}
+
+/**
+ * The prepared segments as REPEATS for the Repeats tab (`RepeatSpread.ts`):
+ * one per lap, and one per out-and-back SECTION with its two legs together —
+ * a leg alone is half a repeat, and its VE carries the terrain once where the
+ * pair carries it out and back. The probes speak SLIDER-value Crr like the
+ * auto-converge closures, and use the primary calculator only (under
+ * `compare` the second wind source is a comparison, not a repeat).
+ */
+export function buildRepeatUnits(
+	prepared: PreparedSegment[],
+	params: AnalysisParameters,
+): RepeatUnitInput[] {
+	const units: RepeatUnitInput[] = [];
+	const sections = new Map<number, RepeatUnitInput>();
+	for (const p of prepared) {
+		const repeatLeg: RepeatLeg = {
+			veProfile: (cda: number, crr: number) =>
+				veProfileWindow(p, cda, resolveAppliedCrr(params, crr)),
+			elevation: elevationWindow(p, params.velodrome),
+			distance: profileDistanceWindow(p.slice.distance, p.trimStart, p.trimEnd),
+			riseSign: p.segment.legDirection === "inbound" ? -1 : 1,
+		};
+		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
+		if (section === undefined) {
+			units.push({
+				key: p.segment.key,
+				label: p.segment.label,
+				legs: [repeatLeg],
+			});
+			continue;
+		}
+		const existing = sections.get(section);
+		if (existing) {
+			existing.legs.push(repeatLeg);
+		} else {
+			const unit = {
+				key: `section-${section}`,
+				label: `Section ${section}`,
+				legs: [repeatLeg],
+			};
+			sections.set(section, unit);
+			units.push(unit);
+		}
+	}
+	return units;
+}
+
+/**
+ * The Repeats tab's systematic-error budget (TODO J5): the same selection
+ * prepared again with ONE assumed input moved, through `prepareSegments` and
+ * `buildRepeatUnits` like the base pass — a real refit per row, not a
+ * derivative. Power moves through the drivetrain efficiency (it multiplies
+ * power and nothing else); density through `rhoScale`, so the per-lap
+ * weather rho and the rho series move with it. The reference rise needs no
+ * calculator: it tilts the profile the fit compares against.
+ */
+export function buildRepeatSensitivities(
+	args: PrepareSegmentsArgs,
+	units: RepeatUnitInput[],
+): SensitivityInput[] {
+	const base = args.params;
+	const refit = (
+		label: string,
+		patch: Partial<AnalysisParameters>,
+		rhoScale?: number,
+	): SensitivityInput => {
+		const params = { ...base, ...patch };
+		return {
+			label,
+			units: buildRepeatUnits(
+				prepareSegments({ ...args, params, rhoScale }),
+				params,
+			),
+		};
+	};
+	return [
+		refit("Power +1 %", { eta: base.eta * 1.01 }),
+		refit("Power −1 %", { eta: base.eta * 0.99 }),
+		refit("Mass +1 kg", { system_mass: base.system_mass + 1 }),
+		refit("Mass −1 kg", { system_mass: base.system_mass - 1 }),
+		refit("Air density +1 %", {}, 1.01),
+		refit("Air density −1 %", {}, 0.99),
+		{
+			label: "Elevation rise +0.5 m",
+			units: tiltReference(units, 0.5),
+		},
+		{
+			label: "Elevation rise −0.5 m",
+			units: tiltReference(units, -0.5),
+		},
+	];
+}
+
+/**
+ * `series` moved by whole samples on the air-speed offset's convention
+ * (`applyAirSpeedOffset`): +s means the channel is LATE by s and sample i
+ * takes the value from i + s. The ends repeat the edge value rather than
+ * NaN — a NaN power sample would zero its VE step, and a NaN reference
+ * sample would drop the lap, so the shifts would compare different laps.
+ */
+function shiftWholeSamples(series: number[], shift: number): number[] {
+	if (shift === 0 || series.length === 0) {
+		return series;
+	}
+	const last = series.length - 1;
+	return series.map((_, i) => series[Math.min(last, Math.max(0, i + shift))]);
+}
+
+/**
+ * The timing sweep's inputs (TODO J4): the selection prepared again with
+ * POWER, or POSITION, moved by each whole-second shift, as Repeats units.
+ * Speed, air speed and everything else stay put.
+ *
+ * The position sweep moves latitude/longitude AND the resolved altitude
+ * (`args.altitude`) together. Latitude/longitude reach the calculator only
+ * through the effective-wind path, so they matter only when some prepared
+ * segment has no usable wind series (no finite non-zero sample), a finite
+ * non-zero wind speed and a wind direction (its per-lap weather, else
+ * `params`), and position samples at all. The row's label follows what
+ * really moves: under `fit-raw` it is "Elevation reference" when
+ * latitude/longitude do not reach the calculator, "GPS position + elevation
+ * reference" when they do; under a DEM profile — sampled at latitude/
+ * longitude, so shifting it is shifting position along the road — it is
+ * "GPS position".
+ *
+ * Null when the ride is not sampled at 1 s: a sample shift is then not a
+ * second, and the VE step already assumes one second between samples.
+ */
+export function buildTimingSweepInputs(
+	args: PrepareSegmentsArgs,
+	shifts: readonly number[],
+	elevationProfile: ElevationDisplayProfile,
+): TimingSweepInputs | null {
+	const t = args.normalized.timestamps;
+	const steps: number[] = [];
+	for (let i = 1; i < t.length; i++) {
+		steps.push(t[i] - t[i - 1]);
+	}
+	steps.sort((a, b) => a - b);
+	const median = steps.length > 0 ? steps[Math.floor(steps.length / 2)] : NaN;
+	if (Math.abs(median - 1) > 1e-6) {
+		return null;
+	}
+	const prepareWith = (
+		normalized: NormalizedActivityArrays,
+		altitude: number[],
+	): { prepared: PreparedSegment[]; units: RepeatUnitInput[] } => {
+		const prepared = prepareSegments({ ...args, normalized, altitude });
+		return { prepared, units: buildRepeatUnits(prepared, args.params) };
+	};
+	let shiftZeroPosition: PreparedSegment[] = [];
+	const position = shifts.map((shift): TimingShiftInput => {
+		const { prepared, units } = prepareWith(
+			{
+				...args.normalized,
+				positionLat: shiftWholeSamples(args.normalized.positionLat, shift),
+				positionLong: shiftWholeSamples(args.normalized.positionLong, shift),
+			},
+			shiftWholeSamples(args.altitude, shift),
+		);
+		if (shift === 0) {
+			shiftZeroPosition = prepared;
+		}
+		return { shift, units };
+	});
+	const latLonReachKernel = shiftZeroPosition.some((p) => {
+		const windSpeed = p.weather?.windSpeed ?? args.params.wind_speed;
+		const windDirection =
+			p.weather?.windDirection ?? args.params.wind_direction;
+		return (
+			!p.slice.windSpeed.some((w) => Number.isFinite(w) && w !== 0) &&
+			Number.isFinite(windSpeed) &&
+			windSpeed !== 0 &&
+			windDirection != null &&
+			p.slice.positionLat.length > 0 &&
+			p.slice.positionLong.length > 0
+		);
+	});
+	const positionLabel =
+		elevationProfile !== "fit-raw"
+			? "GPS position"
+			: latLonReachKernel
+				? "GPS position + elevation reference"
+				: "Elevation reference";
+	return {
+		power: shifts.map((shift): TimingShiftInput => ({
+			shift,
+			units: prepareWith(
+				{
+					...args.normalized,
+					power: shiftWholeSamples(args.normalized.power, shift),
+				},
+				args.altitude,
+			).units,
+		})),
+		position,
+		positionLabel,
+	};
+}
+
+/**
+ * The reference elevation over the same window `veProfileWindow` returns,
+ * rebased to 0 at its start — what the VE tab's RMSE compares against: the
+ * calculator's altitude, flat under velodrome. Null where that RMSE is not
+ * computed either (no usable altitude: empty, all NaN or all zero —
+ * `has_usable_altitude`), or where a NaN inside the window would poison it.
+ */
+function elevationWindow(
+	p: PreparedSegment,
+	velodrome: boolean | undefined,
+): Float64Array | null {
+	const altitude = p.slice.altitude;
+	if (
+		altitude.length === 0 ||
+		altitude.every((x) => Number.isNaN(x)) ||
+		altitude.every((x) => x === 0)
+	) {
+		return null;
+	}
+	const end = Math.min(p.trimEnd, p.slice.timestamps.length - 1);
+	const start = Math.min(p.trimStart, Math.max(0, end));
+	if (end >= altitude.length) {
+		return null;
+	}
+	const out = new Float64Array(Math.max(0, end - start + 1));
+	for (let i = 0; i < out.length; i++) {
+		out[i] = velodrome ? 0 : altitude[start + i] - altitude[start];
+		if (!Number.isFinite(out[i])) {
+			return null;
+		}
+	}
+	return out;
 }
 
 /**

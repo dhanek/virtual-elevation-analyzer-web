@@ -31,6 +31,7 @@ import type { AnalysisModeId } from "../../modes/analysis/types";
  * `convergence` has none either: it is the Convergence tab's ACTIVATION, which
  * reaches the funnel from the tab render map (`requestConvergenceRedraw`)
  * because an inactive tab has no cached surface to draw from (D-14).
+ * `repeats` is the Repeats tab's activation, for the same reason.
  */
 /**
  * Why the funnel was asked to recompute.
@@ -75,6 +76,7 @@ export type ModeUpdateReason =
 	| "autoConverge"
 	| "parameters"
 	| "convergence"
+	| "repeats"
 	| "segmentSelection";
 
 /** The DOM identity of one row. Absent ids mean the row is not element-driven. */

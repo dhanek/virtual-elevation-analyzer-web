@@ -700,6 +700,55 @@
 	margin-right: var(--space-sm);
 }
 
+/* Repeats tab (repeatsView.ts): the lap table reuses .ve-lap-summary. */
+.ve-repeats__row--summary {
+	font-weight: 600;
+}
+
+.ve-repeats__note {
+	color: var(--color-text-muted);
+	font-style: italic;
+	text-align: center;
+}
+
+
+.ve-repeats__unstable {
+	margin-left: var(--space-sm);
+	color: var(--color-text-secondary);
+	font-size: 0.8em;
+	white-space: nowrap;
+}
+
+.ve-repeats__row--unstable .ve-lap-summary__cell:nth-child(-n + 4):not(:first-child) {
+	color: var(--color-text-muted);
+}
+
+.ve-repeats__sub {
+	color: var(--color-text-muted);
+	font-weight: 400;
+}
+
+.ve-repeats__notes {
+	margin: var(--space-xs) 0 0;
+	padding-left: 1.2em;
+	font-size: 0.85rem;
+	color: var(--color-text-secondary);
+}
+
+.ve-repeats__timing-run {
+	margin-top: var(--space-xs);
+	padding: var(--space-xs) var(--space-md);
+	border: 1px solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface-white);
+	color: var(--color-text);
+	cursor: pointer;
+}
+
+.ve-repeats__section-title {
+	margin-top: var(--space-lg);
+}
+
 /* Out-and-back closing-error summary (de-inlined from renderOutAndBack.ts).
    Initially hidden via the shared .hidden utility in the markup; no display
    declaration here, so .hidden wins unaided. Off-palette #f5f5f5 kept. */

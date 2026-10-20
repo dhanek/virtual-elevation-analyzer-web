@@ -169,7 +169,11 @@ describe("buildClosureContourFigure", () => {
 			y: number;
 		}>;
 		expect(annotations).toHaveLength(1);
-		expect(annotations[0]).toMatchObject({ text: "5 cm", x: 0.33, y: 0.005 });
+		expect(annotations[0]).toMatchObject({
+			text: "minimum + 5 cm<br>not a confidence interval",
+			x: 0.33,
+			y: 0.005,
+		});
 	});
 
 	it("draws no band when none is supplied", () => {
@@ -190,5 +194,39 @@ describe("buildClosureContourFigure", () => {
 			responsive: true,
 			displaylogo: false,
 		});
+	});
+
+	it("draws the power ±1 % optima through the best fit, deltas in the hover", () => {
+		const figure = buildClosureContourFigure({
+			...input(determinedSurface()),
+			powerMoves: {
+				down: { cda: 0.303, crr: 0.0044 },
+				up: { cda: 0.297, crr: 0.0056 },
+			},
+		});
+		const trace = figure.data.find((t) => t.name === "Power ±1 %") as {
+			x: number[];
+			y: number[];
+			text: string[];
+		};
+		expect(trace.x).toEqual([0.303, 0.3, 0.297]);
+		expect(trace.y).toEqual([0.0044, 0.005, 0.0056]);
+		expect(trace.text[0]).toBe(
+			"Power −1 % (efficiency × 0.99): ΔCdA +0.0030, ΔCrr −0.00060",
+		);
+		expect(trace.text[2]).toBe(
+			"Power +1 % (efficiency × 1.01): ΔCdA −0.0030, ΔCrr +0.00060",
+		);
+	});
+
+	it("draws no power markers without an optimum to move from", () => {
+		const figure = buildClosureContourFigure({
+			...input({ ...determinedSurface(), best: null, underdetermined: "flat" }),
+			powerMoves: {
+				down: { cda: 0.303, crr: 0.0044 },
+				up: { cda: 0.297, crr: 0.0056 },
+			},
+		});
+		expect(figure.data.some((t) => t.name === "Power ±1 %")).toBe(false);
 	});
 });

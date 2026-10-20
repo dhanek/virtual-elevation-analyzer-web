@@ -28,6 +28,10 @@ import {
 	renderConvergenceView,
 	requestConvergenceRedraw,
 } from "../analysis/convergenceView";
+import {
+	requestRepeatsRedraw,
+	renderRepeatsView,
+} from "../analysis/repeatsView";
 
 // `toOutAndBackProfiles` moved to `outAndBackAggregate.ts` (C4) so the
 // headless API pairs legs into sections through the same function.
@@ -97,6 +101,7 @@ export function createOutAndBackUpdateCallbacks(
 				power: () => renderOutAndBackPowerPlot(sectionProfiles),
 				vd: () => renderOutAndBackVdPlot(sectionProfiles),
 				convergence: requestConvergenceRedraw,
+				repeats: requestRepeatsRedraw,
 				calibration: renderCalibrationTab,
 			});
 		},
@@ -114,6 +119,7 @@ export function createOutAndBackUpdateCallbacks(
 		},
 
 		renderConvergence: renderConvergenceView,
+		renderRepeats: renderRepeatsView,
 
 		renderMetrics(aggregate) {
 			// The template renders ve-metrics-compact with these four spans; there
