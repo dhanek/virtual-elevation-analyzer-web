@@ -304,8 +304,11 @@ ${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit t
 		return `${titleFor("position")}${bullets(["Needs 1 s samples."])}`;
 	}
 	const positionLabel = inputs.positionLabel;
+	// Mid-sentence: lower-case the first word, but never the GPS acronym.
 	const title = titleFor(
-		positionLabel.charAt(0).toLowerCase() + positionLabel.slice(1),
+		positionLabel.startsWith("GPS")
+			? positionLabel
+			: positionLabel.charAt(0).toLowerCase() + positionLabel.slice(1),
 	);
 	const power = computeTimingSweep(inputs.power, fixedCrr);
 	const position = computeTimingSweep(inputs.position, fixedCrr);

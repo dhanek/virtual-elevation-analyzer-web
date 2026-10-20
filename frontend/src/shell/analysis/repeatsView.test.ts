@@ -195,4 +195,30 @@ describe("renderRepeatsView", () => {
 		// Laps, pooled, timing (no sensitivities passed here).
 		expect(document.querySelectorAll("#repeats-tab table")).toHaveLength(3);
 	});
+
+	it("keeps GPS in capitals mid-sentence in the timing check title", () => {
+		const units = [0.29, 0.3, 0.31].map((cda, j) => ({
+			key: `lap-${j + 1}`,
+			label: `Lap ${j + 1}`,
+			legs: [leg(j, cda, 0.004)],
+		}));
+		const rows = [-3, -2, -1, 0, 1, 2, 3].map((shift) => ({ shift, units }));
+		const input = {
+			units,
+			fixedCrr: 0.004,
+			...EXTRA,
+			timing: () => ({
+				power: rows,
+				position: rows,
+				positionLabel: "GPS position + elevation reference",
+			}),
+		};
+		renderRepeatsView(input);
+		document.getElementById("repeatsTimingRun")!.click();
+		renderRepeatsView(input);
+		expect(text()).toContain(
+			"— is power or GPS position + elevation reference out of step with speed?",
+		);
+		expect(text()).not.toContain("gPS");
+	});
 });
