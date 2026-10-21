@@ -580,30 +580,15 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       sessions is flagged; the 2026-08-14 lap 6 CdA lands near 0.284; the warning appears in the
       app.
 
-- [ ] **[S] The VE step assumes one second between samples; FIT files are not resampled.**
-      `VirtualElevationCalculator` sets `dt: 1.0` (`virtual_elevation.rs:231`) and every VE step
-      uses it: the acceleration `(v[i] − v[i−1]) / self.dt` (`:269`), the elevation step
-      `v̄ · self.dt · slope` (`:551`) and the `GainKernel` distance (`:700`). Virtual distance, in
-      the same file, already uses the real gap between timestamps (`:461`). CSV files are
-      interpolated to 1 Hz on load (`ActivityLoader.ts`, `interpolateAllData`); FIT files are
-      passed through as recorded.
-
-      *When it matters:* Garmin smart recording (samples every 1–8 s), and recording gaps such as
-      auto-pause — one of the velodrome sessions in the PR #30 check has pauses of 93 s and 109 s
-      on two laps, each currently counted as a single second. On a 1-second recording nothing
-      changes.
-
-      *Shape of the fix:* use `dt_i = t[i] − t[i−1]` per step. The kinetic-energy height stays
-      exact for any `dt_i` (`a·v̄·dt_i = Δ(v²)/2`); the power term becomes `P[i]·dt_i`, which
-      assumes `P[i]` is the mean over that interval. A gap beyond a threshold contributes nothing,
-      as virtual distance already does with its `dt < 10` check — decide whether VE uses the same
-      10 s. `calculate_virtual_slope_impl`, `build_virtual_elevation`, `GainKernel` and
-      `ve_gain_grid` must change together, or the grid stops matching the VE tab bit for bit.
-
-      *Done when:* a Rust test feeds the same synthetic ride at 1 Hz and thinned to irregular
-      2–5 s steps and gets the same VE gain within the thinning error; a recording gap adds no
-      phantom work; every existing golden test still passes unchanged on 1 Hz data.
-      *origin: follow-up from the PR #31 review, 2026-10-18*
+- [ ] **[S] The GPS modes' ground/air-speed sync error shifts the air speed twice.** The
+      "Ground/air speed sync error" readout under the air-speed offset slider
+      (`refreshOffsetMetric`, `bindModeControls.ts`) shifts the air-speed series by the slider's
+      offset (`calculateAirSpeedSyncError`). Standard mode hands it the UNSHIFTED series
+      (`prepareAnalysisPayload`, `applyOffset: false`); GPS-lap and out-and-back hand it
+      `resolveWindSeries`'s default, which already carries `params.air_speed_offset` — so there
+      the number is measured at twice the offset. *Done when:* every mode's readout is measured
+      at the slider's offset once, with a test per mode. *origin: noticed while moving the lags
+      to seconds, 2026-10-21*
 
 
 ---
@@ -612,6 +597,90 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Lags shift by seconds, not samples — 2026-10-21
+
+**The item this closes:** *Standalone → [S] Lags and shifts count samples, not seconds.* The
+barometer lag (`applyBaroLag`), the air-speed lag (`applyAirSpeedOffset`, and the sync-error
+readout) and the Repeats tab's timing sweep all shifted a channel by whole SAMPLES and labelled
+the shift in seconds; on a smart-recorded FIT file a "+2 s" shift moved the channel 2–16 s, and
+near a recording pause it pulled in a sample from the other side. *Done when:* a lag of N s moves
+a thinned synthetic ride's channel by N s, not N samples, and a 1 Hz recording is unchanged.
+
+**Commits:** `867f593` on `claude/ve-real-dt-0f645c`, PR #37 (with the VE step's real duration
+below).
+
+**What it does.** One rule, `shiftByTime` (`TimeShift.ts`), for all three: sample i reads the
+sample whose timestamp is nearest to `t[i] + lag`, searched only within its stretch of recording
+— split where the VE step splits, at a step that is not positive or is 10 s or longer
+(`MAX_STEP_SECONDS`, mirroring the Rust constant). A target beyond that stretch is each caller's
+edge policy as before: the barometer and the timing sweep clamp to the stretch's end sample, the
+air-speed offset reads NaN. Exact ties go to the earlier sample. The lag is still rounded to a
+whole second and the value is always a recorded sample, never an interpolation. On a strictly
+1 Hz recording the nearest sample to `t[i] + n` is sample i + n, so results there are
+bit-identical. The timing sweep no longer refuses rides whose median step is not 1 s (it said
+"Needs 1 s samples."); it now refuses only a ride without a timestamp for every sample.
+
+**The resolution decision.** Picking recorded samples cannot resolve a lag finer than the
+recording: on samples 2–5 s apart, neighbouring whole-second shifts often read the same samples,
+so a lag comes out right to about a second — an air-speed lag of 4 s scored best at 3 s on such a
+grid, where counting samples read 1 s. Interpolating would sharpen it, but on an irregular grid
+it would smooth every shift except 0 s (which always lands on a sample) and tilt every comparison
+against the unshifted channel — the smoothing trap the air-speed lag fell into before. Nearest
+sample it is.
+
+**Checked.** `TimeShift.test.ts`: bit-identical to the old whole-sample shift on 1 Hz epoch
+timestamps for both edge policies and ten lags; nearest-in-time on an irregular grid, ties,
+gaps (never crossed, ridden steps under 10 s crossed), a duplicate timestamp, and a refusal
+without timestamps. The timing sweep on the four-lap synthetic ride thinned to 2–5 s steps, with
+the barometer recorded 2 s late, finds +2 s; counting samples, the same sweep said +1. The
+air-speed sync error on a 2–5 s ride with a 4 s lag lands within a second of it; counting samples
+it read 1 s. Barometer lag on a 2 s-spaced ride moves the profile two samples for 4 s. Every
+existing test passes with 1 Hz timestamps added to the fixtures that had none.
+
+### The VE step uses each sample's real duration — 2026-10-21
+
+**The item this closes:** *Standalone → [S] The VE step assumes one second between samples; FIT
+files are not resampled.* `VirtualElevationCalculator` set `dt: 1.0` and every VE step used it —
+the acceleration, the elevation step `v̄·dt·slope` and the `GainKernel` distance — while virtual
+distance already used the real gap between timestamps. CSV files are interpolated to 1 Hz on
+load; FIT files are not, so smart recording (1–8 s) and recording pauses were each integrated as
+one second. *Done when:* a Rust test feeds the same synthetic ride at 1 Hz and thinned to
+irregular 2–5 s steps and gets the same VE gain within the thinning error; a recording gap adds
+no phantom work; every existing golden test still passes unchanged on 1 Hz data.
+
+**Commits:** `b1dbf1b` on `claude/ve-real-dt-0f645c`, PR #37.
+
+**What it does.** Each step is `dt_i = t[i] − t[i−1]` (`step_seconds`). The acceleration is
+`(v[i] − v[i−1]) / dt_i`, so `a·v̄·dt_i / g` is still exactly the kinetic-energy height
+`Δ(v²)/(2g)`; the power term becomes `P[i]·dt_i`, which assumes `P[i]` is the mean over the step.
+A step that is not positive, or 10 s or longer, is a recording gap and gets `dt_i = 0`: no height,
+no kinetic-energy change, no virtual distance. The 10 s is the threshold virtual distance already
+used, now one constant (`MAX_STEP_SECONDS`) for both; smart recording stays under it. Sample 0
+keeps a nominal second (it only offsets the profile, never enters a gain), as does a caller
+without timestamps.
+
+`calculate_virtual_slope_impl`, `build_virtual_elevation` and `build_gain_kernel` take the same
+`step_seconds`, so `ve_gain` and `ve_gain_grid` still match the VE tab. The step durations are
+exported on `VEResult` (`step_seconds`). On the TypeScript side everything that rebuilds from WASM
+profiles (ProfileSpread's affine basis, the Convergence probes, the Repeats fits, the timing
+sweep's scoring) follows the kernel with no change; J3's power-independent CdA summed per
+sample, so its legs now carry `stepSeconds` and weight the coasting fraction, the drag-weighted
+speed and the air density by time.
+
+**Checked.** Rust: the 1 Hz ride and the same ride thinned to steps of 2–5 s agree within 1–2 cm
+on 57–134 m gains (the old fixed second would have kept about a third); a 101 s pause and a
+duplicate timestamp add nothing, and a gain across the pause is the sum of the gains either side;
+a 1 Hz ride is bit-identical to the fixed-second kernel, profile and grid. All existing golden
+tests pass unchanged. Old against new WASM over the 48 FIT files in the test folder: every
+strictly 1 Hz file is bit-identical, and so is every lap of the reference ride (its pauses fall
+between laps). Files with pauses inside a lap change by up to ~1 m per lap on short rides and
+~10 m over a 1000 km brevet day; no smart-recorded file was at hand, so that case rests on the
+synthetic test. In the app, an A/B of main against this branch on the reference ride (laps
+10+12+16, same parameters and elevation source) matched on every readout, the VE trace and the
+whole Repeats tab; a lap with 117 s and 143 s pauses moved from 300.06 m to 300.87 m of VE gain.
+Follow-up: lags and the timing sweep shifted by samples — closed in the same PR (the entry
+above).
 
 ### Power-independent CdA in the Repeats tab (J3) — 2026-10-20
 

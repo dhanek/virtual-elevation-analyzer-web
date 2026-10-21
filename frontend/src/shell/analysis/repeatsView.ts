@@ -373,7 +373,7 @@ ${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit t
 	}
 	const inputs = timing();
 	if (!inputs) {
-		return `${titleFor("position")}${bullets(["Needs 1 s samples."])}`;
+		return `${titleFor("position")}${bullets(["Needs a timestamp for every sample."])}`;
 	}
 	const positionLabel = inputs.positionLabel;
 	// Mid-sentence: lower-case the first word, but never the GPS acronym.

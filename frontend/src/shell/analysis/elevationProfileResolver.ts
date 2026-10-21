@@ -1,5 +1,6 @@
 import type { ActivityDataLike, AppState } from "../../state/AppState";
 import { applyBaroLag } from "../../analysis/BaroLag";
+import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import {
 	DEM_PROFILE_FALLBACK_ORDER,
 	type ElevationDisplayProfile,
@@ -33,20 +34,40 @@ function hasValidProfile(
  */
 const baroLagCache = new WeakMap<
 	number[],
-	{ lag: number; shifted: number[] }
+	{ lag: number; timestamps: ArrayLike<number>; shifted: number[] }
 >();
 
-function withBaroLag(raw: number[], lagSeconds: number): number[] {
-	if (Math.round(lagSeconds) === 0) {
+/**
+ * The lag is in seconds, so the shift needs the times the channel was
+ * recorded at (`applyBaroLag`): the loaded activity's, which every channel
+ * routed here shares in length. Without timestamps for every sample there is
+ * no time to shift by, and the channel is returned as it is.
+ */
+function withBaroLag(
+	raw: number[],
+	lagSeconds: number,
+	timestamps: ArrayLike<number> | null,
+): number[] {
+	if (
+		Math.round(lagSeconds) === 0 ||
+		!timestamps ||
+		timestamps.length < raw.length
+	) {
 		return raw;
 	}
 	const hit = baroLagCache.get(raw);
-	if (hit && hit.lag === lagSeconds) {
+	if (hit && hit.lag === lagSeconds && hit.timestamps === timestamps) {
 		return hit.shifted;
 	}
-	const shifted = applyBaroLag(raw, lagSeconds);
-	baroLagCache.set(raw, { lag: lagSeconds, shifted });
+	const shifted = applyBaroLag(raw, timestamps, lagSeconds);
+	baroLagCache.set(raw, { lag: lagSeconds, timestamps, shifted });
 	return shifted;
+}
+
+function timestampsOf(
+	fitData: ActivityDataLike | null | undefined,
+): number[] | null {
+	return fitData ? getNormalizedActivityArrays(fitData).timestamps : null;
 }
 
 function baroLagOf(appState: AppState): number {
@@ -74,6 +95,7 @@ export function resolveElevationProfile(
 			altitude: withBaroLag(
 				appState.fitRawElevation ?? [...normalizedAltitude],
 				baroLagOf(appState),
+				timestampsOf(fitData),
 			),
 		};
 	}
@@ -102,6 +124,7 @@ export function resolveElevationProfile(
 		altitude: withBaroLag(
 			appState.fitRawElevation ?? Array.from(fitData.altitude),
 			baroLagOf(appState),
+			timestampsOf(fitData),
 		),
 	};
 }
@@ -163,7 +186,14 @@ export function resolveReferenceElevation(
 	if (!raw!.some((value) => Number.isFinite(value) && value !== 0)) {
 		return null;
 	}
-	return { label: "Barometer", series: withBaroLag(raw!, baroLagOf(appState)) };
+	return {
+		label: "Barometer",
+		series: withBaroLag(
+			raw!,
+			baroLagOf(appState),
+			timestampsOf(appState.currentFitData),
+		),
+	};
 }
 
 /**
@@ -182,7 +212,11 @@ export function resolveClosureBaroAltitude(
 	)
 		? appState.fitRawElevation!
 		: normalizedAltitude;
-	return withBaroLag(raw, baroLagOf(appState));
+	return withBaroLag(
+		raw,
+		baroLagOf(appState),
+		timestampsOf(appState.currentFitData),
+	);
 }
 
 /**

@@ -136,7 +136,12 @@ export interface BindModeControlsOptions {
 	 * number is unchanged — and the GPS modes supply one per lap or per section.
 	 */
 	getOffsetMetricWindows?: () => OffsetMetricWindow[];
-	getSyncErrorSeries?: () => { groundSpeed: number[]; airSpeed: number[] };
+	getSyncErrorSeries?: () => {
+		groundSpeed: number[];
+		airSpeed: number[];
+		/** When each sample was recorded: the offset is in seconds. */
+		timestamps: number[];
+	};
 	/**
 	 * This mode's Auto Adjust outcome. Null only from test stubs; production
 	 * returns an explicit `none` outcome instead of nothing (review R10).
@@ -241,6 +246,7 @@ export function bindModeControls(
 			const error = calculateAirSpeedSyncError(
 				series.groundSpeed,
 				series.airSpeed,
+				series.timestamps,
 				offset,
 				window.start,
 				window.end,

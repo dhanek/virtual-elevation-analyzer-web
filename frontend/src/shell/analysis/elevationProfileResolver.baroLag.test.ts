@@ -7,7 +7,11 @@ import {
 	resolveElevationProfile,
 } from "./elevationProfileResolver";
 
-const FIT_DATA = { altitude: [] } as unknown as ActivityDataLike;
+/** The lag is in seconds, so the activity carries 1 Hz timestamps. */
+const FIT_DATA = {
+	altitude: [],
+	timestamps: [0, 1, 2, 3, 4],
+} as unknown as ActivityDataLike;
 
 function appStateWithLag(lagSeconds: number): AppState {
 	const appState = new AppState();
@@ -15,6 +19,7 @@ function appStateWithLag(lagSeconds: number): AppState {
 		...DEFAULT_PARAMETERS,
 		baro_lag_seconds: lagSeconds,
 	};
+	appState.currentFitData = FIT_DATA;
 	return appState;
 }
 
@@ -95,5 +100,23 @@ describe("resolveClosureBaroAltitude", () => {
 		appState.fitRawElevation = normalized;
 
 		expect(resolveClosureBaroAltitude(appState, normalized)).toBe(normalized);
+	});
+
+	test("on a smart-recorded ride the lag is in seconds, not samples", () => {
+		const appState = appStateWithLag(4);
+		const fitData = {
+			altitude: [],
+			timestamps: [0, 2, 4, 6, 8],
+		} as unknown as ActivityDataLike;
+		appState.currentFitData = fitData;
+
+		const resolved = resolveElevationProfile(
+			appState,
+			fitData,
+			[100, 101, 102, 103, 104],
+		);
+
+		// 4 s is two samples on, not four.
+		expect(resolved.altitude).toEqual([102, 103, 104, 104, 104]);
 	});
 });

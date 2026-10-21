@@ -275,6 +275,92 @@ describe.skipIf(!built)("Repeats tab fits on the real calculator", () => {
 		});
 	});
 
+	it("timing check: on a ride recorded every 2–5 s, the late baro is found in seconds", () => {
+		// The 1 Hz ride's own road, at CdA 0.3, Crr 0.005: a lag is the only
+		// thing to find.
+		const dense = prepareArgs(LAPS);
+		const [whole] = prepareSegments({
+			...dense,
+			segments: [
+				{
+					key: "all",
+					label: "All",
+					itemNumber: 1,
+					range: { startIdx: 0, endIdx: COUNT - 1 },
+				},
+			],
+		});
+		const ve = whole.calculator.calculate_virtual_elevation(
+			0.3,
+			resolveAppliedCrr(PARAMS, 0.005),
+			0,
+			COUNT - 1,
+		);
+		const road = Array.from(ve.virtual_elevation, (h) => 100 + h);
+		ve.free();
+
+		// Thinned as smart recording does, each kept sample's power the mean
+		// over its step. The baro is recorded LAG seconds late: at time t it
+		// reads the road at t − LAG.
+		const LAG = 2;
+		const CYCLE = [2, 5, 3, 4, 2, 5, 3];
+		const kept = [0];
+		for (let k = 0; ; k++) {
+			const next = kept[kept.length - 1] + CYCLE[k % CYCLE.length];
+			if (next >= COUNT) break;
+			kept.push(next);
+		}
+		const n = dense.normalized as any;
+		const pick = (series: number[]) => kept.map((i) => series[i]);
+		const power = kept.map((i, j) => {
+			if (j === 0) return n.power[0];
+			const step = n.power.slice(kept[j - 1] + 1, i + 1) as number[];
+			return step.reduce((a, b) => a + b, 0) / step.length;
+		});
+		const normalized = {
+			...n,
+			timestamps: pick(n.timestamps),
+			power,
+			velocity: pick(n.velocity),
+			positionLat: pick(n.positionLat),
+			positionLong: pick(n.positionLong),
+			altitude: pick(n.altitude),
+			distance: pick(n.distance),
+			temperature: pick(n.temperature),
+		};
+		const altitude = kept.map((i) => road[Math.max(0, i - LAG)]);
+		const lapAt = (t: number) => kept.findIndex((i) => i >= t);
+		const segments: ModeSegment[] = [0, 1, 2, 3].map((lap) => ({
+			key: `lap-${lap + 1}`,
+			label: `Lap ${lap + 1}`,
+			itemNumber: lap + 1,
+			range: {
+				startIdx: lapAt(lap * LAP),
+				endIdx: lapAt((lap + 1) * LAP) - 1,
+			},
+			trim: { start: 2, end: lapAt((lap + 1) * LAP) - lapAt(lap * LAP) - 3 },
+		}));
+		const inputs = buildTimingSweepInputs(
+			{
+				...dense,
+				segments,
+				normalized,
+				altitude,
+				wind: {
+					windSpeed: normalized.timestamps.map(() => 0),
+					selectedWindSource: "constant",
+				} as any,
+			},
+			TIMING_SHIFTS,
+			"fit-raw",
+		)!;
+		expect(inputs).not.toBeNull();
+		expect(computeTimingSweep(inputs.position, 0.005).verdict).toMatchObject({
+			kind: "best",
+			shift: LAG,
+		});
+	});
+
 	it("timing check: with constant wind and no wind series, lat/lon reach the kernel", () => {
 		const args = {
 			...prepareArgs(LAPS),

@@ -601,7 +601,11 @@ export function setupVESliders(
 			const { start, end } = currentTrim();
 			return Number.isNaN(start) || Number.isNaN(end) ? [] : [{ start, end }];
 		},
-		getSyncErrorSeries: () => ({ groundSpeed: velocity, airSpeed: windSpeed }),
+		getSyncErrorSeries: () => ({
+			groundSpeed: velocity,
+			airSpeed: windSpeed,
+			timestamps,
+		}),
 		getAutoCalibration: () => {
 			const { start, end } = currentTrim();
 			return calculateAutoAirSpeedCalibration({

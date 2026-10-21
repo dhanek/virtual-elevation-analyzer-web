@@ -95,6 +95,7 @@ pub struct VEResult {
     acceleration: Vec<f64>,
     effective_wind: Vec<f64>,
     apparent_velocity: Vec<f64>,
+    step_seconds: Vec<f64>,
     r2: f64,
     rmse: f64,
     ve_elevation_diff: f64,
@@ -129,6 +130,13 @@ impl VEResult {
     #[wasm_bindgen(getter)]
     pub fn apparent_velocity(&self) -> Vec<f64> {
         self.apparent_velocity.clone()
+    }
+
+    /// Each sample's step duration in seconds (`step_seconds`): the time
+    /// from the previous sample, or 0 across a recording gap.
+    #[wasm_bindgen(getter)]
+    pub fn step_seconds(&self) -> Vec<f64> {
+        self.step_seconds.clone()
     }
 
     #[wasm_bindgen(getter)]
@@ -171,15 +179,20 @@ impl VEResult {
 pub struct VirtualElevationCalculator {
     data: VEData,
     params: VEParameters,
-    dt: f64,                    // time step in seconds
     air_speed_calibration: f64, // air_speed multiplier (1.0 = no adjustment, 1.1 = +10%, 0.9 = -10%)
 }
+
+/// A step longer than this many seconds is a recording gap (auto-pause, a
+/// dropout), not riding: it adds no height and no virtual distance.
+/// Garmin smart recording spaces samples up to ~8 s, so its steps count.
+const MAX_STEP_SECONDS: f64 = 10.0;
 
 struct VirtualSlopeResult {
     virtual_slope: Vec<f64>,
     acceleration: Vec<f64>,
     effective_wind: Vec<f64>,
     apparent_velocity: Vec<f64>,
+    step_seconds: Vec<f64>,
 }
 
 /// The parts of a virtual-elevation evaluation that do not depend on CdA or
@@ -190,13 +203,13 @@ struct VirtualSlopeResult {
 ///
 /// Covers samples `start + 1 ..= end` of the window only. That range is
 /// exact, not approximate: `build_virtual_elevation` accumulates
-/// `ve[i] = ve[i-1] + v̄_i·dt·slope_i`, so `ve[end] - ve[start]`
+/// `ve[i] = ve[i-1] + v̄_i·dt_i·slope_i`, so `ve[end] - ve[start]`
 /// is the sum over `start + 1 ..= end` and sample `start` itself contributes
 /// nothing. Include it and every cell is off by one term.
 ///
 /// `v̄_i` and `v̄a_i` are the step's mean ground and air speed (`step_mean`).
 struct GainKernel {
-    /// `v̄_i · dt` — the distance each sample's slope is multiplied by.
+    /// `v̄_i · dt_i` — the distance each sample's slope is multiplied by.
     step: Vec<f64>,
     /// `w/(v̄·m·g) − a/g` — the CdA- and Crr-free part of the Chung slope.
     base: Vec<f64>,
@@ -228,7 +241,6 @@ impl VirtualElevationCalculator {
         VirtualElevationCalculator {
             data,
             params,
-            dt: 1.0,                    // assume 1 second intervals
             air_speed_calibration: 1.0, // default: no calibration
         }
     }
@@ -245,7 +257,7 @@ impl VirtualElevationCalculator {
     ///
     /// A step runs from one sample to the next, and its kinetic-energy change
     /// and the reference altitude are both taken between those two samples.
-    /// Drag and rolling loss must cover the same second: with the speed at
+    /// Drag and rolling loss must cover the same step: with the speed at
     /// the end of the step they are counted half a second late, which reads
     /// as extra drag while the rider speeds up and as less while slowing.
     fn step_mean(values: &[f64], index: usize) -> f64 {
@@ -256,17 +268,50 @@ impl VirtualElevationCalculator {
         }
     }
 
-    /// Acceleration over the step that ends at each sample: a = diff(v)/dt.
+    /// Duration in seconds of the step that ends at each sample:
+    /// `dt_i = t[i] − t[i−1]`. FIT files are not resampled, so steps are
+    /// whatever the head unit recorded — 1 s, 1–8 s under smart recording,
+    /// or a long pause.
+    ///
+    /// A step that is not positive, not finite, or `MAX_STEP_SECONDS` or
+    /// longer is a recording gap and gets 0: the VE step multiplies by it,
+    /// so the gap adds no phantom work, and no kinetic-energy change either
+    /// (the speeds either side of a pause are not one step apart). Virtual
+    /// distance skips the same steps.
+    ///
+    /// Sample 0 has no step before it and keeps a nominal second, as every
+    /// step had before real timestamps were used; it only offsets the whole
+    /// profile and never enters a gain (`GainKernel`). So does a sample past
+    /// the end of `timestamps`, for a caller that passes none.
+    fn step_seconds(&self) -> Vec<f64> {
+        let t = &self.data.timestamps;
+        (0..self.data.velocity.len())
+            .map(|i| {
+                if i == 0 || i >= t.len() {
+                    return 1.0;
+                }
+                let dt = t[i] - t[i - 1];
+                if dt > 0.0 && dt < MAX_STEP_SECONDS {
+                    dt
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    /// Acceleration over the step that ends at each sample: a = diff(v)/dt_i.
     ///
     /// This is the R code's a = diff(v^2)/(2*v*dt) with the step's mean speed
-    /// (`step_mean`) for v, so `a · v̄·dt / g` is still the exact
-    /// kinetic-energy height diff(v^2)/(2*g).
-    fn calculate_acceleration(&self) -> Vec<f64> {
+    /// (`step_mean`) for v, so `a · v̄·dt_i / g` is still the exact
+    /// kinetic-energy height diff(v^2)/(2*g), whatever the step's length.
+    /// Across a recording gap (`dt_i = 0`) it is 0.
+    fn calculate_acceleration(&self, step_seconds: &[f64]) -> Vec<f64> {
         let v = &self.data.velocity;
         let mut acceleration = vec![0.0; v.len()];
 
         for i in 1..v.len() {
-            acceleration[i] = (v[i] - v[i - 1]) / self.dt;
+            acceleration[i] = (v[i] - v[i - 1]) / step_seconds[i];
         }
 
         // Replace NaN and infinite values with 0
@@ -459,7 +504,7 @@ impl VirtualElevationCalculator {
         // distance the VE step uses (`step_mean`).
         for i in (start_idx + 1)..=end_idx {
             let dt = self.data.timestamps[i] - self.data.timestamps[i - 1];
-            if dt > 0.0 && dt < 10.0 {
+            if dt > 0.0 && dt < MAX_STEP_SECONDS {
                 // Sanity check for time step
                 // Apparent velocity distance (already includes wind, just apply calibration)
                 let apparent_before = self.data.wind_speed[i - 1] * self.air_speed_calibration;
@@ -496,7 +541,8 @@ impl VirtualElevationCalculator {
         cda_array: Option<&[f64]>,
         crr: f64,
     ) -> VirtualSlopeResult {
-        let acceleration = self.calculate_acceleration();
+        let step_seconds = self.step_seconds();
+        let acceleration = self.calculate_acceleration(&step_seconds);
         let effective_wind = self.calculate_effective_wind();
         let apparent_velocity = self.get_apparent_velocity(&effective_wind);
 
@@ -532,23 +578,26 @@ impl VirtualElevationCalculator {
             acceleration,
             effective_wind,
             apparent_velocity,
+            step_seconds,
         }
     }
 
-    /// Accumulate `v̄_i · dt · slope_i`: the distance ridden in the step times
-    /// its slope.
+    /// Accumulate `v̄_i · dt_i · slope_i`: the distance ridden in the step
+    /// times its slope, with `dt_i` the step's real duration
+    /// (`step_seconds`; 0 across a recording gap).
     ///
     /// The slope comes from the energy balance along the road, where the
     /// climbing power is `m·g·v·sin θ`. It is therefore already the height
     /// gained per metre ridden (sin θ), not rise over run (tan θ), and takes
     /// no `sin(atan(·))`: that would apply the angle twice and lose
     /// `slope²/2` of the height, 0.7% on an 11.5% road.
-    fn build_virtual_elevation(&self, virtual_slope: &[f64]) -> Vec<f64> {
+    fn build_virtual_elevation(&self, virtual_slope: &[f64], step_seconds: &[f64]) -> Vec<f64> {
         let mut virtual_elevation = Vec::with_capacity(virtual_slope.len());
         let mut cumulative_elevation = 0.0;
 
         for (i, &slope) in virtual_slope.iter().enumerate() {
-            cumulative_elevation += Self::step_mean(&self.data.velocity, i) * self.dt * slope;
+            cumulative_elevation +=
+                Self::step_mean(&self.data.velocity, i) * step_seconds[i] * slope;
             virtual_elevation.push(cumulative_elevation);
         }
 
@@ -568,8 +617,9 @@ impl VirtualElevationCalculator {
             acceleration,
             effective_wind,
             apparent_velocity,
+            step_seconds,
         } = self.calculate_virtual_slope_impl(base_cda, cda_array, crr);
-        let virtual_elevation = self.build_virtual_elevation(&virtual_slope);
+        let virtual_elevation = self.build_virtual_elevation(&virtual_slope, &step_seconds);
 
         // Calculate metrics if actual elevation is available
         let (r2, rmse, ve_elevation_diff, actual_elevation_diff) =
@@ -585,6 +635,7 @@ impl VirtualElevationCalculator {
             acceleration,
             effective_wind,
             apparent_velocity,
+            step_seconds,
             r2,
             rmse,
             ve_elevation_diff,
@@ -671,7 +722,8 @@ impl VirtualElevationCalculator {
     /// Precompute the CdA/Crr-independent inputs over `start + 1 ..= end`.
     /// Both bounds must already have been clamped by `metrics_window`.
     fn build_gain_kernel(&self, start: usize, end: usize) -> GainKernel {
-        let acceleration = self.calculate_acceleration();
+        let step_seconds = self.step_seconds();
+        let acceleration = self.calculate_acceleration(&step_seconds);
         let effective_wind = self.calculate_effective_wind();
         let apparent_velocity = self.get_apparent_velocity(&effective_wind);
         let mg = self.params.system_mass * 9.807;
@@ -697,12 +749,12 @@ impl VirtualElevationCalculator {
             let power_term = w / (v * mg);
             let accel_term = a / 9.807;
             let aero_term = rho * va.powi(2) / (2.0 * mg);
-            let distance = step_velocity * self.dt;
+            let distance = step_velocity * step_seconds[i];
 
             // `calculate_virtual_slope_impl` zeroes a non-finite slope. Whether
             // the slope is finite does not depend on CdA or Crr (both finite,
             // CdA positive), so decide it once here: such a sample contributes
-            // `v̄·dt·0` — zero, or NaN when the step's speed is itself NaN —
+            // `v̄·dt_i·0` — zero, or NaN when the step's speed is itself NaN —
             // exactly as the profile does.
             if (power_term - aero_term - accel_term).is_finite() {
                 step.push(distance);
@@ -2155,5 +2207,165 @@ mod tests {
                 "grid and gain disagree about ({start}, {end})"
             );
         }
+    }
+
+    // ---- Real step durations (smart recording, recording gaps) ----
+
+    /// A 10-minute ride at 1 Hz on a climbing road, with speed and power
+    /// varying slowly enough that a 2–5 s step can follow them.
+    fn smooth_ride(samples: usize) -> VEData {
+        let timestamps: Vec<f64> = (0..samples).map(|i| i as f64).collect();
+        let velocity: Vec<f64> = timestamps
+            .iter()
+            .map(|&t| 9.0 + 2.0 * (t * 0.02).sin())
+            .collect();
+        let power: Vec<f64> = timestamps
+            .iter()
+            .map(|&t| 330.0 + 80.0 * (t * 0.015).cos())
+            .collect();
+        let altitude: Vec<f64> = timestamps.iter().map(|&t| 100.0 + 0.05 * t).collect();
+        let distance: Vec<f64> = velocity
+            .iter()
+            .scan(0.0, |travelled, &v| {
+                *travelled += v;
+                Some(*travelled)
+            })
+            .collect();
+        VEData::new(
+            timestamps,
+            power,
+            velocity,
+            vec![0.0; samples],
+            vec![0.0; samples],
+            altitude,
+            distance,
+            vec![0.0; samples],
+        )
+    }
+
+    /// Keep sample 0 and then every 2nd–5th sample in an irregular cycle,
+    /// as smart recording does. Each kept sample's power is the mean of the
+    /// 1 Hz power over its step — the assumption the VE step's `P[i]·dt_i`
+    /// makes — so what is left between the two rides is only the thinning
+    /// of speed. Returns the thinned ride and the 1 Hz index of its last
+    /// sample.
+    fn thin(ride: &VEData) -> (VEData, usize) {
+        const CYCLE: [usize; 7] = [2, 5, 3, 4, 2, 5, 3];
+        let mut kept = vec![0usize];
+        let mut k = 0;
+        loop {
+            let next = kept[kept.len() - 1] + CYCLE[k % CYCLE.len()];
+            if next >= ride.timestamps.len() {
+                break;
+            }
+            kept.push(next);
+            k += 1;
+        }
+        let pick = |values: &[f64]| -> Vec<f64> { kept.iter().map(|&i| values[i]).collect() };
+        let mut power = vec![ride.power[0]];
+        for pair in kept.windows(2) {
+            let step = &ride.power[pair[0] + 1..=pair[1]];
+            power.push(step.iter().sum::<f64>() / step.len() as f64);
+        }
+        let thinned = VEData::new(
+            pick(&ride.timestamps),
+            power,
+            pick(&ride.velocity),
+            pick(&ride.position_lat),
+            pick(&ride.position_long),
+            pick(&ride.altitude),
+            pick(&ride.distance),
+            pick(&ride.wind_speed),
+        );
+        (thinned, kept[kept.len() - 1])
+    }
+
+    /// The TODO's acceptance test: the same ride at 1 Hz and thinned to
+    /// irregular 2–5 s steps gives the same VE gain, within the thinning
+    /// error. Counting each thinned step as one second — the old fixed
+    /// `dt` — would have kept roughly a third of the work and the gain.
+    #[test]
+    fn thinned_ride_gives_the_same_gain_as_one_hertz() {
+        let ride = smooth_ride(600);
+        let (thinned, last) = thin(&ride);
+        let thinned_len = thinned.timestamps.len();
+        let full = VirtualElevationCalculator::new(ride, reference_params());
+        let sparse = VirtualElevationCalculator::new(thinned, reference_params());
+
+        for &(cda, crr) in &[(0.25, 0.004), (0.30, 0.005), (0.40, 0.008)] {
+            let full_gain = full.ve_gain(cda, crr, 0, last);
+            let sparse_gain = sparse.ve_gain(cda, crr, 0, thinned_len - 1);
+            assert!(
+                full_gain.abs() > 10.0,
+                "the ride must climb or descend enough to compare: {full_gain}"
+            );
+            // Drag at the step's mean speed against the 1 Hz integral: a
+            // second-order error, 1–2 cm over the 57–134 m gains here.
+            assert!(
+                (full_gain - sparse_gain).abs() < 0.05,
+                "CdA {cda}, Crr {crr}: 1 Hz gain {full_gain}, thinned {sparse_gain}"
+            );
+            // The profile tells the same story as the kernel.
+            assert_gain_matches_profile_at(&sparse, cda, crr, 0, thinned_len - 1, "thinned");
+        }
+    }
+
+    /// A recording gap — auto-pause, a dropout — is not ridden: it adds no
+    /// work and no kinetic-energy change, however long it lasts and however
+    /// different the speed and power either side of it are. Before, a 100 s
+    /// pause was counted as one second at the resumed power.
+    #[test]
+    fn recording_gap_adds_no_phantom_work() {
+        let mut data = constant_ride(steady_state_power(), 0.0, vec![0.0; N]);
+        for t in &mut data.timestamps[50..] {
+            *t += 100.0; // a 101 s step between samples 49 and 50
+        }
+        // Resumed slower and with a hard first pedal stroke.
+        data.velocity[50] = 4.0;
+        data.power[50] = 600.0;
+        data.timestamps[60] = data.timestamps[59]; // a duplicate timestamp
+        let calc = VirtualElevationCalculator::new(data, reference_params());
+
+        let result = calc.calculate_virtual_elevation(CDA, CRR, 0, N - 1);
+        let step_seconds = result.step_seconds();
+        assert_eq!(step_seconds[50], 0.0);
+        assert_eq!(step_seconds[60], 0.0);
+        assert_eq!(step_seconds[51], 1.0);
+        let ve = result.virtual_elevation();
+        assert_eq!(ve[50], ve[49], "the gap step must add nothing");
+        assert_eq!(ve[60], ve[59], "a zero-length step must add nothing");
+        assert_eq!(result.acceleration()[50], 0.0);
+
+        let whole = calc.ve_gain(CDA, CRR, 0, N - 1);
+        let before = calc.ve_gain(CDA, CRR, 0, 49);
+        let after = calc.ve_gain(CDA, CRR, 50, N - 1);
+        assert!(
+            (whole - (before + after)).abs() < GAIN_TOLERANCE,
+            "whole {whole} != before {before} + after {after}"
+        );
+        assert_gain_matches_profile_at(&calc, CDA, CRR, 0, N - 1, "gap");
+    }
+
+    /// On a 1 Hz recording every step is exactly one second, so results are
+    /// bit-identical to the fixed `dt = 1` the kernel used before — which
+    /// is still what a ride without timestamps gets.
+    #[test]
+    fn one_hertz_ride_is_bit_identical_to_a_fixed_one_second_step() {
+        let timed = varied_ride();
+        let mut untimed = varied_ride();
+        untimed.timestamps.clear();
+        let timed = VirtualElevationCalculator::new(timed, windy_params());
+        let untimed = VirtualElevationCalculator::new(untimed, windy_params());
+
+        let a = timed.calculate_virtual_elevation(0.31, 0.0047, 5, 90);
+        let b = untimed.calculate_virtual_elevation(0.31, 0.0047, 5, 90);
+        assert_eq!(a.virtual_elevation(), b.virtual_elevation());
+        assert_eq!(a.acceleration(), b.acceleration());
+        assert_eq!(a.ve_elevation_diff(), b.ve_elevation_diff());
+        assert_eq!(a.step_seconds(), vec![1.0; N]);
+        assert_eq!(
+            timed.ve_gain_grid(0.2, 0.4, 5, 0.002, 0.008, 4, 5, 90),
+            untimed.ve_gain_grid(0.2, 0.4, 5, 0.002, 0.008, 4, 5, 90)
+        );
     }
 }

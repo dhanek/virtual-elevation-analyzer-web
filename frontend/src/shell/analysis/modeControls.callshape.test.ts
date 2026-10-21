@@ -251,6 +251,7 @@ function setup(overrides: Partial<AppState> = {}): Harness {
 		getSyncErrorSeries: () => ({
 			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
+			timestamps: Array.from({ length: SAMPLE_COUNT }, (_, i) => i),
 		}),
 		getAutoCalibration: () => ({
 			method: "vdRatio",
@@ -928,6 +929,7 @@ function setupMode(modeCase: ModeCase): AppState {
 		getSyncErrorSeries: () => ({
 			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
+			timestamps: Array.from({ length: SAMPLE_COUNT }, (_, i) => i),
 		}),
 		getAutoCalibration: () => ({
 			method: "vdRatio",

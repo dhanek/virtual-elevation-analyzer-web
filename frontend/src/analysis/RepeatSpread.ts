@@ -66,10 +66,14 @@ export interface RepeatLeg {
 	 * coasting legs and the speed k comes from. `airSpeed` is the apparent
 	 * velocity (m/s) the VE kernel spends drag at over the same window as
 	 * `speed`; absent means no wind: air speed = ground speed.
+	 * `stepSeconds` is each sample's step duration (the kernel's
+	 * `step_seconds`: 0 across a recording gap), which weights every sample
+	 * by the time it covers; absent means 1 s per sample.
 	 */
 	power?: Float64Array;
 	speed?: Float64Array;
 	airSpeed?: Float64Array;
+	stepSeconds?: Float64Array;
 	rho?: number;
 }
 
@@ -680,10 +684,11 @@ export function heldOutScore(units: readonly RepeatUnitInput[]): {
  * along the other direction. k is computed, not fixed at 9, from the
  * coasting legs' air density and their DRAG-WEIGHTED air speed
  *
- *     v̄ = √(Σ v_a²·v / Σ v),   i.e.  k = 2·m·g·Σv / (ρ·Σ v_a²·v)
+ *     v̄ = √(Σ v_a²·v·dt / Σ v·dt),   i.e.  k = 2·m·g·Σv·dt / (ρ·Σ v_a²·v·dt)
  *
- * — over a leg the drag term sums ½ρ·CdA·v_a²·v and the rolling term
- * m·g·Crr·v, so this is the v̄ whose k the leg's VE actually holds fixed.
+ * — over a leg the drag term sums ½ρ·CdA·v_a²·v·dt and the rolling term
+ * m·g·Crr·v·dt, so this is the v̄ whose k the leg's VE actually holds fixed;
+ * dt is each sample's step (`stepSeconds`), 1 s on a 1 Hz recording.
  * v_a is the kernel's apparent velocity (the wind, or the air-speed
  * channel); without wind v_a = v and it is the old √(Σv³ / Σv). At constant
  * speed it is the plain mean; on a real descent, which starts slow and
@@ -698,8 +703,9 @@ export function heldOutScore(units: readonly RepeatUnitInput[]): {
 export const COASTING_POWER_W = 20;
 
 /**
- * A leg is coasting when at least this fraction of its window samples is
- * under `COASTING_POWER_W`. Measured on the hill sessions' FIT laps, which
+ * A leg is coasting when at least this fraction of its window TIME is under
+ * `COASTING_POWER_W` (each sample counts for its `stepSeconds`, so a
+ * smart-recorded leg is judged by time, not by how often it was sampled). Measured on the hill sessions' FIT laps, which
  * include the pedalled turnaround: descents 73–89 %, climbs 5 %, a descent
  * with a pedalled stretch 54 %. Two thirds keeps every clean descent and
  * leaves a leg where power still does real work out.
@@ -713,7 +719,8 @@ export interface PowerIndependentResult {
 	/** k = 2·m·g / (ρ·v̄²). */
 	k: number;
 	/**
-	 * Drag-weighted AIR speed √(Σv_a²·v / Σv) (m/s) and mean air density
+	 * Drag-weighted AIR speed √(Σv_a²·v·dt / Σv·dt) (m/s) and time-weighted
+	 * mean air density
 	 * over the coasting legs.
 	 */
 	speed: number;
@@ -729,6 +736,16 @@ export interface PowerIndependentResult {
 	repeats: { combined: RepeatStat; cda: RepeatStat };
 }
 
+/**
+ * Seconds sample `i` of `leg` covers: its `stepSeconds`, or 1 without them.
+ * On a 1 Hz recording every weight is exactly 1, so the sums below are the
+ * plain per-sample sums they were.
+ */
+function stepWeight(leg: RepeatLeg, i: number): number {
+	const steps = leg.stepSeconds;
+	return steps && i < steps.length ? steps[i] : 1;
+}
+
 /** Whether a leg is coasting; false when it carries no power series. */
 export function isCoastingLeg(leg: RepeatLeg): boolean {
 	const power = leg.power;
@@ -736,12 +753,16 @@ export function isCoastingLeg(leg: RepeatLeg): boolean {
 		return false;
 	}
 	let coasting = 0;
-	for (const p of power) {
+	let total = 0;
+	for (let i = 0; i < power.length; i++) {
+		const dt = stepWeight(leg, i);
+		total += dt;
+		const p = power[i];
 		if (Number.isFinite(p) && p < COASTING_POWER_W) {
-			coasting++;
+			coasting += dt;
 		}
 	}
-	return coasting / power.length >= COASTING_FRACTION;
+	return total > 0 && coasting / total >= COASTING_FRACTION;
 }
 
 /**
@@ -756,7 +777,7 @@ export function computePowerIndependent(
 	let speedSum = 0;
 	let dragSum = 0;
 	let rhoSum = 0;
-	let samples = 0;
+	let seconds = 0;
 	let coastingLegs = 0;
 	let totalLegs = 0;
 	const coastingUnits = new Set<string>();
@@ -774,17 +795,18 @@ export function computePowerIndependent(
 			const airSpeed = leg.airSpeed;
 			let legSpeed = 0;
 			let legDrag = 0;
-			let legSamples = 0;
+			let legSeconds = 0;
 			for (let i = 0; i < speed.length; i++) {
 				if (airSpeed && i >= airSpeed.length) {
 					continue;
 				}
 				const vg = speed[i];
 				const va = airSpeed ? airSpeed[i] : vg;
+				const dt = stepWeight(leg, i);
 				if (Number.isFinite(vg) && Number.isFinite(va)) {
-					legSpeed += vg;
-					legDrag += va * va * vg;
-					legSamples++;
+					legSpeed += vg * dt;
+					legDrag += va * va * vg * dt;
+					legSeconds += dt;
 				}
 			}
 			if (!(legSpeed > 0)) {
@@ -794,15 +816,15 @@ export function computePowerIndependent(
 			coastingUnits.add(unit.key);
 			speedSum += legSpeed;
 			dragSum += legDrag;
-			rhoSum += rho * legSamples;
-			samples += legSamples;
+			rhoSum += rho * legSeconds;
+			seconds += legSeconds;
 		}
 	}
 	if (coastingLegs === 0 || !(systemMass > 0)) {
 		return null;
 	}
 	const speed = Math.sqrt(dragSum / speedSum);
-	const rho = rhoSum / samples;
+	const rho = rhoSum / seconds;
 	const k = (2 * systemMass * GRAVITY) / (rho * speed * speed);
 
 	const pooled = result.pooled;

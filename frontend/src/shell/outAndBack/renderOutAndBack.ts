@@ -864,11 +864,12 @@ function outAndBackRanges(
 function syncErrorSeries(appState: AppState): {
 	groundSpeed: number[];
 	airSpeed: number[];
+	timestamps: number[];
 } {
 	const fitData = appState.currentFitData;
 	const params = appState.currentParameters;
 	if (!fitData || !params) {
-		return { groundSpeed: [], airSpeed: [] };
+		return { groundSpeed: [], airSpeed: [], timestamps: [] };
 	}
 	const normalized = getNormalizedActivityArrays(fitData);
 	const resolution = resolveWindSeries({
@@ -880,5 +881,6 @@ function syncErrorSeries(appState: AppState): {
 	return {
 		groundSpeed: normalized.velocity,
 		airSpeed: resolution.windSpeed,
+		timestamps: normalized.timestamps,
 	};
 }
