@@ -508,6 +508,60 @@ describe("power-independent CdA (J3)", () => {
 		expect(isCoastingLeg(leg(100, 0, 0.3, 0.004))).toBe(false);
 	});
 
+	test("a leg's coasting fraction is by time when steps are uneven", () => {
+		// Half the samples coast, but they are 3 s apart and the pedalling
+		// ones 1 s: three quarters of the time is coasting.
+		const smartRecorded = {
+			...leg(100, 0, 0.3, 0.004),
+			power: Float64Array.from({ length: 100 }, (_, i) =>
+				i < 50 ? COASTING_POWER_W - 1 : 200,
+			),
+			stepSeconds: Float64Array.from({ length: 100 }, (_, i) =>
+				i < 50 ? 3 : 1,
+			),
+		};
+		expect(isCoastingLeg(smartRecorded)).toBe(true);
+		expect(isCoastingLeg({ ...smartRecorded, stepSeconds: undefined })).toBe(
+			false,
+		);
+	});
+
+	test("k weights each sample by its step; 1 s steps change nothing", () => {
+		const units = hillSession(1, HEADWIND);
+		const spread = computeRepeatSpread(units, 0.004);
+		const withSteps = (step: (i: number) => number) =>
+			units.map((u) => ({
+				...u,
+				legs: u.legs.map((l) => ({
+					...l,
+					stepSeconds: Float64Array.from(l.speed!, (_, i) => step(i)),
+				})),
+			}));
+		const plain = computePowerIndependent(units, spread, MASS)!;
+		expect(
+			computePowerIndependent(
+				withSteps(() => 1),
+				spread,
+				MASS,
+			),
+		).toEqual(plain);
+
+		const uneven = (i: number) => 1 + (i % 4);
+		const result = computePowerIndependent(withSteps(uneven), spread, MASS)!;
+		let groundSum = 0;
+		let dragSum = 0;
+		for (const u of units.filter((u) => u.key.startsWith("Down"))) {
+			const leg = u.legs[0];
+			leg.speed!.forEach((vg, i) => {
+				const va = leg.airSpeed![i];
+				groundSum += vg * uneven(i);
+				dragSum += va * va * vg * uneven(i);
+			});
+		}
+		expect(result.speed).toBeCloseTo(Math.sqrt(dragSum / groundSum), 12);
+		expect(result.speed).not.toBeCloseTo(plain.speed, 6);
+	});
+
 	test("not available without a coasting leg", () => {
 		const units = hillSession(1).filter((u) => u.key.startsWith("Up"));
 		expect(

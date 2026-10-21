@@ -27,6 +27,7 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 			) => ({
 				virtual_elevation: new Float64Array(n).fill(1),
 				apparent_velocity: new Float64Array(n).fill(9),
+				step_seconds: new Float64Array(n).fill(1),
 				r2: 0.5,
 				rmse: 1,
 				ve_elevation_diff: 2,

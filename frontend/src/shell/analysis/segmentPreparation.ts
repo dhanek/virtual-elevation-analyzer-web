@@ -586,7 +586,7 @@ export function buildRepeatUnits(
 	for (const p of prepared) {
 		// The kernel's apparent velocity (wind / air-speed channel), which
 		// does not depend on CdA or Crr (any finite pair will do): the speed
-		// the VE spends drag at.
+		// the VE spends drag at, and the step durations it spends it over.
 		const result = p.calculator.calculate_virtual_elevation(
 			0.3,
 			0,
@@ -594,8 +594,10 @@ export function buildRepeatUnits(
 			p.trimEnd,
 		);
 		let air: Float64Array;
+		let stepSeconds: Float64Array;
 		try {
 			air = result.apparent_velocity;
+			stepSeconds = result.step_seconds;
 		} finally {
 			result.free();
 		}
@@ -608,6 +610,7 @@ export function buildRepeatUnits(
 			power: seriesWindow(p.slice.power, p.trimStart, p.trimEnd),
 			speed: seriesWindow(p.slice.velocity, p.trimStart, p.trimEnd),
 			airSpeed: seriesWindow(air, p.trimStart, p.trimEnd),
+			stepSeconds: seriesWindow(stepSeconds, p.trimStart, p.trimEnd),
 			rho: p.airDensity,
 		};
 		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
