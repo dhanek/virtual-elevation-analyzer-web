@@ -622,7 +622,7 @@ power-scale ambiguity. *Criteria:* shown only when the selection contains coasti
 displayed with the speed it came from; on the three hill sessions it reproduces the offline result
 (between-session spread shrinks relative to raw CdA).
 
-**Commit:** `b2a19d5` on `claude/j3-coasting-cda-8f0a92`, PR #36.
+**Commits:** `b2a19d5` and the wind fix `979966b` on `claude/j3-coasting-cda-8f0a92`, PR #36.
 
 **What it does.** A "Power-independent CdA" block in the Repeats tab, under the pooled fit: the
 pooled CdA next to the pooled CdA + k·Crr, each with its clustered SE (the sum's from the
@@ -636,24 +636,28 @@ scrolls sideways, so at phone width a wide table no longer pushes the page wider
 CdA-at-fixed-Crr comparison already existed (the CdA @ slider-Crr column and pooled row).
 
 **How.** `computePowerIndependent` in `RepeatSpread.ts`; legs now carry their recorded power,
-ground speed and mean air density (`PreparedSegment.airDensity`). Decisions:
+ground speed, the calculator's apparent (air) speed and mean air density
+(`PreparedSegment.airDensity`). Decisions:
 - *Coasting:* a sample under 20 W; a leg coasts when ≥ 2/3 of its window does. On the hill
   sessions' FIT laps (turnaround included) the descents sat at 73–89 %, the climbs at 5 %, a
   descent with a pedalled stretch at 54 %.
-- *Speed:* v̄ = √(Σv³ / Σv), not the plain mean. Over a leg the drag sums ½ρ·CdA·v³ and the
-  rolling term m·g·Crr·v, so this is the v̄ whose k the leg's VE holds fixed; the plain mean
-  includes the slow start and braking (32 km/h where the drag is spent at ~40) and gave k 17
-  where ~10 is right — the power ±1 % rows of Δ(CdA + k·Crr) moved ±0.0043 with it, ±0.0009
-  without.
+- *Speed:* v̄ = √(Σv_a²·v / Σv), v_a the apparent (air) speed the kernel spends drag at and v
+  the ground speed. Over a leg the drag sums ½ρ·CdA·v_a²·v and the rolling term m·g·Crr·v, so
+  this is the v̄ whose k the leg's VE holds fixed; without wind it is √(Σv³ / Σv). Not the plain
+  mean: that includes the slow start and braking (32 km/h where the drag is spent at ~40) and
+  gave k 17 where ~10 is right — the power ±1 % rows of Δ(CdA + k·Crr) moved ±0.0043 with it,
+  ±0.0009 without. Ground speed instead of air speed (the first version, PR #36 review F1-01)
+  put k 10.4 where 9.5 is right on the session with 1.1 m/s weather wind.
 - *Value:* the pooled free fit's CdA + k·Crr, as offline. Readout only; sliders, auto-converge and
   the Rust kernels are untouched.
 
 **Checked in the running app** (the three hill sessions, out-and-back gates at the offline 40 m /
-1040 m legs, AWS DEM, η 0.98, offline masses, FIT wind on the two Sept rides): k 10.4 / 9.9 / 9.1
-at 42–44 km/h (3, 2 and 3 of 6 legs coasting); pooled CdA 0.2505 / 0.2577 / 0.2854, between-session
-SD **0.0184** (offline 0.0172); CdA + k·Crr 0.3094 / 0.3007 / 0.3059, SD **0.0044** (offline
-0.0114; 0.0044 at a common k = 9 too). Power +1 % moved CdA by −0.0035…−0.0052 and the sum by
-+0.0004…+0.0016. Not like that on the recorded (barometric) profile: there the fits themselves
+1040 m legs, AWS DEM, η 0.98, offline masses, FIT wind on the two Sept rides, weather wind on
+the August one): k 9.5 / 9.9 / 9.5 at 43–44 km/h air speed (3, 2 and 3 of 6 legs coasting); pooled
+CdA 0.2505 / 0.2577 / 0.2854, between-session SD **0.0184** (offline 0.0172); CdA + k·Crr
+0.3042 / 0.3008 / 0.3068, SD **0.0030** (offline 0.0114; 0.0045 at a common k = 9). Power +1 %
+moved CdA by −0.0035…−0.0052 and the sum by +0.0003…+0.0016 — the largest on the session with
+only 2 coasting legs, where the pooled fit leans more on the climbs. Not like that on the recorded (barometric) profile: there the fits themselves
 are off (Crr ≈ 0.008, CdA 0.21–0.23) and the sum's spread was larger than CdA's (0.0133 vs
 0.0080) — the barometer under-reads this 33 m climb by 4–6 % (offline, 2026-10-14).
 Also checked: a velodrome session (work laps, and all 15 laps — no lap over 43 % coasting) and GPS
