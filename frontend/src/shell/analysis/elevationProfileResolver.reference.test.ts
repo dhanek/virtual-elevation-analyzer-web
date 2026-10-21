@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
+import type { ActivityDataLike } from "../../state/AppState";
 import { AppState } from "../../state/AppState";
 import { resolveReferenceElevation } from "./elevationProfileResolver";
 
@@ -13,6 +14,10 @@ function makeAppState(
 	const appState = new AppState();
 	appState.currentParameters = { ...DEFAULT_PARAMETERS, ...overrides };
 	appState.fitRawElevation = [...BARO];
+	// The barometer lag is in seconds: the activity's 1 Hz timestamps.
+	appState.currentFitData = {
+		timestamps: BARO.map((_, i) => i),
+	} as unknown as ActivityDataLike;
 	return appState;
 }
 

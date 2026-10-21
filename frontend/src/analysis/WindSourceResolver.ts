@@ -1,5 +1,6 @@
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import type { ActivityDataLike, WindSource } from "../state/AppState";
+import { shiftByTime } from "./TimeShift";
 
 export type WindDataSource = "air_speed" | "wind_speed" | "constant" | "none";
 
@@ -82,7 +83,11 @@ export function resolveWindSeries(
 
 	let resolvedWindSpeed = projectWindWithYaw(sourceMagnitudes, yaw);
 	if (input.applyOffset !== false) {
-		resolvedWindSpeed = applyAirSpeedOffset(resolvedWindSpeed, offsetSeconds);
+		resolvedWindSpeed = applyAirSpeedOffset(
+			resolvedWindSpeed,
+			timestamps,
+			offsetSeconds,
+		);
 	}
 
 	if ((input.airSpeedCalibrationPercent ?? 0) !== 0) {
@@ -103,36 +108,35 @@ export function resolveWindSeries(
 	};
 }
 
+/**
+ * The air-speed channel moved by its lag (+s: the sensor reports s seconds
+ * late, so sample i reads the value recorded s seconds after it). The lag is
+ * in SECONDS on the recording's own timestamps and never reaches across a
+ * recording gap (`shiftByTime`, TimeShift.ts); a target beyond the end of its
+ * stretch of recording is NaN. On a strictly 1 Hz recording this is the
+ * whole-sample shift it always was.
+ */
 export function applyAirSpeedOffset(
 	airSpeed: number[],
+	timestamps: ArrayLike<number>,
 	offsetSeconds: number,
 ): number[] {
-	if (offsetSeconds === 0 || airSpeed.length === 0) {
-		return airSpeed;
-	}
-
-	const offsetIndices = Math.round(offsetSeconds);
-	const result = new Array(airSpeed.length);
-
-	for (let i = 0; i < airSpeed.length; i++) {
-		const sourceIndex = i + offsetIndices;
-		result[i] =
-			sourceIndex >= 0 && sourceIndex < airSpeed.length
-				? airSpeed[sourceIndex]
-				: NaN;
-	}
-
-	return result;
+	return shiftByTime(airSpeed, timestamps, offsetSeconds, "nan");
 }
 
 export function calculateAirSpeedSyncError(
 	groundSpeed: number[],
 	airSpeed: number[],
+	timestamps: ArrayLike<number>,
 	offsetSeconds: number,
 	trimStart: number,
 	trimEnd: number,
 ): number {
-	const offsetAirSpeed = applyAirSpeedOffset(airSpeed, offsetSeconds);
+	const offsetAirSpeed = applyAirSpeedOffset(
+		airSpeed,
+		timestamps,
+		offsetSeconds,
+	);
 
 	let sumAbsDiff = 0;
 	let validCount = 0;

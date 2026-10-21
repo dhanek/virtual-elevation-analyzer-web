@@ -580,17 +580,15 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       sessions is flagged; the 2026-08-14 lap 6 CdA lands near 0.284; the warning appears in the
       app.
 
-- [ ] **[S] Lags and shifts count samples, not seconds.** The barometer lag (`applyBaroLag`,
-      `BaroLag.ts`), the air-speed lag and the Repeats tab's timing sweep (`TimingSweep.ts`,
-      −3 … +3 "s") all shift a channel by whole SAMPLES and label the shift in seconds. On a
-      1 Hz recording the two are the same; on a smart-recorded FIT file (1–8 s between samples,
-      not resampled on load) a "+2 s" shift moves the channel by 2–16 s, and a shift across a
-      recording pause pulls in a sample from the other side of it. The VE step itself uses the
-      real step durations since the fix below; these shifts should shift by time (nearest
-      sample at `t ± lag`, never across a gap), or be refused on a recording that is not 1 Hz.
-      *Done when:* a lag of N s moves a thinned synthetic ride's channel by N s, not N samples,
-      and a 1 Hz recording is unchanged. *origin: noticed while fixing the VE step's dt,
-      2026-10-21*
+- [ ] **[S] The GPS modes' ground/air-speed sync error shifts the air speed twice.** The
+      "Ground/air speed sync error" readout under the air-speed offset slider
+      (`refreshOffsetMetric`, `bindModeControls.ts`) shifts the air-speed series by the slider's
+      offset (`calculateAirSpeedSyncError`). Standard mode hands it the UNSHIFTED series
+      (`prepareAnalysisPayload`, `applyOffset: false`); GPS-lap and out-and-back hand it
+      `resolveWindSeries`'s default, which already carries `params.air_speed_offset` — so there
+      the number is measured at twice the offset. *Done when:* every mode's readout is measured
+      at the slider's offset once, with a test per mode. *origin: noticed while moving the lags
+      to seconds, 2026-10-21*
 
 
 ---
@@ -599,6 +597,46 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Lags shift by seconds, not samples — 2026-10-21
+
+**The item this closes:** *Standalone → [S] Lags and shifts count samples, not seconds.* The
+barometer lag (`applyBaroLag`), the air-speed lag (`applyAirSpeedOffset`, and the sync-error
+readout) and the Repeats tab's timing sweep all shifted a channel by whole SAMPLES and labelled
+the shift in seconds; on a smart-recorded FIT file a "+2 s" shift moved the channel 2–16 s, and
+near a recording pause it pulled in a sample from the other side. *Done when:* a lag of N s moves
+a thinned synthetic ride's channel by N s, not N samples, and a 1 Hz recording is unchanged.
+
+**Commits:** COMMIT on `claude/ve-real-dt-0f645c`, PR #37 (with the VE step's real duration
+below).
+
+**What it does.** One rule, `shiftByTime` (`TimeShift.ts`), for all three: sample i reads the
+sample whose timestamp is nearest to `t[i] + lag`, searched only within its stretch of recording
+— split where the VE step splits, at a step that is not positive or is 10 s or longer
+(`MAX_STEP_SECONDS`, mirroring the Rust constant). A target beyond that stretch is each caller's
+edge policy as before: the barometer and the timing sweep clamp to the stretch's end sample, the
+air-speed offset reads NaN. Exact ties go to the earlier sample. The lag is still rounded to a
+whole second and the value is always a recorded sample, never an interpolation. On a strictly
+1 Hz recording the nearest sample to `t[i] + n` is sample i + n, so results there are
+bit-identical. The timing sweep no longer refuses rides whose median step is not 1 s (it said
+"Needs 1 s samples."); it now refuses only a ride without a timestamp for every sample.
+
+**The resolution decision.** Picking recorded samples cannot resolve a lag finer than the
+recording: on samples 2–5 s apart, neighbouring whole-second shifts often read the same samples,
+so a lag comes out right to about a second — an air-speed lag of 4 s scored best at 3 s on such a
+grid, where counting samples read 1 s. Interpolating would sharpen it, but on an irregular grid
+it would smooth every shift except 0 s (which always lands on a sample) and tilt every comparison
+against the unshifted channel — the smoothing trap the air-speed lag fell into before. Nearest
+sample it is.
+
+**Checked.** `TimeShift.test.ts`: bit-identical to the old whole-sample shift on 1 Hz epoch
+timestamps for both edge policies and ten lags; nearest-in-time on an irregular grid, ties,
+gaps (never crossed, ridden steps under 10 s crossed), a duplicate timestamp, and a refusal
+without timestamps. The timing sweep on the four-lap synthetic ride thinned to 2–5 s steps, with
+the barometer recorded 2 s late, finds +2 s; counting samples, the same sweep said +1. The
+air-speed sync error on a 2–5 s ride with a 4 s lag lands within a second of it; counting samples
+it read 1 s. Barometer lag on a 2 s-spaced ride moves the profile two samples for 4 s. Every
+existing test passes with 1 Hz timestamps added to the fixtures that had none.
 
 ### The VE step uses each sample's real duration — 2026-10-21
 
@@ -641,7 +679,8 @@ between laps). Files with pauses inside a lap change by up to ~1 m per lap on sh
 synthetic test. In the app, an A/B of main against this branch on the reference ride (laps
 10+12+16, same parameters and elevation source) matched on every readout, the VE trace and the
 whole Repeats tab; a lap with 117 s and 143 s pauses moved from 300.06 m to 300.87 m of VE gain.
-Follow-up: lags and the timing sweep still shift by samples (Standalone).
+Follow-up: lags and the timing sweep shifted by samples — closed in the same PR (the entry
+above).
 
 ### Power-independent CdA in the Repeats tab (J3) — 2026-10-20
 

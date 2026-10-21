@@ -23,6 +23,7 @@
  * segment's preparation throws (the update pass logs the identical message for
  * a failure in its half, so the observable logging is unchanged).
  */
+import { shiftByTime } from "../../analysis/TimeShift";
 import type { NormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { AutoConvergeSegment } from "../../analysis/AutoConverge";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
@@ -685,18 +686,20 @@ export function buildRepeatSensitivities(
 }
 
 /**
- * `series` moved by whole samples on the air-speed offset's convention
- * (`applyAirSpeedOffset`): +s means the channel is LATE by s and sample i
- * takes the value from i + s. The ends repeat the edge value rather than
- * NaN — a NaN power sample would zero its VE step, and a NaN reference
- * sample would drop the lap, so the shifts would compare different laps.
+ * `series` moved by `shift` whole SECONDS on the air-speed offset's
+ * convention (`applyAirSpeedOffset`): +s means the channel is LATE by s and
+ * sample i takes the value recorded s seconds after it — the sample nearest
+ * that time, never across a recording gap (`shiftByTime`, TimeShift.ts). The
+ * ends of each stretch of recording repeat the edge value rather than NaN —
+ * a NaN power sample would zero its VE step, and a NaN reference sample
+ * would drop the lap, so the shifts would compare different laps.
  */
-function shiftWholeSamples(series: number[], shift: number): number[] {
-	if (shift === 0 || series.length === 0) {
-		return series;
-	}
-	const last = series.length - 1;
-	return series.map((_, i) => series[Math.min(last, Math.max(0, i + shift))]);
+function shiftSeconds(
+	series: number[],
+	timestamps: number[],
+	shift: number,
+): number[] {
+	return shiftByTime(series, timestamps, shift, "clamp");
 }
 
 /**
@@ -716,8 +719,10 @@ function shiftWholeSamples(series: number[], shift: number): number[] {
  * longitude, so shifting it is shifting position along the road — it is
  * "GPS position".
  *
- * Null when the ride is not sampled at 1 s: a sample shift is then not a
- * second, and the VE step already assumes one second between samples.
+ * The shifts are in seconds on the ride's own timestamps (`shiftSeconds`),
+ * so a smart-recorded ride is swept in seconds too, as the VE step
+ * integrates it (`step_seconds`). A ride with no timestamps for its samples
+ * cannot be shifted by seconds: null.
  */
 export function buildTimingSweepInputs(
 	args: PrepareSegmentsArgs,
@@ -725,13 +730,7 @@ export function buildTimingSweepInputs(
 	elevationProfile: ElevationDisplayProfile,
 ): TimingSweepInputs | null {
 	const t = args.normalized.timestamps;
-	const steps: number[] = [];
-	for (let i = 1; i < t.length; i++) {
-		steps.push(t[i] - t[i - 1]);
-	}
-	steps.sort((a, b) => a - b);
-	const median = steps.length > 0 ? steps[Math.floor(steps.length / 2)] : NaN;
-	if (Math.abs(median - 1) > 1e-6) {
+	if (t.length < args.normalized.power.length) {
 		return null;
 	}
 	const prepareWith = (
@@ -746,10 +745,10 @@ export function buildTimingSweepInputs(
 		const { prepared, units } = prepareWith(
 			{
 				...args.normalized,
-				positionLat: shiftWholeSamples(args.normalized.positionLat, shift),
-				positionLong: shiftWholeSamples(args.normalized.positionLong, shift),
+				positionLat: shiftSeconds(args.normalized.positionLat, t, shift),
+				positionLong: shiftSeconds(args.normalized.positionLong, t, shift),
 			},
-			shiftWholeSamples(args.altitude, shift),
+			shiftSeconds(args.altitude, t, shift),
 		);
 		if (shift === 0) {
 			shiftZeroPosition = prepared;
@@ -781,7 +780,7 @@ export function buildTimingSweepInputs(
 			units: prepareWith(
 				{
 					...args.normalized,
-					power: shiftWholeSamples(args.normalized.power, shift),
+					power: shiftSeconds(args.normalized.power, t, shift),
 				},
 				args.altitude,
 			).units,

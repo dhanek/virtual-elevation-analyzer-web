@@ -284,7 +284,14 @@ describe("calculateAutoAirSpeedCalibration", () => {
 		const unaligned = sinusoid(run([raw]));
 		const aligned = sinusoid(
 			run([
-				{ ...raw, airSpeed: applyAirSpeedOffset(Array.from(raw.airSpeed), 2) },
+				{
+					...raw,
+					airSpeed: applyAirSpeedOffset(
+						Array.from(raw.airSpeed),
+						raw.timestamps,
+						2,
+					),
+				},
 			]),
 		);
 		expect(aligned.percent).toBeCloseTo(8, 6);

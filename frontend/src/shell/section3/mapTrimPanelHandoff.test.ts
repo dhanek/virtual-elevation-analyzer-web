@@ -241,6 +241,7 @@ function bindPanel(appState: AppState): void {
 		getSyncErrorSeries: () => ({
 			groundSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
 			airSpeed: new Array<number>(SAMPLE_COUNT).fill(10),
+			timestamps: Array.from({ length: SAMPLE_COUNT }, (_, i) => i),
 		}),
 		getAutoCalibration: () => null,
 	});
