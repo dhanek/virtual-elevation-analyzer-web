@@ -622,7 +622,7 @@ power-scale ambiguity. *Criteria:* shown only when the selection contains coasti
 displayed with the speed it came from; on the three hill sessions it reproduces the offline result
 (between-session spread shrinks relative to raw CdA).
 
-**Commit:** `COMMIT` on `claude/j3-coasting-cda-8f0a92`, PR #PR.
+**Commit:** `b2a19d5` on `claude/j3-coasting-cda-8f0a92`, PR #36.
 
 **What it does.** A "Power-independent CdA" block in the Repeats tab, under the pooled fit: the
 pooled CdA next to the pooled CdA + k·Crr, each with its clustered SE (the sum's from the
