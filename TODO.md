@@ -607,7 +607,7 @@ invisible in the lap RMSE. *Done when:* 3–4 checkpoints can be placed, persist
 and show on the VE plot; the table matches VE − reference read off the plot at those points; a
 lap that misses a checkpoint shows "not passed", never a number.
 
-**Commit:** `946e546` on `claude/ve-checkpoints-8a2510`.
+**Commit:** `946e546` on `claude/ve-checkpoints-8a2510`, PR #38.
 
 **What it does.** A "Course Checkpoints" panel beside the map (every mode with GPS) holds up to
 four checkpoints, CP1…CP4: a slider each in seconds into the selection, like the gates, a remove

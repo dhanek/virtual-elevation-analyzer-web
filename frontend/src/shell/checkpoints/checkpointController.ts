@@ -16,6 +16,7 @@ import {
 } from "../../analysis/Checkpoints";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import type { MapVisualization } from "../../components/MapVisualization";
+import type { CheckpointMarker } from "../../components/map/checkpointMarkers";
 import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
@@ -122,7 +123,7 @@ export function refreshCheckpointMap(): void {
 	const track = checkpointTrack(deps.appState);
 	if (!map || !track) return;
 	const markers = resolvedCheckpoints(deps.appState, track).flatMap(
-		(cp, slot) =>
+		(cp, slot): CheckpointMarker[] =>
 			cp ? [{ lat: cp.lat, lon: cp.lon, label: checkpointLabel(slot) }] : [],
 	);
 	map.setCheckpointMarkers(markers);

@@ -1,3 +1,4 @@
+import { MAX_CHECKPOINTS } from "../analysis/Checkpoints";
 import {
 	DEFAULT_WIND_HEIGHT_FACTOR,
 	LEGACY_WIND_HEIGHT_FACTOR,
@@ -140,16 +141,14 @@ export function normalizeLoadedParameters(
 
 /**
  * Stored checkpoints are untrusted data: keep finite numbers only, at most
- * `MAX_STORED_CHECKPOINTS`.
+ * `MAX_CHECKPOINTS`.
  */
 export function sanitizeCheckpoints(value: unknown): number[] {
 	if (!Array.isArray(value)) return [];
 	return value
 		.filter((t): t is number => typeof t === "number" && Number.isFinite(t))
-		.slice(0, MAX_STORED_CHECKPOINTS);
+		.slice(0, MAX_CHECKPOINTS);
 }
-
-const MAX_STORED_CHECKPOINTS = 4;
 
 export class ParameterStorage {
 	private dbName = "VirtualElevationAnalyzer";

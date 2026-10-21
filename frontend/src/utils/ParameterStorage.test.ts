@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
-import { normalizeLoadedParameters } from "./ParameterStorage";
+import { MAX_CHECKPOINTS } from "../analysis/Checkpoints";
+import {
+	normalizeLoadedParameters,
+	sanitizeCheckpoints,
+} from "./ParameterStorage";
 
 /**
  * A record as it was persisted before the wind height transfer existed: every
@@ -157,5 +161,18 @@ describe("normalizeLoadedParameters tolerates partial records (WR-03)", () => {
 		expect(
 			normalizeLoadedParameters("corrupt" as unknown as AnalysisParameters),
 		).toBeNull();
+	});
+});
+
+describe("sanitizeCheckpoints", () => {
+	test("truncates to the app's own checkpoint cap", () => {
+		// Vacuous while ParameterStorage and Checkpoints agree on the cap: the
+		// mutation that proves it gives sanitizeCheckpoints a private copy of the
+		// cap and raises MAX_CHECKPOINTS, and this case then fails (PR #38, F1-03).
+		const stored = Array.from({ length: MAX_CHECKPOINTS + 2 }, (_, i) => i);
+
+		expect(sanitizeCheckpoints(stored)).toEqual(
+			Array.from({ length: MAX_CHECKPOINTS }, (_, i) => i),
+		);
 	});
 });
