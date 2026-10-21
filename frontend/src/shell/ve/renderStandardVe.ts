@@ -559,6 +559,7 @@ export async function showVirtualElevationAnalysisInline(
                                 this is the control's own axis.
                             -->
                             ${plotXAxisToggleMarkup()}
+                            <div class="ve-lap-summary" id="veCheckpointTable"></div>
                         </div>
                         ${
 													cdaReference

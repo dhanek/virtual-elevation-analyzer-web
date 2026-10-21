@@ -1,3 +1,5 @@
+import { bindCheckpointPlotClick } from "../checkpoints/checkpointOverlay";
+import { applyStandardCheckpoints } from "./standardCheckpoints";
 import { AppState, WindSource } from "../../state/AppState";
 import { log } from "../../utils/log";
 import { MapVisualization } from "../../components/MapVisualization";
@@ -207,6 +209,16 @@ function createStandardUpdateCallbacks(
 					cdaLabel: cda.toFixed(3),
 					crrLabel: appliedCrr.toFixed(4),
 				});
+		applyStandardCheckpoints(
+			series,
+			context,
+			figures,
+			appState.currentAnalyzedLaps.flatMap((lapNumber) => {
+				const lap = appState.currentLaps[lapNumber - 1];
+				return lap ? [{ lapNumber, lap }] : [];
+			}),
+			series.virtualElevationCompare !== null,
+		);
 		Plotly.react(
 			"vePlot",
 			figures.elevation.data,
@@ -219,6 +231,7 @@ function createStandardUpdateCallbacks(
 			figures.residuals.layout,
 			figures.residuals.config,
 		);
+		bindCheckpointPlotClick("vePlot");
 
 		// Register the tab render map, exactly as the GPS-lap adapter does.
 		// Standard used to call setupTabSwitching() with an EMPTY map, so a

@@ -26,6 +26,7 @@ const storedRecord = (): StoredParameters => ({
 	oneWayMarkerSettings: {
 		"10-12-16": { gateATimeOffset: 8, gateBTimeOffset: 50 },
 	},
+	checkpoints: [1_000_040, 1_000_090],
 	lastUsed: 1_700_000_000_000,
 	fileName: "ride.fit",
 });
@@ -84,6 +85,7 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 		expect(record.oneWayMarkerSettings).toEqual(
 			storedRecord().oneWayMarkerSettings,
 		);
+		expect(record.checkpoints).toEqual([1_000_040, 1_000_090]);
 	});
 
 	it("the live form parameters win over the stored record's", () => {
@@ -179,6 +181,7 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 		expect(parsed.envelope.outAndBackMarkerSettings).toEqual({});
 		// An export from before one-way gates existed.
 		expect(parsed.envelope.oneWayMarkerSettings).toEqual({});
+		expect(parsed.envelope.checkpoints).toEqual([]);
 		expect(parsed.envelope.section3).toBeNull();
 	});
 });

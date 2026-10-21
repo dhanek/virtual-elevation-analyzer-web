@@ -8,6 +8,7 @@ import {
 	sectionVirtualDistances,
 	type OutAndBackSectionLegs,
 } from "./segmentVirtualDistance";
+import type { LapIndexRange } from "../../state/AppState";
 import type { OutAndBackSection } from "../../utils/GpsLapDetection";
 import type { SegmentVeProfile } from "./types";
 import type {
@@ -39,7 +40,7 @@ export const outAndBackMode: AnalysisModeHandler = {
 		const selectedEntries = appState.outAndBackSections.filter((section) =>
 			selectedItems.includes(section.sectionNumber),
 		);
-		const indexRanges = selectedEntries.flatMap((section) => [
+		const indexRanges = selectedEntries.flatMap((section): LapIndexRange[] => [
 			{ startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
 			{ startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
 		]);
@@ -91,28 +92,30 @@ export const outAndBackMode: AnalysisModeHandler = {
 	 * behaviour change.
 	 */
 	getUpdateSegments(appState): ModeSegment[] {
-		return resolveActiveOutAndBackSections(appState).flatMap((section) => [
-			{
-				key: `s${section.sectionNumber}-out`,
-				itemNumber: section.sectionNumber,
-				label: `Section ${section.sectionNumber} outbound`,
-				legDirection: "outbound",
-				range: {
-					startIdx: section.outboundStartIdx,
-					endIdx: section.outboundEndIdx,
+		return resolveActiveOutAndBackSections(appState).flatMap(
+			(section): ModeSegment[] => [
+				{
+					key: `s${section.sectionNumber}-out`,
+					itemNumber: section.sectionNumber,
+					label: `Section ${section.sectionNumber} outbound`,
+					legDirection: "outbound",
+					range: {
+						startIdx: section.outboundStartIdx,
+						endIdx: section.outboundEndIdx,
+					},
 				},
-			},
-			{
-				key: `s${section.sectionNumber}-in`,
-				itemNumber: section.sectionNumber,
-				label: `Section ${section.sectionNumber} inbound`,
-				legDirection: "inbound",
-				range: {
-					startIdx: section.inboundStartIdx,
-					endIdx: section.inboundEndIdx,
+				{
+					key: `s${section.sectionNumber}-in`,
+					itemNumber: section.sectionNumber,
+					label: `Section ${section.sectionNumber} inbound`,
+					legDirection: "inbound",
+					range: {
+						startIdx: section.inboundStartIdx,
+						endIdx: section.inboundEndIdx,
+					},
 				},
-			},
-		]);
+			],
+		);
 	},
 
 	/**

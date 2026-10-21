@@ -196,6 +196,11 @@ export interface SelectionState {
 	gpsSelectedLaps: number[];
 	outAndBackSelectedSections: number[];
 	currentOutAndBackSections: OutAndBackSection[];
+	/**
+	 * Course checkpoints of the loaded file, as FIT timestamps of their defining
+	 * samples, in CP1… order (`analysis/Checkpoints.ts`). Saved per file.
+	 */
+	checkpoints: number[];
 }
 
 export interface AnalysisState {
@@ -330,6 +335,7 @@ export class AppState {
 		gpsSelectedLaps: [],
 		outAndBackSelectedSections: [],
 		currentOutAndBackSections: [],
+		checkpoints: [],
 	};
 
 	readonly analysis: AnalysisState = {
@@ -553,6 +559,14 @@ export class AppState {
 
 	set lastWeatherQueryKey(queryKey: string | null) {
 		this.analysis.lastWeatherQueryKey = queryKey;
+	}
+
+	get checkpoints(): number[] {
+		return this.selection.checkpoints;
+	}
+
+	set checkpoints(checkpoints: number[]) {
+		this.selection.checkpoints = checkpoints;
 	}
 
 	get selectedLaps(): number[] {

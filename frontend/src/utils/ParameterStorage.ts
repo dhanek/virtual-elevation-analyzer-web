@@ -1,3 +1,4 @@
+import { MAX_CHECKPOINTS } from "../analysis/Checkpoints";
 import {
 	DEFAULT_WIND_HEIGHT_FACTOR,
 	LEGACY_WIND_HEIGHT_FACTOR,
@@ -64,6 +65,13 @@ export interface StoredParameters {
 	gpsMarkerSettings?: { [lapKey: string]: GpsMarkerSettings }; // GPS marker per lap selection
 	outAndBackMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // Out and Back markers per lap selection
 	oneWayMarkerSettings?: { [lapKey: string]: OutAndBackMarkerSettings }; // One-way gates per lap selection, same shape
+	/**
+	 * Course checkpoints, as the FIT timestamps of the samples that define them
+	 * (`analysis/Checkpoints.ts`). Per FILE, not per lap selection: a checkpoint
+	 * marks a place on the course and cuts nothing, so ticking another lap must
+	 * not lose it.
+	 */
+	checkpoints?: number[];
 	/** Last Section-3 selection (mode + laps), so an analyze can replicate it. */
 	section3?: StoredSection3 | null;
 	lastUsed: number; // timestamp
@@ -129,6 +137,17 @@ export function normalizeLoadedParameters(
 	// A record carrying the field is post-feature: returned by identity, with
 	// no defensive copy, so a caller can distinguish the two cases if it needs.
 	return stored;
+}
+
+/**
+ * Stored checkpoints are untrusted data: keep finite numbers only, at most
+ * `MAX_CHECKPOINTS`.
+ */
+export function sanitizeCheckpoints(value: unknown): number[] {
+	if (!Array.isArray(value)) return [];
+	return value
+		.filter((t): t is number => typeof t === "number" && Number.isFinite(t))
+		.slice(0, MAX_CHECKPOINTS);
 }
 
 export class ParameterStorage {
@@ -935,6 +954,55 @@ export class ParameterStorage {
 				reject(getRequest.error);
 			};
 		});
+	}
+
+	/** Save the file's course checkpoints (FIT timestamps), replacing any. */
+	async saveCheckpoints(fileHash: string, timestamps: number[]): Promise<void> {
+		if (!this.db) {
+			log.warn("IndexedDB not initialized, cannot save checkpoints");
+			return;
+		}
+
+		return new Promise((resolve, reject) => {
+			const transaction = this.db!.transaction([this.storeName], "readwrite");
+			const objectStore = transaction.objectStore(this.storeName);
+			const getRequest = objectStore.get(fileHash);
+
+			getRequest.onsuccess = () => {
+				const existingData = (getRequest.result as
+					StoredParameters | undefined) ?? {
+					fileHash,
+					parameters: {
+						...DEFAULT_PARAMETERS,
+						// See saveLapSettings: a new record must carry the fresh
+						// default, or it normalises to "unknown" on its next load.
+						wind_height_factor: DEFAULT_WIND_HEIGHT_FACTOR,
+					},
+					lapSettings: {},
+					lastUsed: Date.now(),
+				};
+				existingData.checkpoints = [...timestamps];
+				existingData.lastUsed = Date.now();
+
+				const putRequest = objectStore.put(existingData);
+				putRequest.onsuccess = () => resolve();
+				putRequest.onerror = () => {
+					log.error("❌ Failed to save checkpoints:", putRequest.error);
+					reject(putRequest.error);
+				};
+			};
+
+			getRequest.onerror = () => {
+				log.error("❌ Failed to get existing data:", getRequest.error);
+				reject(getRequest.error);
+			};
+		});
+	}
+
+	/** The file's course checkpoints (FIT timestamps); empty when none saved. */
+	async loadCheckpoints(fileHash: string): Promise<number[]> {
+		const record = await this.getStoredRecord(fileHash);
+		return sanitizeCheckpoints(record?.checkpoints);
 	}
 
 	/**

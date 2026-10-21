@@ -17,6 +17,13 @@
  *   const t: T = {a: 1, bogus: 1}
  *       -> TS2353, the baseline.
  *
+ * `.flatMap(x => [{ … }])` is the same trap one array deeper (PR #38, F1-02):
+ * `const u: T[] = xs.flatMap(x => [{a: x, bogus: 1}])` compiles clean, with or
+ * without a `x ? [ … ] : []` conditional around the array, and
+ * `xs.flatMap((x): T[] => [{a: x, bogus: 1}])` is TS2353. So the guard covers
+ * expression-bodied flatMap callbacks too, and asks for the same fix: annotate
+ * the callback return, not the binding.
+ *
  * That is why this guard checks the callback and nothing else, and why a site
  * inside a function that already declares `: T[]` is NOT exempt — it looks
  * checked and is not.
@@ -143,6 +150,32 @@ const UNANNOTATED_MAP_LITERAL =
 	/\.map\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\(\{/g;
 
 /**
+ * A `.flatMap(` callback with no `): Type =>` whose expression body is an array
+ * literal opening an object literal, directly or as a conditional branch
+ * (`cond ? [{ … }] : []`). A conditional whose test contains parentheses or
+ * brackets is out of its reach; block bodies are out of scope, as for `.map`.
+ */
+const UNANNOTATED_FLATMAP_LITERAL =
+	/\.flatMap\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*(?:[^;{}()[\]]*?\?\s*)?\[\s*\{/g;
+
+/** Every pattern the scan runs; the offender and staleness cases share it. */
+const UNANNOTATED_LITERAL_PATTERNS = [
+	UNANNOTATED_MAP_LITERAL,
+	UNANNOTATED_FLATMAP_LITERAL,
+];
+
+/** Each match of every scan pattern in `src`, in pattern order. */
+function literalSiteMatches(src: string): RegExpExecArray[] {
+	const matches: RegExpExecArray[] = [];
+	for (const pattern of UNANNOTATED_LITERAL_PATTERNS) {
+		pattern.lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = pattern.exec(src)) !== null) matches.push(match);
+	}
+	return matches;
+}
+
+/**
  * The unannotated sites in one file's text, as `file:line`. The offender case
  * and the prettier-broken-shape case both go through this one function, so a
  * fixture proving the scan sees a broken site is proving it about the code that
@@ -150,9 +183,7 @@ const UNANNOTATED_MAP_LITERAL =
  */
 function unannotatedSites(file: string, src: string): string[] {
 	const sites: string[] = [];
-	UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-	let match: RegExpExecArray | null;
-	while ((match = UNANNOTATED_MAP_LITERAL.exec(src)) !== null) {
+	for (const match of literalSiteMatches(src)) {
 		const line = src.slice(0, match.index).split("\n").length;
 		if (!isAllowed(file, siteText(src, match))) sites.push(`${file}:${line}`);
 	}
@@ -170,7 +201,16 @@ const PRETTIER_BROKEN =
 const PRETTIER_BROKEN_ANNOTATED =
 	"\tconst xs: T[] = ys.map(\n\t\t(y: SomeWideType, i: number): T => ({\n\t\t\ta: y,\n\t\t}),\n\t);";
 
-describe("map callbacks building object literals annotate their return type", () => {
+/**
+ * The flatMap form prettier produces for PR #38's own checkpoint-marker site: a
+ * conditional body broken onto its own line under the parameter list.
+ */
+const PRETTIER_BROKEN_FLATMAP =
+	"xs.flatMap(\n\t(cp, slot) =>\n\t\tcp ? [{ a }] : [],\n)";
+const PRETTIER_BROKEN_FLATMAP_ANNOTATED =
+	"xs.flatMap(\n\t(cp, slot): T[] =>\n\t\tcp ? [{ a }] : [],\n)";
+
+describe("map and flatMap callbacks building object literals annotate their return type", () => {
 	it("has no unannotated site in production source", () => {
 		const offenders: string[] = [];
 		for (const root of ROOTS) {
@@ -194,12 +234,9 @@ describe("map callbacks building object literals annotate their return type", ()
 			}
 			// The same whole-file rule the offender case uses, so an entry keyed to
 			// a site prettier broke across lines is not called stale.
-			const texts: string[] = [];
-			UNANNOTATED_MAP_LITERAL.lastIndex = 0;
-			let match: RegExpExecArray | null;
-			while ((match = UNANNOTATED_MAP_LITERAL.exec(src)) !== null) {
-				texts.push(siteText(src, match));
-			}
+			const texts = literalSiteMatches(src).map((match) =>
+				siteText(src, match),
+			);
 			return !texts.some((text) => text.includes(entry.callback));
 		});
 
@@ -231,6 +268,18 @@ describe("map callbacks building object literals annotate their return type", ()
 		expect(UNANNOTATED_MAP_LITERAL.test(PRETTIER_BROKEN)).toBe(true);
 		UNANNOTATED_MAP_LITERAL.lastIndex = 0;
 		expect(UNANNOTATED_MAP_LITERAL.test(PRETTIER_BROKEN_ANNOTATED)).toBe(false);
+
+		const flatMapMatches = (text: string): boolean => {
+			UNANNOTATED_FLATMAP_LITERAL.lastIndex = 0;
+			return UNANNOTATED_FLATMAP_LITERAL.test(text);
+		};
+		expect(flatMapMatches("xs.flatMap((x) => [{ a: x }])")).toBe(true);
+		expect(flatMapMatches(PRETTIER_BROKEN_FLATMAP)).toBe(true);
+		expect(flatMapMatches("xs.flatMap((x): T[] => [{ a: x }])")).toBe(false);
+		expect(flatMapMatches("xs.flatMap((x) => x.ok ? [x.v] : [])")).toBe(false);
+		expect(flatMapMatches("xs.flatMap((x) => { return [{ a }]; })")).toBe(
+			false,
+		);
 	});
 
 	it("reports a site prettier has broken across lines", () => {
@@ -244,6 +293,20 @@ describe("map callbacks building object literals annotate their return type", ()
 		]);
 		expect(
 			unannotatedSites("src/fake-fixture.ts", PRETTIER_BROKEN_ANNOTATED),
+		).toEqual([]);
+	});
+
+	it("reports a prettier-broken flatMap site", () => {
+		// The scan's own guard for the flatMap pattern (PR #38, F1-02), through
+		// the same `unannotatedSites` the offender case uses.
+		expect(
+			unannotatedSites("src/fake-fixture.ts", PRETTIER_BROKEN_FLATMAP),
+		).toEqual(["src/fake-fixture.ts:1"]);
+		expect(
+			unannotatedSites(
+				"src/fake-fixture.ts",
+				PRETTIER_BROKEN_FLATMAP_ANNOTATED,
+			),
 		).toEqual([]);
 	});
 });

@@ -58,4 +58,25 @@ describe("saveParameters keeps what it did not write", () => {
 			gateBTimeOffset: 120,
 		});
 	});
+
+	it("checkpoints survive a later parameter save and a new lap selection", async () => {
+		await storage.saveCheckpoints(FILE, [1700000040, 1700000090]);
+		await storage.saveParameters(
+			FILE,
+			{ ...DEFAULT_PARAMETERS, system_mass: 76 },
+			"ride.fit",
+		);
+		expect(await storage.loadCheckpoints(FILE)).toEqual([
+			1700000040, 1700000090,
+		]);
+		// Saved per file, so a gate saved for other laps leaves them alone.
+		await storage.saveGpsMarkerSettings(FILE, [1], { gateTimeOffset: 3 });
+		expect(await storage.loadCheckpoints(FILE)).toHaveLength(2);
+	});
+
+	it("checkpoints on a file with no record yet start one", async () => {
+		await storage.saveCheckpoints("hash_new", [5]);
+		expect(await storage.loadCheckpoints("hash_new")).toEqual([5]);
+		expect(await storage.loadCheckpoints("hash_none")).toEqual([]);
+	});
 });

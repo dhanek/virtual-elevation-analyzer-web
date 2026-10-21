@@ -57,6 +57,12 @@ import { noteTrimWindowRequested } from "../analysis/bindModeControls";
 import { saveCurrentLapSettings } from "../analysis/storageHandlers";
 import { sameItems } from "../ve/veSelectionGuard";
 import { selectedLapWindows } from "./selectedLapWindows";
+import {
+	configureCheckpoints,
+	loadCheckpointsForFile,
+	refreshCheckpointMap,
+	renderCheckpointRows,
+} from "../checkpoints/checkpointController";
 
 /**
  * "Re-run the active GPS detection with the gates where they are now",
@@ -532,6 +538,8 @@ export function resetAnalysisForNewActivity(): void {
 	appState.gpsSelectedLaps = [];
 	appState.outAndBackSelectedSections = [];
 	appState.currentOutAndBackSections = [];
+	// The previous file's checkpoints; the new file's load in initializeSection3.
+	appState.checkpoints = [];
 
 	// AND THE STATE DERIVED FROM THEM, which is the half that was missed.
 	// Clearing a selection while leaving its derived data behind does not
@@ -664,6 +672,7 @@ function rerenderSection3(): void {
 					deps.setMapVisualization(mapVisualization);
 
 					bindGateDetection(mapVisualization, gpsMode);
+					refreshCheckpointMap();
 				} else {
 					// Map not yet initialized, initialize it
 					const mapVisualization = new MapVisualization("mapView");
@@ -673,6 +682,7 @@ function rerenderSection3(): void {
 					deps.setMapVisualization(mapVisualization);
 
 					bindGateDetection(mapVisualization, gpsMode);
+					refreshCheckpointMap();
 				}
 			}
 		} catch (error) {
@@ -761,6 +771,12 @@ export function configureSection3Orchestration(
 	nextDependencies: Section3Dependencies,
 ): void {
 	dependencies = nextDependencies;
+	configureCheckpoints({
+		appState: nextDependencies.appState,
+		parameterStorage: nextDependencies.parameterStorage,
+		getMapVisualization: nextDependencies.getMapVisualization,
+		getSelectedDataTimeRange,
+	});
 }
 
 export function isGpsLapSelectionMode(
@@ -1419,6 +1435,9 @@ export function updateSelectedLaps(): void {
 		mapVisualization.setSelectedLaps(deps.appState.selectedLaps);
 	}
 
+	// The checkpoint sliders span the selection, as the gates' do.
+	renderCheckpointRows();
+
 	// AND IN THE GPS MODES, RE-DETECT. The FIT selection is the detection
 	// WINDOW there, not the analysis unit: `runGpsLapDetection` and
 	// `runOutAndBackDetection` both derive their detection windows from
@@ -2036,6 +2055,8 @@ export function initializeSection3(): void {
 				log.debug("Map initialized with GPS data");
 
 				bindGateDetection(mapVisualization, gpsMode);
+				// Checkpoints are per file: read them now the map can show them.
+				void loadCheckpointsForFile();
 			} else {
 				log.debug("No GPS data - skipping map initialization");
 				deps.setMapVisualization(null);

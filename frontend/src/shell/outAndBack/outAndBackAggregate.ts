@@ -53,6 +53,8 @@ export function toOutAndBackProfiles(
 
 		result.push({
 			sectionNumber: section.sectionNumber,
+			outboundIndices: outbound?.indices ?? [],
+			inboundIndices: inbound?.indices ?? [],
 			outboundDistances: outbound?.distancesKm ?? [],
 			outboundVE: outbound?.virtualElevation ?? [],
 			// Carried straight through from the primitive, PER LEG: non-null iff

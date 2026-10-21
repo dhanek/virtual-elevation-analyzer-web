@@ -859,3 +859,23 @@
 	font-size: 1rem;
 	font-family: inherit;
 }
+
+/* Course checkpoints table: the "place on the plot" buttons reuse the x-axis
+   toggle's look, but each button is rounded on its own. */
+.ve-checkpoints__place {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+	margin: var(--space-xs) 0;
+}
+
+.ve-checkpoints__place .plot-x-axis-toggle__btn.ve-checkpoints__place-btn {
+	border-radius: 4px;
+	border-left: 1px solid #d0d4dc;
+}
+
+.ve-checkpoints__place
+	.plot-x-axis-toggle__btn.ve-checkpoints__place-btn.plot-x-axis-toggle__btn--active {
+	border-color: var(--color-primary);
+}

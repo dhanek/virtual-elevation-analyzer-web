@@ -3,6 +3,8 @@
  *
  * Verbatim lift from main.ts -- update logic for out-and-back mode.
  */
+import { bindCheckpointPlotClick } from "../checkpoints/checkpointOverlay";
+import { decorateOutAndBackWithCheckpoints } from "./outAndBackCheckpoints";
 import { renderCalibrationTab } from "../ve/calibrationTab";
 import type { AppState } from "../../state/AppState";
 import type {
@@ -89,7 +91,9 @@ export function createOutAndBackUpdateCallbacks(
 				sectionProfiles,
 				meanElevation(profiles),
 				memoMeanReference,
+				decorateOutAndBackWithCheckpoints(sectionProfiles),
 			);
+			bindCheckpointPlotClick("oabVePlot");
 			// Re-register the tab map against THIS pass's sections. renderOutAndBack
 			// registers once at analyze time, and updateModeVEPlots deliberately
 			// skips inactive tabs (D-14) — so without this, activating Wind/Power/VD

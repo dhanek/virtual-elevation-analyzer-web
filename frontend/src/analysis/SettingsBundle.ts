@@ -19,6 +19,7 @@
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import {
 	normalizeLoadedParameters,
+	sanitizeCheckpoints,
 	type GpsMarkerSettings,
 	type LapSettings,
 	type OutAndBackMarkerSettings,
@@ -73,6 +74,11 @@ export interface SettingsEnvelope {
 	 * predating one-way gates, and read back as empty.
 	 */
 	oneWayMarkerSettings: Record<string, OutAndBackMarkerSettings>;
+	/**
+	 * Course checkpoints as FIT timestamps of the exporting ride. Absent on
+	 * exports predating checkpoints, and read back as none.
+	 */
+	checkpoints: number[];
 }
 
 export function buildSettingsEnvelope(input: {
@@ -101,6 +107,7 @@ export function buildSettingsEnvelope(input: {
 		gpsMarkerSettings: input.record?.gpsMarkerSettings ?? {},
 		outAndBackMarkerSettings: input.record?.outAndBackMarkerSettings ?? {},
 		oneWayMarkerSettings: input.record?.oneWayMarkerSettings ?? {},
+		checkpoints: sanitizeCheckpoints(input.record?.checkpoints),
 	};
 }
 
@@ -171,6 +178,7 @@ export function parseSettingsEnvelope(text: string): ParsedSettingsEnvelope {
 			gpsMarkerSettings: record(candidate.gpsMarkerSettings),
 			outAndBackMarkerSettings: record(candidate.outAndBackMarkerSettings),
 			oneWayMarkerSettings: record(candidate.oneWayMarkerSettings),
+			checkpoints: sanitizeCheckpoints(candidate.checkpoints),
 		},
 	};
 }
@@ -220,6 +228,7 @@ export function envelopeToStoredRecord(
 		gpsMarkerSettings: envelope.gpsMarkerSettings,
 		outAndBackMarkerSettings: envelope.outAndBackMarkerSettings,
 		oneWayMarkerSettings: envelope.oneWayMarkerSettings,
+		checkpoints: envelope.checkpoints,
 		section3: envelope.section3,
 		lastUsed: now,
 		fileName: targetFileName,

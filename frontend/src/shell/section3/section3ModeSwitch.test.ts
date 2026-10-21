@@ -71,6 +71,7 @@ class FakeMap {
 	clearOutAndBackMarkers(): void {
 		this.cleared.outAndBackMarkers++;
 	}
+	setCheckpointMarkers(): void {}
 	showDetectedLaps(): void {}
 	showOutAndBackSections(): void {}
 	// Recorded, not ignored: whether this is called AT ALL on a first load is

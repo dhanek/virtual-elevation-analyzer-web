@@ -46,6 +46,7 @@ export function toGpsLapProfiles(
 			// lap's number. The number resolved against the RANGE ordinal
 			// rides on the segment instead.
 			lapNumber: gpsLapNumberForProfile(appState, profile, i),
+			indices: profile.indices,
 			distances: profile.distancesKm,
 			virtualElevation: profile.virtualElevation,
 			// Carried straight through from the primitive: non-null iff

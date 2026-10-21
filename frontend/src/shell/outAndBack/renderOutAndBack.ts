@@ -21,7 +21,7 @@ import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { ShellServices } from "../analysis/types";
-import type { AppState } from "../../state/AppState";
+import type { AppState, LapIndexRange } from "../../state/AppState";
 import type { OutAndBackSection } from "../../utils/GpsLapDetection";
 import type { OutAndBackVEProfile } from "./types";
 
@@ -548,6 +548,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                                 </div>
                             </div>
                             <div id="oabClosingError" class="ve-closing-error hidden"></div>
+                            <div class="ve-lap-summary" id="oabCheckpointTable"></div>
                         </div>
 
                         ${
@@ -848,10 +849,12 @@ export function setupOutAndBackSliderSync(
 function outAndBackRanges(
 	appState: AppState,
 ): Array<{ startIdx: number; endIdx: number }> {
-	return appState.currentOutAndBackSections.flatMap((section) => [
-		{ startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
-		{ startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
-	]);
+	return appState.currentOutAndBackSections.flatMap(
+		(section): LapIndexRange[] => [
+			{ startIdx: section.outboundStartIdx, endIdx: section.outboundEndIdx },
+			{ startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
+		],
+	);
 }
 
 /**
