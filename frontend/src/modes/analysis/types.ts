@@ -397,6 +397,8 @@ export interface RepeatsUpdateInput {
 	/** Slider bounds; a free per-repeat fit at or beyond them is flagged. */
 	cdaBounds: [number, number];
 	crrBounds: [number, number];
+	/** System mass (kg), for the power-independent CdA's k (TODO J3). */
+	systemMass: number;
 	/** One refit per assumed-input change (TODO J5). */
 	sensitivities: SensitivityInput[];
 	/**

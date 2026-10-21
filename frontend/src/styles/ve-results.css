@@ -749,6 +749,12 @@
 	margin-top: var(--space-lg);
 }
 
+/* Wraps each Repeats table: on a phone a wide table scrolls sideways inside
+   its own box instead of pushing the page wider. */
+.ve-repeats__scroll {
+	overflow-x: auto;
+}
+
 /* Out-and-back closing-error summary (de-inlined from renderOutAndBack.ts).
    Initially hidden via the shared .hidden utility in the markup; no display
    declaration here, so .hidden wins unaided. Off-palette #f5f5f5 kept. */

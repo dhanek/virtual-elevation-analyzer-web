@@ -84,6 +84,13 @@ export interface PreparedSegment {
 	 * the same rule `lapsCovered` follows.
 	 */
 	weather: SegmentWeatherRecord | null;
+	/**
+	 * Mean air density the calculator used over the trim window: the rho
+	 * series where one spans the segment, else the segment's `params.rho`
+	 * (per-lap weather and `rhoScale` included). Read by the Repeats tab's
+	 * power-independent CdA (TODO J3) for k.
+	 */
+	airDensity: number;
 }
 
 /** The slot series `autoRho` fetched, and the rho formula to apply to it. */
@@ -294,6 +301,12 @@ export function prepareSegments(args: PrepareSegmentsArgs): PreparedSegment[] {
 			const trimEnd = segment.trim?.end ?? slice.timestamps.length - 1;
 
 			prepared.push({
+				airDensity: meanAirDensity(
+					segmentRho,
+					segmentParams.rho,
+					trimStart,
+					trimEnd,
+				),
 				segment,
 				indices,
 				slice,
@@ -577,6 +590,9 @@ export function buildRepeatUnits(
 			elevation: elevationWindow(p, params.velodrome),
 			distance: profileDistanceWindow(p.slice.distance, p.trimStart, p.trimEnd),
 			riseSign: p.segment.legDirection === "inbound" ? -1 : 1,
+			power: seriesWindow(p.slice.power, p.trimStart, p.trimEnd),
+			speed: seriesWindow(p.slice.velocity, p.trimStart, p.trimEnd),
+			rho: p.airDensity,
 		};
 		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
 		if (section === undefined) {
@@ -763,6 +779,44 @@ export function buildTimingSweepInputs(
  * computed either (no usable altitude: empty, all NaN or all zero —
  * `has_usable_altitude`), or where a NaN inside the window would poison it.
  */
+/** Mean of the rho series over the window, else the constant rho. */
+function meanAirDensity(
+	series: number[] | null,
+	constant: number,
+	trimStart: number,
+	trimEnd: number,
+): number {
+	if (series) {
+		let sum = 0;
+		let n = 0;
+		for (let i = trimStart; i <= trimEnd && i < series.length; i++) {
+			if (Number.isFinite(series[i]) && series[i] > 0) {
+				sum += series[i];
+				n++;
+			}
+		}
+		if (n > 0) {
+			return sum / n;
+		}
+	}
+	return constant;
+}
+
+/** A raw channel over the trim window, not rebased. */
+function seriesWindow(
+	series: ArrayLike<number>,
+	trimStart: number,
+	trimEnd: number,
+): Float64Array {
+	const end = Math.min(trimEnd, series.length - 1);
+	const start = Math.min(trimStart, Math.max(0, end));
+	const out = new Float64Array(Math.max(0, end - start + 1));
+	for (let i = 0; i < out.length; i++) {
+		out[i] = series[start + i];
+	}
+	return out;
+}
+
 function elevationWindow(
 	p: PreparedSegment,
 	velodrome: boolean | undefined,

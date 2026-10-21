@@ -499,6 +499,7 @@ export async function updateModeVEPlots(
 				params.crr_min ?? DEFAULT_PARAMETERS.crr_min,
 				params.crr_max ?? DEFAULT_PARAMETERS.crr_max,
 			],
+			systemMass: params.system_mass,
 			// Six more preparations (TODO J5) — paid only with the tab open.
 			sensitivities: buildRepeatSensitivities(prepareArgs, units),
 			// Fourteen more preparations (TODO J4) — only once asked for.

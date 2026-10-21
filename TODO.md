@@ -407,13 +407,8 @@ Items, in order:
 - [x] **J2 [M] Repeat-based spread** — done 2026-10-19, see *Done → Repeats tab: each lap
       fitted alone*.
 
-- [ ] **J3 [S] Power-independent CdA for comparisons.** Show CdA + k·Crr, where k = 2·m·g /
-      (ρ·v̄²) is taken from the coasting legs' mean speed (≈9 at 40 km/h), and/or CdA at a user-fixed
-      Crr, so sessions can be compared without the power-scale ambiguity.
-      *Criteria:* the value is shown only when the selection contains coasting legs (power below
-      a threshold for most of the leg); k is displayed with the speed it came from; on the three
-      hill sessions it reproduces the offline result (between-session spread shrinks relative to
-      raw CdA).
+- [x] **J3 [S] Power-independent CdA for comparisons** — done 2026-10-20, in the Repeats tab;
+      see *Done → Power-independent CdA in the Repeats tab*.
 
 - [x] **J4 [M] Timing checks for power and GPS relative to speed** — done 2026-10-19, in the
       Repeats tab; see *Done → Timing check in the Repeats tab*.
@@ -617,6 +612,54 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Power-independent CdA in the Repeats tab (J3) — 2026-10-20
+
+**The item this closes:** *Bundle J → J3 [S] Power-independent CdA for comparisons.* Original
+wording: show CdA + k·Crr, where k = 2·m·g / (ρ·v̄²) is taken from the coasting legs' mean speed
+(≈9 at 40 km/h), and/or CdA at a user-fixed Crr, so sessions can be compared without the
+power-scale ambiguity. *Criteria:* shown only when the selection contains coasting legs; k is
+displayed with the speed it came from; on the three hill sessions it reproduces the offline result
+(between-session spread shrinks relative to raw CdA).
+
+**Commit:** `COMMIT` on `claude/j3-coasting-cda-8f0a92`, PR #PR.
+
+**What it does.** A "Power-independent CdA" block in the Repeats tab, under the pooled fit: the
+pooled CdA next to the pooled CdA + k·Crr, each with its clustered SE (the sum's from the
+clustered CdA–Crr covariance), and the SD across the repeats that contain a coasting leg. A
+bullet gives k with the speed and air density it came from and how many legs coast. The
+sensitivity table gains a Δ(CdA + k·Crr) column, so the power ±1 % rows show the sum standing
+still. With no coasting leg the block reads "Not available: no coasting legs (…)", with a hint
+that a lap that climbs and descends never counts (GPS laps on a hill are whole circuits, ~40 %
+coasting) — the descents have to be legs of their own. Each Repeats table now sits in a box that
+scrolls sideways, so at phone width a wide table no longer pushes the page wider. The
+CdA-at-fixed-Crr comparison already existed (the CdA @ slider-Crr column and pooled row).
+
+**How.** `computePowerIndependent` in `RepeatSpread.ts`; legs now carry their recorded power,
+ground speed and mean air density (`PreparedSegment.airDensity`). Decisions:
+- *Coasting:* a sample under 20 W; a leg coasts when ≥ 2/3 of its window does. On the hill
+  sessions' FIT laps (turnaround included) the descents sat at 73–89 %, the climbs at 5 %, a
+  descent with a pedalled stretch at 54 %.
+- *Speed:* v̄ = √(Σv³ / Σv), not the plain mean. Over a leg the drag sums ½ρ·CdA·v³ and the
+  rolling term m·g·Crr·v, so this is the v̄ whose k the leg's VE holds fixed; the plain mean
+  includes the slow start and braking (32 km/h where the drag is spent at ~40) and gave k 17
+  where ~10 is right — the power ±1 % rows of Δ(CdA + k·Crr) moved ±0.0043 with it, ±0.0009
+  without.
+- *Value:* the pooled free fit's CdA + k·Crr, as offline. Readout only; sliders, auto-converge and
+  the Rust kernels are untouched.
+
+**Checked in the running app** (the three hill sessions, out-and-back gates at the offline 40 m /
+1040 m legs, AWS DEM, η 0.98, offline masses, FIT wind on the two Sept rides): k 10.4 / 9.9 / 9.1
+at 42–44 km/h (3, 2 and 3 of 6 legs coasting); pooled CdA 0.2505 / 0.2577 / 0.2854, between-session
+SD **0.0184** (offline 0.0172); CdA + k·Crr 0.3094 / 0.3007 / 0.3059, SD **0.0044** (offline
+0.0114; 0.0044 at a common k = 9 too). Power +1 % moved CdA by −0.0035…−0.0052 and the sum by
++0.0004…+0.0016. Not like that on the recorded (barometric) profile: there the fits themselves
+are off (Crr ≈ 0.008, CdA 0.21–0.23) and the sum's spread was larger than CdA's (0.0133 vs
+0.0080) — the barometer under-reads this 33 m climb by 4–6 % (offline, 2026-10-14).
+Also checked: a velodrome session (work laps, and all 15 laps — no lap over 43 % coasting) and GPS
+lap splitting on a hill session both show "Not available"; moving the Crr slider and running the
+timing check leave the block intact; no console errors; at 390 px every table scrolls inside its
+box and the page does not overflow. The app has no dark mode.
 
 ### Timing check in the Repeats tab (J4) — 2026-10-19
 
