@@ -644,8 +644,12 @@ hand by Hannes.
 **Found on the way.** On the stacked GPS-lap plot lap 2 sits ~75 m further along the axis than
 laps 1 and 3: it passes every checkpoint 70–80 m later from its own start, so its residual against
 the mean elevation compares it with another part of the road. The table reads it where it passes
-and says so ("Lap 2 passes the checkpoints +70 … +80 m from their markers"), for any lap more
-than 20 m off. Not changed: the stacked axis itself.
+and marks the lap "Lap 2 ⚠", the tooltip giving the offset (+70 … +80 m), for any lap more than
+20 m off. Not changed: the stacked axis itself.
+
+**Text kept minimal (Hannes, 2026-10-21):** it is a visual tool, so the table carries no notes;
+what "reference" means is the heading's tooltip, and whether a lap passes a checkpoint can be
+seen on the map.
 
 ### Lags shift by seconds, not samples — 2026-10-21
 

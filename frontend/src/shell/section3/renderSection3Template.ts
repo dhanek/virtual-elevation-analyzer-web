@@ -112,7 +112,7 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                 <div class="gps-lap-detection-panel" id="checkpointPanel">
                     <h4>Course Checkpoints</h4>
                     <p class="gps-lap-detection-panel__hint">
-                        Up to 4 points on the course: hilltops, valleys, sharp road features. The VE tab shows each lap's VE − reference where it passes them. Number them in riding order. To place one on the VE plot, pick it under the plot, then click the plot.
+                        Up to 4 points on the course, in riding order.
                     </p>
                     <div id="checkpointRows"></div>
                     <button type="button" class="select-all-btn" id="checkpointAdd">+ Add checkpoint</button>

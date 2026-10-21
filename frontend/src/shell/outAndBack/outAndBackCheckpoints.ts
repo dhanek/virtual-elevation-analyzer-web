@@ -47,9 +47,6 @@ export function decorateOutAndBackWithCheckpoints(
 			residualLayout: figures.residuals.layout,
 			tableId: "oabCheckpointTable",
 			rowNoun: "Leg",
-			notes: [
-				`VE − reference as the residual plot draws it: each leg's VE (outbound anchored to the mean elevation at gate A, inbound continuing from where its outbound ended) minus the mean elevation at that distance from A${isCompare ? " (FIT-wind plots)" : ""}.`,
-				"The marker sits at the median distance from A the legs pass the checkpoint; each leg's value is read where that leg passes it.",
-			],
+			reference: `Each leg's VE minus the mean elevation (the residual plot)${isCompare ? ", FIT-wind plots" : ""}.`,
 		});
 }

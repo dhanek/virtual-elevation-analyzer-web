@@ -70,9 +70,6 @@ export function applyStandardCheckpoints(
 		residualLayout: figures.residuals.layout,
 		tableId: "veCheckpointTable",
 		rowNoun: "Lap",
-		notes: [
-			`VE − reference as the residual plot draws it: VE anchored to the actual elevation at the trim start, minus the actual elevation${isCompare ? " (FIT-wind leg)" : ""}. Only the trim window counts.`,
-			"One marker per passing: every lap has its own stretch of the axis.",
-		],
+		reference: `VE anchored to the actual elevation at the trim start, minus the actual elevation (the residual plot)${isCompare ? ", FIT-wind leg" : ""}.`,
 	});
 }

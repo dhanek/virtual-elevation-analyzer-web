@@ -247,15 +247,20 @@ function placeControls(count: number): string {
 	return `<div class="ve-checkpoints__place"><span class="plot-x-axis-toggle__label">Place on the plot:</span>${buttons}<span class="plot-x-axis-toggle__label">${hint}</span></div>`;
 }
 
+function escapeAttr(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
 function tableHtml(
 	rows: readonly CheckpointRow[],
 	count: number,
 	rowNoun: string,
-	notes: readonly string[],
+	reference: string,
+	offMarker: ReadonlyMap<number, string>,
 ): string {
-	const title = `<h4 class="ve-lap-summary__title">Checkpoints — VE − reference (m)</h4>`;
+	const title = `<h4 class="ve-lap-summary__title" title="${escapeAttr(reference)}">Checkpoints — VE − reference (m)</h4>`;
 	if (count === 0) {
-		return `${title}${placeControls(0)}<ul class="ve-repeats__notes"><li>No checkpoints yet: add up to ${MAX_CHECKPOINTS} in the Course Checkpoints panel beside the map, or place them on the plot.</li></ul>`;
+		return `${title}${placeControls(0)}`;
 	}
 	const summary = summarizeCheckpoints(rows, count);
 	const labels = Array.from({ length: count }, (_, k) => checkpointLabel(k));
@@ -265,14 +270,17 @@ function tableHtml(
 		...labels.slice(1).map((label, k) => headCell(`${labels[k]}→${label}`)),
 	].join("");
 	const body = rows
-		.map(
-			(row, r) =>
-				`<tr class="ve-lap-summary__row">${cell(row.label, LABEL)}${row.hits
-					.map(valueCell)
-					.join("")}${summary.segments
-					.map((segment) => deltaCell(segment.deltas[r]))
-					.join("")}</tr>`,
-		)
+		.map((row, r) => {
+			const warning = offMarker.get(r);
+			const label = warning
+				? `<span title="${escapeAttr(warning)}">${row.label} ⚠</span>`
+				: row.label;
+			return `<tr class="ve-lap-summary__row">${cell(label, LABEL)}${row.hits
+				.map(valueCell)
+				.join("")}${summary.segments
+				.map((segment) => deltaCell(segment.deltas[r]))
+				.join("")}</tr>`;
+		})
 		.join("");
 	const stats =
 		statRow("Mean", summary, (s) => (s.n > 0 ? signed(s.mean) : "—")) +
@@ -282,8 +290,7 @@ function tableHtml(
 <div class="ve-repeats__scroll"><table class="ve-lap-summary__table ve-repeats__table">
     <thead><tr class="ve-lap-summary__row ve-lap-summary__row--head">${head}</tr></thead>
     <tbody>${body}${stats}</tbody>
-</table></div>
-<ul class="ve-repeats__notes">${notes.map((note) => `<li>${note}</li>`).join("")}<li>CPk→CPk+1: the change of VE − reference between neighbouring checkpoints, the drift built up on that stretch. SD over the ${rowNoun.toLowerCase()}s that passed both (— below two).</li><li>"not passed": the ${rowNoun.toLowerCase()} never came within 20 m of the checkpoint${rowNoun === "Leg" ? "" : " going its way"}.</li></ul>`;
+</table></div>`;
 }
 
 function bindPlaceButtons(container: HTMLElement, rerender: () => void): void {
@@ -302,34 +309,37 @@ function bindPlaceButtons(container: HTMLElement, rerender: () => void): void {
  * Rows passing a checkpoint well away from its median marker. A stacked axis
  * measures distance from the lap's own start, so a lap that started a little
  * earlier or later draws every feature shifted; its value is still read where
- * IT passes, which is not where the marker is. Say so instead of leaving the
- * reader to find the mismatch by hovering.
+ * IT passes, which is not where the marker is. The row label carries a ⚠
+ * whose tooltip says so.
  */
 const OFF_MARKER_METRES = 20;
 const METRES_PER_KM = 1000;
 
-function offMarkerNotes(
+function offMarkerWarnings(
 	rows: readonly CheckpointRow[],
 	count: number,
-): string[] {
+): Map<number, string> {
 	const markers = Array.from({ length: count }, (_, k) =>
 		medianMarkerX(rows, k),
 	);
-	return rows.flatMap((row) => {
-		const offsets = row.hits.flatMap((hit, k) => {
+	const warnings = new Map<number, string>();
+	rows.forEach((row, r) => {
+		const offsets = row.hits.flatMap((hit, k): number[] => {
 			const marker = markers[k];
 			return hit && marker !== null ? [(hit.x - marker) * METRES_PER_KM] : [];
 		});
-		if (!offsets.some((d) => Math.abs(d) > OFF_MARKER_METRES)) return [];
+		if (!offsets.some((d) => Math.abs(d) > OFF_MARKER_METRES)) return;
 		const metres = (d: number) =>
 			`${d < 0 ? "−" : "+"}${Math.round(Math.abs(d))}`;
 		const lo = metres(Math.min(...offsets));
 		const hi = metres(Math.max(...offsets));
 		const range = lo === hi ? lo : `${lo} … ${hi}`;
-		return [
-			`${row.label} passes the checkpoints ${range} m from their markers: its curve is shifted along the axis, so read it where it passes, not at the marker.`,
-		];
+		warnings.set(
+			r,
+			`Passes the checkpoints ${range} m from their markers: read this lap where it passes, not at the marker.`,
+		);
 	});
+	return warnings;
 }
 
 // ---------------------------------------------------------------- entry point
@@ -339,13 +349,13 @@ export interface CheckpointOverlayInput {
 	markers: "median" | "each";
 	/** Mutated: the checkpoint lines and labels are appended. */
 	veLayout: Layout;
-	/** Mutated: the checkpoint lines are appended. */
+	/** Mutated: the checkpoint lines and labels are appended. */
 	residualLayout: Layout;
 	tableId: string;
 	/** What a row is, for the table head: "Lap" or "Leg". */
 	rowNoun: string;
-	/** What VE − reference means in this view. */
-	notes: readonly string[];
+	/** What VE − reference means in this view: the heading's tooltip. */
+	reference: string;
 }
 
 /**
@@ -383,14 +393,25 @@ export function applyCheckpointOverlay(input: CheckpointOverlayInput): void {
 		"shapes",
 		positions.map((p) => markerLine(p.x)),
 	);
+	append(
+		input.residualLayout,
+		"annotations",
+		positions.map((p) => markerLabel(p.x, checkpointLabel(p.slot), p.slot)),
+	);
 
 	if (!container) return;
-	const notes =
+	const offMarker =
 		input.markers === "median"
-			? [...input.notes, ...offMarkerNotes(rows, count)]
-			: input.notes;
+			? offMarkerWarnings(rows, count)
+			: new Map<number, string>();
 	const render = () => {
-		container.innerHTML = tableHtml(rows, count, input.rowNoun, notes);
+		container.innerHTML = tableHtml(
+			rows,
+			count,
+			input.rowNoun,
+			input.reference,
+			offMarker,
+		);
 		bindPlaceButtons(container, render);
 	};
 	render();

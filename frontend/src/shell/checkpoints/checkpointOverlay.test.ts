@@ -178,8 +178,13 @@ describe("stacked laps (GPS laps, one-way, Standard stacked)", () => {
 			expect.closeTo(0.2, 9),
 			expect.closeTo(0.45, 9),
 		]);
-		// The residual plot keeps its zero line and gains the two markers.
-		expect(reacted.gpsLapResidualPlot.layout.shapes).toHaveLength(3);
+		// The residual plot keeps its zero line and gains the two labelled markers.
+		const residual = reacted.gpsLapResidualPlot.layout;
+		expect(residual.shapes).toHaveLength(3);
+		expect(residual.annotations.map((a: any) => a.text)).toEqual([
+			"CP1",
+			"CP2",
+		]);
 	});
 
 	it("names a lap whose curve is shifted away from the markers", () => {
@@ -194,11 +199,22 @@ describe("stacked laps (GPS laps, one-way, Standard stacked)", () => {
 			null,
 			decorateStackedWithCheckpoints(laps),
 		);
-		const text = document.getElementById("gpsLapCheckpointTable")!.textContent;
-		// Two laps passed: the median sits halfway, 38 m from each.
-		expect(text).toMatch(/Lap 1 passes the checkpoints −3[78]/);
-		expect(text).toMatch(/Lap 2 passes the checkpoints \+3[78]/);
-		expect(text).not.toContain("Lap 3 passes");
+		// Two laps passed: the median sits halfway, 38 m from each. The lap
+		// label carries a ⚠ whose tooltip says by how much; lap 3 passed none.
+		const labels = [
+			...document.querySelectorAll(
+				"#gpsLapCheckpointTable tbody td:first-child",
+			),
+		].slice(0, 3);
+		expect(labels.map((td) => td.textContent)).toEqual([
+			"Lap 1 ⚠",
+			"Lap 2 ⚠",
+			"Lap 3",
+		]);
+		const tip = (td: Element) =>
+			td.querySelector("span")?.getAttribute("title");
+		expect(tip(labels[0])).toMatch(/^Passes the checkpoints −3[78]/);
+		expect(tip(labels[1])).toMatch(/^Passes the checkpoints \+3[78]/);
 	});
 
 	it("shows no markers and a hint when there are no checkpoints", () => {
@@ -212,9 +228,9 @@ describe("stacked laps (GPS laps, one-way, Standard stacked)", () => {
 			decorateStackedWithCheckpoints(laps),
 		);
 		expect(reacted.gpsLapVePlot.layout.shapes).toBeUndefined();
-		expect(
-			document.getElementById("gpsLapCheckpointTable")!.textContent,
-		).toContain("No checkpoints yet");
+		const table = document.getElementById("gpsLapCheckpointTable")!;
+		expect(table.querySelector("table")).toBeNull();
+		expect(table.textContent).toContain("+ CP1");
 	});
 });
 

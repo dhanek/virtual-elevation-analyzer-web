@@ -53,9 +53,6 @@ export function decorateStackedWithCheckpoints(
 			residualLayout: figures.residuals.layout,
 			tableId: "gpsLapCheckpointTable",
 			rowNoun: "Lap",
-			notes: [
-				`VE − reference as the residual plot draws it: each lap's VE, anchored to the mean elevation at the gate, minus the mean elevation at that lap's distance from the gate${isCompare ? " (FIT-wind legs)" : ""}.`,
-				"The marker sits at the median distance the laps pass the checkpoint; each lap's value is read where that lap passes it.",
-			],
+			reference: `Each lap's VE, anchored to the mean elevation at the gate, minus the mean elevation (the residual plot)${isCompare ? ", FIT-wind legs" : ""}.`,
 		});
 }
