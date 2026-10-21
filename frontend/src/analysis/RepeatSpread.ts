@@ -59,6 +59,18 @@ export interface RepeatLeg {
 	 * ridden back. Absent means +1.
 	 */
 	riseSign?: 1 | -1;
+	/**
+	 * Recorded power (W, before drivetrain efficiency) and ground speed (m/s)
+	 * over the same window, and the leg's mean air density (kg/m³). Optional:
+	 * only the power-independent CdA (TODO J3) reads them, to find the
+	 * coasting legs and the speed k comes from. `airSpeed` is the apparent
+	 * velocity (m/s) the VE kernel spends drag at over the same window as
+	 * `speed`; absent means no wind: air speed = ground speed.
+	 */
+	power?: Float64Array;
+	speed?: Float64Array;
+	airSpeed?: Float64Array;
+	rho?: number;
 }
 
 export interface RepeatUnitInput {
@@ -112,6 +124,11 @@ export interface PooledFit {
 	naiveSe: { cda: number; crr: number };
 	/** Repeat-clustered SE; null when fewer than two repeats. */
 	clusteredSe: { cda: number; crr: number } | null;
+	/**
+	 * Clustered covariance of CdA and Crr (free fit only; NaN for the
+	 * CdA-only fit), for the SE of a combination such as CdA + k·Crr.
+	 */
+	clusteredCov: number;
 	/** Repeats the clustered SE is built from, and its df (G − 1). */
 	clusters: number;
 	df: number;
@@ -382,6 +399,7 @@ function pooledFit(
 
 	const clusters = repeats.length;
 	let clusteredSe: PooledFit["clusteredSe"] = null;
+	let clusteredCov = NaN;
 	if (clusters >= 2) {
 		// Meat: Σ_g u_g u_gᵀ with u_g = X_gᵀ e_g, one score per repeat.
 		const meat = Array.from({ length: p }, () => new Array<number>(p).fill(0));
@@ -417,6 +435,7 @@ function pooledFit(
 			cda: Math.sqrt(cov(0, 0)),
 			crr: p === 2 ? Math.sqrt(cov(1, 1)) : NaN,
 		};
+		clusteredCov = p === 2 ? cov(0, 1) : NaN;
 	}
 
 	const t = tQuantile975(clusters - 1);
@@ -430,6 +449,7 @@ function pooledFit(
 		rms: Math.sqrt(ssr / samplesOf(all)),
 		naiveSe,
 		clusteredSe,
+		clusteredCov,
 		clusters,
 		df: Math.max(0, clusters - 1),
 		range95: clusteredSe
@@ -631,5 +651,185 @@ export function heldOutScore(units: readonly RepeatUnitInput[]): {
 		rms: Math.sqrt(ssr / samples),
 		repeats: usable.length,
 		perRepeatRms,
+	};
+}
+
+/**
+ * POWER-INDEPENDENT CdA (TODO J3).
+ *
+ * WHY. An error that is the same in every run — a power meter reading 1 %
+ * high — is invisible to the fit (its RMS barely moves) and to the repeats
+ * (they all move together). Per 1 % of power it moves Crr by ±0.0006 and CdA
+ * by ∓0.005, along a line in the (CdA, Crr) plane. On a COASTING leg power is
+ * ~0, so the leg pins one combination of the two independently of any power
+ * scale: over a step at speed v the losses are ½ρ·CdA·v² + m·g·Crr, i.e.
+ * ½ρv²·(CdA + k·Crr) with
+ *
+ *     k = 2·m·g / (ρ·v̄²)          (≈ 9 at 40 km/h for ~85 kg)
+ *
+ * Two sessions on different power meters disagree on CdA and on Crr; on
+ * CdA + k·Crr they agree as far as their coasting legs do. On the three hill
+ * sessions (6 legs each, 3 climbs at different power, 3 mostly coasting
+ * descents, two power meters) the between-session SD of the pooled CdA was
+ * 0.0172 and of CdA + 9·Crr 0.0114 (vw-demo objective_repeatability), and
+ * power +1 % moved each session's CdA by −0.004…−0.0055 but CdA + 9·Crr by
+ * only 0.000…+0.001 (power_scale_effect).
+ *
+ * The value is the POOLED free fit's CdA + k·Crr, as offline: the descents
+ * are what pin it, the climbs only add power-scale-dependent information
+ * along the other direction. k is computed, not fixed at 9, from the
+ * coasting legs' air density and their DRAG-WEIGHTED air speed
+ *
+ *     v̄ = √(Σ v_a²·v / Σ v),   i.e.  k = 2·m·g·Σv / (ρ·Σ v_a²·v)
+ *
+ * — over a leg the drag term sums ½ρ·CdA·v_a²·v and the rolling term
+ * m·g·Crr·v, so this is the v̄ whose k the leg's VE actually holds fixed.
+ * v_a is the kernel's apparent velocity (the wind, or the air-speed
+ * channel); without wind v_a = v and it is the old √(Σv³ / Σv). At constant
+ * speed it is the plain mean; on a real descent, which starts slow and
+ * brakes at the bottom, the plain mean came out 32 km/h where the leg
+ * spends its drag at ~40, and k 17 where ~10 is right (the power ±1 % rows
+ * of the sensitivity table, Δ(CdA + k·Crr) ≈ 0, are the check). Shown only
+ * when the selection has a coasting leg; with none, k has no speed to come
+ * from and the sum is no more power-independent than CdA itself.
+ */
+
+/** A sample is coasting below this recorded power (W). */
+export const COASTING_POWER_W = 20;
+
+/**
+ * A leg is coasting when at least this fraction of its window samples is
+ * under `COASTING_POWER_W`. Measured on the hill sessions' FIT laps, which
+ * include the pedalled turnaround: descents 73–89 %, climbs 5 %, a descent
+ * with a pedalled stretch 54 %. Two thirds keeps every clean descent and
+ * leaves a leg where power still does real work out.
+ */
+export const COASTING_FRACTION = 2 / 3;
+
+/** Standard gravity, as in the Rust VE kernel. */
+const GRAVITY = 9.807;
+
+export interface PowerIndependentResult {
+	/** k = 2·m·g / (ρ·v̄²). */
+	k: number;
+	/**
+	 * Drag-weighted AIR speed √(Σv_a²·v / Σv) (m/s) and mean air density
+	 * over the coasting legs.
+	 */
+	speed: number;
+	rho: number;
+	coastingLegs: number;
+	totalLegs: number;
+	/** Pooled free fit's CdA + k·Crr and its clustered SE (null below 2). */
+	pooled: { value: number; clusteredSe: number | null } | null;
+	/**
+	 * Across the repeats that contain a coasting leg: each one's free-fit
+	 * CdA + k·Crr, and its free CdA for comparison.
+	 */
+	repeats: { combined: RepeatStat; cda: RepeatStat };
+}
+
+/** Whether a leg is coasting; false when it carries no power series. */
+export function isCoastingLeg(leg: RepeatLeg): boolean {
+	const power = leg.power;
+	if (!power || power.length === 0) {
+		return false;
+	}
+	let coasting = 0;
+	for (const p of power) {
+		if (Number.isFinite(p) && p < COASTING_POWER_W) {
+			coasting++;
+		}
+	}
+	return coasting / power.length >= COASTING_FRACTION;
+}
+
+/**
+ * CdA + k·Crr for `units` (already fitted as `result`); null when no leg is
+ * coasting, or the coasting legs carry no usable speed or density.
+ */
+export function computePowerIndependent(
+	units: readonly RepeatUnitInput[],
+	result: RepeatSpreadResult,
+	systemMass: number,
+): PowerIndependentResult | null {
+	let speedSum = 0;
+	let dragSum = 0;
+	let rhoSum = 0;
+	let samples = 0;
+	let coastingLegs = 0;
+	let totalLegs = 0;
+	const coastingUnits = new Set<string>();
+	for (const unit of units) {
+		for (const leg of unit.legs) {
+			totalLegs++;
+			if (!isCoastingLeg(leg)) {
+				continue;
+			}
+			const speed = leg.speed;
+			const rho = leg.rho;
+			if (!speed || !(rho !== undefined && rho > 0)) {
+				continue;
+			}
+			const airSpeed = leg.airSpeed;
+			let legSpeed = 0;
+			let legDrag = 0;
+			let legSamples = 0;
+			for (let i = 0; i < speed.length; i++) {
+				if (airSpeed && i >= airSpeed.length) {
+					continue;
+				}
+				const vg = speed[i];
+				const va = airSpeed ? airSpeed[i] : vg;
+				if (Number.isFinite(vg) && Number.isFinite(va)) {
+					legSpeed += vg;
+					legDrag += va * va * vg;
+					legSamples++;
+				}
+			}
+			if (!(legSpeed > 0)) {
+				continue;
+			}
+			coastingLegs++;
+			coastingUnits.add(unit.key);
+			speedSum += legSpeed;
+			dragSum += legDrag;
+			rhoSum += rho * legSamples;
+			samples += legSamples;
+		}
+	}
+	if (coastingLegs === 0 || !(systemMass > 0)) {
+		return null;
+	}
+	const speed = Math.sqrt(dragSum / speedSum);
+	const rho = rhoSum / samples;
+	const k = (2 * systemMass * GRAVITY) / (rho * speed * speed);
+
+	const pooled = result.pooled;
+	let pooledValue: PowerIndependentResult["pooled"] = null;
+	if (pooled) {
+		const se = pooled.clusteredSe;
+		const variance = se
+			? se.cda * se.cda + k * k * se.crr * se.crr + 2 * k * pooled.clusteredCov
+			: NaN;
+		pooledValue = {
+			value: pooled.cda + k * pooled.crr,
+			clusteredSe: se && variance >= 0 ? Math.sqrt(variance) : null,
+		};
+	}
+	const fits = result.units.filter(
+		(fit) => fit.status === "ok" && coastingUnits.has(fit.key),
+	);
+	return {
+		k,
+		speed,
+		rho,
+		coastingLegs,
+		totalLegs,
+		pooled: pooledValue,
+		repeats: {
+			combined: repeatStat(fits.map((fit) => fit.cda + k * fit.crr)),
+			cda: repeatStat(fits.map((fit) => fit.cda)),
+		},
 	};
 }

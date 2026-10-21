@@ -26,6 +26,7 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 				trimEnd: number,
 			) => ({
 				virtual_elevation: new Float64Array(n).fill(1),
+				apparent_velocity: new Float64Array(n).fill(9),
 				r2: 0.5,
 				rmse: 1,
 				ve_elevation_diff: 2,
@@ -34,6 +35,7 @@ vi.mock("../../analysis/VeCalculatorFactory", () => ({
 				virtual_distance_ground: 0,
 				vd_difference_percent: 0,
 				_trim: [trimStart, trimEnd],
+				free: () => {},
 			}),
 		};
 	},

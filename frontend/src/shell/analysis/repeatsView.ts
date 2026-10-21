@@ -12,8 +12,12 @@
  * normal pass (`requestRepeatsRedraw`) instead of drawing from a closure.
  */
 import {
+	COASTING_FRACTION,
+	COASTING_POWER_W,
+	computePowerIndependent,
 	computeRepeatSpread,
 	computeSensitivities,
+	type PowerIndependentResult,
 	REPEAT_SPREAD_NONE_REASON,
 	type SensitivityRow,
 	type PooledFit,
@@ -176,14 +180,14 @@ function pooledBlock(result: RepeatSpreadResult, noun: string): string {
 			]
 		: [`Clustered SE needs 2 or more ${noun}s.`];
 	return `${heading(`All ${noun}s together`)}
-<table class="ve-lap-summary__table ve-repeats__table">
+<div class="ve-repeats__scroll"><table class="ve-lap-summary__table ve-repeats__table">
     <thead>
         <tr class="ve-lap-summary__row ve-lap-summary__row--head">
             ${headCell("", LABEL)}${headCell("Estimate")}${headCell("Naive SE")}${headCell("Clustered SE")}${headCell("× naive")}${headCell("95 % range")}
         </tr>
     </thead>
     <tbody>${rows.join("")}</tbody>
-</table>
+</table></div>
 ${bullets(notes)}`;
 }
 
@@ -221,28 +225,93 @@ function signed(value: number, digits: number): string {
 function sensitivityBlock(
 	rows: readonly SensitivityRow[],
 	fixedCrr: number,
+	k: number | null,
 ): string {
 	if (rows.length === 0) {
 		return "";
 	}
+	// With coasting legs, the power-independent sum's shift too: the power
+	// rows are where it earns its name (TODO J3).
 	const body = rows
 		.map(
 			(row) =>
 				`<tr class="ve-lap-summary__row">${cell(row.label, LABEL)}${cell(
 					signed(row.dCda, 4),
-				)}${cell(signed(row.dCrr, 5))}${cell(signed(row.dCdaAtFixedCrr, 4))}</tr>`,
+				)}${cell(signed(row.dCrr, 5))}${cell(signed(row.dCdaAtFixedCrr, 4))}${
+					k === null ? "" : cell(signed(row.dCda + k * row.dCrr, 4))
+				}</tr>`,
 		)
 		.join("");
 	return `${heading("If an input is off", "— shift of the all-together fit")}
-<table class="ve-lap-summary__table ve-repeats__table">
+<div class="ve-repeats__scroll"><table class="ve-lap-summary__table ve-repeats__table">
     <thead>
         <tr class="ve-lap-summary__row ve-lap-summary__row--head">
-            ${headCell("Input", LABEL)}${headCell("ΔCdA")}${headCell("ΔCrr")}${headCell(`ΔCdA @ Crr ${fixedCrr.toFixed(4)}`)}
+            ${headCell("Input", LABEL)}${headCell("ΔCdA")}${headCell("ΔCrr")}${headCell(`ΔCdA @ Crr ${fixedCrr.toFixed(4)}`)}${k === null ? "" : headCell("Δ(CdA + k·Crr)")}
         </tr>
     </thead>
     <tbody>${body}</tbody>
-</table>
+</table></div>
 ${bullets(["Sensitivities, not error bars — don't add them up."])}`;
+}
+
+const KMH = 3.6;
+
+/** The power-independent CdA (TODO J3), or why there is none. */
+function powerIndependentBlock(
+	result: RepeatSpreadResult,
+	power: PowerIndependentResult | null,
+	noun: string,
+): string {
+	const title = heading(
+		"Power-independent CdA",
+		"— CdA + k·Crr, for comparing sessions",
+	);
+	const rule = `power under ${COASTING_POWER_W} W for at least ${Math.round(COASTING_FRACTION * 100)} % of the leg`;
+	if (!power) {
+		// A lap that climbs and descends is never mostly coasting, however
+		// long its descent: say how to get the descents as legs of their own.
+		return `${title}${bullets([
+			`Not available: no coasting legs (${rule}).`,
+			"A lap that climbs and then descends never counts — the descent has to be a leg of its own: out-and-back sections, or laps split at the top.",
+		])}`;
+	}
+	const k = power.k;
+	const rows: string[] = [];
+	if (result.pooled && power.pooled) {
+		const se = result.pooled.clusteredSe;
+		rows.push(
+			`<tr class="ve-lap-summary__row">${cell(`All ${noun}s together`, LABEL)}${cell(
+				fixed(result.pooled.cda, 4),
+			)}${cell(fixed(power.pooled.value, 4))}</tr>`,
+			`<tr class="ve-lap-summary__row">${cell("Clustered SE", LABEL)}${cell(
+				se ? seText(se.cda, 4) : NOT_ESTIMABLE,
+			)}${cell(
+				power.pooled.clusteredSe === null
+					? NOT_ESTIMABLE
+					: seText(power.pooled.clusteredSe, 4),
+			)}</tr>`,
+		);
+	}
+	const { combined, cda } = power.repeats;
+	rows.push(
+		`<tr class="ve-lap-summary__row">${cell(
+			`SD across ${noun}s with a coasting leg (n ${combined.n})`,
+			LABEL,
+		)}${cell(sdText(cda, 4))}${cell(sdText(combined, 4))}</tr>`,
+	);
+	return `${title}
+<div class="ve-repeats__scroll"><table class="ve-lap-summary__table ve-repeats__table">
+    <thead>
+        <tr class="ve-lap-summary__row ve-lap-summary__row--head">
+            ${headCell("", LABEL)}${headCell("CdA")}${headCell(`CdA + ${k.toFixed(1)}·Crr`)}
+        </tr>
+    </thead>
+    <tbody>${rows.join("")}</tbody>
+</table></div>
+${bullets([
+	`k = 2·m·g / (ρ·v̄²) = ${k.toFixed(1)} at v̄ = ${(power.speed * KMH).toFixed(1)} km/h, ρ = ${power.rho.toFixed(3)} kg/m³, from ${power.coastingLegs} of ${power.totalLegs} legs that coast (${rule}). v̄ = √(Σv_a²·v / Σv): the air speed the drag is spent at.`,
+	"A power-meter scale error moves CdA and Crr in opposite directions; this sum barely moves (last column below). Compare sessions on it when the power meters differ — or on CdA @ a Crr held the same for every session.",
+])}`;
 }
 
 /**
@@ -338,14 +407,14 @@ ${bullets([`Shifts each channel −3 … +3 s; each ${noun} is scored on a fit t
 		})
 		.join("");
 	return `${title}
-<table class="ve-lap-summary__table ve-repeats__table">
+<div class="ve-repeats__scroll"><table class="ve-lap-summary__table ve-repeats__table">
     <thead>
         <tr class="ve-lap-summary__row ve-lap-summary__row--head">
             ${headCell("Shift", LABEL)}${headCell("Power: held-out RMS (m)")}${headCell("Power: Crr")}${headCell(`${positionLabel}: held-out RMS (m)`)}
         </tr>
     </thead>
     <tbody>${body}</tbody>
-</table>
+</table></div>
 ${bullets([
 	verdictText("Power", power, noun),
 	verdictText(positionLabel, position, noun),
@@ -357,6 +426,7 @@ ${bullets([
 /** The tab's whole content for one result. */
 function repeatsMarkup(
 	result: RepeatSpreadResult,
+	power: PowerIndependentResult | null,
 	sensitivities: readonly SensitivityRow[],
 	timing: RepeatsUpdateInput["timing"],
 ): string {
@@ -379,17 +449,18 @@ function repeatsMarkup(
 		);
 	}
 	return `${heading(`Each ${noun} on its own`)}
-<table class="ve-lap-summary__table ve-repeats__table">
+<div class="ve-repeats__scroll"><table class="ve-lap-summary__table ve-repeats__table">
     <thead>
         <tr class="ve-lap-summary__row ve-lap-summary__row--head">
             ${headCell(noun === "section" ? "Section" : "Lap", LABEL)}${headCell("CdA")}${headCell("Crr")}${headCell("RMS (m)")}${headCell(crrLabel)}${headCell("RMS (m)")}
         </tr>
     </thead>
     <tbody>${result.units.map(unitRow).join("")}${summaryRows(result)}</tbody>
-</table>
+</table></div>
 ${bullets(notes)}
 ${pooledBlock(result, noun)}
-${sensitivityBlock(sensitivities, result.fixedCrr)}
+${powerIndependentBlock(result, power, noun)}
+${sensitivityBlock(sensitivities, result.fixedCrr, power?.k ?? null)}
 ${timingBlock(timing, result.fixedCrr, noun)}`;
 }
 
@@ -407,6 +478,7 @@ export function renderRepeatsView(input: RepeatsUpdateInput): void {
 	});
 	container.innerHTML = repeatsMarkup(
 		result,
+		computePowerIndependent(input.units, result, input.systemMass),
 		result.pooled || result.pooledFixed
 			? computeSensitivities(result, input.sensitivities)
 			: [],

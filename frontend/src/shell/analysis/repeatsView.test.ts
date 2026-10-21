@@ -30,6 +30,7 @@ function leg(seed: number, cda: number, crr: number): RepeatLeg {
 const EXTRA = {
 	cdaBounds: [0.15, 0.5] as [number, number],
 	crrBounds: [0.0015, 0.03] as [number, number],
+	systemMass: 85,
 	sensitivities: [],
 };
 
@@ -39,6 +40,16 @@ beforeEach(() => {
 	resetTimingRequest();
 	document.body.innerHTML = repeatsTabMarkup();
 });
+
+/** `leg` with a power and speed channel: coasting or pedalled. */
+function poweredLeg(seed: number, coasting: boolean): RepeatLeg {
+	return {
+		...leg(seed, 0.3, 0.004),
+		power: new Float64Array(200).fill(coasting ? 0 : 250),
+		speed: new Float64Array(200).fill(coasting ? 12 : 6),
+		rho: 1.2,
+	};
+}
 
 describe("renderRepeatsView", () => {
 	it("lists every repeat, the SD with n and df, and both pooled error bars", () => {
@@ -263,5 +274,46 @@ describe("renderRepeatsView", () => {
 				.querySelectorAll("tbody tr td:last-child"),
 		];
 		expect(positionCells.some((td) => td.querySelector("strong"))).toBe(false);
+	});
+
+	it("power-independent CdA: not available without a coasting leg", () => {
+		renderRepeatsView({
+			units: [0, 1].map((j) => ({
+				key: `lap-${j + 1}`,
+				label: `Lap ${j + 1}`,
+				legs: [poweredLeg(j, false)],
+			})),
+			fixedCrr: 0.004,
+			...EXTRA,
+		});
+		expect(text()).toContain("Power-independent CdA");
+		expect(text()).toContain("Not available: no coasting legs");
+		expect(text()).toContain("the descent has to be a leg of its own");
+		expect(text()).not.toContain("k = 2·m·g");
+	});
+
+	it("power-independent CdA: k with the speed it came from, and its shift per input", () => {
+		const units = [0, 1, 2, 3].map((j) => ({
+			key: `lap-${j + 1}`,
+			label: `Lap ${j + 1}`,
+			legs: [poweredLeg(j, j % 2 === 1)],
+		}));
+		renderRepeatsView({
+			units,
+			fixedCrr: 0.004,
+			...EXTRA,
+			sensitivities: [{ label: "Unchanged", units }],
+		});
+		// k = 2 · 85 · 9.807 / (1.2 · 12²) = 9.6 at 43.2 km/h.
+		expect(text()).toContain("k = 2·m·g / (ρ·v̄²) = 9.6 at v̄ = 43.2 km/h");
+		expect(text()).toContain("2 of 4 legs that coast");
+		expect(text()).toContain("CdA + 9.6·Crr");
+		expect(text()).toContain("SD across laps with a coasting leg (n 2)");
+		expect(text()).toContain("Δ(CdA + k·Crr)");
+		expect(text()).not.toContain("the descent has to be a leg of its own");
+		// Every table scrolls inside its own box at phone width.
+		for (const table of document.querySelectorAll("#repeats-tab table")) {
+			expect(table.parentElement!.classList).toContain("ve-repeats__scroll");
+		}
 	});
 });
