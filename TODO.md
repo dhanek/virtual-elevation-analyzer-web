@@ -611,7 +611,7 @@ one second. *Done when:* a Rust test feeds the same synthetic ride at 1 Hz and t
 irregular 2–5 s steps and gets the same VE gain within the thinning error; a recording gap adds
 no phantom work; every existing golden test still passes unchanged on 1 Hz data.
 
-**Commits:** COMMIT on `claude/ve-real-dt-0f645c`, PR #PR.
+**Commits:** `b1dbf1b` on `claude/ve-real-dt-0f645c`, PR #37.
 
 **What it does.** Each step is `dt_i = t[i] − t[i−1]` (`step_seconds`). The acceleration is
 `(v[i] − v[i−1]) / dt_i`, so `a·v̄·dt_i / g` is still exactly the kinetic-energy height
@@ -638,7 +638,10 @@ tests pass unchanged. Old against new WASM over the 48 FIT files in the test fol
 strictly 1 Hz file is bit-identical, and so is every lap of the reference ride (its pauses fall
 between laps). Files with pauses inside a lap change by up to ~1 m per lap on short rides and
 ~10 m over a 1000 km brevet day; no smart-recorded file was at hand, so that case rests on the
-synthetic test. Follow-up: lags and the timing sweep still shift by samples (Standalone).
+synthetic test. In the app, an A/B of main against this branch on the reference ride (laps
+10+12+16, same parameters and elevation source) matched on every readout, the VE trace and the
+whole Repeats tab; a lap with 117 s and 143 s pauses moved from 300.06 m to 300.87 m of VE gain.
+Follow-up: lags and the timing sweep still shift by samples (Standalone).
 
 ### Power-independent CdA in the Repeats tab (J3) — 2026-10-20
 
