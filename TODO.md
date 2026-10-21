@@ -590,6 +590,28 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       at the slider's offset once, with a test per mode. *origin: noticed while moving the lags
       to seconds, 2026-10-21*
 
+- [ ] **[M] Course checkpoints on the VE plot.** Let the user pick 3–4 points on the course
+      (checkpoint gates, in addition to the lap start/finish gate) and show them on the main
+      VE screen: a marker per checkpoint on the VE plot, and VE − reference at each checkpoint
+      for every lap/repetition.
+
+      *Why:* one fit per lap hides where the error builds up. A rider testing a short hill loop
+      ridden several times marked hilltops, valley bottoms and sharp road features. At those
+      points VE vs the reference showed drift building on one climb and recovering at the next
+      valley, invisible in the lap RMSE. Comparing the same checkpoint across repetitions cancels
+      shared DEM error and leaves drift and position changes.
+
+      *Shape:* checkpoints defined like the existing gates (`gatePassings.ts`, saved with the file
+      like a saved gate) and located on each lap by its passing; markers on the VE plot in both
+      x-axis modes; a small table under the plot: per checkpoint and lap VE − reference, the
+      change between neighbouring checkpoints (segment closure), and mean/SD across laps. Reuse
+      the Repeats tab's per-lap machinery where it fits.
+
+      *Done when:* 3–4 checkpoints can be placed, persist with the file and show on the VE plot;
+      the table matches VE − reference read off the plot at those points; a lap that misses a
+      checkpoint shows "not passed", never a number.
+      *origin: community request (VE discussion), 2026-10-21*
+
 
 ---
 
