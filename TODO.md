@@ -607,7 +607,7 @@ the shift in seconds; on a smart-recorded FIT file a "+2 s" shift moved the chan
 near a recording pause it pulled in a sample from the other side. *Done when:* a lag of N s moves
 a thinned synthetic ride's channel by N s, not N samples, and a 1 Hz recording is unchanged.
 
-**Commits:** COMMIT on `claude/ve-real-dt-0f645c`, PR #37 (with the VE step's real duration
+**Commits:** `867f593` on `claude/ve-real-dt-0f645c`, PR #37 (with the VE step's real duration
 below).
 
 **What it does.** One rule, `shiftByTime` (`TimeShift.ts`), for all three: sample i reads the
