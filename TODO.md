@@ -590,28 +590,6 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       at the slider's offset once, with a test per mode. *origin: noticed while moving the lags
       to seconds, 2026-10-21*
 
-- [ ] **[M] Course checkpoints on the VE plot.** Let the user pick 3–4 points on the course
-      (checkpoint gates, in addition to the lap start/finish gate) and show them on the main
-      VE screen: a marker per checkpoint on the VE plot, and VE − reference at each checkpoint
-      for every lap/repetition.
-
-      *Why:* one fit per lap hides where the error builds up. A rider testing a short hill loop
-      ridden several times marked hilltops, valley bottoms and sharp road features. At those
-      points VE vs the reference showed drift building on one climb and recovering at the next
-      valley, invisible in the lap RMSE. Comparing the same checkpoint across repetitions cancels
-      shared DEM error and leaves drift and position changes.
-
-      *Shape:* checkpoints defined like the existing gates (`gatePassings.ts`, saved with the file
-      like a saved gate) and located on each lap by its passing; markers on the VE plot in both
-      x-axis modes; a small table under the plot: per checkpoint and lap VE − reference, the
-      change between neighbouring checkpoints (segment closure), and mean/SD across laps. Reuse
-      the Repeats tab's per-lap machinery where it fits.
-
-      *Done when:* 3–4 checkpoints can be placed, persist with the file and show on the VE plot;
-      the table matches VE − reference read off the plot at those points; a lap that misses a
-      checkpoint shows "not passed", never a number.
-      *origin: community request (VE discussion), 2026-10-21*
-
 
 ---
 
@@ -619,6 +597,55 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Course checkpoints on the VE plot — 2026-10-21
+
+**The item this closes:** *Standalone → [M] Course checkpoints on the VE plot.* A community user
+riding a short hill loop asked to pick 3–4 points on the course and see them on the main VE
+screen; VE drifted ~1 m above the reference on one climb and recovered at the next valley,
+invisible in the lap RMSE. *Done when:* 3–4 checkpoints can be placed, persist with the file
+and show on the VE plot; the table matches VE − reference read off the plot at those points; a
+lap that misses a checkpoint shows "not passed", never a number.
+
+**Commit:** `946e546` on `claude/ve-checkpoints-8a2510`.
+
+**What it does.** A "Course Checkpoints" panel beside the map (every mode with GPS) holds up to
+four checkpoints, CP1…CP4: a slider each in seconds into the selection, like the gates, a remove
+button, and "+ Add checkpoint". They show as purple labelled markers on the map, as dotted
+markers on the VE and residual plots, and in a table under the plot: VE − reference per row and
+checkpoint, CPk→CPk+1 (the change between neighbours — the drift built up on that stretch), and
+mean / SD / n. "Place on the plot" buttons above the table arm a checkpoint; the next click on
+the VE plot puts it at the clicked sample. Rows are laps (GPS laps, one-way segments, Standard's
+stacked view, Standard's stitched view per selected FIT lap within the trim) or legs
+(out-and-back, "S2 B→A").
+
+**How.** `analysis/Checkpoints.ts`: a checkpoint is the place one sample defines — position and
+smoothed bearing — stored as that sample's FIT timestamp, per FILE (`StoredParameters.checkpoints`,
+also in the settings export), not per lap selection like the gates: it cuts nothing, so ticking
+another lap must not lose it. A row passes it like a gate (`findGatePassings`, 20 m, the closest
+sample of the visit), in the checkpoint's direction except on out-and-back legs; the first
+passing counts. The value is read off the series the residual plot draws, at the passing sample:
+VE anchored to the actual elevation at the trim start minus actual (Standard), VE anchored to the
+mean elevation at the gate minus the mean elevation (stacked laps, out-and-back), the FIT-wind leg
+under compare. Each renderer hands its figures to the overlay before drawing (a `decorate` hook,
+so the plot modules the headless API imports stay free of shell code). Stacked plots draw one
+marker per checkpoint at the median passing distance; the stitched plot one per passing. The VE
+traces are tagged with their samples (a WeakMap on the trace object), which is what a plot click
+resolves. Rust untouched.
+
+**Checked in the running app** (reference ride, laps 10+12+16, Chrome): Standard — three
+checkpoints from the sliders and a fourth by clicking the plot; at every marker the table equals
+the plotted "VE - Actual" residual, in time and in distance axis; the four survived a page reload.
+GPS lap splitting (gate 8 s, 3 laps): CP2→CP3 −1.57/−1.23/−1.39 m, SD 0.17 against SD 1.6–3.6 m
+at the checkpoints themselves. Out-and-back (A 8 s, B 50 s, 10 legs): CP4, placed past B, reads
+"not passed" on every leg with n 0. No console errors. Map markers and sidebar sliders checked by
+hand by Hannes.
+
+**Found on the way.** On the stacked GPS-lap plot lap 2 sits ~75 m further along the axis than
+laps 1 and 3: it passes every checkpoint 70–80 m later from its own start, so its residual against
+the mean elevation compares it with another part of the road. The table reads it where it passes
+and says so ("Lap 2 passes the checkpoints +70 … +80 m from their markers"), for any lap more
+than 20 m off. Not changed: the stacked axis itself.
 
 ### Lags shift by seconds, not samples — 2026-10-21
 
