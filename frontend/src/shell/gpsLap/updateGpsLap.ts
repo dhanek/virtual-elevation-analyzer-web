@@ -34,6 +34,8 @@ import {
 	type MeanReferenceProfile,
 } from "./gpsLapPlots";
 import { setupTabSwitching } from "../dom/tabs";
+import { bindCheckpointPlotClick } from "../checkpoints/checkpointOverlay";
+import { decorateStackedWithCheckpoints } from "./gpsLapCheckpoints";
 import {
 	resolveElevationProfile,
 	resolveReferenceElevation,
@@ -262,7 +264,9 @@ export function createGpsLapUpdateCallbacks(
 				meanElevation(profiles),
 				headerStats(aggregate),
 				memoMeanReference,
+				decorateStackedWithCheckpoints(lapProfiles),
 			);
+			bindCheckpointPlotClick("gpsLapVePlot");
 			setupTabSwitching({
 				wind: () => renderGpsLapWindPlot(lapProfiles),
 				power: () => renderGpsLapPowerPlot(lapProfiles),

@@ -77,6 +77,7 @@ export type ModeUpdateReason =
 	| "parameters"
 	| "convergence"
 	| "repeats"
+	| "checkpoints"
 	| "segmentSelection";
 
 /** The DOM identity of one row. Absent ids mean the row is not element-driven. */

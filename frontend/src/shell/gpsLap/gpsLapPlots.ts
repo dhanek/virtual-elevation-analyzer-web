@@ -722,6 +722,12 @@ function buildStackedSingleSourceFigures(
 	};
 }
 
+/** The VE and residual figures of the stacked lap view. */
+export interface StackedFigures {
+	ve: { data: any[]; layout: any };
+	residuals: { data: any[]; layout: any };
+}
+
 /**
  * Render GPS lap VE plots (extracted for reuse during recalculation)
  *
@@ -746,6 +752,7 @@ export function renderGpsLapVEPlots(
 	meanElevation: { distances: number[]; elevation: number[] },
 	stats: GpsLapHeaderStats,
 	meanReference: MeanReferenceProfile | null = null,
+	decorate?: (figures: StackedFigures, isCompare: boolean) => void,
 ) {
 	const PlotlyGlobal = (window as any).Plotly;
 	if (!PlotlyGlobal) return;
@@ -770,6 +777,9 @@ export function renderGpsLapVEPlots(
 				meanElevation,
 				meanReference,
 			);
+
+	// The course checkpoints' markers go onto the layouts before they are drawn.
+	decorate?.(figures, isCompare);
 
 	// Render plots in-place. Plotly.react initializes the div on first call and
 	// diffs on subsequent calls, so slider-driven recomputes update smoothly

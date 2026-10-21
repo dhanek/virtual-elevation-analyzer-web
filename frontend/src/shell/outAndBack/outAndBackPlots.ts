@@ -594,6 +594,26 @@ function residualsOverMean(
 	return { x, y };
 }
 
+/**
+ * `residualsOverMean` point for point: the same value at every sample the
+ * residual plot draws, NaN where it draws none — so a sample index into the
+ * leg indexes this too.
+ */
+function residualsOverMeanAligned(
+	distances: number[],
+	calibrated: number[],
+	meanElevation: { distances: number[]; elevation: number[] },
+): number[] {
+	return distances.map((dist, j) => {
+		const meanElev = interpolateAscending(
+			dist,
+			meanElevation.distances,
+			meanElevation.elevation,
+		);
+		return isNaN(meanElev) ? NaN : calibrated[j] - meanElev;
+	});
+}
+
 function outAndBackLayouts(maxDist: number, titleSuffix: string) {
 	return {
 		veLayout: {
@@ -649,10 +669,12 @@ function buildOutAndBackModelTraces(
 	veTraces: any[];
 	residualTraces: any[];
 	closingErrors: { sectionNumber: number; error: number }[];
+	legs: OutAndBackDrawnLeg[];
 } {
 	const veTraces: any[] = [];
 	const residualTraces: any[] = [];
 	const closingErrors: { sectionNumber: number; error: number }[] = [];
+	const drawnLegs: OutAndBackDrawnLeg[] = [];
 
 	if (meanElevation.distances.length > 0) {
 		veTraces.push(meanElevationTrace(meanElevation));
@@ -683,12 +705,23 @@ function buildOutAndBackModelTraces(
 			// Store the last calibrated VE value for inbound continuity
 			outboundLastVE = calibratedOutboundVE[calibratedOutboundVE.length - 1];
 
-			veTraces.push({
+			const outboundTrace = {
 				x: profile.outboundDistances,
 				y: calibratedOutboundVE,
 				mode: "lines",
 				name: `Section ${profile.sectionNumber} (A→B)`,
 				line: { color, width: 3 },
+			};
+			veTraces.push(outboundTrace);
+			drawnLegs.push({
+				sectionNumber: profile.sectionNumber,
+				direction: "outbound",
+				veTrace: outboundTrace,
+				residual: residualsOverMeanAligned(
+					profile.outboundDistances,
+					calibratedOutboundVE,
+					meanElevation,
+				),
 			});
 
 			const residuals = residualsOverMean(
@@ -725,12 +758,23 @@ function buildOutAndBackModelTraces(
 				error: inboundLastVE - startElev,
 			});
 
-			veTraces.push({
+			const inboundTrace = {
 				x: mirroredDistances,
 				y: calibratedInboundVE,
 				mode: "lines",
 				name: `Section ${profile.sectionNumber} (B→A)`,
 				line: { color, width: 3, dash: "dash" },
+			};
+			veTraces.push(inboundTrace);
+			drawnLegs.push({
+				sectionNumber: profile.sectionNumber,
+				direction: "inbound",
+				veTrace: inboundTrace,
+				residual: residualsOverMeanAligned(
+					mirroredDistances,
+					calibratedInboundVE,
+					meanElevation,
+				),
 			});
 
 			const residuals = residualsOverMean(
@@ -749,7 +793,7 @@ function buildOutAndBackModelTraces(
 		}
 	}
 
-	return { veTraces, residualTraces, closingErrors };
+	return { veTraces, residualTraces, closingErrors, legs: drawnLegs };
 }
 
 export interface OutAndBackFigures {
@@ -760,6 +804,18 @@ export interface OutAndBackFigures {
 	compareResiduals?: { data: any[]; layout: any };
 	/** Closing errors of the FIT series — what `#oabClosingError` has always shown. */
 	closingErrors: { sectionNumber: number; error: number }[];
+	/** The FIT series' legs as drawn, for the course checkpoints. */
+	legs: OutAndBackDrawnLeg[];
+}
+
+/** One leg as the VE figure draws it. */
+interface OutAndBackDrawnLeg {
+	sectionNumber: number;
+	direction: "outbound" | "inbound";
+	/** The VE trace object handed to the plot; its `x` is the leg's axis. */
+	veTrace: { x: number[]; y: number[] };
+	/** VE − mean elevation per sample, as the residual plot draws it (NaN = not drawn). */
+	residual: number[];
 }
 
 /** The single-source figures — one pair of plots, exactly as before. */
@@ -783,6 +839,7 @@ function buildOutAndBackSingleSourceFigures(
 		ve: { data: traces.veTraces, layout: veLayout },
 		residuals: { data: traces.residualTraces, layout: residualLayout },
 		closingErrors: traces.closingErrors,
+		legs: traces.legs,
 	};
 }
 
@@ -836,6 +893,7 @@ export function buildOutAndBackComparisonFigures(
 			layout: secondary.residualLayout,
 		},
 		closingErrors: fit.closingErrors,
+		legs: fit.legs,
 	};
 }
 
@@ -875,6 +933,7 @@ export function renderOutAndBackPlots(
 	profiles: OutAndBackVEProfile[],
 	meanElevation: { distances: number[]; elevation: number[] },
 	meanReference: MeanReferenceProfile | null = null,
+	decorate?: (figures: OutAndBackFigures, isCompare: boolean) => void,
 ) {
 	const withCompare = sectionsCarryingCompare(profiles);
 	const isCompare = everySectionHasCompareSeries(profiles);
@@ -895,6 +954,9 @@ export function renderOutAndBackPlots(
 			);
 
 	renderOutAndBackClosingErrors(figures.closingErrors);
+
+	// The course checkpoints' markers go onto the layouts before they are drawn.
+	decorate?.(figures, isCompare);
 
 	// Unhide BEFORE plotting: Plotly measures the container at draw time, and a
 	// `display: none` div measures zero.

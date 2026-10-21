@@ -7,6 +7,10 @@ import type {
 } from "../utils/GpsLapDetection";
 import { log } from "../utils/log";
 import type { FitData, LapData, MapContext } from "./map/context";
+import {
+	setCheckpointMarkers,
+	type CheckpointMarker,
+} from "./map/checkpointMarkers";
 import * as detectedRoutes from "./map/detectedRoutes";
 import { createGateMarkers, type GateMarkers } from "./map/gateMarkers";
 import * as gateMarkers from "./map/gateMarkers";
@@ -36,6 +40,7 @@ export class MapVisualization {
 	private readonly gateMarkers: GateMarkers = createGateMarkers();
 	private gpsMarkerLayer: L.LayerGroup | null = null;
 	private detectedLapsLayer: L.LayerGroup | null = null;
+	private checkpointLayer: L.LayerGroup | null = null;
 
 	constructor(containerId: string) {
 		this.container = document.getElementById(containerId) as HTMLElement;
@@ -104,6 +109,9 @@ export class MapVisualization {
 
 		// Initialize detected laps visualization layer
 		this.detectedLapsLayer = L.layerGroup().addTo(this.map);
+
+		// Course checkpoints, on top of everything else
+		this.checkpointLayer = L.layerGroup().addTo(this.map);
 	}
 
 	public setData(fitData: FitData, laps: LapData[]): void {
@@ -270,6 +278,14 @@ export class MapVisualization {
 		detectedRoutes.showOutAndBackSections(ctx, sections);
 	}
 
+	// ==================== Course checkpoints ====================
+
+	/** Show the course checkpoints, replacing any shown. */
+	public setCheckpointMarkers(markers: readonly CheckpointMarker[]): void {
+		if (!this.checkpointLayer) return;
+		setCheckpointMarkers(this.checkpointLayer, markers);
+	}
+
 	public destroy(): void {
 		if (this.map) {
 			this.map.remove();
@@ -278,6 +294,7 @@ export class MapVisualization {
 		this.routeLayer = null;
 		this.gpsMarkerLayer = null;
 		this.detectedLapsLayer = null;
+		this.checkpointLayer = null;
 		this.hideWindIndicator();
 		this.clearGpsMarker();
 		this.clearOutAndBackMarkers();

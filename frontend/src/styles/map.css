@@ -412,3 +412,8 @@
 	user-select: none;
 	white-space: nowrap;
 }
+
+.gate-marker-label--checkpoint {
+	background: #911eb4 !important;
+	color: white !important;
+}

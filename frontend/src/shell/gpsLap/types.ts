@@ -3,6 +3,12 @@ import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles"
 
 export interface LapVEProfile {
 	lapNumber: number;
+	/**
+	 * Full-activity sample indices, one per point — where the course
+	 * checkpoints are located and a click on the plot lands. Optional only for
+	 * hand-built test profiles.
+	 */
+	indices?: number[];
 	distances: number[]; // km, relative to gate crossing (starting at 0)
 	virtualElevation: number[];
 	/**

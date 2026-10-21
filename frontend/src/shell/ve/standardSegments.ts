@@ -179,6 +179,8 @@ export interface StitchedStandardSeries {
 	 * are not contiguous.
 	 */
 	cumulativeDistanceKm: number[];
+	/** Full-activity sample index of each stitched sample. */
+	indices: number[];
 }
 
 /**
@@ -232,6 +234,7 @@ export function stitchStandardProfiles(
 	const power: number[] = [];
 	const apparentWindSpeedMps: number[] = [];
 	const cumulativeDistanceKm: number[] = [];
+	const indices: number[] = [];
 
 	// Carried ACROSS segments: each segment's `distancesKm` restarts at zero, so
 	// without this the axis would reset on every lap boundary.
@@ -306,6 +309,7 @@ export function stitchStandardProfiles(
 		apparentWindSpeedMps.push(
 			...profile.supplementarySeries.apparentWindSpeedMps,
 		);
+		indices.push(...profile.indices);
 		for (const index of profile.indices) {
 			timestamps.push(normalized.timestamps[index]);
 			velocity.push(normalized.velocity[index]);
@@ -330,6 +334,7 @@ export function stitchStandardProfiles(
 		power,
 		apparentWindSpeedMps,
 		cumulativeDistanceKm,
+		indices,
 	};
 }
 

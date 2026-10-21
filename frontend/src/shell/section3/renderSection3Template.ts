@@ -106,6 +106,17 @@ export function renderSection3Template(input: Section3TemplateInput): string {
                         </div>
                         <div id="gpsGatePositionInfo" class="gate-position-info"></div>
                     </div>`;
+	// Course checkpoints (`shell/checkpoints/checkpointController.ts` fills the
+	// rows): in every mode, since they only mark the course.
+	const checkpointPanel = `
+                <div class="gps-lap-detection-panel" id="checkpointPanel">
+                    <h4>Course Checkpoints</h4>
+                    <p class="gps-lap-detection-panel__hint">
+                        Up to 4 points on the course: hilltops, valleys, sharp road features. The VE tab shows each lap's VE − reference where it passes them. Number them in riding order. To place one on the VE plot, pick it under the plot, then click the plot.
+                    </p>
+                    <div id="checkpointRows"></div>
+                    <button type="button" class="select-all-btn" id="checkpointAdd">+ Add checkpoint</button>
+                </div>`;
 	const oneWayGateControls = `
                     <p class="gps-lap-detection-panel__hint">
                         Set gate A (start) and gate B (end) on the stretch to measure. Only passes in the direction you placed them count.
@@ -200,6 +211,7 @@ ${twoGateSliderControls}`;
                 `
 										: ""
 								}
+                ${hasGpsData ? checkpointPanel : ""}
             </div>
             ${
 							hasGpsData

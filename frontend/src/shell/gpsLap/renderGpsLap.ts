@@ -817,6 +817,7 @@ export function buildGpsLapVeAnalysisTemplate(
                             <div class="ve-plot-container">
                                 <div id="gpsLapResidualPlot" class="ve-plot-container__plot ve-plot-container__plot--residuals"></div>
                             </div>
+                            <div class="ve-lap-summary" id="gpsLapCheckpointTable"></div>
                             <div class="ve-lap-summary">
                                 <h4 class="ve-lap-summary__title">Detected Laps Summary</h4>
                                 <div id="gpsLapSummaryTable"></div>

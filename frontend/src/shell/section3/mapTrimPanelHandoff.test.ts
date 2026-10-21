@@ -65,6 +65,7 @@ class FakeMap {
 	clearDetectedLaps(): void {}
 	clearGpsMarker(): void {}
 	clearOutAndBackMarkers(): void {}
+	setCheckpointMarkers(): void {}
 	showDetectedLaps(): void {}
 	showOutAndBackSections(): void {}
 	fitBoundsToTrimRegion(): void {}

@@ -3,6 +3,12 @@ import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles"
 
 export interface OutAndBackVEProfile {
 	sectionNumber: number;
+	/**
+	 * Full-activity sample indices of each leg, point for point — where the
+	 * course checkpoints are located. Optional only for hand-built test profiles.
+	 */
+	outboundIndices?: number[];
+	inboundIndices?: number[];
 	outboundDistances: number[]; // km, relative to gate A
 	outboundVE: number[];
 	/**

@@ -548,6 +548,7 @@ export function buildOutAndBackVeAnalysisTemplate(
                                 </div>
                             </div>
                             <div id="oabClosingError" class="ve-closing-error hidden"></div>
+                            <div class="ve-lap-summary" id="oabCheckpointTable"></div>
                         </div>
 
                         ${
