@@ -425,7 +425,9 @@ describe("power-independent CdA (J3)", () => {
 	/**
 	 * A physical leg at 1 s steps: speed `v(i)`, recorded power `power(i)`,
 	 * and VE whose power term is scaled by `eta` — the reference is the road
-	 * a power meter with eta = 1 would reconstruct for (cda, crr).
+	 * a power meter with eta = 1 would reconstruct for (cda, crr). Drag is
+	 * spent at the air speed `air(i)` (default: no wind, air = ground speed);
+	 * the height step stays slope·ground speed, as in the kernel.
 	 */
 	function physicalLeg(
 		n: number,
@@ -434,17 +436,20 @@ describe("power-independent CdA (J3)", () => {
 		cda: number,
 		crr: number,
 		eta: number,
+		air: (i: number) => number = v,
 	): RepeatLeg {
 		const speed = Float64Array.from({ length: n }, (_, i) => v(i));
+		const airSpeed = Float64Array.from({ length: n }, (_, i) => air(i));
 		const watts = Float64Array.from({ length: n }, (_, i) => power(i));
 		const profile = (c: number, r: number, scale: number) => {
 			const out = new Float64Array(n);
 			for (let i = 1; i < n; i++) {
 				const s = speed[i];
+				const va = airSpeed[i];
 				const accel = speed[i] - speed[i - 1];
 				const slope =
 					(scale * watts[i]) / (MASS * G * s) -
-					(c * RHO * s * s) / (2 * MASS * G) -
+					(c * RHO * va * va) / (2 * MASS * G) -
 					r -
 					accel / G;
 				out[i] = out[i - 1] + slope * s;
@@ -456,12 +461,16 @@ describe("power-independent CdA (J3)", () => {
 			elevation: profile(cda, crr, 1),
 			power: watts,
 			speed,
+			airSpeed,
 			rho: RHO,
 		};
 	}
 
+	/** A constant headwind on the descents (m/s); 0 is no wind. */
+	const HEADWIND = 3;
+
 	/** Three climbs at different power and three coasting descents. */
-	function hillSession(eta: number): RepeatUnitInput[] {
+	function hillSession(eta: number, headwind = 0): RepeatUnitInput[] {
 		return [0, 1, 2].flatMap((j) => [
 			unit(`Up ${j}`, [
 				physicalLeg(
@@ -481,6 +490,7 @@ describe("power-independent CdA (J3)", () => {
 					0.3,
 					0.004,
 					eta,
+					(i) => 9 + 4 * (1 - Math.exp(-i / 20)) + headwind,
 				),
 			]),
 		]);
@@ -542,6 +552,54 @@ describe("power-independent CdA (J3)", () => {
 		const dCda = high.cda - base.cda;
 		expect(Math.abs(dCda)).toBeGreaterThan(0.002);
 		expect(Math.abs(high.sum - base.sum)).toBeLessThan(0.25 * Math.abs(dCda));
+	});
+
+	test("k comes from the coasting legs' air speed when there is wind", () => {
+		const units = hillSession(1, HEADWIND);
+		const result = computePowerIndependent(
+			units,
+			computeRepeatSpread(units, 0.004),
+			MASS,
+		)!;
+		let groundSum = 0;
+		let dragSum = 0;
+		let cubeSum = 0;
+		for (const u of units.filter((u) => u.key.startsWith("Down"))) {
+			const leg = u.legs[0];
+			leg.speed!.forEach((vg, i) => {
+				const va = leg.airSpeed![i];
+				groundSum += vg;
+				dragSum += va * va * vg;
+				cubeSum += vg * vg * vg;
+			});
+		}
+		const weighted = Math.sqrt(dragSum / groundSum);
+		expect(result.speed).toBeCloseTo(weighted, 12);
+		expect(result.k).toBeCloseTo(
+			(2 * MASS * G) / (RHO * weighted * weighted),
+			12,
+		);
+		const groundK = (2 * MASS * G * groundSum) / (RHO * cubeSum);
+		expect(result.k / groundK).toBeLessThan(0.8);
+	});
+
+	test("with a headwind, a 1 % power error still leaves CdA + k·Crr flat", () => {
+		const fitAt = (eta: number) => {
+			const units = hillSession(eta, HEADWIND);
+			const spread = computeRepeatSpread(units, 0.004);
+			return {
+				cda: spread.pooled!.cda,
+				sum: computePowerIndependent(units, spread, MASS)!.pooled!.value,
+			};
+		};
+		const base = fitAt(1);
+		const high = fitAt(1.01);
+		const dCda = high.cda - base.cda;
+		const dSum = high.sum - base.sum;
+		expect(Math.abs(dCda)).toBeGreaterThan(0.002);
+		// Measured: |ΔSum| ≈ 0.011·|ΔCdA| with k from the air speed, ≈ 0.53·|ΔCdA|
+		// with k from the ground speed. The bound sits well between the two.
+		expect(Math.abs(dSum)).toBeLessThan(0.05 * Math.abs(dCda));
 	});
 
 	test("the combination's clustered SE uses the CdA–Crr covariance", () => {

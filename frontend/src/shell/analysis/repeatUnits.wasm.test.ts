@@ -289,6 +289,42 @@ describe.skipIf(!built)("Repeats tab fits on the real calculator", () => {
 		).toBe("GPS position");
 	});
 
+	it("each leg carries the kernel's apparent velocity as its air speed", () => {
+		const check = (params: AnalysisParameters, windy: boolean) => {
+			const prepared = prepareSegments({ ...prepareArgs(LAPS), params });
+			const units = buildRepeatUnits(prepared, params);
+			expect(units).toHaveLength(4);
+			units.forEach((unit, j) => {
+				const [leg] = unit.legs;
+				const p = prepared[j];
+				// The call happened: a series, not an absent field.
+				expect(leg.airSpeed).toBeDefined();
+				expect(leg.airSpeed!.length).toBeGreaterThan(0);
+				expect(leg.airSpeed!.length).toBe(leg.speed!.length);
+				const ve = p.calculator.calculate_virtual_elevation(
+					0.3,
+					0,
+					p.trimStart,
+					p.trimEnd,
+				);
+				const own = ve.apparent_velocity.slice(p.trimStart, p.trimEnd + 1);
+				ve.free();
+				let maxGap = 0;
+				leg.airSpeed!.forEach((va, i) => {
+					expect(va).toBeCloseTo(own[i], 9);
+					maxGap = Math.max(maxGap, Math.abs(va - leg.speed![i]));
+				});
+				if (windy) {
+					expect(maxGap).toBeGreaterThan(0.5);
+				} else {
+					expect(maxGap).toBeLessThan(1e-9);
+				}
+			});
+		};
+		check({ ...PARAMS, wind_speed: 3, wind_direction: 90 }, true);
+		check({ ...PARAMS, wind_speed: 0 }, false);
+	});
+
 	it("Convergence power shift: base grid + shift equals the grid recomputed at efficiency × 1.01", () => {
 		const args = prepareArgs(LAPS);
 		const prepared = prepareSegments(args);

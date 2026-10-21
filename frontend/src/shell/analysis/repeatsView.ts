@@ -309,7 +309,7 @@ function powerIndependentBlock(
     <tbody>${rows.join("")}</tbody>
 </table></div>
 ${bullets([
-	`k = 2·m·g / (ρ·v̄²) = ${k.toFixed(1)} at v̄ = ${(power.speed * KMH).toFixed(1)} km/h, ρ = ${power.rho.toFixed(3)} kg/m³, from ${power.coastingLegs} of ${power.totalLegs} legs that coast (${rule}). v̄ = √(Σv³ / Σv): the speed the drag is spent at.`,
+	`k = 2·m·g / (ρ·v̄²) = ${k.toFixed(1)} at v̄ = ${(power.speed * KMH).toFixed(1)} km/h, ρ = ${power.rho.toFixed(3)} kg/m³, from ${power.coastingLegs} of ${power.totalLegs} legs that coast (${rule}). v̄ = √(Σv_a²·v / Σv): the air speed the drag is spent at.`,
 	"A power-meter scale error moves CdA and Crr in opposite directions; this sum barely moves (last column below). Compare sessions on it when the power meters differ — or on CdA @ a Crr held the same for every session.",
 ])}`;
 }

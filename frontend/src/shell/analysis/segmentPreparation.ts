@@ -584,6 +584,21 @@ export function buildRepeatUnits(
 	const units: RepeatUnitInput[] = [];
 	const sections = new Map<number, RepeatUnitInput>();
 	for (const p of prepared) {
+		// The kernel's apparent velocity (wind / air-speed channel), which
+		// does not depend on CdA or Crr (any finite pair will do): the speed
+		// the VE spends drag at.
+		const result = p.calculator.calculate_virtual_elevation(
+			0.3,
+			0,
+			p.trimStart,
+			p.trimEnd,
+		);
+		let air: Float64Array;
+		try {
+			air = result.apparent_velocity;
+		} finally {
+			result.free();
+		}
 		const repeatLeg: RepeatLeg = {
 			veProfile: (cda: number, crr: number) =>
 				veProfileWindow(p, cda, resolveAppliedCrr(params, crr)),
@@ -592,6 +607,7 @@ export function buildRepeatUnits(
 			riseSign: p.segment.legDirection === "inbound" ? -1 : 1,
 			power: seriesWindow(p.slice.power, p.trimStart, p.trimEnd),
 			speed: seriesWindow(p.slice.velocity, p.trimStart, p.trimEnd),
+			airSpeed: seriesWindow(air, p.trimStart, p.trimEnd),
 			rho: p.airDensity,
 		};
 		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
@@ -772,13 +788,6 @@ export function buildTimingSweepInputs(
 	};
 }
 
-/**
- * The reference elevation over the same window `veProfileWindow` returns,
- * rebased to 0 at its start — what the VE tab's RMSE compares against: the
- * calculator's altitude, flat under velodrome. Null where that RMSE is not
- * computed either (no usable altitude: empty, all NaN or all zero —
- * `has_usable_altitude`), or where a NaN inside the window would poison it.
- */
 /** Mean of the rho series over the window, else the constant rho. */
 function meanAirDensity(
 	series: number[] | null,
@@ -817,6 +826,13 @@ function seriesWindow(
 	return out;
 }
 
+/**
+ * The reference elevation over the same window `veProfileWindow` returns,
+ * rebased to 0 at its start — what the VE tab's RMSE compares against: the
+ * calculator's altitude, flat under velodrome. Null where that RMSE is not
+ * computed either (no usable altitude: empty, all NaN or all zero —
+ * `has_usable_altitude`), or where a NaN inside the window would poison it.
+ */
 function elevationWindow(
 	p: PreparedSegment,
 	velodrome: boolean | undefined,

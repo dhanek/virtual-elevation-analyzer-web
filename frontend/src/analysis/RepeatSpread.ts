@@ -63,10 +63,13 @@ export interface RepeatLeg {
 	 * Recorded power (W, before drivetrain efficiency) and ground speed (m/s)
 	 * over the same window, and the leg's mean air density (kg/m³). Optional:
 	 * only the power-independent CdA (TODO J3) reads them, to find the
-	 * coasting legs and the speed k comes from.
+	 * coasting legs and the speed k comes from. `airSpeed` is the apparent
+	 * velocity (m/s) the VE kernel spends drag at over the same window as
+	 * `speed`; absent means no wind: air speed = ground speed.
 	 */
 	power?: Float64Array;
 	speed?: Float64Array;
+	airSpeed?: Float64Array;
 	rho?: number;
 }
 
@@ -675,12 +678,14 @@ export function heldOutScore(units: readonly RepeatUnitInput[]): {
  * The value is the POOLED free fit's CdA + k·Crr, as offline: the descents
  * are what pin it, the climbs only add power-scale-dependent information
  * along the other direction. k is computed, not fixed at 9, from the
- * coasting legs' air density and their DRAG-WEIGHTED speed
+ * coasting legs' air density and their DRAG-WEIGHTED air speed
  *
- *     v̄ = √(Σv³ / Σv)
+ *     v̄ = √(Σ v_a²·v / Σ v),   i.e.  k = 2·m·g·Σv / (ρ·Σ v_a²·v)
  *
- * — over a leg the drag term sums ½ρ·CdA·v³ and the rolling term m·g·Crr·v,
- * so this is the v̄ whose k the leg's VE actually holds fixed. At constant
+ * — over a leg the drag term sums ½ρ·CdA·v_a²·v and the rolling term
+ * m·g·Crr·v, so this is the v̄ whose k the leg's VE actually holds fixed.
+ * v_a is the kernel's apparent velocity (the wind, or the air-speed
+ * channel); without wind v_a = v and it is the old √(Σv³ / Σv). At constant
  * speed it is the plain mean; on a real descent, which starts slow and
  * brakes at the bottom, the plain mean came out 32 km/h where the leg
  * spends its drag at ~40, and k 17 where ~10 is right (the power ±1 % rows
@@ -708,8 +713,8 @@ export interface PowerIndependentResult {
 	/** k = 2·m·g / (ρ·v̄²). */
 	k: number;
 	/**
-	 * Drag-weighted ground speed √(Σv³ / Σv) (m/s) and mean air density over
-	 * the coasting legs.
+	 * Drag-weighted AIR speed √(Σv_a²·v / Σv) (m/s) and mean air density
+	 * over the coasting legs.
 	 */
 	speed: number;
 	rho: number;
@@ -749,7 +754,7 @@ export function computePowerIndependent(
 	systemMass: number,
 ): PowerIndependentResult | null {
 	let speedSum = 0;
-	let cubeSum = 0;
+	let dragSum = 0;
 	let rhoSum = 0;
 	let samples = 0;
 	let coastingLegs = 0;
@@ -766,13 +771,19 @@ export function computePowerIndependent(
 			if (!speed || !(rho !== undefined && rho > 0)) {
 				continue;
 			}
+			const airSpeed = leg.airSpeed;
 			let legSpeed = 0;
-			let legCube = 0;
+			let legDrag = 0;
 			let legSamples = 0;
-			for (const v of speed) {
-				if (Number.isFinite(v)) {
-					legSpeed += v;
-					legCube += v * v * v;
+			for (let i = 0; i < speed.length; i++) {
+				if (airSpeed && i >= airSpeed.length) {
+					continue;
+				}
+				const vg = speed[i];
+				const va = airSpeed ? airSpeed[i] : vg;
+				if (Number.isFinite(vg) && Number.isFinite(va)) {
+					legSpeed += vg;
+					legDrag += va * va * vg;
 					legSamples++;
 				}
 			}
@@ -782,7 +793,7 @@ export function computePowerIndependent(
 			coastingLegs++;
 			coastingUnits.add(unit.key);
 			speedSum += legSpeed;
-			cubeSum += legCube;
+			dragSum += legDrag;
 			rhoSum += rho * legSamples;
 			samples += legSamples;
 		}
@@ -790,7 +801,7 @@ export function computePowerIndependent(
 	if (coastingLegs === 0 || !(systemMass > 0)) {
 		return null;
 	}
-	const speed = Math.sqrt(cubeSum / speedSum);
+	const speed = Math.sqrt(dragSum / speedSum);
 	const rho = rhoSum / samples;
 	const k = (2 * systemMass * GRAVITY) / (rho * speed * speed);
 
