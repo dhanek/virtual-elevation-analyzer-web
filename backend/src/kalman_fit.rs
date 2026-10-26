@@ -1037,7 +1037,7 @@ pub struct KalmanOptions {
     /// Flag threshold on |t| of the smoothed disturbance. 6, not the ~4 a
     /// Gaussian calibration gives (`tau_calibration`): real residual tails
     /// are heavier, and at 6 the two clean hill sessions flag nothing while
-    /// Sep 23's braking event flags at t ≈ 28.
+    /// Sep 23's braking event flags at t ≈ 20 (≈ 24 in the final fit).
     pub tau: f64,
     /// At most this many jumps per leg (J_max = this × legs).
     pub max_jumps_per_leg: usize,
