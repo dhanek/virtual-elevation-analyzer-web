@@ -13,6 +13,7 @@ import { fit_selection_json } from "@wasm/virtual_elevation_analyzer.js";
 import {
 	buildKalmanSelection,
 	type KalmanOutput,
+	type KalmanSelectionInput,
 	kalmanReasonText,
 	kalmanWarningText,
 	parseKalmanOutput,
@@ -29,7 +30,7 @@ type Runner = (input: string) => string;
 
 let runner: Runner = fit_selection_json;
 let requested = false;
-let cache: { signature: string; output: KalmanOutput } | null = null;
+let cache: { signature: number; output: KalmanOutput } | null = null;
 
 /** Test seam: the WASM entry point. */
 export function setKalmanRunner(next: Runner): void {
@@ -43,19 +44,34 @@ export function resetKalmanState(): void {
 	runner = fit_selection_json;
 }
 
+/** cyrb53: a 53-bit string hash, so the cache keeps a number, not the input. */
+function hash(text: string): number {
+	let h1 = 0xdeadbeef;
+	let h2 = 0x41c6ce57;
+	for (let i = 0; i < text.length; i++) {
+		const c = text.charCodeAt(i);
+		h1 = Math.imul(h1 ^ c, 2654435761);
+		h2 = Math.imul(h2 ^ c, 1597334677);
+	}
+	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+	h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+	h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+	return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
 /**
- * What a cached result belongs to: the legs (by repeat key and window
- * length), where the air speed comes from, and the mass. Deliberately not
- * CdA or Crr, so a slider move keeps the result.
+ * What a cached result belongs to: a hash of exactly what the fit would be
+ * sent — every leg's series, the options and the physics — except the
+ * slider values CdA and Crr, so a slider move keeps the result (TODO J6
+ * criterion A2) and any other change to the input marks it stale.
  */
-function signatureOf(
-	units: readonly RepeatUnitInput[],
-	kalman: NonNullable<RepeatsUpdateInput["kalman"]>,
-): string {
-	const legs = units.map(
-		(u) => `${u.key}:${u.legs.map((l) => l.elevation?.length ?? 0).join("/")}`,
-	);
-	return `${legs.join(",")}|${kalman.airSpeed}|${kalman.physics.mass}`;
+function signatureOf(selection: KalmanSelectionInput | null): number {
+	if (!selection) {
+		return hash("none");
+	}
+	const { mass, eta } = selection.physics;
+	return hash(JSON.stringify({ ...selection, physics: { mass, eta } }));
 }
 
 function usableLegs(units: readonly RepeatUnitInput[]): number {
@@ -75,7 +91,7 @@ function run(
 		kalman.physics,
 		kalman.airSpeed,
 	);
-	const signature = signatureOf(units, kalman);
+	const signature = signatureOf(selection);
 	if (!selection) {
 		cache = {
 			signature,
@@ -240,7 +256,10 @@ export function kalmanBlock(
 	if (!requested || !cache) {
 		return `${title}${button("Run Kalman fit")}${intro}`;
 	}
-	if (cache.signature !== signatureOf(input.units, kalman)) {
+	const current = signatureOf(
+		buildKalmanSelection(input.units, kalman.physics, kalman.airSpeed),
+	);
+	if (cache.signature !== current) {
 		return `${title}${button("Re-run Kalman fit")}${bullets(["Selection changed since the last fit."])}`;
 	}
 	return `${title}${button("Re-run Kalman fit")}${resultMarkup(cache.output, pooled, noun)}`;

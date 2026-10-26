@@ -97,9 +97,18 @@ const OK: KalmanOutput = {
 	sessionZ: [],
 };
 
-function render(count: number, kalman = true) {
+const PHYSICS = { mass: 85, eta: 0.98, cda: 0.3, crr: 0.004 };
+
+function render(
+	count: number,
+	kalman = true,
+	options: {
+		units?: RepeatUnitInput[];
+		physics?: typeof PHYSICS;
+	} = {},
+) {
 	renderRepeatsView({
-		units: units(count),
+		units: options.units ?? units(count),
 		fixedCrr: 0.004,
 		cdaBounds: [0.15, 0.5],
 		crrBounds: [0.0015, 0.03],
@@ -107,7 +116,7 @@ function render(count: number, kalman = true) {
 		sensitivities: [],
 		kalman: kalman
 			? {
-					physics: { mass: 85, eta: 0.98, cda: 0.3, crr: 0.004 },
+					physics: options.physics ?? PHYSICS,
 					airSpeed: "measured",
 				}
 			: undefined,
@@ -159,10 +168,32 @@ describe("Kalman block in the Repeats tab", () => {
 		render(3);
 		document.getElementById(KALMAN_BUTTON_ID)!.click();
 		render(3);
-		render(3);
-		render(3);
+		render(3, true, { physics: { ...PHYSICS, cda: 0.25, crr: 0.006 } });
+		render(3, true, { physics: { ...PHYSICS, cda: 0.35, crr: 0.003 } });
 		expect(runner).toHaveBeenCalledTimes(1);
 		expect(text()).toContain("0.2954");
+		expect(text()).not.toContain("Selection changed");
+	});
+
+	it("marks the result stale when the leg data changes at the same lengths", () => {
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		const shifted = units(3).map((u) => ({
+			...u,
+			legs: u.legs.map((l) => ({
+				...l,
+				elevation: l.elevation!.map((e) => e + 0.5),
+			})),
+		}));
+		render(3, true, { units: shifted });
+		expect(text()).toContain("Selection changed");
+		expect(text()).not.toContain("0.2954");
+		expect(runner).toHaveBeenCalledTimes(1);
+		render(3, true, { physics: { ...PHYSICS, eta: 0.96 } });
+		expect(text()).toContain("Selection changed");
+		expect(runner).toHaveBeenCalledTimes(1);
 	});
 
 	it("marks a result stale when the selection changes, and refits on Re-run", () => {
