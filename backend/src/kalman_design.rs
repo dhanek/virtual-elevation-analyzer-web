@@ -99,7 +99,9 @@ pub struct Route {
     xy: Vec<(f64, f64)>,
     s: Vec<f64>,
     pub length: f64,
-    /// The route ends where it starts: positions wrap at `length`.
+    /// The route ends where it starts: positions wrap at `length`. Set by
+    /// `new` when the track's own ends are within `LOOP_CLOSURE_M`, or by
+    /// `close_if_ridden` when another leg rides the gap between them.
     pub closed: bool,
 }
 
@@ -143,6 +145,45 @@ impl Route {
         }
         route.closed = route.length >= LOOP_MIN_M && dist(route.xy[0], *route.xy.last().unwrap()) < LOOP_CLOSURE_M;
         Some(route)
+    }
+
+    /// Close a route whose ends are up to `MATCH_WINDOW_M` apart when the
+    /// selection rides the gap: some fix of another leg projects onto the
+    /// closing chord (end → start) strictly inside its middle 80 %, within
+    /// `OFF_ROUTE_M` of it and nearer to it than to the open route. Closing
+    /// adds the chord as the last segment, so `length` includes it. Routes
+    /// already closed, or shorter than `LOOP_MIN_M`, are left alone.
+    pub fn close_if_ridden(&mut self, others: &[(&[f64], &[f64])]) {
+        if self.closed || self.length < LOOP_MIN_M {
+            return;
+        }
+        let (start, end) = (self.xy[0], *self.xy.last().unwrap());
+        let g = dist(end, start);
+        if !(g > 1e-6 && g <= MATCH_WINDOW_M) {
+            return;
+        }
+        let (dx, dy) = (start.0 - end.0, start.1 - end.1);
+        let segments = self.xy.len() - 1;
+        let ridden = others.iter().any(|(lat, lon)| {
+            lat.iter().zip(lon.iter()).any(|(a, b)| {
+                if !(a.is_finite() && b.is_finite()) || (*a == 0.0 && *b == 0.0) {
+                    return false;
+                }
+                let p = self.local(*a, *b);
+                let t = ((p.0 - end.0) * dx + (p.1 - end.1) * dy) / (g * g);
+                if !(t > 0.1 && t < 0.9) {
+                    return false;
+                }
+                let off = dist(p, (end.0 + t * dx, end.1 + t * dy));
+                off <= OFF_ROUTE_M && (0..segments).all(|i| self.project(i, p).1 > off)
+            })
+        });
+        if ridden {
+            self.xy.push(start);
+            self.s.push(self.length + g);
+            self.length += g;
+            self.closed = true;
+        }
     }
 
     fn local(&self, lat: f64, lon: f64) -> (f64, f64) {
@@ -339,16 +380,24 @@ pub struct BuiltDesign {
 /// Every leg on one road axis — map-matched onto the first leg's GPS track
 /// (B7), or its distance ridden when any leg lacks GPS — split into clean
 /// stretches at every masked sample (B6), each kept monotone along the road
-/// and thinned to `grid_m`. A closed loop is cut at its widest empty gap
-/// (`loop_cut`). Legs are labelled by direction (0 with the road, 1
-/// against it) for the per-direction terrain choice. `masks` overrides
-/// `premask` (tests).
+/// and thinned to `grid_m`. The first leg's track is a closed loop when its
+/// ends meet (`Route::new`) or when another leg rides the gap between them
+/// (`Route::close_if_ridden`). A closed loop is cut at its widest empty gap
+/// (`loop_cut`), and a stretch that crosses the cut is split there into
+/// two. Each stretch's direction is the sign of its net motion along the
+/// road; legs are labelled by direction (0 with the road, 1 against it, by
+/// their stretches' summed net motion) for the per-direction terrain
+/// choice. `masks` overrides `premask` (tests).
 pub fn build_design(input: &SelectionInput, masks: Option<&[Vec<bool>]>) -> Result<BuiltDesign, FitError> {
     let legs = &input.legs;
     let has_gps = legs
         .iter()
         .all(|l| l.lat.len() == l.distance.len() && Route::new(&l.lat, &l.lon).is_some());
-    let route = if has_gps { legs.first().and_then(|l| Route::new(&l.lat, &l.lon)) } else { None };
+    let mut route = if has_gps { legs.first().and_then(|l| Route::new(&l.lat, &l.lon)) } else { None };
+    if let Some(r) = route.as_mut() {
+        let others: Vec<(&[f64], &[f64])> = legs.iter().skip(1).map(|l| (l.lat.as_slice(), l.lon.as_slice())).collect();
+        r.close_if_ridden(&others);
+    }
     let closed = route.as_ref().is_some_and(|r| r.closed);
     let loop_length = route.as_ref().filter(|r| r.closed).map(|r| r.length);
 
@@ -406,10 +455,32 @@ pub fn build_design(input: &SelectionInput, masks: Option<&[Vec<bool>]>) -> Resu
         if let Some(g) = gap {
             spans.push(g);
         }
-        // Monotone along the road and thinned, per run.
+        // On a closed loop a run that crosses the cut jumps by about the
+        // loop's length: each side of the jump is its own stretch.
+        let pieces: Vec<Vec<usize>> = match loop_length {
+            Some(length) => runs
+                .into_iter()
+                .flat_map(|run| {
+                    let mut out: Vec<Vec<usize>> = vec![Vec::new()];
+                    for i in run {
+                        let wraps = out.last().unwrap().last().is_some_and(|&p| (pos[i] - pos[p]).abs() > 0.5 * length);
+                        if wraps {
+                            out.push(Vec::new());
+                        }
+                        out.last_mut().unwrap().push(i);
+                    }
+                    out
+                })
+                .collect(),
+            None => runs,
+        };
+        // Monotone along the road and thinned, per stretch; its direction
+        // is the sign of its net motion.
         let mut chosen: Vec<(usize, u32)> = Vec::new();
-        for (id, run) in runs.iter().enumerate() {
-            let rising = pos[*run.last().unwrap()] >= pos[run[0]];
+        let mut motion = 0.0;
+        for (id, run) in pieces.iter().enumerate() {
+            let net: f64 = run.windows(2).map(|w| pos[w[1]] - pos[w[0]]).sum();
+            let rising = net >= 0.0;
             let mut picked: Vec<usize> = Vec::new();
             for &i in run {
                 if let Some(&last) = picked.last() {
@@ -421,13 +492,11 @@ pub fn build_design(input: &SelectionInput, masks: Option<&[Vec<bool>]>) -> Resu
                 picked.push(i);
             }
             if picked.len() >= 3 {
+                motion += net;
                 chosen.extend(picked.into_iter().map(|i| (i, id as u32)));
             }
         }
-        let rising = match (chosen.first(), chosen.last()) {
-            (Some(&(a, _)), Some(&(b, _))) => pos[b] >= pos[a],
-            _ => true,
-        };
+        let rising = motion >= 0.0;
         out_legs.push(LegDesign {
             group: if rising { 0 } else { 1 },
             pos: chosen.iter().map(|&(i, _)| pos[i]).collect(),
@@ -1094,6 +1163,58 @@ mod tests {
             "{:?}",
             warnings
         );
+    }
+
+    /// A circle of `circumference` m about (51° N, 7° E), counter-clockwise.
+    fn on_circle(s: f64, circumference: f64) -> (f64, f64) {
+        let k = 111_320.0 * 51f64.to_radians().cos();
+        let r = circumference / (2.0 * std::f64::consts::PI);
+        let theta = 2.0 * std::f64::consts::PI * s / circumference;
+        (51.0 + r * theta.sin() / 111_320.0, 7.0 + r * theta.cos() / k)
+    }
+
+    /// A lap of the 1000 m circle from road position `from`, `length` m
+    /// ridden, a fix every 5 m.
+    fn circle_lap(from: f64, length: f64, label: &str) -> LegInput {
+        let n = (length / 5.0).round() as usize + 1;
+        let mut leg = steady_leg(n);
+        let fixes: Vec<(f64, f64)> = (0..n).map(|i| on_circle(from + 5.0 * i as f64, 1000.0)).collect();
+        leg.lat = fixes.iter().map(|f| f.0).collect();
+        leg.lon = fixes.iter().map(|f| f.1).collect();
+        leg.distance = (0..n).map(|i| 5.0 * i as f64).collect();
+        leg.label = label.into();
+        leg
+    }
+
+    /// Lap 1 leaves a 60 m gap at the start line (30–970 m), too wide for
+    /// the first-leg 30 m rule; lap 2 starts before lap 1's start (950 m)
+    /// and rides through the gap. The selection closes the loop, and every
+    /// lap keeps its observations on one direction.
+    #[test]
+    fn a_loop_ridden_past_lap_ones_start_keeps_every_lap() {
+        let legs = vec![
+            circle_lap(30.0, 940.0, "Lap 1"),
+            circle_lap(950.0, 940.0, "Lap 2"),
+            circle_lap(30.0, 940.0, "Lap 3"),
+        ];
+        let masks: Vec<Vec<bool>> = legs.iter().map(|l| vec![true; l.distance.len()]).collect();
+        let input = SelectionInput {
+            names: vec!["CdA".into(), "Crr".into()],
+            legs,
+            physics: physics(),
+            options: SelectionOptions::default(),
+        };
+        let built = build_design(&input, Some(&masks)).unwrap();
+        assert!(built.closed_loop);
+        let length = built.loop_length.unwrap();
+        assert!((length - 1000.0).abs() <= 3.0, "{}", length);
+        for (l, leg) in built.design.legs.iter().enumerate() {
+            eprintln!("leg {}: {} observations, group {}", l, leg.pos.len(), leg.group);
+            assert!(leg.pos.len() >= 150, "leg {}: {} observations", l, leg.pos.len());
+        }
+        assert!(built.design.legs[1].pos.iter().all(|s| s.is_finite() && *s >= 0.0 && *s < length));
+        let group = built.design.legs[0].group;
+        assert!(built.design.legs.iter().all(|l| l.group == group));
     }
 
     /// `leg` moved ~1.1 km north: every fix is off the first leg's route.
