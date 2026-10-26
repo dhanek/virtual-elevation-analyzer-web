@@ -789,7 +789,7 @@ pub const ELL_GRID: [f64; 5] = [10.0, 25.0, 50.0, 100.0, 200.0];
 pub struct NoiseOptions {
     /// Upper bound on q (m²/m): (10 cm)² per 5 m.
     pub q_max: f64,
-    /// Upper bound on s2 (m²): (30 cm)².
+    /// Upper bound on s2 (m²): (1 m)².
     pub s2_max: f64,
     /// Lower bound on the white floor r (m²): (1 cm)².
     pub r_min: f64,
@@ -805,7 +805,7 @@ impl Default for NoiseOptions {
     fn default() -> Self {
         NoiseOptions {
             q_max: 0.1 * 0.1 / 5.0,
-            s2_max: 0.3 * 0.3,
+            s2_max: 1.0 * 1.0,
             r_min: 1e-4,
             initial: Noise {
                 q: 0.03 * 0.03 / 5.0,
@@ -2180,6 +2180,24 @@ mod tests {
         let fit = fit_noise(&design, Anchor::Stretch, &NoiseOptions::default()).unwrap();
         assert_eq!(fit.noise.r, NoiseOptions::default().r_min);
         assert!(fit.at_bound.contains(&"r"), "{:?}", fit.at_bound);
+    }
+
+    /// Terrain noise well above the old (30 cm)² bound is fitted, not pinned:
+    /// truth s2 = (50 cm)² comes back above (30 cm)² and off the bound.
+    #[test]
+    fn terrain_noise_above_thirty_cm_is_not_pinned_at_the_bound() {
+        let truth = Noise {
+            q: 0.03 * 0.03 / 5.0,
+            s2: 0.5 * 0.5,
+            ell: 50.0,
+            r: 2e-4,
+        };
+        let mut rng = Rng(0x0520_0D70);
+        let design = simulated_hill(&mut rng, 12, &truth);
+        let fit = fit_noise(&design, Anchor::Stretch, &NoiseOptions::default()).unwrap();
+        eprintln!("s2 truth 0.25: {:?}, at bound {:?}", fit.noise, fit.at_bound);
+        assert!(!fit.at_bound.contains(&"s2"), "{:?}", fit.at_bound);
+        assert!(fit.noise.s2 > 0.09, "s2 {}", fit.noise.s2);
     }
 
     /// The hill reference's REML optimum (dense GLS, scipy Nelder–Mead):
