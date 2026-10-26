@@ -868,14 +868,6 @@ impl VirtualElevationCalculator {
         grid
     }
 
-    /// The Crr at which `ve_gain(cda, ·)` equals `target_gain`, by bisection
-    /// over `[crr_lo, crr_hi]`. Raising Crr lowers every sample's slope, so
-    /// gain is strictly decreasing in Crr and the root is unique whenever it
-    /// is bracketed; NaN when it is not, so a caller can tell "outside the
-    /// bounds" from a bound. Single segment only — the pooled multi-segment
-    /// solve needs every segment's calculator at once and lives in
-    /// TypeScript. The NaN is `try_crr_for_gain`'s `CrrForGainError`,
-    /// collapsed for JavaScript.
     /// `try_gain_columns` flattened for JavaScript: `[y, a, f_0, …, f_{G−1}]`,
     /// each the window's length (`trim_end − trim_start + 1` after clamping).
     /// Empty where `ve_gain` is NaN.
@@ -893,6 +885,14 @@ impl VirtualElevationCalculator {
         flat
     }
 
+    /// The Crr at which `ve_gain(cda, ·)` equals `target_gain`, by bisection
+    /// over `[crr_lo, crr_hi]`. Raising Crr lowers every sample's slope, so
+    /// gain is strictly decreasing in Crr and the root is unique whenever it
+    /// is bracketed; NaN when it is not, so a caller can tell "outside the
+    /// bounds" from a bound. Single segment only — the pooled multi-segment
+    /// solve needs every segment's calculator at once and lives in
+    /// TypeScript. The NaN is `try_crr_for_gain`'s `CrrForGainError`,
+    /// collapsed for JavaScript.
     #[wasm_bindgen]
     pub fn crr_for_gain(
         &self,
