@@ -12,9 +12,11 @@
  * Spec: docs/superpowers/specs/2026-10-26-kalman-shared-terrain-jumps-design.md
  */
 import type { WindDataSource } from "./WindSourceResolver";
+import type { WindEntry } from "./WindHeightTransfer";
 import { legParts, type RepeatUnitInput } from "./RepeatSpread";
 
-export type AirSpeedSource = "measured" | "modelled" | "groundSpeed";
+export type AirSpeedSource =
+	"measured" | "modelled" | "entered" | "groundSpeed";
 
 /** The rider and slider values the braking pre-mask's coasting physics uses. */
 export interface KalmanPhysics {
@@ -171,16 +173,25 @@ export function buildKalmanSelection(
 	};
 }
 
-/** What the wind resolution means for a free CdA (B8). */
-export function airSpeedSource(dataSource: WindDataSource): AirSpeedSource {
+/**
+ * Where the fit's air speed comes from (it never refuses on this; it names
+ * the source in a warning).
+ */
+export function airSpeedSource(
+	dataSource: WindDataSource,
+	params: { wind_speed?: number | null; wind_entry?: WindEntry },
+): AirSpeedSource {
 	switch (dataSource) {
 		case "air_speed":
 		case "wind_speed":
 			return "measured";
-		case "constant":
-			return "modelled";
 		case "none":
 			return "groundSpeed";
+		case "constant":
+			if (!Number.isFinite(params.wind_speed)) {
+				return "groundSpeed";
+			}
+			return params.wind_entry === "weather" ? "modelled" : "entered";
 	}
 }
 
@@ -198,8 +209,6 @@ export function kalmanReasonText(
 			return "Needs 2 or more legs with an elevation profile.";
 		case "tooFewObservations":
 			return "Too few clean observations after the braking, corner and lap-button cuts.";
-		case "cdaNeedsAirspeed":
-			return "No measured air speed: a free CdA soaks up unmodelled wind and comes out far too low. Use an air-speed or wind channel, or fix CdA.";
 		case "notIdentified":
 			return coupled
 				? `Cannot tell ${coupled[0]} and ${coupled[1]} apart on this selection.`
@@ -227,8 +236,12 @@ export function kalmanWarningText(code: string): string {
 			return "Too many disturbances: the jump stage stopped at its limit (2 per leg).";
 		case "weakSpeedContrast":
 			return `Speed contrast ${Number(value).toFixed(2)} (under 0.15): CdA is weakly separated from Crr — ride two speeds, or fix CdA.`;
+		case "noWind":
+			return "No wind used: air speed is ground speed alone. Unmodelled wind dilutes CdA, so it may read low.";
+		case "enteredWind":
+			return "Air speed from the wind you entered, not a sensor: unmodelled wind dilutes CdA, so it may read low.";
 		case "modelledWind":
-			return "Air speed from the weather model, not a sensor: CdA carries its error.";
+			return "Air speed from the weather model (Open-Meteo), not a sensor: unmodelled wind dilutes CdA, so it may read low.";
 		default:
 			return code;
 	}

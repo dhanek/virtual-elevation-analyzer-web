@@ -103,9 +103,6 @@ pub enum FitError {
     TooFewLegs,
     /// No observations, or more fixed effects than observations.
     TooFewObservations,
-    /// No measured air speed and CdA free (`cdaNeedsAirspeed`, B8): drag
-    /// from unmodelled gusts dilutes CdA towards 0. Fix CdA instead.
-    CdaNeedsAirspeed,
     /// The GLS information matrix is singular or its condition number
     /// exceeds 1e10 (`notIdentified`), naming the two fixed effects whose
     /// columns are closest to collinear where there are two.
@@ -1049,7 +1046,8 @@ pub struct KalmanOptions {
     /// further one still moves CdA by ~0.2–0.5 SE on Sep 23, so 0.1 never
     /// stops (7 jumps where one settles the estimate).
     pub beta_stop: f64,
-    /// Where the air speed came from: a free CdA needs a measured one.
+    /// Where the air speed came from: a free CdA without a measured one is
+    /// fitted with a warning naming the source.
     pub air_speed: AirSpeed,
     /// Hold CdA at this value and fit only the rest (the column named
     /// "CdA" is subtracted from y and dropped).
@@ -1063,7 +1061,9 @@ pub enum AirSpeed {
     Measured,
     /// Ground speed plus a weather model's wind: fitted, with a warning.
     Modelled,
-    /// Ground speed only: a free CdA is refused (B8).
+    /// Ground speed plus a wind the rider entered: fitted, with a warning.
+    Entered,
+    /// Ground speed only, no wind: fitted, with a warning.
     GroundSpeed,
 }
 
@@ -1081,6 +1081,10 @@ pub enum Warning {
     WeakSpeedContrast(f64),
     /// Air speed from a weather model, not a sensor.
     ModelledWind,
+    /// Air speed from a wind the rider entered, not a sensor.
+    EnteredWind,
+    /// No wind at all: air speed is ground speed.
+    NoWind,
 }
 
 impl Default for KalmanOptions {
@@ -1171,7 +1175,8 @@ pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResu
     let mut warnings = Vec::new();
     if has_cda && options.fixed_cda.is_none() {
         match options.air_speed {
-            AirSpeed::GroundSpeed => return Err(FitError::CdaNeedsAirspeed),
+            AirSpeed::GroundSpeed => warnings.push(Warning::NoWind),
+            AirSpeed::Entered => warnings.push(Warning::EnteredWind),
             AirSpeed::Modelled => warnings.push(Warning::ModelledWind),
             AirSpeed::Measured => {}
         }
@@ -2553,19 +2558,33 @@ mod tests {
         assert!(!shared.warnings.contains(&Warning::NoCommonRoad));
     }
 
-    /// Without measured air speed a free CdA is refused (B8); a fixed CdA is
-    /// subtracted and only Crr is fitted.
+    /// Without measured air speed a free CdA is still fitted, with a warning
+    /// naming the wind source used; a fixed CdA is subtracted and only Crr
+    /// is fitted, without one.
     #[test]
-    fn free_cda_needs_air_speed_and_fixed_cda_is_honoured() {
+    fn free_cda_without_air_speed_is_fitted_with_a_warning_and_fixed_cda_is_honoured() {
         let design = quiet_hill(3, 6);
-        let no_air = KalmanOptions { air_speed: AirSpeed::GroundSpeed, ..KalmanOptions::default() };
-        assert_eq!(kalman_fit(&design, &no_air).unwrap_err(), FitError::CdaNeedsAirspeed);
-        let fixed = KalmanOptions { fixed_cda: Some(0.30), ..no_air };
+        let wind = [Warning::NoWind, Warning::EnteredWind, Warning::ModelledWind];
+        let warnings = |air_speed| {
+            kalman_fit(&design, &KalmanOptions { air_speed, ..KalmanOptions::default() })
+                .unwrap()
+                .warnings
+        };
+        let no_air = warnings(AirSpeed::GroundSpeed);
+        assert!(no_air.contains(&Warning::NoWind), "{:?}", no_air);
+        assert!(warnings(AirSpeed::Entered).contains(&Warning::EnteredWind));
+        assert!(warnings(AirSpeed::Modelled).contains(&Warning::ModelledWind));
+        let measured = warnings(AirSpeed::Measured);
+        assert!(wind.iter().all(|w| !measured.contains(w)), "{:?}", measured);
+        let fixed = KalmanOptions {
+            air_speed: AirSpeed::GroundSpeed,
+            fixed_cda: Some(0.30),
+            ..KalmanOptions::default()
+        };
         let r = kalman_fit(&design, &fixed).unwrap();
         assert_eq!(r.fit.names[0], "Crr");
+        assert!(!r.warnings.contains(&Warning::NoWind), "{:?}", r.warnings);
         assert!((r.fit.beta[0] - 0.004).abs() < 3.0 * r.fit.se[0], "Crr {} ± {}", r.fit.beta[0], r.fit.se[0]);
-        let modelled = KalmanOptions { air_speed: AirSpeed::Modelled, ..KalmanOptions::default() };
-        assert!(kalman_fit(&design, &modelled).unwrap().warnings.contains(&Warning::ModelledWind));
     }
 
     /// Two columns that cannot be told apart: refused, naming both.

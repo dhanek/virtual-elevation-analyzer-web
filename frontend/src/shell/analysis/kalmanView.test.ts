@@ -186,7 +186,7 @@ describe("Kalman block in the Repeats tab", () => {
 			JSON.stringify({
 				...OK,
 				status: "refused",
-				reason: "cdaNeedsAirspeed",
+				reason: "tooFewObservations",
 				fit: null,
 				residuals: [],
 			}),
@@ -194,7 +194,7 @@ describe("Kalman block in the Repeats tab", () => {
 		render(3);
 		document.getElementById(KALMAN_BUTTON_ID)!.click();
 		render(3);
-		expect(text()).toContain("No measured air speed");
+		expect(text()).toContain("Too few clean observations");
 	});
 
 	it("escapes text from the fit's output instead of rendering it as markup", () => {

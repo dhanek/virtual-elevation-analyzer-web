@@ -514,7 +514,7 @@ export async function updateModeVEPlots(
 					cda,
 					crr,
 				},
-				airSpeed: airSpeedSource(wind.dataSource),
+				airSpeed: airSpeedSource(wind.dataSource, params),
 			},
 		});
 	}

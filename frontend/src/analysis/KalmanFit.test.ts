@@ -91,11 +91,23 @@ describe("buildKalmanSelection", () => {
 });
 
 describe("airSpeedSource", () => {
-	it("maps the wind resolution to what the fit allows", () => {
-		expect(airSpeedSource("air_speed")).toBe("measured");
-		expect(airSpeedSource("wind_speed")).toBe("measured");
-		expect(airSpeedSource("constant")).toBe("modelled");
-		expect(airSpeedSource("none")).toBe("groundSpeed");
+	it("names the wind source the fit actually uses", () => {
+		expect(airSpeedSource("air_speed", {})).toBe("measured");
+		expect(airSpeedSource("wind_speed", {})).toBe("measured");
+		expect(airSpeedSource("none", {})).toBe("groundSpeed");
+		expect(airSpeedSource("constant", { wind_speed: null })).toBe(
+			"groundSpeed",
+		);
+		expect(airSpeedSource("constant", {})).toBe("groundSpeed");
+		expect(
+			airSpeedSource("constant", { wind_speed: 3, wind_entry: "manual" }),
+		).toBe("entered");
+		expect(
+			airSpeedSource("constant", { wind_speed: 3, wind_entry: "weather" }),
+		).toBe("modelled");
+		expect(
+			airSpeedSource("constant", { wind_speed: 3, wind_entry: "unknown" }),
+		).toBe("entered");
 	});
 });
 
@@ -104,7 +116,6 @@ describe("texts", () => {
 		for (const reason of [
 			"tooFewLegs",
 			"tooFewObservations",
-			"cdaNeedsAirspeed",
 			"notIdentified",
 		]) {
 			expect(kalmanReasonText(reason, null)).not.toMatch(/undefined/);
@@ -122,7 +133,12 @@ describe("texts", () => {
 		expect(kalmanWarningText("weakSpeedContrast:0.081")).toContain("0.08");
 		expect(kalmanWarningText("noCommonRoad")).toMatch(/road/);
 		expect(kalmanWarningText("tooManyDisturbances")).toMatch(/disturbances/);
-		expect(kalmanWarningText("modelledWind")).toMatch(/weather/);
+		expect(kalmanWarningText("noWind")).toMatch(/No wind/);
+		expect(kalmanWarningText("enteredWind")).toMatch(/entered/);
+		expect(kalmanWarningText("modelledWind")).toMatch(/weather model/);
+		for (const code of ["noWind", "enteredWind", "modelledWind"]) {
+			expect(kalmanWarningText(code)).toMatch(/may read low/);
+		}
 	});
 });
 

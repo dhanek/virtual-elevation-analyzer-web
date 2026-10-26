@@ -234,14 +234,15 @@ describe.skipIf(!built)("Kalman fit on the real WASM", () => {
 		expect(fit.warnings).not.toContain("noCommonRoad");
 	});
 
-	it("refuses a free CdA without measured air speed, by name", () => {
+	it("fits a free CdA on ground speed alone, with the noWind warning", () => {
 		const units = buildRepeatUnits(prepare(LAPS), PARAMS);
 		const selection = buildKalmanSelection(units, PHYSICS, "groundSpeed")!;
 		const out = parseKalmanOutput(
 			fit_selection_json(JSON.stringify(selection)),
 		);
-		expect(out.status).toBe("refused");
-		expect(out.reason).toBe("cdaNeedsAirspeed");
+		expect(out.status).toBe("ok");
+		expect(out.fit!.warnings).toContain("noWind");
+		expect(Number.isFinite(out.fit!.beta[0])).toBe(true);
 	});
 
 	it("refuses one leg, by name", () => {

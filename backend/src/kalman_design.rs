@@ -62,7 +62,7 @@ pub struct Physics {
 pub struct SelectionOptions {
     /// Observations along a stretch at least this far apart (m).
     pub grid_m: f64,
-    /// "measured", "modelled" or "groundSpeed".
+    /// "measured", "modelled", "entered" or "groundSpeed".
     pub air_speed: String,
     pub fixed_cda: Option<f64>,
     pub jumps: bool,
@@ -543,7 +543,6 @@ fn reason(e: &FitError) -> (String, Option<(String, String)>) {
     match e {
         FitError::TooFewLegs => ("tooFewLegs".into(), None),
         FitError::TooFewObservations => ("tooFewObservations".into(), None),
-        FitError::CdaNeedsAirspeed => ("cdaNeedsAirspeed".into(), None),
         FitError::NotIdentified { coupled } => ("notIdentified".into(), coupled.clone()),
     }
 }
@@ -555,6 +554,8 @@ fn warning_text(w: &Warning) -> String {
         Warning::TooManyDisturbances => "tooManyDisturbances".into(),
         Warning::WeakSpeedContrast(c) => format!("weakSpeedContrast:{:.3}", c),
         Warning::ModelledWind => "modelledWind".into(),
+        Warning::EnteredWind => "enteredWind".into(),
+        Warning::NoWind => "noWind".into(),
     }
 }
 
@@ -607,6 +608,7 @@ fn kalman_options(o: &SelectionOptions) -> KalmanOptions {
         fixed_cda: o.fixed_cda,
         air_speed: match o.air_speed.as_str() {
             "modelled" => AirSpeed::Modelled,
+            "entered" => AirSpeed::Entered,
             "groundSpeed" => AirSpeed::GroundSpeed,
             _ => AirSpeed::Measured,
         },
@@ -999,6 +1001,74 @@ mod tests {
             assert_eq!(out["status"], "refused");
             assert!(out["reason"].as_str().unwrap().starts_with("badInput"), "{}", out["reason"]);
         }
+    }
+
+    /// A leg the fit can identify CdA and Crr from: straight road east of
+    /// the origin from 0 to ~1000 m at a steady `speed`, y built from
+    /// CdA 0.3 and Crr 0.004 plus a small random walk.
+    fn fittable_leg(speed: f64, seed: u64) -> LegInput {
+        let n = (1000.0 / speed) as usize + 1;
+        let mut leg = steady_leg(n);
+        let (lat, lon) = straight(0.0, speed * (n - 1) as f64, speed);
+        leg.lat = lat;
+        leg.lon = lon;
+        leg.distance = (0..n).map(|i| speed * i as f64).collect();
+        leg.speed = vec![speed; n];
+        leg.air_speed = vec![speed; n];
+        let p = (0.5 * 1.2 * 0.3 * speed * speed + 0.004 * 85.0 * G) * speed;
+        leg.power = vec![p; n];
+        let mut state = seed;
+        let mut noise = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+        };
+        let (mut a, mut w) = (0.0, 0.0);
+        let mut av = Vec::with_capacity(n);
+        let mut ys = Vec::with_capacity(n);
+        for i in 0..n {
+            if i > 0 {
+                a += 0.5 * 1.2 * speed * speed * speed * (1.0 + 0.2 * noise()) / (85.0 * G);
+                w += 0.02 * noise();
+            }
+            av.push(a);
+            ys.push(0.3 * a + 0.004 * leg.distance[i] + w + 0.01 * noise());
+        }
+        leg.y = ys;
+        leg.columns = vec![av, leg.distance.clone()];
+        leg
+    }
+
+    fn fit_json(legs: Vec<LegInput>, air_speed: &str) -> serde_json::Value {
+        let input = SelectionInput {
+            names: vec!["CdA".into(), "Crr".into()],
+            legs,
+            physics: physics(),
+            options: SelectionOptions {
+                air_speed: air_speed.into(),
+                ..SelectionOptions::default()
+            },
+        };
+        serde_json::from_str(&fit_selection_json(&serde_json::to_string(&input).unwrap())).unwrap()
+    }
+
+    /// No measured air speed: the fit runs and names the wind it used.
+    #[test]
+    fn json_entry_fits_without_air_speed_and_names_the_wind_source() {
+        let legs = || vec![fittable_leg(5.0, 1), fittable_leg(8.0, 2), fittable_leg(11.0, 3)];
+        for (air_speed, warning) in [("entered", "enteredWind"), ("groundSpeed", "noWind"), ("modelled", "modelledWind")] {
+            let out = fit_json(legs(), air_speed);
+            assert_eq!(out["status"], "ok", "{}: {}", air_speed, out["reason"]);
+            let warnings = out["fit"]["warnings"].as_array().unwrap();
+            assert!(warnings.iter().any(|w| w == warning), "{}: {:?}", air_speed, warnings);
+        }
+        let measured = fit_json(legs(), "measured");
+        assert_eq!(measured["status"], "ok");
+        let warnings = measured["fit"]["warnings"].as_array().unwrap();
+        assert!(
+            warnings.iter().all(|w| w != "enteredWind" && w != "noWind" && w != "modelledWind"),
+            "{:?}",
+            warnings
+        );
     }
 
     #[test]
