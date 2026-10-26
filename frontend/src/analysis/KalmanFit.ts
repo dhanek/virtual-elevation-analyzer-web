@@ -114,6 +114,8 @@ export interface KalmanOutput {
 		fit: KalmanFitSummary | null;
 	}[];
 	sessionZ: { name: string; first: number; second: number; z: number }[];
+	/** Legs left out for having no observation on the road grid. */
+	droppedLegs: string[];
 }
 
 const toArray = (series: ArrayLike<number> | undefined | null): number[] =>

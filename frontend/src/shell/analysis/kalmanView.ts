@@ -105,6 +105,7 @@ function run(
 				loopLength: null,
 				sessions: [],
 				sessionZ: [],
+				droppedLegs: [],
 			},
 		};
 		return;
@@ -210,6 +211,11 @@ function resultMarkup(
 		);
 	}
 	notes.push(...fit.warnings.map(kalmanWarningText));
+	if (output.droppedLegs.length > 0) {
+		notes.push(
+			`No clean observations on the common road, left out: ${output.droppedLegs.join(", ")}.`,
+		);
+	}
 	notes.push(
 		`SEs from the fit's information matrix: they carry the drift and the shared terrain, unlike the naive ones. ${fit.observations} points on ${fit.legs} legs (${noun}s split into their legs).`,
 	);

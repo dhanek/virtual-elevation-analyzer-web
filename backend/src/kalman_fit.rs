@@ -1168,7 +1168,7 @@ pub struct Round {
 /// another leg it took that step first, stopped, and never reached the
 /// braking event that biases CdA — 6 SE off.
 pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResult, FitError> {
-    if design.legs.len() < 2 {
+    if design.legs.iter().filter(|l| !l.pos.is_empty()).count() < 2 {
         return Err(FitError::TooFewLegs);
     }
     let has_cda = design.names.iter().any(|n| n == "CdA");
@@ -1295,7 +1295,7 @@ pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResu
         warnings,
         cda_crr_correlation,
         speed_contrast,
-        legs: design.legs.len(),
+        legs: design.legs.iter().filter(|l| !l.pos.is_empty()).count(),
         design,
     })
 }

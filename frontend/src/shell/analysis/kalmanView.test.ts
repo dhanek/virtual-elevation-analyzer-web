@@ -95,6 +95,7 @@ const OK: KalmanOutput = {
 	loopLength: null,
 	sessions: [],
 	sessionZ: [],
+	droppedLegs: [],
 };
 
 const PHYSICS = { mass: 85, eta: 0.98, cda: 0.3, crr: 0.004 };
@@ -210,6 +211,14 @@ describe("Kalman block in the Repeats tab", () => {
 		expect(runner).toHaveBeenCalledTimes(1);
 		document.getElementById(KALMAN_BUTTON_ID)!.click();
 		expect(runner).toHaveBeenCalledTimes(2);
+	});
+
+	it("names the legs left out for want of observations", () => {
+		setKalmanRunner(() => JSON.stringify({ ...OK, droppedLegs: ["Lap 3"] }));
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).toContain("left out: Lap 3");
 	});
 
 	it("names a refusal", () => {

@@ -537,6 +537,9 @@ pub struct SelectionOutput {
     /// Only with more than one session.
     pub sessions: Vec<SessionSummary>,
     pub session_z: Vec<SessionZSummary>,
+    /// Labels of the legs left out for having no observation on the road
+    /// grid, in input order; empty when refused or nothing was dropped.
+    pub dropped_legs: Vec<String>,
 }
 
 fn reason(e: &FitError) -> (String, Option<(String, String)>) {
@@ -661,6 +664,7 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
             loop_length: None,
             sessions: Vec::new(),
             session_z: Vec::new(),
+            dropped_legs: Vec::new(),
         }
     };
     if input.legs.len() < 2 {
@@ -670,9 +674,28 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
         Ok(b) => b,
         Err(e) => return refused(&e),
     };
-    let labels: Vec<String> = input.legs.iter().map(|l| l.label.clone()).collect();
+    // Only legs with observations on the road grid enter the fit; the rest
+    // are named, and everything below (jumps, residuals, sessions) refers
+    // to the contributing legs, re-indexed.
+    let kept: Vec<usize> = (0..built.design.legs.len()).filter(|&l| !built.design.legs[l].pos.is_empty()).collect();
+    if kept.len() < 2 {
+        let mut out = refused(&FitError::TooFewLegs);
+        out.closed_loop = built.closed_loop;
+        out.loop_length = built.loop_length;
+        return out;
+    }
+    let dropped_legs: Vec<String> = (0..input.legs.len())
+        .filter(|l| !kept.contains(l))
+        .map(|l| input.legs[l].label.clone())
+        .collect();
+    let design = Design {
+        names: built.design.names.clone(),
+        legs: kept.iter().map(|&l| built.design.legs[l].clone()).collect(),
+    };
+    let masked: Vec<Vec<(f64, f64)>> = kept.iter().map(|&l| built.masked[l].clone()).collect();
+    let labels: Vec<String> = kept.iter().map(|&l| input.legs[l].label.clone()).collect();
     let options = kalman_options(&input.options);
-    let result = match kalman_fit(&built.design, &options) {
+    let result = match kalman_fit(&design, &options) {
         Ok(r) => r,
         Err(e) => {
             let mut out = refused(&e);
@@ -698,16 +721,16 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
             pos: leg.pos.clone(),
             residual: residual[l].clone(),
             stretch: leg.stretch.clone(),
-            masked: built.masked[l].clone(),
+            masked: masked[l].clone(),
         })
         .collect();
 
-    let session_of: Vec<usize> = input.legs.iter().map(|l| l.session).collect();
+    let session_of: Vec<usize> = kept.iter().map(|&l| input.legs[l].session).collect();
     let mut distinct = session_of.clone();
     distinct.sort_unstable();
     distinct.dedup();
     let (sessions, session_z) = if distinct.len() > 1 {
-        match session_comparison(&built.design, &session_of, &options) {
+        match session_comparison(&design, &session_of, &options) {
             Ok(cmp) => (
                 cmp.per_session
                     .iter()
@@ -752,6 +775,7 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
         loop_length: built.loop_length,
         sessions,
         session_z,
+        dropped_legs,
     }
 }
 
@@ -766,6 +790,7 @@ fn refused_with(reason: String) -> SelectionOutput {
         loop_length: None,
         sessions: Vec::new(),
         session_z: Vec::new(),
+        dropped_legs: Vec::new(),
     }
 }
 
@@ -1069,6 +1094,49 @@ mod tests {
             "{:?}",
             warnings
         );
+    }
+
+    /// `leg` moved ~1.1 km north: every fix is off the first leg's route.
+    fn off_route(mut leg: LegInput, label: &str) -> LegInput {
+        leg.lat.iter_mut().for_each(|a| *a += 0.01);
+        leg.label = label.into();
+        leg
+    }
+
+    fn labelled(mut leg: LegInput, label: &str) -> LegInput {
+        leg.label = label.into();
+        leg
+    }
+
+    /// A leg with no observation on the road grid does not count: two legs,
+    /// one off the route, are too few; with a third, the off-route leg is
+    /// left out and named, and the fit runs on the other two.
+    #[test]
+    fn legs_without_observations_are_dropped_and_named() {
+        let input = |legs: Vec<LegInput>| SelectionInput {
+            names: vec!["CdA".into(), "Crr".into()],
+            legs,
+            physics: physics(),
+            options: SelectionOptions::default(),
+        };
+        let two = fit_selection(&input(vec![
+            labelled(fittable_leg(5.0, 1), "Lap 1"),
+            off_route(fittable_leg(11.0, 2), "Lap 2"),
+        ]));
+        assert_eq!(two.status, "refused");
+        assert_eq!(two.reason.as_deref(), Some("tooFewLegs"));
+        assert!(two.dropped_legs.is_empty());
+
+        let three = fit_selection(&input(vec![
+            labelled(fittable_leg(5.0, 1), "Lap 1"),
+            labelled(fittable_leg(11.0, 2), "Lap 2"),
+            off_route(fittable_leg(8.0, 3), "Lap 3"),
+        ]));
+        assert_eq!(three.status, "ok", "{:?}", three.reason);
+        assert_eq!(three.fit.as_ref().unwrap().legs, 2);
+        assert_eq!(three.dropped_legs, vec!["Lap 3".to_string()]);
+        assert_eq!(three.residuals.len(), 2);
+        assert_eq!(three.residuals[1].label, "Lap 2");
     }
 
     #[test]
