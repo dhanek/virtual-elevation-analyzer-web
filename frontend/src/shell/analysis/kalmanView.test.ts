@@ -197,6 +197,24 @@ describe("Kalman block in the Repeats tab", () => {
 		expect(text()).toContain("No measured air speed");
 	});
 
+	it("escapes text from the fit's output instead of rendering it as markup", () => {
+		setKalmanRunner(() =>
+			JSON.stringify({
+				...OK,
+				status: "refused",
+				reason: "notIdentified",
+				coupled: ['<img src=x onerror="alert(1)">', "Crr"],
+				fit: null,
+				residuals: [],
+			}),
+		);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(document.querySelector("#repeats-tab img")).toBeNull();
+		expect(text()).toContain('<img src=x onerror="alert(1)">');
+	});
+
 	it("says why with fewer than two legs, without a button", () => {
 		render(1);
 		expect(document.getElementById(KALMAN_BUTTON_ID)).toBeNull();

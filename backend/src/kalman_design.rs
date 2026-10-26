@@ -173,6 +173,10 @@ impl Route {
                 continue;
             }
             let p = self.local(*a, *b);
+            if !(p.0.is_finite() && p.1.is_finite()) {
+                out.push(f64::NAN);
+                continue;
+            }
             let near = |s: f64| -> bool {
                 previous.map_or(true, |prev| {
                     let mut gap = (s - prev).abs();
@@ -188,7 +192,7 @@ impl Route {
                         !windowed || near(self.s[i]) || near(self.s[i + 1])
                     })
                     .map(|i| self.project(i, p))
-                    .min_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
+                    .min_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal))
             };
             let best = search(true)
                 .filter(|m| m.1 <= OFF_ROUTE_M)
@@ -610,8 +614,39 @@ fn kalman_options(o: &SelectionOptions) -> KalmanOptions {
     }
 }
 
+/// Why a selection's series cannot be fitted as given: every per-sample
+/// series of a leg must be as long as its `distance` (GPS: both or neither,
+/// power and speed may be empty), with one column per name.
+fn malformed(input: &SelectionInput) -> Option<String> {
+    for (l, leg) in input.legs.iter().enumerate() {
+        let n = leg.distance.len();
+        let same = |name: &str, len: usize| (len != n).then(|| format!("leg {}: {} has {} values, distance {}", l, name, len, n));
+        let optional = |name: &str, len: usize| (len != 0 && len != n).then(|| format!("leg {}: {} has {} values, distance {}", l, name, len, n));
+        let problem = same("timestamps", leg.timestamps.len())
+            .or_else(|| same("y", leg.y.len()))
+            .or_else(|| same("elevation", leg.elevation.len()))
+            .or_else(|| optional("power", leg.power.len()))
+            .or_else(|| optional("speed", leg.speed.len()))
+            .or_else(|| optional("airSpeed", leg.air_speed.len()))
+            .or_else(|| optional("lat", leg.lat.len()))
+            .or_else(|| (leg.lon.len() != leg.lat.len()).then(|| format!("leg {}: lat and lon differ in length", l)))
+            .or_else(|| {
+                (leg.columns.len() != input.names.len())
+                    .then(|| format!("leg {}: {} columns for {} names", l, leg.columns.len(), input.names.len()))
+            })
+            .or_else(|| leg.columns.iter().enumerate().find_map(|(c, col)| same(&format!("column {}", c), col.len())));
+        if problem.is_some() {
+            return problem;
+        }
+    }
+    None
+}
+
 /// The whole J6 fit on one selection.
 pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
+    if let Some(problem) = malformed(input) {
+        return refused_with(format!("badInput: {}", problem));
+    }
     let refused = |e: &FitError| {
         let (reason, coupled) = reason(e);
         SelectionOutput {
@@ -718,6 +753,20 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
     }
 }
 
+fn refused_with(reason: String) -> SelectionOutput {
+    SelectionOutput {
+        status: "refused".into(),
+        reason: Some(reason),
+        coupled: None,
+        fit: None,
+        residuals: Vec::new(),
+        closed_loop: false,
+        loop_length: None,
+        sessions: Vec::new(),
+        session_z: Vec::new(),
+    }
+}
+
 /// `fit_selection` for JavaScript: `SelectionInput` as JSON in,
 /// `SelectionOutput` as JSON out. Malformed input comes back as
 /// `{"status":"refused","reason":"badInput",…}`.
@@ -725,17 +774,7 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
 pub fn fit_selection_json(input: &str) -> String {
     let output = match serde_json::from_str::<SelectionInput>(input) {
         Ok(input) => fit_selection(&input),
-        Err(e) => SelectionOutput {
-            status: "refused".into(),
-            reason: Some(format!("badInput: {}", e)),
-            coupled: None,
-            fit: None,
-            residuals: Vec::new(),
-            closed_loop: false,
-            loop_length: None,
-            sessions: Vec::new(),
-            session_z: Vec::new(),
-        },
+        Err(e) => refused_with(format!("badInput: {}", e)),
     };
     serde_json::to_string(&output).unwrap_or_else(|e| format!("{{\"status\":\"refused\",\"reason\":\"badOutput: {}\"}}", e))
 }
@@ -935,6 +974,30 @@ mod tests {
         assert_eq!(stretches.len(), 2);
         for leg in &built.design.legs {
             assert!(leg.drift.windows(2).all(|w| w[1] - w[0] >= input.options.grid_m - 1e-9));
+        }
+    }
+
+    /// Series of different lengths are refused as bad input, never indexed
+    /// past their end.
+    #[test]
+    fn mismatched_series_are_bad_input() {
+        let mut short_y = steady_leg(100);
+        short_y.y.truncate(50);
+        let mut short_lon = steady_leg(100);
+        short_lon.lon.truncate(10);
+        let mut few_columns = steady_leg(100);
+        few_columns.columns.pop();
+        for broken in [short_y, short_lon, few_columns] {
+            let input = SelectionInput {
+                names: vec!["CdA".into(), "Crr".into()],
+                legs: vec![steady_leg(100), broken],
+                physics: physics(),
+                options: SelectionOptions::default(),
+            };
+            let out: serde_json::Value =
+                serde_json::from_str(&fit_selection_json(&serde_json::to_string(&input).unwrap())).unwrap();
+            assert_eq!(out["status"], "refused");
+            assert!(out["reason"].as_str().unwrap().starts_with("badInput"), "{}", out["reason"]);
         }
     }
 

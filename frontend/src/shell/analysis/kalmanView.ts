@@ -107,7 +107,9 @@ function escapeHtml(text: string): string {
 	return text
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
 }
 
 function cell(text: string, modifier = ""): string {
@@ -124,10 +126,11 @@ function heading(title: string, subtitle: string): string {
 	return `<div class="ve-lap-summary__title ve-repeats__section-title"><strong>${title}</strong> <span class="ve-repeats__sub">${subtitle}</span></div>`;
 }
 
+/** Plain-text notes: escaped here, at the markup boundary. */
 function bullets(items: readonly string[]): string {
 	return items.length === 0
 		? ""
-		: `<ul class="ve-repeats__notes">${items.map((i) => `<li>${i}</li>`).join("")}</ul>`;
+		: `<ul class="ve-repeats__notes">${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`;
 }
 
 function fixed(value: number, digits: number): string {
