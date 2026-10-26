@@ -44,34 +44,110 @@ export function resetKalmanState(): void {
 	runner = fit_selection_json;
 }
 
-/** cyrb53: a 53-bit string hash, so the cache keeps a number, not the input. */
-function hash(text: string): number {
-	let h1 = 0xdeadbeef;
-	let h2 = 0x41c6ce57;
-	for (let i = 0; i < text.length; i++) {
-		const c = text.charCodeAt(i);
-		h1 = Math.imul(h1 ^ c, 2654435761);
-		h2 = Math.imul(h2 ^ c, 1597334677);
+/**
+ * cyrb53's two-lane mixing, fed incrementally: numbers as their IEEE-754
+ * bits, strings by char code, every array prefixed by its length so values
+ * cannot shift between adjacent arrays and give the same hash. The cache
+ * keeps a 53-bit number, not the input.
+ */
+class Hasher {
+	private h1 = 0xdeadbeef;
+	private h2 = 0x41c6ce57;
+	private static readonly float = new Float64Array(1);
+	private static readonly words = new Uint32Array(Hasher.float.buffer);
+
+	private word(c: number): void {
+		this.h1 = Math.imul(this.h1 ^ c, 2654435761);
+		this.h2 = Math.imul(this.h2 ^ c, 1597334677);
 	}
-	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
-	h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
-	h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-	return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+
+	number(value: number): void {
+		Hasher.float[0] = value;
+		this.word(Hasher.words[0]);
+		this.word(Hasher.words[1]);
+	}
+
+	string(text: string): void {
+		this.number(text.length);
+		for (let i = 0; i < text.length; i++) {
+			this.word(text.charCodeAt(i));
+		}
+	}
+
+	numbers(values: readonly number[]): void {
+		this.number(values.length);
+		for (const v of values) {
+			this.number(v);
+		}
+	}
+
+	strings(values: readonly string[]): void {
+		this.number(values.length);
+		for (const v of values) {
+			this.string(v);
+		}
+	}
+
+	digest(): number {
+		let h1 = this.h1;
+		let h2 = this.h2;
+		h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+		h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+		h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+		h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+		return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+	}
 }
 
 /**
  * What a cached result belongs to: a hash of exactly what the fit would be
  * sent — every leg's series, the options and the physics — except the
  * slider values CdA and Crr, so a slider move keeps the result (TODO J6
- * criterion A2) and any other change to the input marks it stale.
+ * criterion A2) and any other change to the input marks it stale. The
+ * selection's arrays are fed to the hash directly, in a fixed order, with
+ * no string built from them.
  */
 function signatureOf(selection: KalmanSelectionInput | null): number {
+	const h = new Hasher();
 	if (!selection) {
-		return hash("none");
+		h.string("none");
+		return h.digest();
 	}
-	const { mass, eta } = selection.physics;
-	return hash(JSON.stringify({ ...selection, physics: { mass, eta } }));
+	h.string("selection");
+	h.strings(selection.names);
+	h.number(selection.legs.length);
+	for (const leg of selection.legs) {
+		h.string(leg.label);
+		h.number(leg.session);
+		h.number(leg.rho);
+		h.numbers(leg.timestamps);
+		h.numbers(leg.power);
+		h.numbers(leg.speed);
+		h.numbers(leg.airSpeed);
+		h.numbers(leg.distance);
+		h.numbers(leg.lat);
+		h.numbers(leg.lon);
+		h.numbers(leg.elevation);
+		h.numbers(leg.y);
+		h.number(leg.columns.length);
+		for (const column of leg.columns) {
+			h.numbers(column);
+		}
+	}
+	const { options } = selection;
+	h.number(options.gridM);
+	h.string(options.airSpeed);
+	if (options.fixedCda === null) {
+		h.string("fixedCda:none");
+	} else {
+		h.string("fixedCda");
+		h.number(options.fixedCda);
+	}
+	h.number(options.jumps ? 1 : 0);
+	// Mass and eta only: CdA and Crr are the sliders (A2).
+	h.number(selection.physics.mass);
+	h.number(selection.physics.eta);
+	return h.digest();
 }
 
 function usableLegs(units: readonly RepeatUnitInput[]): number {
@@ -168,7 +244,9 @@ function resultMarkup(
 	noun: string,
 ): string {
 	if (output.status !== "ok" || !output.fit) {
-		return bullets([kalmanReasonText(output.reason, output.coupled)]);
+		return bullets([
+			kalmanReasonText(output.reason, output.coupled, output.droppedLegs),
+		]);
 	}
 	const fit = output.fit;
 	const at = (name: string) => fit.names.indexOf(name);

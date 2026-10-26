@@ -1166,8 +1166,10 @@ pub struct Round {
 /// no shared β by `beta_stop`·SE, which is then left out. Every flag still
 /// above `tau` in the final fit is listed as a jump that was not fitted.
 ///
-/// Flags at `2·tau` or more are always taken, whatever they do to β. A
-/// rule that stopped at the first step that barely moves β (the spec's)
+/// In the main loop, flags at `2·tau` or more are always taken, whatever
+/// they do to β; the verification pass after it judges every remaining
+/// flag by `beta_stop` alone, so a flag it finds harmless is left out and
+/// listed as moving nothing, whatever its |t|. A rule that stopped at the first step that barely moves β (the spec's)
 /// is order-dependent: on Sep 23 with a harmless 1.25 m step injected on
 /// another leg it took that step first, stopped, and never reached the
 /// braking event that biases CdA — 6 SE off.
@@ -1241,10 +1243,12 @@ pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResu
         fit = next;
     }
     // Verification: the loop above tested only the largest flag. Test every
-    // flag still above tau, largest |t| first, exactly as the loop does; one
-    // that matters is taken (or, at J_max, stops the stage) and the pass
-    // starts over on the new fit. A full pass that takes nothing leaves
-    // `tested` holding the flags that move nothing in the final fit.
+    // flag still above tau, largest |t| first, against `beta_stop` alone —
+    // unlike the loop, this pass does not take a flag for being at 2·tau or
+    // more. One that moves some shared β by beta_stop·SE is taken (or, at
+    // J_max, stops the stage) and the pass starts over on the new fit. A
+    // full pass that takes nothing leaves `tested` holding the flags that
+    // move nothing in the final fit.
     let mut tested: Vec<StepAt> = Vec::new();
     let mut accepted = false;
     while options.jumps && !too_many {

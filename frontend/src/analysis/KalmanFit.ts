@@ -207,10 +207,13 @@ export function parseKalmanOutput(json: string): KalmanOutput {
 export function kalmanReasonText(
 	reason: string | null,
 	coupled: [string, string] | null,
+	droppedLegs: readonly string[] = [],
 ): string {
 	switch (reason) {
 		case "tooFewLegs":
-			return "Needs 2 or more legs with an elevation profile.";
+			return droppedLegs.length > 0
+				? `Needs 2 or more legs with clean observations on a common road; none on it: ${droppedLegs.join(", ")}.`
+				: "Needs 2 or more legs with an elevation profile.";
 		case "tooFewObservations":
 			return "Too few clean observations after the braking, corner and lap-button cuts.";
 		case "notIdentified":

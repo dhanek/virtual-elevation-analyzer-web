@@ -623,7 +623,8 @@ pub struct SelectionOutput {
     pub sessions: Vec<SessionSummary>,
     pub session_z: Vec<SessionZSummary>,
     /// Labels of the legs left out for having no observation on the road
-    /// grid, in input order; empty when refused or nothing was dropped.
+    /// grid, in input order; empty when nothing was dropped, or on any
+    /// refusal other than too few legs left after dropping.
     pub dropped_legs: Vec<String>,
 }
 
@@ -764,16 +765,17 @@ pub fn fit_selection(input: &SelectionInput) -> SelectionOutput {
     // are named, and everything below (jumps, residuals, sessions) refers
     // to the contributing legs, re-indexed.
     let kept: Vec<usize> = (0..built.design.legs.len()).filter(|&l| !built.design.legs[l].pos.is_empty()).collect();
-    if kept.len() < 2 {
-        let mut out = refused(&FitError::TooFewLegs);
-        out.closed_loop = built.closed_loop;
-        out.loop_length = built.loop_length;
-        return out;
-    }
     let dropped_legs: Vec<String> = (0..input.legs.len())
         .filter(|l| !kept.contains(l))
         .map(|l| input.legs[l].label.clone())
         .collect();
+    if kept.len() < 2 {
+        let mut out = refused(&FitError::TooFewLegs);
+        out.closed_loop = built.closed_loop;
+        out.loop_length = built.loop_length;
+        out.dropped_legs = dropped_legs;
+        return out;
+    }
     let design = Design {
         names: built.design.names.clone(),
         legs: kept.iter().map(|&l| built.design.legs[l].clone()).collect(),
@@ -1301,7 +1303,7 @@ mod tests {
         ]));
         assert_eq!(two.status, "refused");
         assert_eq!(two.reason.as_deref(), Some("tooFewLegs"));
-        assert!(two.dropped_legs.is_empty());
+        assert_eq!(two.dropped_legs, vec!["Lap 2".to_string()]);
 
         let three = fit_selection(&input(vec![
             labelled(fittable_leg(5.0, 1), "Lap 1"),
