@@ -611,7 +611,10 @@ shows CdA and Crr ± SE beside the classic pooled row (naive / clustered SE), th
 index, its warnings, the disturbances it took out (leg, road position, step, t) and those it flagged
 but left out, and the residuals by road position with every clean stretch on its own offset, cut
 zones shaded and jumps marked (spec §6). Refusals are named: too few legs, too few clean
-observations, no measured air speed with CdA free, CdA and Crr not separable (naming the pair).
+observations, CdA and Crr not separable (naming the pair). Without measured air speed it still fits,
+and a warning names where the air speed came from: ground speed alone (`noWind`), the wind you
+entered (`enteredWind`) or the weather model (`modelledWind`). Legs with no observation on the road
+grid are left out of the fit and named, also when that leaves too few legs and the fit refuses.
 `npm run ve -- kalman --selection <json|->` runs the same fit on the WASM entry's own input.
 
 **How.** Rust `kalman_fit.rs` (model, GLS through the filter, REML, smoother, jump stage,
@@ -628,7 +631,11 @@ JSON entry `fit_selection_json`); `gain_columns` on the calculator; `KalmanFit.t
   needs only each stretch to be monotone. Samples are thinned to ≥ 5 m apart. Every leg is
   map-matched onto the first leg's GPS track (distance ridden when any leg has no GPS); a closed
   loop is cut in its widest empty gap (`loop_cut`), which kept the loop parity at 1.6e-6 where a
-  cut at the start line lost 6.4e-4 on CdA.
+  cut at the start line lost 6.4e-4 on CdA. A loop is also closed by the selection: when the first
+  leg's ends are near and another leg rides across the closing gap, so a lap that starts before lap
+  1's start keeps its observations; a run crossing the cut is split there, each piece judged rising
+  or falling by its own net motion. A masked span that crosses the cut is split in two as well, so
+  it is shaded at both ends of the axis and not across the middle.
 - *Hill reference rebuilt on the app's VE logic (PR #31).* The offline `results_shared.json` used
   sin(atan(slope)) and end-of-step speeds; `vw-demo/analysis/aerosensor_20260921/kalman_app_reference.py`
   rebuilds it with step-mean speeds and height per metre ridden (exactly linear), dense GLS, ML and
@@ -639,8 +646,10 @@ JSON entry `fit_selection_json`); `gain_columns` on the calculator; `KalmanFit.t
 - *Jumps by intervention.* Flag statistic: the smoothed random-walk disturbance over its SD with β
   profiled out — equal to the t-test of adding that step (de Jong & Penzer), checked to 1e-7. τ = 6:
   a Gaussian calibration gives ~4, but at 6 the two clean hill sessions flag nothing while Sep 23's
-  descent braking flags at t ≈ 24. Flags at 2τ or more are always fitted; a marginal one is fitted
-  only if it moves some shared β by ≥ 0.5 SE, else it is listed as not fitted and the stage stops.
+  descent braking flags at t ≈ 24. In the main loop, flags at 2τ or more are always fitted; a
+  marginal one is fitted only if it moves some shared β by ≥ 0.5 SE, else the loop stops. A
+  verification pass then tests every flag still above τ, largest first, by the 0.5 SE rule alone:
+  one that moves β is fitted and the pass starts over; the rest are listed as "moves nothing".
   The spec's 0.1 SE never stopped on Sep 23 (7 jumps where one settles it), and a rule that stops at
   the first harmless step is order-dependent (a harmless 1.25 m step taken first left the braking
   event in: 6 SE off).
@@ -648,31 +657,37 @@ JSON entry `fit_selection_json`); `gain_columns` on the calculator; `KalmanFit.t
   moves the plain fit only 0.2–1.1 SE (0.30 m: 0.03–0.23 SE). The bite guard (> 1 SE without, < 0.1
   SE with) holds on simulated legs; on the real ones every injected step is listed within ±10 m
   (or its own |t| is under τ) and moves CdA/Crr by < 0.5 SE.
-- *Noise:* REML, q ≤ (10 cm)²/5 m, s2 ≤ (30 cm)², r ≥ (1 cm)²; ell by a downhill walk over
+- *Noise:* REML, q ≤ (10 cm)²/5 m, s2 ≤ (1 m)², r ≥ (1 cm)²; ell by a downhill walk over
   {10, 25, 50, 100, 200} m from 50; shared or per-direction terrain by REML; re-estimated after
   every jump. All three hill sessions pick ell = 200 m (the top of the grid) and r at its floor.
 
 **Acceptance tests** (Rust unless noted; real-data ones read the gitignored `vw-demo/` fixtures and
 skip without them): 1 parity — synthetic dense GLS 1e-9, hills 1e-8, loop within the TODO bounds;
-2 jumps — simulated and real as above; 3 Sep 23 — braking at leg 2 / 370 m (+1.24 m) fitted, 1 jump
-fitted, CdA 0.2945 against classic 0.2889; 4 SE calibration — leave-one-pair-out z RMS 1.09 CdA /
-1.01 Crr (offline mixture 1.10 / 0.90; the plain Gaussian filter offline 3.07 / 1.82); 5 loop A/B —
-pebblestone B − A +4.98 W (offline +5.0), whole lap +1.44 W (offline +1.13), exit cut 40 → 80 m moves
-them 0.05 / 0.21 W; 6 no air speed — `cdaNeedsAirspeed`; 7 speed — 18 legs × 200 points 0.22 s native,
-0.27 s in WASM (`kalmanFit.wasm.test.ts`; ~0.8 s under full-suite load).
+2 jumps — simulated and real as above; 3 Sep 23 — two jumps fitted, the braking at leg 2 / 410 m
+(+1.24 m) and leg 3 / 740 m (+0.36 m), CdA 0.2970 against classic 0.2889; 4 SE calibration —
+leave-one-pair-out z RMS 1.09 CdA / 1.01 Crr (offline mixture 1.10 / 0.90; the plain Gaussian filter
+offline 3.07 / 1.82); 5 loop A/B — pebblestone B − A +4.98 W (offline +5.0), whole lap +1.44 W
+(offline +1.13), exit cut 40 → 80 m moves them 0.05 / 0.21 W; 6 no air speed — fits, with a `noWind`
+warning (entered wind → `enteredWind`, weather → `modelledWind`); 7 speed — 18 legs × 200 points
+0.22 s native, 0.27 s in WASM (`kalmanFit.wasm.test.ts`; ~0.8 s under full-suite load).
 
 **Checked in the running app** (Sep 7 hill session, its stored out-and-back setup: laps 15–20, three
-sections, AWS DEM, measured air speed, 87.09 kg): Kalman CdA 0.2606 ± 0.0076, Crr 0.00404 ± 0.00071
-on 6 legs (604 points), in 64 ms. Each section fitted alone scatters by SD 0.0074 / 0.00069 — the
+sections, AWS DEM, measured air speed, 87.09 kg): Kalman CdA 0.2608 ± 0.0077, Crr 0.00404 ± 0.00073
+on 6 legs (604 points), in 62 ms. Each section fitted alone scatters by SD 0.0074 / 0.00069 — the
 Kalman SEs match it, where the classic clustered SEs (0.0019 / 0.00019) are ~4× too small. Noise:
-drift 4.4 cm per 5 m, terrain per direction at its 30 cm bound over 200 m; the residual plot shows
-why — every leg shares a ~1 m swing at 150–400 m, the DEM's own error. A CdA slider move left the
-block untouched (no refit logged); no console errors. On the reference ride's laps 10/12/16 in
-Standard mode the block also ran, but those laps are not usable VE data as set up (classic Crr
-0.013) and the noise hit its upper bounds — the warning says the SEs may then be too small.
+drift 4.4 cm per 5 m, terrain per direction 32 cm over 200 m, under its 1 m bound, so no
+at-bound warning; the only note is the white noise at its 1 cm floor. A CdA slider move redrew the
+VE but left the block untouched (no refit logged); no console errors. On a hill session without air
+speed the block names the source: "No wind used" with the wind field empty, "the wind you entered"
+for a typed wind, "the weather model (Open-Meteo)" for a weather-filled one. On the reference ride's
+laps 10/12/16 in GPS lap splitting the block also ran, but those laps are not usable VE data as set
+up (classic Crr 0.013) and the noise hit its upper bound — the warning says the SEs may then be too
+small. Its closed loop's masked span across the cut is shaded at both ends of the axis.
 
-**Open choice.** s2 ≤ (30 cm)² (spec §3.4) binds on a coarse DEM, where the shared error reaches
-~1 m. Raising it, or warning only when the SEs and the repeat spread disagree, is left for a decision.
+**Decided (D70-02).** The terrain bound is s2 ≤ (1 m)², not the spec's (30 cm)²: a coarse DEM's
+shared error reaches ~1 m, and at 30 cm the fit sat on the bound and warned that the SEs may be too
+small although they matched the repeat spread. The three hill reference fits came back identical
+under the new bound.
 
 **Not done.** `ve-run kalman` takes the fit's own input, not a run config (the headless API does not
 expose prepared segments). The app analyses one file, so the per-session block (B9) is reachable
