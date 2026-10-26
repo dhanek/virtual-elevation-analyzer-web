@@ -445,7 +445,21 @@ pub fn build_design(input: &SelectionInput, masks: Option<&[Vec<bool>]>) -> Resu
                     runs.push(std::mem::take(&mut current));
                 }
                 if pos[i].is_finite() {
-                    gap = Some(gap.map_or((pos[i], pos[i]), |(a, _)| (a, pos[i])));
+                    // A gap is (first, previous) position. On a closed loop a
+                    // step of more than half the loop crosses the cut: close
+                    // the span at the axis end it was heading for and open a
+                    // new one at the other end.
+                    gap = Some(match gap {
+                        None => (pos[i], pos[i]),
+                        Some((a, previous)) => match loop_length {
+                            Some(length) if (pos[i] - previous).abs() > 0.5 * length => {
+                                let rising = pos[i] < previous;
+                                spans.push((a, if rising { length } else { 0.0 }));
+                                (if rising { 0.0 } else { length }, pos[i])
+                            }
+                            _ => (a, pos[i]),
+                        },
+                    });
                 }
             }
         }
@@ -1215,6 +1229,44 @@ mod tests {
         assert!(built.design.legs[1].pos.iter().all(|s| s.is_finite() && *s >= 0.0 && *s < length));
         let group = built.design.legs[0].group;
         assert!(built.design.legs.iter().all(|l| l.group == group));
+    }
+
+    /// Every lap masked over road 440–560 m, so the loop is cut in that
+    /// zone: the masked span crosses the cut and comes out as two spans,
+    /// one at each end of the axis, never one spanning the whole road.
+    #[test]
+    fn a_masked_span_across_the_loop_cut_is_split() {
+        let legs = vec![
+            circle_lap(0.0, 1000.0, "Lap 1"),
+            circle_lap(0.0, 1000.0, "Lap 2"),
+            circle_lap(0.0, 1000.0, "Lap 3"),
+        ];
+        let masks: Vec<Vec<bool>> = legs
+            .iter()
+            .map(|l| l.distance.iter().map(|&d| !(440.0..=560.0).contains(&d)).collect())
+            .collect();
+        let input = SelectionInput {
+            names: vec!["CdA".into(), "Crr".into()],
+            legs,
+            physics: physics(),
+            options: SelectionOptions::default(),
+        };
+        let built = build_design(&input, Some(&masks)).unwrap();
+        assert!(built.closed_loop);
+        let length = built.loop_length.unwrap();
+        let step = input.options.grid_m;
+        for (l, spans) in built.masked.iter().enumerate() {
+            eprintln!("leg {}: masked {:?} on a {:.1} m loop", l, spans, length);
+            assert!(spans.iter().all(|(a, b)| (b - a).abs() <= 0.5 * length), "leg {}: {:?}", l, spans);
+            let covers = |from: f64, to: f64| {
+                spans.iter().any(|&(a, b)| {
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    (lo - from).abs() <= step && (hi - to).abs() <= step
+                })
+            };
+            assert!(covers(length - 60.0, length), "leg {}: {:?}", l, spans);
+            assert!(covers(0.0, 60.0), "leg {}: {:?}", l, spans);
+        }
     }
 
     /// `leg` moved ~1.1 km north: every fix is off the first leg's route.
