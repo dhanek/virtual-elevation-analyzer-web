@@ -613,6 +613,9 @@ export function buildRepeatUnits(
 			airSpeed: seriesWindow(air, p.trimStart, p.trimEnd),
 			stepSeconds: seriesWindow(stepSeconds, p.trimStart, p.trimEnd),
 			rho: p.airDensity,
+			timestamps: seriesWindow(p.slice.timestamps, p.trimStart, p.trimEnd),
+			lat: seriesWindow(p.slice.positionLat, p.trimStart, p.trimEnd),
+			lon: seriesWindow(p.slice.positionLong, p.trimStart, p.trimEnd),
 		};
 		const section = p.segment.legDirection ? p.segment.itemNumber : undefined;
 		if (section === undefined) {

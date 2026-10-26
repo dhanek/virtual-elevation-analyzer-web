@@ -75,6 +75,14 @@ export interface RepeatLeg {
 	airSpeed?: Float64Array;
 	stepSeconds?: Float64Array;
 	rho?: number;
+	/**
+	 * Timestamps (s) and GPS fixes (degrees) over the same window. Optional:
+	 * only the Kalman fit (TODO J6) reads them, to put every leg on one road
+	 * axis and to find braking and corners.
+	 */
+	timestamps?: Float64Array;
+	lat?: Float64Array;
+	lon?: Float64Array;
 }
 
 export interface RepeatUnitInput {
@@ -245,13 +253,13 @@ function unstableReason(
 }
 
 /** b, a, f and the target over one leg's window (`y = b − h`). */
-interface LegParts {
+export interface LegParts {
 	y: Float64Array;
 	a: Float64Array;
 	f: Float64Array;
 }
 
-function legParts(leg: RepeatLeg): LegParts | null {
+export function legParts(leg: RepeatLeg): LegParts | null {
 	const h = leg.elevation;
 	if (!h || h.length < 2) {
 		return null;
