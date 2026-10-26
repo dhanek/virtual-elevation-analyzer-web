@@ -225,7 +225,7 @@ function resultMarkup(
     <tbody>${fit.jumps
 			.map(
 				(j) =>
-					`<tr class="ve-lap-summary__row">${cell(escapeHtml(j.label), LABEL)}${cell(fixed(j.pos, 0))}${cell(fixed(j.distance, 0))}${cell(`${j.size >= 0 ? "+" : "−"}${Math.abs(j.size).toFixed(2)}`)}${cell(fixed(Math.abs(j.t), 1))}${cell(j.fitted ? "taken out" : "not fitted — moves nothing")}</tr>`,
+					`<tr class="ve-lap-summary__row">${cell(escapeHtml(j.label), LABEL)}${cell(fixed(j.pos, 0))}${cell(fixed(j.distance, 0))}${cell(`${j.size >= 0 ? "+" : "−"}${Math.abs(j.size).toFixed(2)}`)}${cell(fixed(Math.abs(j.t), 1))}${cell(j.fitted ? "taken out" : j.movesNothing ? "not fitted — moves nothing" : "not fitted — jump limit reached")}</tr>`,
 			)
 			.join("")}</tbody>
 </table></div>`

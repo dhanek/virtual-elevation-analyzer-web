@@ -64,8 +64,10 @@ interface KalmanJump {
 	/** Step size (m) in the direction the leg was ridden. */
 	size: number;
 	t: number;
-	/** In the fit, or flagged but left out (it would not move the estimate). */
+	/** In the fit, or flagged but left out. */
 	fitted: boolean;
+	/** Left out after a test against the final fit: it moves nothing. */
+	movesNothing: boolean;
 }
 
 interface KalmanFitSummary {

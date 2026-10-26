@@ -573,6 +573,8 @@ pub struct JumpSummary {
     pub size: f64,
     pub t: f64,
     pub fitted: bool,
+    /// Not fitted, and tested against the final fit: it moves nothing.
+    pub moves_nothing: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -678,6 +680,7 @@ fn summary(labels: &[String], r: &KalmanResult) -> FitSummary {
                 size: j.size,
                 t: j.t,
                 fitted: j.fitted,
+                moves_nothing: j.moves_nothing,
             })
             .collect(),
         warnings: r.warnings.iter().map(warning_text).collect(),

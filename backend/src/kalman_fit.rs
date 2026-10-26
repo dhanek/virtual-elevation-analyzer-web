@@ -1115,9 +1115,13 @@ pub struct Jump {
     /// Its t-statistic in the final fit (or, when not fitted, in the fit
     /// that tried it).
     pub t: f64,
-    /// In the final fit. Flags still above `tau` that would move no shared
-    /// β by `beta_stop`·SE are listed but left out.
+    /// In the final fit. Flags still above `tau` that are not are listed
+    /// too, left out.
     pub fitted: bool,
+    /// Not fitted, and tested against the final fit: adding it would move
+    /// no shared β by `beta_stop`·SE. False for fitted jumps and for flags
+    /// left untested because the jump stage hit J_max.
+    pub moves_nothing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1236,13 +1240,56 @@ pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResu
         noise = next_noise;
         fit = next;
     }
-    // Every flag still above tau in the final fit is listed too, marked
-    // not fitted: each would move no shared β by beta_stop·SE.
-    let unfitted: Vec<(StepAt, f64, f64, bool)> = if options.jumps {
+    // Verification: the loop above tested only the largest flag. Test every
+    // flag still above tau, largest |t| first, exactly as the loop does; one
+    // that matters is taken (or, at J_max, stops the stage) and the pass
+    // starts over on the new fit. A full pass that takes nothing leaves
+    // `tested` holding the flags that move nothing in the final fit.
+    let mut tested: Vec<StepAt> = Vec::new();
+    let mut accepted = false;
+    while options.jumps && !too_many {
+        let mut flags: Vec<StepStat> = step_statistics(&design, &noise.noise, &steps)?
+            .into_iter()
+            .filter(|s| !steps.contains(&s.at))
+            .collect();
+        flags.sort_by(|a, b| b.t.abs().partial_cmp(&a.t.abs()).unwrap());
+        if accepted {
+            rounds.push(round(&fit, &noise.noise, flags.first().map_or(0.0, |w| w.t.abs())));
+        }
+        accepted = false;
+        tested.clear();
+        for flag in flags.iter().take_while(|s| s.t.abs() >= options.tau) {
+            let mut with = steps.clone();
+            with.push(flag.at);
+            let next_noise = refit_noise(&design, &options.noise, &with, &noise)?;
+            let next = gls_with_steps(&design, &next_noise.noise, Anchor::Stretch, &with)?;
+            let matters = (0..shared).any(|i| (next.beta[i] - fit.beta[i]).abs() >= options.beta_stop * next.se[i]);
+            if !matters {
+                tested.push(flag.at);
+                continue;
+            }
+            if steps.len() >= max_jumps {
+                too_many = true;
+                tested.clear();
+            } else {
+                steps = with;
+                noise = next_noise;
+                fit = next;
+                accepted = true;
+            }
+            break;
+        }
+        if !accepted {
+            break;
+        }
+    }
+    // Every flag still above tau in the final fit is listed too, not
+    // fitted: tested above and moving nothing, or untested at J_max.
+    let unfitted: Vec<(StepAt, f64, f64, bool, bool)> = if options.jumps {
         step_statistics(&design, &noise.noise, &steps)?
             .into_iter()
             .filter(|s| s.t.abs() >= options.tau && !steps.contains(&s.at))
-            .map(|s| (s.at, s.size, s.size / s.t, false))
+            .map(|s| (s.at, s.size, s.size / s.t, false, tested.contains(&s.at)))
             .collect()
     } else {
         Vec::new()
@@ -1251,9 +1298,9 @@ pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResu
     let jumps = steps
         .iter()
         .enumerate()
-        .map(|(i, s)| (*s, fit.beta[first_step + i], fit.se[first_step + i], true))
+        .map(|(i, s)| (*s, fit.beta[first_step + i], fit.se[first_step + i], true, false))
         .chain(unfitted)
-        .map(|(s, beta, se, fitted)| {
+        .map(|(s, beta, se, fitted, moves_nothing)| {
             let leg = &design.legs[s.leg];
             // A leg ridden against road position meets the step the other
             // way round: report it in riding order.
@@ -1270,6 +1317,7 @@ pub fn kalman_fit(design: &Design, options: &KalmanOptions) -> Result<KalmanResu
                 size,
                 t: size / se,
                 fitted,
+                moves_nothing,
             }
         })
         .collect();
@@ -2459,11 +2507,44 @@ mod tests {
             );
         }
         for j in &result.jumps {
-            eprintln!("jump: leg {} at {} m (grid {} m), {:+.2} m, t {:.1}, fitted {}", j.leg + 1, j.pos, j.pos - 40.0, j.size, j.t, j.fitted);
+            eprintln!(
+                "jump: leg {} at {} m (grid {} m), {:+.2} m, t {:.1}, fitted {}, moves nothing {}",
+                j.leg + 1,
+                j.pos,
+                j.pos - 40.0,
+                j.size,
+                j.t,
+                j.fitted,
+                j.moves_nothing
+            );
         }
         eprintln!("classic CdA {:.4} Crr {:.3}e-3", classic[0], classic[1] * 1e3);
         let fitted = result.jumps.iter().filter(|j| j.fitted).count();
         assert!(fitted <= 3, "{} jumps fitted", fitted);
+        // Every flag left out moves nothing: the final steps plus that one,
+        // refitted as the jump stage does, move no shared β by beta_stop·SE.
+        let options = KalmanOptions::default();
+        let steps: Vec<StepAt> =
+            result.jumps.iter().filter(|j| j.fitted).map(|j| StepAt { leg: j.leg, obs: j.obs }).collect();
+        let unfitted: Vec<(&Jump, Vec<f64>)> = result
+            .jumps
+            .iter()
+            .filter(|j| !j.fitted)
+            .map(|j| {
+                let mut with = steps.clone();
+                with.push(StepAt { leg: j.leg, obs: j.obs });
+                let noise = refit_noise(&result.design, &options.noise, &with, &result.noise).unwrap();
+                let next = gls_with_steps(&result.design, &noise.noise, Anchor::Stretch, &with).unwrap();
+                let moves: Vec<f64> =
+                    (0..2).map(|i| (next.beta[i] - result.fit.beta[i]).abs() / next.se[i]).collect();
+                eprintln!("unfitted leg {} at {} m moves [{:.2}, {:.2}] SE", j.leg + 1, j.pos, moves[0], moves[1]);
+                (j, moves)
+            })
+            .collect();
+        for (j, moves) in &unfitted {
+            assert!(moves.iter().all(|&m| m < options.beta_stop), "leg {} at {} m: {:?}", j.leg + 1, j.pos, moves);
+        }
+        assert!(unfitted.iter().all(|(j, _)| j.moves_nothing));
         assert!(result
             .jumps
             .iter()
@@ -2585,6 +2666,22 @@ mod tests {
         assert_eq!(r.fit.names[0], "Crr");
         assert!(!r.warnings.contains(&Warning::NoWind), "{:?}", r.warnings);
         assert!((r.fit.beta[0] - 0.004).abs() < 3.0 * r.fit.se[0], "Crr {} ± {}", r.fit.beta[0], r.fit.se[0]);
+    }
+
+    /// A stage stopped at J_max tested nothing it left out: every unfitted
+    /// flag says so (moves_nothing false), never "moves nothing".
+    #[test]
+    fn flags_left_at_the_jump_limit_are_not_called_harmless() {
+        let mut design = quiet_hill(7, 4);
+        for (l, at) in [(0, 60), (1, 120), (2, 90)] {
+            design.legs[l].y.iter_mut().skip(at).for_each(|y| *y += 1.5);
+        }
+        let options = KalmanOptions { max_jumps_per_leg: 0, ..KalmanOptions::default() };
+        let r = kalman_fit(&design, &options).unwrap();
+        assert!(r.too_many_disturbances);
+        assert!(r.warnings.contains(&Warning::TooManyDisturbances));
+        assert!(!r.jumps.is_empty());
+        assert!(r.jumps.iter().all(|j| !j.fitted && !j.moves_nothing), "{:?}", r.jumps);
     }
 
     /// Two columns that cannot be told apart: refused, naming both.

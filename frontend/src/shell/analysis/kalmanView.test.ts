@@ -65,6 +65,7 @@ const OK: KalmanOutput = {
 				size: 1.24,
 				t: 23.8,
 				fitted: true,
+				movesNothing: false,
 			},
 			{
 				leg: 2,
@@ -74,6 +75,7 @@ const OK: KalmanOutput = {
 				size: 0.5,
 				t: 10.1,
 				fitted: false,
+				movesNothing: true,
 			},
 		],
 		warnings: ["noiseAtBound:r"],
@@ -219,6 +221,24 @@ describe("Kalman block in the Repeats tab", () => {
 		document.getElementById(KALMAN_BUTTON_ID)!.click();
 		render(3);
 		expect(text()).toContain("left out: Lap 3");
+	});
+
+	it("says a flag left at the jump limit was not tested", () => {
+		const fit = OK.fit!;
+		setKalmanRunner(() =>
+			JSON.stringify({
+				...OK,
+				fit: {
+					...fit,
+					jumps: [{ ...fit.jumps[1], movesNothing: false }],
+				},
+			}),
+		);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).toContain("not fitted — jump limit reached");
+		expect(text()).not.toContain("moves nothing");
 	});
 
 	it("names a refusal", () => {
