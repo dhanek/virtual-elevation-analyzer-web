@@ -180,6 +180,8 @@ export function buildKalmanSelection(
 /**
  * Where the fit's air speed comes from (it never refuses on this; it names
  * the source in a warning).
+ * The label mirrors the VE calculator: a channel-less "fit" source ("none")
+ * falls back to the constant wind, and 0 m/s is no wind.
  */
 export function airSpeedSource(
 	dataSource: WindDataSource,
@@ -190,12 +192,13 @@ export function airSpeedSource(
 		case "wind_speed":
 			return "measured";
 		case "none":
-			return "groundSpeed";
-		case "constant":
-			if (!Number.isFinite(params.wind_speed)) {
+		case "constant": {
+			const w = params.wind_speed;
+			if (typeof w !== "number" || !Number.isFinite(w) || w === 0) {
 				return "groundSpeed";
 			}
 			return params.wind_entry === "weather" ? "modelled" : "entered";
+		}
 	}
 }
 

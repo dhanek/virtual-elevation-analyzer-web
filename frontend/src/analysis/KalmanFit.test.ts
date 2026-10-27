@@ -109,6 +109,25 @@ describe("airSpeedSource", () => {
 			airSpeedSource("constant", { wind_speed: 3, wind_entry: "unknown" }),
 		).toBe("entered");
 	});
+
+	it("follows the calculator's fallback to the constant wind; 0 m/s is no wind", () => {
+		expect(
+			airSpeedSource("none", { wind_speed: 1.14, wind_entry: "weather" }),
+		).toBe("modelled");
+		expect(
+			airSpeedSource("none", { wind_speed: 3, wind_entry: "manual" }),
+		).toBe("entered");
+		expect(
+			airSpeedSource("none", { wind_speed: 0, wind_entry: "weather" }),
+		).toBe("groundSpeed");
+		expect(airSpeedSource("none", { wind_speed: null })).toBe("groundSpeed");
+		expect(
+			airSpeedSource("constant", { wind_speed: 0, wind_entry: "manual" }),
+		).toBe("groundSpeed");
+		expect(airSpeedSource("constant", { wind_speed: Number.NaN })).toBe(
+			"groundSpeed",
+		);
+	});
 });
 
 describe("texts", () => {
