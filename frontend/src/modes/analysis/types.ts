@@ -1,3 +1,4 @@
+import type { AirSpeedSource, KalmanPhysics } from "../../analysis/KalmanFit";
 import type { ReferenceElevationSeries } from "../../analysis/elevationProfiles";
 import type {
 	RepeatUnitInput,
@@ -407,6 +408,16 @@ export interface RepeatsUpdateInput {
 	 * is not sampled at 1 s. Optional so callers without it show no section.
 	 */
 	timing?: () => TimingSweepInputs | null;
+	/**
+	 * What the Kalman fit (TODO J6) needs beyond the units: the rider and the
+	 * slider values its braking pre-mask uses, and where the air speed comes
+	 * from (a free CdA needs a measured one). Optional: absent means no
+	 * Kalman block. The fit itself runs only from the tab's button.
+	 */
+	kalman?: {
+		physics: KalmanPhysics;
+		airSpeed: AirSpeedSource;
+	};
 }
 
 /**

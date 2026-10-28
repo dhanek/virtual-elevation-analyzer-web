@@ -7,6 +7,7 @@
  *   npm run ve -- --file ride.fit --config run.json
  *   cat run.json | npm run ve -- --config -
  *   npm run ve -- --batch < runs.ndjson > results.ndjson
+ *   npm run ve -- kalman --selection selection.json   (TODO J6)
  *
  * Exit codes: 0 ok · 2 invalid config · 3 activity load / wasm missing ·
  * 4 no valid segments · 1 unexpected. Every code still writes a well-formed
@@ -28,7 +29,7 @@ console.debug = console.error.bind(console);
 console.warn = console.error.bind(console);
 /* eslint-enable no-console */
 
-import init from "../pkg/virtual_elevation_analyzer.js";
+import init, { fit_selection_json } from "../pkg/virtual_elevation_analyzer.js";
 import {
 	loadRunActivity,
 	runAnalysis,
@@ -173,6 +174,11 @@ async function main(): Promise<void> {
 	}
 	await init({ module_or_path: readFileSync(WASM_PATH) });
 
+	if (argv.filter((a) => a !== "--")[0] === "kalman") {
+		await runKalman(flag("--selection"));
+		return;
+	}
+
 	if (batch) {
 		// NDJSON in, NDJSON out: one `{file?, config}` per line, one result per
 		// line, tagged nowhere — order is the correlation. A bad line emits its
@@ -229,6 +235,36 @@ async function main(): Promise<void> {
 	const { result, exitCode } = await runOne(raw, fileArg, configDir);
 	emit(result);
 	process.exitCode = exitCode;
+}
+
+/**
+ * `kalman --selection <path|->`: the Kalman fit (TODO J6) on a selection in
+ * the WASM entry's own input format (`KalmanSelectionInput`), its output JSON
+ * on stdout. Exit 0 fitted · 4 refused by a named fallback · 2 bad input.
+ */
+async function runKalman(selectionArg: string | null): Promise<void> {
+	if (!selectionArg) {
+		process.stdout.write(
+			JSON.stringify({
+				status: "refused",
+				reason: "badInput: pass --selection <path|->",
+			}) + "\n",
+		);
+		process.exitCode = 2;
+		return;
+	}
+	const text =
+		selectionArg === "-"
+			? await readStdin()
+			: readFileSync(selectionArg, "utf8");
+	const output = fit_selection_json(text);
+	process.stdout.write(output + "\n");
+	const parsed = JSON.parse(output) as {
+		status: string;
+		reason?: string | null;
+	};
+	process.exitCode =
+		parsed.status === "ok" ? 0 : parsed.reason?.startsWith("badInput") ? 2 : 4;
 }
 
 void main().catch((error) => {

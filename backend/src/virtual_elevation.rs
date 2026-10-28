@@ -868,6 +868,23 @@ impl VirtualElevationCalculator {
         grid
     }
 
+    /// `try_gain_columns` flattened for JavaScript: `[y, a, f_0, …, f_{G−1}]`,
+    /// each the window's length (`trim_end − trim_start + 1` after clamping).
+    /// Empty where `ve_gain` is NaN.
+    #[wasm_bindgen]
+    pub fn gain_columns(&self, trim_start: usize, trim_end: usize, groups: &[u8]) -> Vec<f64> {
+        let Some(cols) = self.try_gain_columns(trim_start, trim_end, groups) else {
+            return Vec::new();
+        };
+        let mut flat = Vec::with_capacity(cols.y.len() * (2 + cols.f.len()));
+        flat.extend_from_slice(&cols.y);
+        flat.extend_from_slice(&cols.a);
+        for f in &cols.f {
+            flat.extend_from_slice(f);
+        }
+        flat
+    }
+
     /// The Crr at which `ve_gain(cda, ·)` equals `target_gain`, by bisection
     /// over `[crr_lo, crr_hi]`. Raising Crr lowers every sample's slope, so
     /// gain is strictly decreasing in Crr and the root is unique whenever it
@@ -1035,6 +1052,67 @@ impl VirtualElevationCalculator {
         }
         Ok(0.5 * (lo + hi))
     }
+
+    /// The VE profile over a window split into its CdA- and Crr-free part
+    /// and the columns CdA and each Crr group multiply, cumulative from the
+    /// window start (0 there):
+    ///
+    /// `ve[start + k] − ve[start] = y[k] − CdA·a[k] − Σ_s Crr_s·f[s][k]`
+    ///
+    /// exactly, up to summation rounding. `groups` labels each sample of the
+    /// ride with its Crr group; empty puts every sample in group 0. Same
+    /// window clamping and the same non-finite rule as `ve_gain`, and `None`
+    /// where `ve_gain` is NaN. Target-free like `ve_gain`: the caller
+    /// subtracts its own reference rise.
+    pub fn try_gain_columns(
+        &self,
+        trim_start: usize,
+        trim_end: usize,
+        groups: &[u8],
+    ) -> Option<GainColumns> {
+        let (start, end) = self.metrics_window(self.data.velocity.len(), trim_start, trim_end)?;
+        let kernel = self.build_gain_kernel(start, end);
+        if kernel.step.is_empty() {
+            return None;
+        }
+        let group_of = |i: usize| groups.get(i).copied().unwrap_or(0) as usize;
+        let group_count = ((start + 1)..=end).map(group_of).max().unwrap_or(0) + 1;
+
+        let len = kernel.step.len() + 1;
+        let mut cols = GainColumns {
+            y: Vec::with_capacity(len),
+            a: Vec::with_capacity(len),
+            f: vec![Vec::with_capacity(len); group_count],
+        };
+        let (mut y, mut a) = (0.0, 0.0);
+        let mut f = vec![0.0; group_count];
+        cols.y.push(y);
+        cols.a.push(a);
+        cols.f.iter_mut().for_each(|col| col.push(0.0));
+        for (j, i) in ((start + 1)..=end).enumerate() {
+            let step = kernel.step[j];
+            y += step * kernel.base[j];
+            a += step * kernel.aero[j];
+            f[group_of(i)] += step;
+            cols.y.push(y);
+            cols.a.push(a);
+            for (col, &value) in cols.f.iter_mut().zip(f.iter()) {
+                col.push(value);
+            }
+        }
+        Some(cols)
+    }
+}
+
+/// `try_gain_columns`' result: per window sample, cumulative from the start.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GainColumns {
+    /// VE at CdA = 0 and Crr = 0.
+    pub y: Vec<f64>,
+    /// The column CdA multiplies: cumulative `v̄·dt·ρ·v̄a²/(2mg)`.
+    pub a: Vec<f64>,
+    /// One column per Crr group: cumulative distance ridden in that group.
+    pub f: Vec<Vec<f64>>,
 }
 
 fn create_ve_calculator_impl(
@@ -2367,5 +2445,73 @@ mod tests {
             timed.ve_gain_grid(0.2, 0.4, 5, 0.002, 0.008, 4, 5, 90),
             untimed.ve_gain_grid(0.2, 0.4, 5, 0.002, 0.008, 4, 5, 90)
         );
+    }
+
+    // ---- Gain columns (Kalman fit, J6) ----
+
+    /// `y − CdA·a − Crr·Σ f_s` must reproduce the VE profile from the window
+    /// start, sample by sample, at any (CdA, Crr): the Kalman fit relies on
+    /// the profile being exactly linear in both.
+    #[test]
+    fn gain_columns_reproduce_the_profile_at_every_sample() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        let groups: Vec<u8> = (0..N).map(|i| ((i / 7) % 3) as u8).collect();
+        let (start, end) = (10, 90);
+        let cols = calc
+            .try_gain_columns(start, end, &groups)
+            .expect("an interior window has columns");
+        assert_eq!(cols.f.len(), 3);
+        assert_eq!(cols.y.len(), end - start + 1);
+        for &(cda, crr) in &[(0.20, 0.002), (0.31, 0.0047), (0.45, 0.012)] {
+            let ve = calc
+                .calculate_virtual_elevation(cda, crr, start, end)
+                .virtual_elevation();
+            for k in 0..=(end - start) {
+                let rolling: f64 = cols.f.iter().map(|f| f[k]).sum();
+                let linear = cols.y[k] - cda * cols.a[k] - crr * rolling;
+                let profile = ve[start + k] - ve[start];
+                assert!(
+                    (linear - profile).abs() < GAIN_TOLERANCE,
+                    "sample {}: columns give {} but the profile says {}",
+                    k,
+                    linear,
+                    profile
+                );
+            }
+        }
+    }
+
+    /// Each Crr column only accumulates distance on its own group's samples,
+    /// so a different Crr per group moves the profile only where that group
+    /// is ridden.
+    #[test]
+    fn gain_columns_split_the_rolling_distance_by_group() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        let groups: Vec<u8> = (0..N).map(|i| if i < 50 { 0 } else { 1 }).collect();
+        let cols = calc.try_gain_columns(10, 90, &groups).unwrap();
+        // Window samples 11..=49 are group 0, 50..=90 group 1.
+        assert_eq!(cols.f[1][39], 0.0, "group 1 is not ridden before sample 50");
+        assert!(cols.f[1][40] > 0.0);
+        assert_eq!(cols.f[0][80], cols.f[0][39], "group 0 stops at sample 49");
+        let untagged = calc.try_gain_columns(10, 90, &[]).unwrap();
+        assert_eq!(untagged.f.len(), 1);
+        assert!((untagged.f[0][80] - cols.f[0][80] - cols.f[1][80]).abs() < 1e-9);
+    }
+
+    /// The flat WASM layout is `[y, a, f_0, …, f_{G−1}]`, each the window's
+    /// length, and empty on a window `ve_gain` rejects.
+    #[test]
+    fn gain_columns_flat_layout_and_degenerate_window() {
+        let calc = VirtualElevationCalculator::new(varied_ride(), windy_params());
+        let groups: Vec<u8> = (0..N).map(|i| (i % 2) as u8).collect();
+        let flat = calc.gain_columns(10, 90, &groups);
+        let cols = calc.try_gain_columns(10, 90, &groups).unwrap();
+        let n = cols.y.len();
+        assert_eq!(flat.len(), 4 * n);
+        assert_eq!(&flat[..n], &cols.y[..]);
+        assert_eq!(&flat[n..2 * n], &cols.a[..]);
+        assert_eq!(&flat[3 * n..], &cols.f[1][..]);
+        assert!(calc.gain_columns(5, 6, &groups).is_empty());
+        assert!(calc.try_gain_columns(5, 6, &groups).is_none());
     }
 }

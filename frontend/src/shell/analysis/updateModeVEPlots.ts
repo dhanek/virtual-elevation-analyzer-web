@@ -42,6 +42,7 @@ import {
 } from "../../analysis/AutoConverge";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { TIMING_SHIFTS } from "../../analysis/TimingSweep";
+import { airSpeedSource } from "../../analysis/KalmanFit";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
 import type {
@@ -505,6 +506,16 @@ export async function updateModeVEPlots(
 			// Fourteen more preparations (TODO J4) — only once asked for.
 			timing: () =>
 				buildTimingSweepInputs(prepareArgs, TIMING_SHIFTS, elevation.profile),
+			// The Kalman fit (TODO J6) runs only from the tab's button.
+			kalman: {
+				physics: {
+					mass: params.system_mass,
+					eta: params.eta,
+					cda,
+					crr,
+				},
+				airSpeed: airSpeedSource(wind.dataSource, params),
+			},
 		});
 	}
 

@@ -1,0 +1,391 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { KalmanOutput } from "../../analysis/KalmanFit";
+import type { RepeatLeg, RepeatUnitInput } from "../../analysis/RepeatSpread";
+import {
+	KALMAN_BUTTON_ID,
+	resetKalmanState,
+	setKalmanRunner,
+} from "./kalmanView";
+import { renderRepeatsView, repeatsTabMarkup } from "./repeatsView";
+
+function leg(seed: number): RepeatLeg {
+	const n = 120;
+	const a = Float64Array.from(
+		{ length: n },
+		(_, i) => i * (0.5 + 0.2 * Math.sin((i + seed) / 9)),
+	);
+	const f = Float64Array.from({ length: n }, (_, i) => i * 9);
+	return {
+		veProfile: (c, k) =>
+			Float64Array.from({ length: n }, (_, i) => -c * a[i] - k * f[i]),
+		elevation: Float64Array.from(
+			{ length: n },
+			(_, i) => -0.3 * a[i] - 0.004 * f[i] + 0.02 * Math.sin(i + seed),
+		),
+		distance: Float64Array.from({ length: n }, (_, i) => 5 * i),
+	};
+}
+
+const units = (count: number): RepeatUnitInput[] =>
+	Array.from({ length: count }, (_, j) => ({
+		key: `lap-${j + 1}`,
+		label: `Lap ${j + 1}`,
+		legs: [leg(j)],
+	}));
+
+const OK: KalmanOutput = {
+	status: "ok",
+	reason: null,
+	coupled: null,
+	fit: {
+		names: ["CdA", "Crr"],
+		beta: [0.2954, 0.00177],
+		se: [0.006, 0.00047],
+		cov: [
+			[3.6e-5, -2e-6],
+			[-2e-6, 2.2e-7],
+		],
+		noise: {
+			qPer5m: 0.045 ** 2,
+			s2: 0.109 ** 2,
+			ell: 200,
+			r: 1e-4,
+			terrainByDirection: false,
+			atBound: ["r"],
+		},
+		jumps: [
+			{
+				leg: 1,
+				label: "Lap 2",
+				pos: 410,
+				distance: 370,
+				size: 1.24,
+				t: 23.8,
+				fitted: true,
+				movesNothing: false,
+			},
+			{
+				leg: 2,
+				label: "Lap 3",
+				pos: 460,
+				distance: 420,
+				size: 0.5,
+				t: 10.1,
+				fitted: false,
+				movesNothing: true,
+			},
+		],
+		warnings: ["noiseAtBound:r"],
+		cdaCrrCorrelation: -0.71,
+		speedContrast: 0.62,
+		legs: 3,
+		observations: 600,
+	},
+	residuals: [
+		{
+			label: "Lap 1",
+			pos: [0, 5, 10],
+			residual: [0, 0.01, -0.01],
+			stretch: [0, 0, 0],
+			masked: [[20, 60]],
+		},
+	],
+	closedLoop: false,
+	loopLength: null,
+	sessions: [],
+	sessionZ: [],
+	droppedLegs: [],
+};
+
+const PHYSICS = { mass: 85, eta: 0.98, cda: 0.3, crr: 0.004 };
+
+function render(
+	count: number,
+	kalman = true,
+	options: {
+		units?: RepeatUnitInput[];
+		physics?: typeof PHYSICS;
+	} = {},
+) {
+	renderRepeatsView({
+		units: options.units ?? units(count),
+		fixedCrr: 0.004,
+		cdaBounds: [0.15, 0.5],
+		crrBounds: [0.0015, 0.03],
+		systemMass: 85,
+		sensitivities: [],
+		kalman: kalman
+			? {
+					physics: options.physics ?? PHYSICS,
+					airSpeed: "measured",
+				}
+			: undefined,
+	});
+}
+
+const text = () => document.getElementById("repeats-tab")!.textContent ?? "";
+
+beforeEach(() => {
+	resetKalmanState();
+	document.body.innerHTML = repeatsTabMarkup();
+});
+
+describe("Kalman block in the Repeats tab", () => {
+	it("waits for the button: no fit on render", () => {
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		const button = document.getElementById(KALMAN_BUTTON_ID)!;
+		expect(button.textContent).toBe("Run Kalman fit");
+		expect(runner).not.toHaveBeenCalled();
+	});
+
+	it("fits on click and shows estimates ± SE, the classic row, noise, warnings and jumps", () => {
+		const runner = vi.fn((_input: string) => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(runner).toHaveBeenCalledTimes(1);
+		const sent = JSON.parse(runner.mock.calls[0][0]);
+		expect(sent.legs).toHaveLength(3);
+		const t = text();
+		expect(t).toContain("0.2954");
+		expect(t).toContain("± 0.0060");
+		expect(t).toContain("0.00177");
+		expect(t).toContain("Classic");
+		expect(t).toContain("3 legs");
+		expect(t).toContain("White noise at its 1 cm floor");
+		expect(t).toContain("Lap 2");
+		expect(t).toContain("+1.24");
+		expect(t).toMatch(/not fitted/);
+		expect(document.getElementById("repeatsKalmanPlot")).not.toBeNull();
+	});
+
+	it("never refits on a slider move, only when asked again", () => {
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		render(3, true, { physics: { ...PHYSICS, cda: 0.25, crr: 0.006 } });
+		render(3, true, { physics: { ...PHYSICS, cda: 0.35, crr: 0.003 } });
+		expect(runner).toHaveBeenCalledTimes(1);
+		expect(text()).toContain("0.2954");
+		expect(text()).not.toContain("Selection changed");
+	});
+
+	it("marks the result stale when the leg data changes at the same lengths", () => {
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		const shifted = units(3).map((u) => ({
+			...u,
+			legs: u.legs.map((l) => ({
+				...l,
+				elevation: l.elevation!.map((e) => e + 0.5),
+			})),
+		}));
+		render(3, true, { units: shifted });
+		expect(text()).toContain("Selection changed");
+		expect(text()).not.toContain("0.2954");
+		expect(runner).toHaveBeenCalledTimes(1);
+		render(3, true, { physics: { ...PHYSICS, eta: 0.96 } });
+		expect(text()).toContain("Selection changed");
+		expect(runner).toHaveBeenCalledTimes(1);
+	});
+
+	it("marks the result stale when the elevation changes but y does not", () => {
+		// y = b − h: shifting the VE profile with the elevation keeps y, so
+		// only the elevation series (which the braking pre-mask reads)
+		// differs. Integer series, so y is bit-identical after the shift.
+		const integerUnits = (shift: number): RepeatUnitInput[] =>
+			Array.from({ length: 3 }, (_, j) => ({
+				key: `lap-${j + 1}`,
+				label: `Lap ${j + 1}`,
+				legs: [
+					{
+						veProfile: (c: number, k: number) =>
+							Float64Array.from(
+								{ length: 120 },
+								(_, i) => shift + 2 * i + j - c * i - k * 3 * i,
+							),
+						elevation: Float64Array.from(
+							{ length: 120 },
+							(_, i) => shift + i + (i % 7),
+						),
+						distance: Float64Array.from({ length: 120 }, (_, i) => 5 * i),
+					},
+				],
+			}));
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3, true, { units: integerUnits(0) });
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3, true, { units: integerUnits(0) });
+		expect(text()).not.toContain("Selection changed");
+		render(3, true, { units: integerUnits(4) });
+		expect(text()).toContain("Selection changed");
+		expect(runner).toHaveBeenCalledTimes(1);
+	});
+
+	it("a cached render builds no JSON of the selection", () => {
+		// STRUCTURAL: guards how the cache key is computed, not what renders.
+		// A cached render hashes the selection's arrays directly; a JSON
+		// string of ~15,000 samples per render is what this rules out.
+		setKalmanRunner(() => JSON.stringify(OK));
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		const stringify = vi.spyOn(JSON, "stringify");
+		try {
+			render(3);
+			render(3, true, { physics: { ...PHYSICS, cda: 0.25 } });
+			const ofSelection = stringify.mock.calls.filter(
+				([value]) =>
+					typeof value === "object" && value !== null && "legs" in value,
+			);
+			expect(ofSelection).toHaveLength(0);
+		} finally {
+			stringify.mockRestore();
+		}
+		expect(text()).toContain("0.2954");
+	});
+
+	it("marks the result stale when the air-speed source or the mass changes", () => {
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		renderRepeatsView({
+			units: units(3),
+			fixedCrr: 0.004,
+			cdaBounds: [0.15, 0.5],
+			crrBounds: [0.0015, 0.03],
+			systemMass: 85,
+			sensitivities: [],
+			kalman: { physics: PHYSICS, airSpeed: "groundSpeed" },
+		});
+		expect(text()).toContain("Selection changed");
+		expect(runner).toHaveBeenCalledTimes(1);
+
+		resetKalmanState();
+		setKalmanRunner(runner);
+		document.body.innerHTML = repeatsTabMarkup();
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).not.toContain("Selection changed");
+		render(3, true, { physics: { ...PHYSICS, mass: 90 } });
+		expect(text()).toContain("Selection changed");
+		expect(runner).toHaveBeenCalledTimes(2);
+	});
+
+	it("marks a result stale when the selection changes, and refits on Re-run", () => {
+		const runner = vi.fn(() => JSON.stringify(OK));
+		setKalmanRunner(runner);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(4);
+		expect(text()).toContain("Selection changed");
+		expect(text()).not.toContain("0.2954");
+		expect(document.getElementById(KALMAN_BUTTON_ID)!.textContent).toBe(
+			"Re-run Kalman fit",
+		);
+		expect(runner).toHaveBeenCalledTimes(1);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		expect(runner).toHaveBeenCalledTimes(2);
+	});
+
+	it("names the legs left out for want of observations", () => {
+		setKalmanRunner(() => JSON.stringify({ ...OK, droppedLegs: ["Lap 3"] }));
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).toContain("left out: Lap 3");
+	});
+
+	it("says a flag left at the jump limit was not tested", () => {
+		const fit = OK.fit!;
+		setKalmanRunner(() =>
+			JSON.stringify({
+				...OK,
+				fit: {
+					...fit,
+					jumps: [{ ...fit.jumps[1], movesNothing: false }],
+				},
+			}),
+		);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).toContain("not fitted — jump limit reached");
+		expect(text()).not.toContain("moves nothing");
+	});
+
+	it("names a refusal", () => {
+		setKalmanRunner(() =>
+			JSON.stringify({
+				...OK,
+				status: "refused",
+				reason: "tooFewObservations",
+				fit: null,
+				residuals: [],
+			}),
+		);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).toContain("Too few clean observations");
+	});
+
+	it("names the lap left out when too few legs remain", () => {
+		setKalmanRunner(() =>
+			JSON.stringify({
+				...OK,
+				status: "refused",
+				reason: "tooFewLegs",
+				fit: null,
+				residuals: [],
+				droppedLegs: ["Lap 2"],
+			}),
+		);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(text()).toContain("none on it: Lap 2");
+		expect(text()).not.toContain("with an elevation profile");
+	});
+
+	it("escapes text from the fit's output instead of rendering it as markup", () => {
+		setKalmanRunner(() =>
+			JSON.stringify({
+				...OK,
+				status: "refused",
+				reason: "notIdentified",
+				coupled: ['<img src=x onerror="alert(1)">', "Crr"],
+				fit: null,
+				residuals: [],
+			}),
+		);
+		render(3);
+		document.getElementById(KALMAN_BUTTON_ID)!.click();
+		render(3);
+		expect(document.querySelector("#repeats-tab img")).toBeNull();
+		expect(text()).toContain('<img src=x onerror="alert(1)">');
+	});
+
+	it("says why with fewer than two legs, without a button", () => {
+		render(1);
+		expect(document.getElementById(KALMAN_BUTTON_ID)).toBeNull();
+		expect(text()).toContain("Needs 2 or more legs");
+	});
+
+	it("is absent when the caller passes no Kalman input", () => {
+		render(3, false);
+		expect(text()).not.toContain("Kalman");
+	});
+});

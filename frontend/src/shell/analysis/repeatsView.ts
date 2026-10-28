@@ -31,6 +31,7 @@ import {
 	type TimingResult,
 } from "../../analysis/TimingSweep";
 import type { RepeatsUpdateInput } from "../../modes/analysis/types";
+import { bindKalman, kalmanBlock } from "./kalmanView";
 import { requestModeUpdate } from "./requestModeUpdate";
 
 /** Container `renderRepeatsView` owns outright. Empty in the templates. */
@@ -428,8 +429,9 @@ function repeatsMarkup(
 	result: RepeatSpreadResult,
 	power: PowerIndependentResult | null,
 	sensitivities: readonly SensitivityRow[],
-	timing: RepeatsUpdateInput["timing"],
+	input: RepeatsUpdateInput,
 ): string {
+	const timing = input.timing;
 	const crrLabel = `CdA @ Crr ${result.fixedCrr.toFixed(4)}`;
 	// Out-and-back repeats are sections; everything else is a lap.
 	const noun = result.units.some((unit) => unit.key.startsWith("section-"))
@@ -461,7 +463,8 @@ ${bullets(notes)}
 ${pooledBlock(result, noun)}
 ${powerIndependentBlock(result, power, noun)}
 ${sensitivityBlock(sensitivities, result.fixedCrr, power?.k ?? null)}
-${timingBlock(timing, result.fixedCrr, noun)}`;
+${timingBlock(timing, result.fixedCrr, noun)}
+${kalmanBlock(input, result.pooled, noun)}`;
 }
 
 export function renderRepeatsView(input: RepeatsUpdateInput): void {
@@ -482,10 +485,11 @@ export function renderRepeatsView(input: RepeatsUpdateInput): void {
 		result.pooled || result.pooledFixed
 			? computeSensitivities(result, input.sensitivities)
 			: [],
-		input.timing,
+		input,
 	);
 	document.getElementById(TIMING_BUTTON_ID)?.addEventListener("click", () => {
 		timingRequested = true;
 		requestRepeatsRedraw();
 	});
+	bindKalman(input, requestRepeatsRedraw);
 }

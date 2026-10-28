@@ -4,6 +4,8 @@ mod air_density;
 mod dem_processor;
 mod fit_parser;
 mod fitparser_wrapper;
+mod kalman_design;
+mod kalman_fit;
 mod security;
 mod utils;
 mod virtual_elevation;
