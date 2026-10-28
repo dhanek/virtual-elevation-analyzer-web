@@ -113,6 +113,14 @@ export interface UpdateModeVEPlotsArgs {
 	) => number[] | null;
 	/** Injectable so node tests can drive tab laziness without a document. */
 	isTabActive?: (tabId: string) => boolean;
+	/**
+	 * The Section 3 mode string ("GPS based lap splitting", "GPS gate one
+	 * way", "None", ...). The handler id cannot tell lap splitting from
+	 * one-way gates or the stacked standard view, and only lap splitting pins
+	 * the closure target (`isClosureTargetPinned`). Passed in rather than
+	 * read from Section 3 so the headless runner never imports the DOM shell.
+	 */
+	lapDetectionMode: string;
 }
 
 export interface ModeUpdateOutcome {
@@ -234,13 +242,22 @@ export async function updateModeVEPlots(
 	// `segmentPreparation.ts` so the Convergence grid and the auto-converge
 	// solve can reuse one preparation. Skips and preparation failures are
 	// logged there with the messages this loop used to emit.
-	// (3b) The closure target's source (phase 2), ONCE per pass. GPS-lap mode
-	//      pins it to manual 0 — every lap starts and ends at the gate — and
-	//      the other modes read the persisted choice, validated rather than
-	//      cast (`resolveClosureSelection`). The default 'dem' with no DEM
+	// (3b) The closure target's source (phase 2), ONCE per pass. GPS lap
+	//      splitting pins it to manual 0 — every lap starts and ends at the
+	//      gate — and everything else (one-way gates and the stacked standard
+	//      view included, though both run this handler id) reads the persisted
+	//      choice, validated rather than cast (`resolveClosureSelection`). The default 'dem' with no DEM
 	//      loaded falls back to the resolved profile and reproduces phase 1
 	//      byte for byte.
-	const closureSelection = resolveClosureSelection(handler.id, params);
+	const closurePinned = isClosureTargetPinned(
+		handler.id,
+		args.lapDetectionMode,
+	);
+	const closureSelection = resolveClosureSelection(
+		handler.id,
+		args.lapDetectionMode,
+		params,
+	);
 	const closureSource = closureSelection.source;
 	const closureDemAltitude =
 		closureSource === "dem"
@@ -472,7 +489,7 @@ export async function updateModeVEPlots(
 				targetSource: closureSource,
 				// 'dem' with no DEM channel loaded fell back to the resolved
 				// profile — say so rather than let the title claim DEM.
-				targetLabel: isClosureTargetPinned(handler.id)
+				targetLabel: closurePinned
 					? "lap closure (0 m)"
 					: closureSource === "manual"
 						? "manual Δh"

@@ -79,6 +79,7 @@ import { fitWindVisibilityAttrs } from "../ve/windSourceVisibility";
 import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
+import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 import { requestConvergenceRedraw } from "../analysis/convergenceView";
@@ -713,7 +714,7 @@ export function buildGpsLapVeAnalysisTemplate(
                                     <input type="number" id="crrValue" value="${resolveDisplayCrr(params.crr).toFixed(4)}" min="${crrBounds.min}" max="${crrBounds.max}" step="0.0001" class="ve-value-input">
                                 </div>
                                 ${autoConvergeLockControlsMarkup()}
-                                ${elevationDiffControlsMarkup(params, "gpsLap")}
+                                ${elevationDiffControlsMarkup(params, "gpsLap", getGpsAnalysisMode())}
                                 ${crrTempControlsMarkup(params)}
                                 ${windHeightControlsMarkup(params, selectedWindSource)}
                             </div>

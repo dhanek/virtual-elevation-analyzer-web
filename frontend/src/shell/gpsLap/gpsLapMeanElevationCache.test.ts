@@ -132,6 +132,7 @@ async function update(appState: AppState, cda: number): Promise<void> {
 	const outcome = await updateModeVEPlots({
 		appState,
 		handler: getAnalysisModeHandlerById("gpsLap"),
+		lapDetectionMode: "GPS based lap splitting",
 		makeCallbacks: () => createGpsLapUpdateCallbacks(appState),
 		windSource: "fit",
 		cda,

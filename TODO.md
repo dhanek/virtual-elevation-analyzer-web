@@ -591,6 +591,30 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
+### Closure target pinned to 0 only for GPS lap splitting — 2026-10-28
+
+**The bug.** Every route through the `gpsLap` handler pinned the closure target to Manual 0 m,
+on the premise that each lap starts and ends at the gate. Two of them do not: **GPS gate one way**
+(each lap runs gate A → gate B, two different points) and the **Stacked** view of a standard FIT
+lap selection (FIT laps carry no promise of returning to the start). On a one-way stretch that
+falls ~1 m, a flat VE read as a near-perfect closure while the residuals against the mean
+elevation reached ~1.3 m.
+
+**Commits:** on `fix/closure-target-one-way-gates`.
+
+**What it does.** `isClosureTargetPinned` / `resolveClosureSelection` (`ClosureTarget.ts`) take the
+Section 3 mode string as well as the handler id and pin only under "GPS based lap splitting". The
+GPS-lap sidebar and the browser update funnel pass `getGpsAnalysisMode()`; `updateModeVEPlots`
+takes it as a required argument rather than importing Section 3, so the headless `ve-run` CLI
+stays DOM-free — it passes lap splitting for `gpsLap`, since its schema refuses one-way gates,
+and its output is unchanged.
+
+**Checked.** Unit tests for one-way and "None" under the `gpsLap` handler (DEM default, persisted
+choice honoured, a one-way target equal to the DEM difference between the gates) and for the
+unpinned sidebar markup and binding. In the app on the reference ride: one-way gates show a free
+DEM/Barometer/Manual block, and the Convergence optimum moves with the source; lap splitting is
+still locked at Manual 0; the stacked standard view of three FIT laps is free.
+
 ### Kalman fit in the Repeats tab (J6) — 2026-10-26
 
 **The item this closes:** *Bundle J → J6 [L] Kalman error-model fit as an "honest uncertainty"

@@ -201,6 +201,7 @@ describe("updateModeVEPlots renders once per update, for every mode", () => {
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				lapDetectionMode: HANDLER_KEY[mode] ?? "None",
 				makeCallbacks: () => callbacks,
 				windSource: "fit",
 				cda: 0.3,
@@ -222,6 +223,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
+			lapDetectionMode: HANDLER_KEY.gpsLap ?? "None",
 			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
@@ -244,6 +246,7 @@ describe("the tab-active check is honoured, and lives only in the primitive (D-1
 		await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
+			lapDetectionMode: HANDLER_KEY.gpsLap ?? "None",
 			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
@@ -268,6 +271,7 @@ describe("wind is resolved ONCE PER UPDATE, not once per segment (D-05)", () => 
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				lapDetectionMode: HANDLER_KEY[mode] ?? "None",
 				makeCallbacks: () => callbacks,
 				windSource: "fit",
 				cda: 0.3,
@@ -299,6 +303,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				lapDetectionMode: HANDLER_KEY[mode] ?? "None",
 				makeCallbacks: () => callbacks,
 				windSource: "compare",
 				cda: 0.3,
@@ -326,6 +331,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 			const outcome = await updateModeVEPlots({
 				appState: stateFor(mode),
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				lapDetectionMode: HANDLER_KEY[mode] ?? "None",
 				makeCallbacks: () => callbacks,
 				windSource: "compare",
 				cda: 0.3,
@@ -377,6 +383,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 				const outcome = await updateModeVEPlots({
 					appState: stateFor(mode),
 					handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+					lapDetectionMode: HANDLER_KEY[mode] ?? "None",
 					makeCallbacks: () => callbacks,
 					windSource: source,
 					cda: 0.3,
@@ -406,6 +413,7 @@ describe("compare resolves twice and produces a second series (D-07/D-20)", () =
 		await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
+			lapDetectionMode: HANDLER_KEY.gpsLap ?? "None",
 			makeCallbacks: () => callbacks,
 			windSource: "compare",
 			cda: 0.3,
@@ -433,6 +441,7 @@ describe("the summarize seam owns the AppState result writes (D-17a / N-1)", () 
 			await updateModeVEPlots({
 				appState,
 				handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+				lapDetectionMode: HANDLER_KEY[mode] ?? "None",
 				makeCallbacks: () => callbacks,
 				windSource: "fit",
 				cda: 0.3,
@@ -459,6 +468,7 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 		await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
+			lapDetectionMode: HANDLER_KEY.gpsLap ?? "None",
 			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
@@ -481,6 +491,7 @@ describe("rho reaches the calculator per segment (D-06)", () => {
 		const outcome = await updateModeVEPlots({
 			appState: stateFor("gpsLap"),
 			handler: getAnalysisModeHandler(HANDLER_KEY.gpsLap),
+			lapDetectionMode: HANDLER_KEY.gpsLap ?? "None",
 			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
@@ -525,6 +536,7 @@ describe("the entry write to `computing` covers a second pass over a ready panel
 		await updateModeVEPlots({
 			appState,
 			handler,
+			lapDetectionMode: HANDLER_KEY.gpsLap,
 			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,
@@ -603,6 +615,7 @@ describe("per-lap weather respects who owns the wind and the rho", () => {
 		return updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandler(HANDLER_KEY.standard),
+			lapDetectionMode: HANDLER_KEY.standard ?? "None",
 			makeCallbacks: () => callbacks,
 			windSource: "constant",
 			cda: 0.3,
@@ -666,6 +679,7 @@ describe("guards", () => {
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandler(null),
+			lapDetectionMode: "None",
 			makeCallbacks: () => callbacks,
 			windSource: "fit",
 			cda: 0.3,

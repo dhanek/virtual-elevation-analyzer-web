@@ -223,6 +223,7 @@ describe.skipIf(!built || !fixturePresent)("headless API round trip", () => {
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandlerById(mode),
+			lapDetectionMode: mode === "gpsLap" ? "GPS based lap splitting" : "None",
 			makeCallbacks: () => (screenCallbacks ? screenCallbacks(appState) : noop),
 			windSource,
 			cda: CDA,

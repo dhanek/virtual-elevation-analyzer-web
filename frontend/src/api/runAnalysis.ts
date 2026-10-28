@@ -48,6 +48,10 @@ export async function runAnalysis(
 		segments: state.segments,
 		resolveRho: state.resolveRho,
 		isTabActive: () => false,
+		// The run schema's gpsLap is lap splitting (one-way gates are refused
+		// by `validateRunConfig`), so its closure target stays pinned to 0.
+		lapDetectionMode:
+			config.mode === "gpsLap" ? "GPS based lap splitting" : "None",
 	});
 
 	if (!outcome) {

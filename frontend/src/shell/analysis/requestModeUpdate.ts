@@ -379,6 +379,7 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 					cda,
 					crr,
 					segments,
+					lapDetectionMode: getGpsAnalysisMode(),
 				});
 
 				// Auto-converge write-back, AFTER the await — inside the serialised
