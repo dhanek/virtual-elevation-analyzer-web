@@ -178,6 +178,7 @@ describe("the GPS-lap header numbers come from the caller's one computation", ()
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler: getAnalysisModeHandlerById("gpsLap"),
+			lapDetectionMode: "GPS based lap splitting",
 			makeCallbacks: () => createGpsLapUpdateCallbacks(appState),
 			windSource: "fit",
 			cda: 0.25,

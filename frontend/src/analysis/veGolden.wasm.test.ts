@@ -347,6 +347,7 @@ describe.skipIf(!built || !fixturePresent)(
 			const outcome = await updateModeVEPlots({
 				appState,
 				handler: getAnalysisModeHandler(null),
+				lapDetectionMode: "None",
 				makeCallbacks: () => noopCallbacks(),
 				windSource: wind,
 				cda: GOLDEN_CDA,
@@ -436,6 +437,7 @@ describe.skipIf(!built || !fixturePresent)(
 			const outcome = await updateModeVEPlots({
 				appState: appStateForMode(mode, ride),
 				handler: getAnalysisModeHandler(HANDLER_FOR[mode]),
+				lapDetectionMode: HANDLER_FOR[mode] ?? "None",
 				makeCallbacks: () => noopCallbacks(),
 				windSource: "compare",
 				cda: GOLDEN_CDA,
@@ -492,6 +494,7 @@ describe.skipIf(!built || !fixturePresent)(
 			const outcome = await updateModeVEPlots({
 				appState,
 				handler: getAnalysisModeHandler("GPS based lap splitting"),
+				lapDetectionMode: "GPS based lap splitting",
 				makeCallbacks: () => noopCallbacks(),
 				windSource: wind,
 				cda: GOLDEN_CDA,
@@ -531,6 +534,7 @@ describe.skipIf(!built || !fixturePresent)(
 			const outcome = await updateModeVEPlots({
 				appState,
 				handler: getAnalysisModeHandler("GPS based lap splitting"),
+				lapDetectionMode: "GPS based lap splitting",
 				makeCallbacks: () => noopCallbacks(),
 				windSource: wind,
 				cda: GOLDEN_CDA,
@@ -587,6 +591,7 @@ describe.skipIf(!built || !fixturePresent)(
 			const outcome = await updateModeVEPlots({
 				appState,
 				handler: getAnalysisModeHandler("GPS based out and back"),
+				lapDetectionMode: "GPS based out and back",
 				makeCallbacks: () => noopCallbacks(),
 				windSource: wind,
 				cda: GOLDEN_CDA,

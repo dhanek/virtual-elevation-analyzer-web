@@ -324,37 +324,76 @@ describe("resolveClosureTarget (manual, out-and-back legs)", () => {
 });
 
 describe("resolveClosureSelection", () => {
-	test("GPS-lap mode is pinned to manual 0 regardless of the persisted choice", () => {
-		expect(isClosureTargetPinned("gpsLap")).toBe(true);
+	const SPLITTING = "GPS based lap splitting";
+
+	test("GPS lap splitting is pinned to manual 0 regardless of the persisted choice", () => {
+		expect(isClosureTargetPinned("gpsLap", SPLITTING)).toBe(true);
 		expect(
-			resolveClosureSelection("gpsLap", {
+			resolveClosureSelection("gpsLap", SPLITTING, {
 				elevation_diff_source: "barometer",
 				manual_elevation_diff_m: 4.2,
 			}),
 		).toEqual({ source: "manual", manualDiffMetres: 0 });
 	});
 
-	test("the other modes read the persisted choice, validated not cast", () => {
-		for (const mode of ["standard", "outAndBack", undefined] as const) {
-			expect(isClosureTargetPinned(mode)).toBe(false);
-			expect(
-				resolveClosureSelection(mode, {
-					elevation_diff_source: "barometer",
-					manual_elevation_diff_m: 4.2,
-				}),
-			).toEqual({ source: "barometer", manualDiffMetres: 4.2 });
-			expect(resolveClosureSelection(mode, {})).toEqual({
+	// Both routes run the gpsLap handler on laps that do not return to their
+	// start: one-way gates (A ≠ B) and the stacked view of standard FIT laps,
+	// where the Section 3 mode still reads "None".
+	test.each([["GPS gate one way"], ["None"], [undefined]])(
+		"the gpsLap handler under %s is not pinned",
+		(lapDetectionMode) => {
+			expect(isClosureTargetPinned("gpsLap", lapDetectionMode)).toBe(false);
+			expect(resolveClosureSelection("gpsLap", lapDetectionMode, {})).toEqual({
 				source: "dem",
 				manualDiffMetres: null,
 			});
 			expect(
-				resolveClosureSelection(mode, { elevation_diff_source: "bogus" }),
+				resolveClosureSelection("gpsLap", lapDetectionMode, {
+					elevation_diff_source: "barometer",
+					manual_elevation_diff_m: 4.2,
+				}),
+			).toEqual({ source: "barometer", manualDiffMetres: 4.2 });
+		},
+	);
+
+	test("a one-way gate lap's target is the DEM difference between its gates", () => {
+		const selection = resolveClosureSelection("gpsLap", "GPS gate one way", {});
+		expect(
+			resolveClosureTarget({
+				...selection,
+				altitude: ramp(20),
+				demAltitude: Array.from({ length: 20 }, (_, i) => 50 - i * 0.05),
+				velodrome: false,
+				trimStart: 0,
+				trimEnd: 19,
+			}),
+		).toBeCloseTo(-0.95, 10);
+	});
+
+	test("the other modes read the persisted choice, validated not cast", () => {
+		for (const mode of ["standard", "outAndBack", undefined] as const) {
+			// Not even the lap-splitting string pins a non-gpsLap handler.
+			expect(isClosureTargetPinned(mode, SPLITTING)).toBe(false);
+			expect(
+				resolveClosureSelection(mode, SPLITTING, {
+					elevation_diff_source: "barometer",
+					manual_elevation_diff_m: 4.2,
+				}),
+			).toEqual({ source: "barometer", manualDiffMetres: 4.2 });
+			expect(resolveClosureSelection(mode, SPLITTING, {})).toEqual({
+				source: "dem",
+				manualDiffMetres: null,
+			});
+			expect(
+				resolveClosureSelection(mode, SPLITTING, {
+					elevation_diff_source: "bogus",
+				}),
 			).toEqual({ source: "dem", manualDiffMetres: null });
 		}
 	});
 
 	test("a pinned selection resolves to a 0 target through resolveClosureTarget", () => {
-		const selection = resolveClosureSelection("gpsLap", {
+		const selection = resolveClosureSelection("gpsLap", SPLITTING, {
 			elevation_diff_source: "dem",
 		});
 		expect(

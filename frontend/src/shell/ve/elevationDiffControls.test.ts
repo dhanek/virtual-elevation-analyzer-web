@@ -218,10 +218,10 @@ describe("the manual field's wording is mode-specific", () => {
 });
 
 /**
- * GPS-lap mode pins the block: every lap starts and ends at the gate, so the
- * target is Manual 0 and the user is told rather than asked.
+ * GPS lap splitting pins the block: every lap starts and ends at the gate, so
+ * the target is Manual 0 and the user is told rather than asked.
  */
-describe("GPS-lap mode pins the closure target to Manual 0", () => {
+describe("GPS lap splitting pins the closure target to Manual 0", () => {
 	it("locks the radios on Manual and the Δh input on 0, whatever is persisted", () => {
 		document.body.innerHTML = elevationDiffControlsMarkup(
 			makeParams({
@@ -229,6 +229,7 @@ describe("GPS-lap mode pins the closure target to Manual 0", () => {
 				manual_elevation_diff_m: 4.2,
 			}),
 			"gpsLap",
+			"GPS based lap splitting",
 		);
 
 		for (const value of ["dem", "barometer", "manual"]) {
@@ -253,6 +254,7 @@ describe("GPS-lap mode pins the closure target to Manual 0", () => {
 		document.body.innerHTML = elevationDiffControlsMarkup(
 			makeParams(),
 			"gpsLap",
+			"GPS based lap splitting",
 		);
 		const info = document
 			.querySelector(".crr-temp-controls__info")!
@@ -271,6 +273,7 @@ describe("GPS-lap mode pins the closure target to Manual 0", () => {
 		document.body.innerHTML = elevationDiffControlsMarkup(
 			makeParams({ elevation_diff_source: "dem" }),
 			"gpsLap",
+			"GPS based lap splitting",
 		);
 		const merged: Array<Partial<AnalysisParameters>> = [];
 		let changes = 0;
@@ -302,5 +305,57 @@ describe("GPS-lap mode pins the closure target to Manual 0", () => {
 		expect(document.getElementById("elevationDiffStatus")!.textContent).toBe(
 			ELEVATION_DIFF_PINNED_STATUS,
 		);
+	});
+});
+
+/**
+ * One-way gates and the stacked standard view render the GPS-lap panel too,
+ * but their laps run between two different points: the block stays free.
+ */
+describe("the GPS-lap panel outside lap splitting is not pinned", () => {
+	it.each([["GPS gate one way"], ["None"]])(
+		"under %s the radios are free and the persisted choice is checked",
+		(lapDetectionMode) => {
+			document.body.innerHTML = elevationDiffControlsMarkup(
+				makeParams({ elevation_diff_source: "barometer" }),
+				"gpsLap",
+				lapDetectionMode,
+			);
+			for (const value of ["dem", "barometer", "manual"]) {
+				expect(radio(value).disabled).toBe(false);
+			}
+			expect(radio("barometer").checked).toBe(true);
+			expect(
+				document
+					.getElementById("elevationDiffControls")!
+					.hasAttribute("data-pinned"),
+			).toBe(false);
+			expect(
+				document.getElementById("elevationDiffStatus")!.textContent,
+			).not.toBe(ELEVATION_DIFF_PINNED_STATUS);
+		},
+	);
+
+	it("defaults a one-way panel to DEM and binds its radio", () => {
+		document.body.innerHTML = elevationDiffControlsMarkup(
+			makeParams(),
+			"gpsLap",
+			"GPS gate one way",
+		);
+		expect(radio("dem").checked).toBe(true);
+		const merged: Array<Partial<AnalysisParameters>> = [];
+		bindElevationDiffControls(
+			{
+				getParams: () => makeParams(),
+				setParams: (fields) => {
+					merged.push(fields);
+				},
+				onChange: () => {},
+			},
+			true,
+		);
+		radio("barometer").checked = true;
+		radio("barometer").dispatchEvent(new Event("change"));
+		expect(merged).toEqual([{ elevation_diff_source: "barometer" }]);
 	});
 });

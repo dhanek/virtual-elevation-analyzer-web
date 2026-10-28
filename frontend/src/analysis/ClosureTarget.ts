@@ -62,9 +62,15 @@ export function toElevationDiffSource(
 }
 
 /**
- * GPS-LAP MODE PINS THE TARGET TO 0. A GPS lap runs from one passing of the
- * gate to the next passing in the same direction, so by construction every lap
- * starts and ends at the same point and its true elevation difference is 0.
+ * The Section 3 mode string whose laps return to their start — the one mode
+ * the target is pinned in.
+ */
+const LAP_SPLITTING_MODE = "GPS based lap splitting";
+
+/**
+ * GPS LAP SPLITTING PINS THE TARGET TO 0. A split lap runs from one passing of
+ * the gate to the next passing in the same direction, so by construction every
+ * lap starts and ends at the same point and its true elevation difference is 0.
  * Offering DEM / Barometer there only lets gate slack (the 20 m proximity
  * threshold) and barometric drift leak into the closure the solve chases, so
  * the radio is pinned to Manual at 0 and the user is told why instead
@@ -72,13 +78,22 @@ export function toElevationDiffSource(
  * `manual_elevation_diff_m` are left untouched: they still describe the user's
  * choice in the modes that offer one.
  *
- * Standard mode is NOT pinned. Its laps come from the FIT lap button, which
- * carries no promise of returning to the start.
+ * THE MODE ID ALONE CANNOT DECIDE THIS. Two other routes run the `gpsLap`
+ * handler on laps that do NOT close, so the pin also needs the Section 3
+ * `lapDetectionMode` string:
+ *   - "GPS gate one way": each lap runs gate A → gate B, two different points,
+ *     so its true difference is whatever the terrain does between them.
+ *     Pinning it to 0 made a flat VE over a falling stretch read as a near
+ *     perfect closure.
+ *   - the "Stacked" view of a multi-lap STANDARD selection: the mode string
+ *     still reads "None", and FIT laps carry no promise of returning to the
+ *     start (the reason standard mode was never pinned).
  */
 export function isClosureTargetPinned(
 	mode: AnalysisModeId | undefined,
+	lapDetectionMode: string | null | undefined,
 ): boolean {
-	return mode === "gpsLap";
+	return mode === "gpsLap" && lapDetectionMode === LAP_SPLITTING_MODE;
 }
 
 export interface ClosureSelection {
@@ -94,12 +109,13 @@ export interface ClosureSelection {
  */
 export function resolveClosureSelection(
 	mode: AnalysisModeId | undefined,
+	lapDetectionMode: string | null | undefined,
 	params: {
 		elevation_diff_source?: string;
 		manual_elevation_diff_m?: number | null;
 	},
 ): ClosureSelection {
-	if (isClosureTargetPinned(mode)) {
+	if (isClosureTargetPinned(mode, lapDetectionMode)) {
 		return { source: "manual", manualDiffMetres: 0 };
 	}
 	return {

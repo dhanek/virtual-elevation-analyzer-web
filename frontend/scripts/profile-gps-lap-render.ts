@@ -251,6 +251,7 @@ async function main(): Promise<void> {
 			await updateModeVEPlots({
 				appState,
 				handler,
+				lapDetectionMode: "GPS based lap splitting",
 				makeCallbacks: () => timed as any,
 				windSource: "fit",
 				// A drag moves CdA, so vary it the way a drag does; an identical
@@ -353,6 +354,7 @@ async function main(): Promise<void> {
 		const outcome = await updateModeVEPlots({
 			appState,
 			handler,
+			lapDetectionMode: "GPS based lap splitting",
 			makeCallbacks: () =>
 				({
 					...callbacks,

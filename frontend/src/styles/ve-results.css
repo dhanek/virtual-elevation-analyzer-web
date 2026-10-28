@@ -309,7 +309,7 @@
 	width: 5.5rem;
 }
 
-/* GPS-lap mode pins the block on Manual 0 (`isClosureTargetPinned`); the
+/* GPS lap splitting pins the block on Manual 0 (`isClosureTargetPinned`); the
    disabled inputs read as informational, not broken. */
 .elevation-diff-controls__radios .ve-radio-label:has(input:disabled),
 .elevation-diff-controls__manual input:disabled {
