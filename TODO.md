@@ -602,16 +602,29 @@ at the fitted +18.3 % and 0.506 at 0. B − A in watts survives, because CdA abs
 
 **What it does.** `resolveMultiSegmentSettings` keeps the current calibration when the new selection
 has none saved. A saved value still wins, and a new file still resets
-(`resetAnalysisForNewActivity`).
+(`resetAnalysisForNewActivity`). Every settings save now stores the current calibration for that
+selection, 0 included, in all three modes, so a selection tuned to 0 gets its 0 back instead of the
+carried value.
 
 **Behaviour change.** New GPS and out-and-back selections with no saved calibration start from the
-current value instead of 0, so their CdA differs from before. Stored results do not change.
+current value instead of 0, so their CdA differs from before. A selection follows the current value
+only until its first save: moving CdA, Crr, trim or smoothing stores the calibration it had, and a
+later calibration elsewhere does not reach it. That includes a save at 0, so a selection tuned
+before anything was calibrated stays at 0. A map trim drag before Analyze clears a stored
+calibration, as it always did. Stored results do not change.
 
-**Checked.** Unit tests for no saved settings and for saved settings without a calibration. In the
-app in GPS lap splitting: +18.3 % carried to two new subsets of virtual laps, and the log line shows
-it reaching the VE; a subset with its own saved value got that back (+5 %, +12 %). The new-file reset
-has its existing unit test and was not run in the app, and out-and-back shares the function but was
-not run in the app.
+**Checked.** Unit tests for no saved settings and for saved settings without a calibration, and
+real-storage tests for a selection tuned to 0 in all three modes, for a save pinning the carried
+value, and for a reload in either analyze order. In the app, with values typed or fitted on the
+slider: in GPS lap splitting, out-and-back (the reference ride's sections) and Standard, A at +5 and
+a new B set to 0 come back as +5 and 0; a new B with only CdA moved stays at +5 with that CdA after a
+new C is set to +9. In GPS lap splitting a new D then shows +9; a selection tuned at 0 before
+anything was calibrated stays at 0 after +5 is set elsewhere; a fitted +20 % comes back after another
+selection is set to +3. After a reload, in GPS lap splitting and Standard, a selection tuned under a
+carried +5 is +5 with its CdA in both analyze orders, and in Standard a saved 0 comes back. In
+Standard a calibration survives a re-analyze, a map trim drag and leaving and returning. A map trim
+drag before Analyze and the new-file reset were not run in the app. Not on this branch: a ride-level
+calibration with per-selection overrides, the planned next step.
 
 ### Auto air density in the GPS modes — 2026-11-03
 
