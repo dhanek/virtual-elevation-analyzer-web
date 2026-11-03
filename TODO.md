@@ -583,6 +583,18 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       at the slider's offset once, with a test per mode. *origin: noticed while moving the lags
       to seconds, 2026-10-21*
 
+- [ ] **[XL] A ride-level air speed calibration with per-selection overrides.** The sensor's scale
+      belongs to the ride, but the calibration is stored per selection. A new selection starts from
+      the current value and any settings save pins that value to the selection, so a later
+      calibration elsewhere does not reach a selection already saved. A selection with nothing saved
+      starts from whatever is current, which after a reload is 0 until a saved selection has been
+      analyzed. The next step is one value per ride, stored per file, that a selection follows unless
+      it was deliberately tuned. **Open before this can be sized:** a stored `airSpeedCalibration`
+      does not say whether it was tuned or only pinned by a save, so existing records cannot be read
+      as overrides as they stand. *Done when:* a later calibration reaches every selection not
+      deliberately tuned, a tuned selection keeps its value, 0 included, and a reload gives the same
+      values in either analyze order. *origin: PR #42 review, F80-01 and F81-03, 2026-11-03*
+
 
 ---
 
@@ -622,9 +634,12 @@ new C is set to +9. In GPS lap splitting a new D then shows +9; a selection tune
 anything was calibrated stays at 0 after +5 is set elsewhere; a fitted +20 % comes back after another
 selection is set to +3. After a reload, in GPS lap splitting and Standard, a selection tuned under a
 carried +5 is +5 with its CdA in both analyze orders, and in Standard a saved 0 comes back. In
-Standard a calibration survives a re-analyze, a map trim drag and leaving and returning. A map trim
-drag before Analyze and the new-file reset were not run in the app. Not on this branch: a ride-level
-calibration with per-selection overrides, the planned next step.
+Standard a calibration survives a re-analyze, a map trim drag and leaving and returning. On the
+branch's first commit, in GPS lap splitting: +18.3 % carried to two new subsets of virtual laps, and
+the log line shows it reaching the VE; a subset with its own saved value got that back (+5 %, +12 %).
+A map trim drag before Analyze was not run in the app. The new-file reset has its existing unit test
+and was not run in the app. Not on this branch: a ride-level calibration with per-selection
+overrides, the planned next step.
 
 ### Auto air density in the GPS modes — 2026-11-03
 
