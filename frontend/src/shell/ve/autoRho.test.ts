@@ -32,6 +32,11 @@ const mocks = vi.hoisted(() => ({
 	updateCachedEntry: vi.fn(),
 	calculateAirDensity: vi.fn(),
 	showNotification: vi.fn(),
+	gpsAnalysisMode: "None",
+}));
+
+vi.mock("../section3/section3Orchestration", () => ({
+	getGpsAnalysisMode: () => mocks.gpsAnalysisMode,
 }));
 
 vi.mock("../dom/notifications", () => ({
@@ -216,6 +221,69 @@ function slotLookups(): Date[] {
 beforeEach(() => {
 	vi.clearAllMocks();
 	mocks.calculateAirDensity.mockReturnValue(1.2);
+	mocks.gpsAnalysisMode = "None";
+});
+
+/**
+ * Only Standard renders trim sliders, so in the GPS modes "no sliders" is the
+ * normal state and the region is the whole FIT-lap selection. In Standard it
+ * still means the panel is not ready yet.
+ */
+describe("calculateAutoRho — modes without trim sliders", () => {
+	function removeTrimSliders(): void {
+		document.getElementById("mapTrimStartSlider")?.remove();
+		document.getElementById("mapTrimEndSlider")?.remove();
+	}
+
+	test.each([
+		"GPS based lap splitting",
+		"GPS based out and back",
+		"GPS gate one way",
+	])("%s reads the weather for the whole selection", async (mode) => {
+		const h = setupHarness();
+		removeTrimSliders();
+		mocks.gpsAnalysisMode = mode;
+		mocks.getWeatherData.mockResolvedValue(weatherEntry(14.2));
+		mocks.calculateAirDensity.mockReturnValue(1.2215);
+
+		const rho = await calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		expect(rho).toBe(1.2215);
+		expect(h.parametersComponent.getParameters().rho).toBe(1.2215);
+		// 12 valid points, 60 s apart: the midpoint of ALL of them, not of a part.
+		const metadata = mocks.getWeatherData.mock
+			.calls[0][0] as TrimRegionMetadata;
+		expect(metadata.dataPointCount).toBe(REGION_POINTS);
+	});
+
+	test("a GPS mode with no usable selection stays quiet", async () => {
+		const h = setupHarness();
+		removeTrimSliders();
+		mocks.gpsAnalysisMode = "GPS based lap splitting";
+		h.appState.filteredLapData = null;
+
+		await expect(
+			calculateAutoRho(h.appState, h.parametersComponent, h.services),
+		).resolves.toBeNull();
+
+		expect(mocks.getWeatherData).not.toHaveBeenCalled();
+		expect(mocks.showNotification).not.toHaveBeenCalled();
+	});
+
+	test("Standard without sliders still waits for its panel", async () => {
+		const h = setupHarness();
+		removeTrimSliders();
+
+		await expect(
+			calculateAutoRho(h.appState, h.parametersComponent, h.services),
+		).resolves.toBeNull();
+
+		expect(mocks.getWeatherData).not.toHaveBeenCalled();
+	});
 });
 
 describe("calculateAutoRho — successful fetch", () => {
