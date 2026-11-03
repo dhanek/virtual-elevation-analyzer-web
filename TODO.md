@@ -591,6 +591,28 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
+### Air speed calibration carries across selections — 2026-11-03
+
+**The bug.** GPS lap splitting and out-and-back reset the air speed calibration to 0 on any new
+selection with no saved value, while Standard kept it. The scale belongs to the sensor on that ride,
+not to a selection, so picking a subset of laps silently changed CdA: on a closed-loop A/B test, 0.362
+at the fitted +18.3 % and 0.506 at 0. B − A in watts survives, because CdA absorbs the scale.
+
+**Commits:** on `fix/air-speed-calibration-carries`.
+
+**What it does.** `resolveMultiSegmentSettings` keeps the current calibration when the new selection
+has none saved. A saved value still wins, and a new file still resets
+(`resetAnalysisForNewActivity`).
+
+**Behaviour change.** New GPS and out-and-back selections with no saved calibration start from the
+current value instead of 0, so their CdA differs from before. Stored results do not change.
+
+**Checked.** Unit tests for no saved settings and for saved settings without a calibration. In the
+app in GPS lap splitting: +18.3 % carried to two new subsets of virtual laps, and the log line shows
+it reaching the VE; a subset with its own saved value got that back (+5 %, +12 %). The new-file reset
+has its existing unit test and was not run in the app, and out-and-back shares the function but was
+not run in the app.
+
 ### Auto air density in the GPS modes — 2026-11-03
 
 **The bug.** With "Auto-calculate from weather" ticked, the GPS modes never got a density: the box

@@ -11,7 +11,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppState } from "../state/AppState";
 import type { ParameterStorage } from "../utils/ParameterStorage";
 import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
-import { DEFAULT_AIR_SPEED_CALIBRATION_PERCENT } from "./AirSpeedCalibration";
 import {
 	resolveMultiSegmentAnalysisParams,
 	resolveMultiSegmentSettings,
@@ -69,7 +68,7 @@ describe("resolveMultiSegmentSettings", () => {
 		expect(resolved.airSpeedCalibrationPercent).toBe(-4.5);
 	});
 
-	it("resets calibration to default when a new selection has no saved settings", () => {
+	it("keeps the current calibration when a new selection has no saved settings", () => {
 		const resolved = resolveMultiSegmentSettings({
 			currentAnalyzedItems: [1, 2],
 			nextAnalyzedItems: [7],
@@ -80,9 +79,19 @@ describe("resolveMultiSegmentSettings", () => {
 
 		expect(resolved.params.cda).toBe(0.21);
 		expect(resolved.params.crr).toBe(0.0042);
-		expect(resolved.airSpeedCalibrationPercent).toBe(
-			DEFAULT_AIR_SPEED_CALIBRATION_PERCENT,
-		);
+		expect(resolved.airSpeedCalibrationPercent).toBe(9);
+	});
+
+	it("keeps the current calibration when the saved settings carry none", () => {
+		const resolved = resolveMultiSegmentSettings({
+			currentAnalyzedItems: [1, 2],
+			nextAnalyzedItems: [7],
+			params: DEFAULT_PARAMETERS,
+			currentAirSpeedCalibrationPercent: 9,
+			savedSettings: { cda: 0.3, crr: 0.005 },
+		});
+
+		expect(resolved.airSpeedCalibrationPercent).toBe(9);
 	});
 });
 
