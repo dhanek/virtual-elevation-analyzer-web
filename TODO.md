@@ -602,8 +602,9 @@ running from Standard at a mode switch was abandoned by its key, with nothing to
 
 **Commits:** on `fix/auto-rho-gps-modes`.
 
-**What it does.** `resolveTrimRegion` (`autoRho.ts`) keeps the sliders first; without them a GPS
-mode uses the whole FIT-lap selection, and Standard still waits for its panel.
+**What it does.** `resolveTrimRegion` (`autoRho.ts`) decides by mode: a GPS mode uses the whole
+FIT-lap selection and never reads sliders, since any left in the DOM belong to a hidden Standard
+panel. Standard reads its sliders, and without them still waits for its panel.
 `publishFilteredLapData` (`section3Orchestration.ts`) is shared by both paths, and
 `updateSelectedLaps`, which also runs after a mode switch's re-render, publishes it in the GPS modes
 and starts the calculation there, with no `isCalculatingAutoRho` guard: `calculateAutoRho` joins an
@@ -615,11 +616,13 @@ CdA moves slightly. Rides without measured air speed and no stored wind also get
 as in Standard.
 
 **Checked.** Unit tests for all three GPS modes, no usable selection, Standard without sliders, the
-trigger with a Standard flight active, the selection following the ticks, and auto off. In the app
-on a ride with eight FIT laps of a closed loop in GPS lap splitting: rho 1.2218 for all eight
-(3085 samples), 1.2200 for the first alone (341), 1.2236 for the cool-down lap alone (493), back to
-1.2218 on restoring them; a restored GPS mode on file load also calculates. The other two GPS modes
-were not run in the app.
+trigger with a Standard flight active, the selection following the ticks, auto off, a GPS mode with
+stale hidden Standard sliders, and Standard reading its panel sliders. In the app on a ride with
+eight FIT laps of a closed loop in GPS lap splitting: rho 1.2218 for all eight (3085 samples),
+1.2200 for the first alone (341), 1.2236 for the cool-down lap alone (493), back to 1.2218 on
+restoring them; a restored GPS mode on file load also calculates. Those runs predate the stale-slider
+fix (`9c015f6`). The other two GPS modes, and a switch to a GPS mode after a Standard analysis, were
+not run in the app.
 
 ### Closure target pinned to 0 only for GPS lap splitting — 2026-10-28
 
