@@ -32,6 +32,11 @@ const mocks = vi.hoisted(() => ({
 	updateCachedEntry: vi.fn(),
 	calculateAirDensity: vi.fn(),
 	showNotification: vi.fn(),
+	gpsAnalysisMode: "None",
+}));
+
+vi.mock("../section3/section3Orchestration", () => ({
+	getGpsAnalysisMode: () => mocks.gpsAnalysisMode,
 }));
 
 vi.mock("../dom/notifications", () => ({
@@ -216,6 +221,127 @@ function slotLookups(): Date[] {
 beforeEach(() => {
 	vi.clearAllMocks();
 	mocks.calculateAirDensity.mockReturnValue(1.2);
+	mocks.gpsAnalysisMode = "None";
+});
+
+/**
+ * Only Standard renders trim sliders, so in the GPS modes "no sliders" is the
+ * normal state and the region is the whole FIT-lap selection. In Standard it
+ * still means the panel is not ready yet.
+ */
+describe("calculateAutoRho — modes without trim sliders", () => {
+	function removeTrimSliders(): void {
+		document.getElementById("mapTrimStartSlider")?.remove();
+		document.getElementById("mapTrimEndSlider")?.remove();
+	}
+
+	/**
+	 * A hidden Standard panel's sliders. The `max` matters: without it a range
+	 * input can clamp the stale value and change what is tested.
+	 */
+	function addPanelTrimSliders(start: number, end: number): void {
+		for (const [id, value] of [
+			["trimStartSlider", start],
+			["trimEndSlider", end],
+		] as const) {
+			const slider = document.createElement("input");
+			slider.type = "range";
+			slider.id = id;
+			slider.min = "0";
+			slider.max = "1000";
+			slider.value = String(value);
+			document.body.appendChild(slider);
+		}
+	}
+
+	test.each([
+		"GPS based lap splitting",
+		"GPS based out and back",
+		"GPS gate one way",
+	])("%s reads the weather for the whole selection", async (mode) => {
+		const h = setupHarness();
+		removeTrimSliders();
+		mocks.gpsAnalysisMode = mode;
+		mocks.getWeatherData.mockResolvedValue(weatherEntry(14.2));
+		mocks.calculateAirDensity.mockReturnValue(1.2215);
+
+		const rho = await calculateAutoRho(
+			h.appState,
+			h.parametersComponent,
+			h.services,
+		);
+
+		expect(rho).toBe(1.2215);
+		expect(h.parametersComponent.getParameters().rho).toBe(1.2215);
+		// 12 valid points, 60 s apart: the midpoint of ALL of them, not of a part.
+		const metadata = mocks.getWeatherData.mock
+			.calls[0][0] as TrimRegionMetadata;
+		expect(metadata.dataPointCount).toBe(REGION_POINTS);
+	});
+
+	test.each([
+		["past the end of the selection", 0, 500],
+		["a trimmed part of the selection", 2, 5],
+	])(
+		"a GPS mode ignores hidden Standard sliders holding %s",
+		async (_row, panelStart, panelEnd) => {
+			const h = setupHarness();
+			removeTrimSliders();
+			addPanelTrimSliders(panelStart, panelEnd);
+			mocks.gpsAnalysisMode = "GPS based lap splitting";
+			mocks.getWeatherData.mockResolvedValue(weatherEntry(14.2));
+
+			await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+			expect(mocks.showNotification).not.toHaveBeenCalledWith(
+				expect.anything(),
+				"error",
+			);
+			expect(mocks.getWeatherData).toHaveBeenCalled();
+			const metadata = mocks.getWeatherData.mock
+				.calls[0][0] as TrimRegionMetadata;
+			expect(metadata.dataPointCount).toBe(REGION_POINTS);
+		},
+	);
+
+	test("Standard without map sliders reads the panel sliders", async () => {
+		const h = setupHarness();
+		removeTrimSliders();
+		addPanelTrimSliders(2, 5);
+		mocks.getWeatherData.mockResolvedValue(weatherEntry(14.2));
+
+		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+		expect(mocks.getWeatherData).toHaveBeenCalled();
+		const metadata = mocks.getWeatherData.mock
+			.calls[0][0] as TrimRegionMetadata;
+		expect(metadata.dataPointCount).toBe(4);
+	});
+
+	test("a GPS mode with no usable selection stays quiet", async () => {
+		const h = setupHarness();
+		removeTrimSliders();
+		mocks.gpsAnalysisMode = "GPS based lap splitting";
+		h.appState.filteredLapData = null;
+
+		await expect(
+			calculateAutoRho(h.appState, h.parametersComponent, h.services),
+		).resolves.toBeNull();
+
+		expect(mocks.getWeatherData).not.toHaveBeenCalled();
+		expect(mocks.showNotification).not.toHaveBeenCalled();
+	});
+
+	test("Standard without sliders still waits for its panel", async () => {
+		const h = setupHarness();
+		removeTrimSliders();
+
+		await expect(
+			calculateAutoRho(h.appState, h.parametersComponent, h.services),
+		).resolves.toBeNull();
+
+		expect(mocks.getWeatherData).not.toHaveBeenCalled();
+	});
 });
 
 describe("calculateAutoRho — successful fetch", () => {

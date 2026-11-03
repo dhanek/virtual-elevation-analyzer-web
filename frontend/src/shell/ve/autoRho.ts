@@ -20,6 +20,7 @@ import {
 import { WeatherAPI, WeatherAPIError } from "../../utils/WeatherAPI";
 import { AirDensityCalculator } from "../../../pkg/virtual_elevation_analyzer.js";
 import { showNotification } from "../dom/notifications";
+import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import { ShellServices } from "../analysis/types";
 import {
 	refreshCrrTempReadout,
@@ -134,6 +135,58 @@ function captureAutoRhoFlightKey(appState: AppState): string {
 	return `${appState.autoRhoInputRevision ?? 0}:${start}:${end}:${autoEnabled ? 1 : 0}`;
 }
 
+/**
+ * The samples of the filtered lap data the weather should describe.
+ *
+ * The mode decides. A GPS mode's region is the whole FIT-lap selection, and any
+ * trim sliders still in the DOM there are a hidden Standard panel's, which is
+ * why they are not read. In Standard the sliders give the region, and without
+ * them the panel is not ready yet.
+ */
+function resolveTrimRegion(
+	appState: AppState,
+): { start: number; end: number } | null {
+	if (getGpsAnalysisMode() !== "None") {
+		const sampleCount = appState.filteredLapData?.timestamps.length ?? 0;
+		return sampleCount >= 2 ? { start: 0, end: sampleCount - 1 } : null;
+	}
+
+	// IMPORTANT: For auto-rho calculation, always use map trim sliders
+	// Map trim sliders are relative to filtered lap data, which is what we need
+	// Section 3 trim sliders are relative to full FIT data
+	let trimStartSlider = document.getElementById(
+		"mapTrimStartSlider",
+	) as HTMLInputElement;
+	let trimEndSlider = document.getElementById(
+		"mapTrimEndSlider",
+	) as HTMLInputElement;
+
+	// Fallback to section 3 sliders only if map sliders don't exist
+	if (!trimStartSlider || !trimEndSlider) {
+		trimStartSlider = document.getElementById(
+			"trimStartSlider",
+		) as HTMLInputElement;
+		trimEndSlider = document.getElementById(
+			"trimEndSlider",
+		) as HTMLInputElement;
+		log.debug("🔍 Map trim sliders not found, using section 3 sliders...");
+	} else {
+		log.debug("🔍 Using map trim sliders (relative to filtered lap data)...");
+	}
+
+	log.debug("  - trimStartSlider exists:", !!trimStartSlider);
+	log.debug("  - trimEndSlider exists:", !!trimEndSlider);
+
+	if (trimStartSlider && trimEndSlider) {
+		return {
+			start: parseInt(trimStartSlider.value),
+			end: parseInt(trimEndSlider.value),
+		};
+	}
+
+	return null;
+}
+
 async function performAutoRho(
 	appState: AppState,
 	parametersComponent: AnalysisParametersComponent | null,
@@ -202,41 +255,15 @@ async function performAutoRho(
 
 		log.debug("✅ Auto-calculate enabled, proceeding...\n");
 
-		// IMPORTANT: For auto-rho calculation, always use map trim sliders
-		// Map trim sliders are relative to filtered lap data, which is what we need
-		// Section 3 trim sliders are relative to full FIT data
-		let trimStartSlider = document.getElementById(
-			"mapTrimStartSlider",
-		) as HTMLInputElement;
-		let trimEndSlider = document.getElementById(
-			"mapTrimEndSlider",
-		) as HTMLInputElement;
-
-		// Fallback to section 3 sliders only if map sliders don't exist
-		if (!trimStartSlider || !trimEndSlider) {
-			trimStartSlider = document.getElementById(
-				"trimStartSlider",
-			) as HTMLInputElement;
-			trimEndSlider = document.getElementById(
-				"trimEndSlider",
-			) as HTMLInputElement;
-			log.debug("🔍 Map trim sliders not found, using section 3 sliders...");
-		} else {
-			log.debug("🔍 Using map trim sliders (relative to filtered lap data)...");
-		}
-
-		log.debug("  - trimStartSlider exists:", !!trimStartSlider);
-		log.debug("  - trimEndSlider exists:", !!trimEndSlider);
-
-		if (!trimStartSlider || !trimEndSlider) {
-			log.warn("❌ No trim sliders found - cannot calculate auto rho");
+		const trimRegion = resolveTrimRegion(appState);
+		if (!trimRegion) {
+			log.warn("❌ No trim region available - cannot calculate auto rho");
 			log.debug("  This usually means the UI is not ready yet.");
 			log.debug("  Will retry when sliders are available.\n");
 			return null;
 		}
 
-		const trimStart = parseInt(trimStartSlider.value);
-		const trimEnd = parseInt(trimEndSlider.value);
+		const { start: trimStart, end: trimEnd } = trimRegion;
 
 		log.debug("📊 Trim region values:", {
 			start: trimStart,

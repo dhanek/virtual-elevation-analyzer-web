@@ -591,6 +591,42 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
 
+### Auto air density in the GPS modes — 2026-11-03
+
+**The bug.** With "Auto-calculate from weather" ticked, the GPS modes never got a density: the box
+stayed ticked and rho stayed at 1.225 (or whatever was stored), with only a log line to say so. Only
+Standard renders trim sliders, so `performAutoRho` stopped at "No trim sliders found". Behind that,
+`filteredLapData` was built only by Standard's trim setup, so a GPS mode held Standard's last
+selection or nothing, and no GPS-mode lap or mode change started a calculation. A flight still
+running from Standard at a mode switch was abandoned by its key, with nothing to replace it.
+
+**Commits:** on `fix/auto-rho-gps-modes`.
+
+**What it does.** `resolveTrimRegion` (`autoRho.ts`) decides by mode: a GPS mode uses the whole
+FIT-lap selection and never reads sliders, since any left in the DOM belong to a hidden Standard
+panel. Standard reads its sliders, and without them still waits for its panel.
+`publishFilteredLapData` (`section3Orchestration.ts`) is shared by both paths, and
+`updateSelectedLaps`, which also runs after a mode switch's re-render, publishes it in the GPS modes
+and starts the calculation there, with no `isCalculatingAutoRho` guard: `calculateAutoRho` joins an
+identical flight and queues behind a different one. Deselecting virtual laps or moving a gate does
+not change the selection-level density.
+
+**Behaviour change.** With auto ticked, a saved GPS analysis gets a fresh density on load, so its
+CdA moves slightly. Rides without measured air speed and no stored wind also get the weather wind,
+as in Standard.
+
+**Checked.** Unit tests for all three GPS modes, no usable selection, Standard without sliders, the
+trigger with a Standard flight active, the selection following the ticks, auto off, a GPS mode with
+stale hidden Standard sliders, and Standard reading its panel sliders. In the app on a ride with
+eight FIT laps of a closed loop in GPS lap splitting: rho 1.2218 for all eight (3085 samples),
+1.2200 for the first alone (341), 1.2236 for the cool-down lap alone (493), back to 1.2218 on
+restoring them; a restored GPS mode on file load also calculates. Those runs predate the stale-slider
+fix (`9c015f6`). Re-run on that fix, same ride: Standard trimmed to the first 301 samples gives 1.2200;
+switching to each GPS mode with those sliders still in the page gives 1.2218, 1.2200 with one lap and
+1.2218 restored, with no error notification; Analyze in lap splitting removes them; back in Standard the
+trim drives rho again (1.2200, then 1.2218 untrimmed). A Standard panel from one file followed by another
+file restoring a GPS mode was not run in the app.
+
 ### Closure target pinned to 0 only for GPS lap splitting — 2026-10-28
 
 **The bug.** Every route through the `gpsLap` handler pinned the closure target to Manual 0 m,

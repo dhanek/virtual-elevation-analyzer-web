@@ -1510,8 +1510,103 @@ export function updateSelectedLaps(): void {
 		}
 	}
 
+	// The GPS modes have no trim gesture to start the weather, so this hook is
+	// their only trigger. No `isCalculatingAutoRho` guard: a flight from before
+	// a mode switch is abandoned by its inputs, and `calculateAutoRho` joins an
+	// identical flight or queues behind a different one.
+	if (!isFitLapSelectionMode) {
+		const selectedLapData = deps.appState.selectedLaps
+			.map((lapNumber) => deps.appState.currentLaps[lapNumber - 1])
+			.filter(Boolean);
+		if (selectedLapData.length === 0) {
+			deps.appState.filteredLapData = null;
+		} else {
+			publishFilteredLapData(selectedLapData);
+			if (deps.appState.currentParameters?.auto_calculate_rho) {
+				setTimeout(() => {
+					calculateAutoRho(
+						deps.appState,
+						deps.getParametersComponent(),
+						getServices(deps),
+					).catch((err) => {
+						log.error("Auto-rho calculation error on lap selection:", err);
+					});
+				}, 500);
+			}
+		}
+	}
+
 	// Update analyze button in section 3
 	deps.updateAnalyzeButton();
+}
+
+type TimeLap = { start_time: number; end_time: number };
+
+/**
+ * Store the selected FIT laps' samples for auto-rho, and return their count.
+ * Every mode publishes this: the GPS modes select inside these laps.
+ */
+function publishFilteredLapData(selectedLapData: TimeLap[]): number {
+	const deps = getDependencies();
+	const fitData =
+		deps.appState.currentFitData || deps.appState.currentFitResult?.fit_data;
+	if (!fitData) return 0;
+
+	const allTimestamps = fitData.timestamps;
+	const allPositionLat = fitData.position_lat;
+	const allPositionLong = fitData.position_long;
+
+	const hasGpsData =
+		deps.appState.currentFitResult?.parsing_statistics?.has_gps_data ?? false;
+
+	// Get time ranges for selected laps
+	const selectedLapTimeRanges = selectedLapData.map((lap): TimeRange => ({
+		start: lap.start_time,
+		end: lap.end_time,
+	}));
+
+	// Filter GPS data for selected laps (if available)
+	const filteredLapPositionLat: number[] = [];
+	const filteredLapPositionLong: number[] = [];
+	const filteredLapTimestamps: number[] = [];
+
+	let dataLength = 0;
+
+	if (hasGpsData && allPositionLat && allPositionLong) {
+		for (let i = 0; i < allTimestamps.length; i++) {
+			const timestamp = allTimestamps[i];
+			const isInSelectedLap = selectedLapTimeRanges.some(
+				(range) => timestamp >= range.start && timestamp <= range.end,
+			);
+			if (isInSelectedLap) {
+				filteredLapPositionLat.push(allPositionLat[i]);
+				filteredLapPositionLong.push(allPositionLong[i]);
+				filteredLapTimestamps.push(timestamp);
+			}
+		}
+		dataLength = filteredLapPositionLat.length;
+	} else {
+		// Use timestamp count instead of GPS points
+		for (let i = 0; i < allTimestamps.length; i++) {
+			const timestamp = allTimestamps[i];
+			const isInSelectedLap = selectedLapTimeRanges.some(
+				(range) => timestamp >= range.start && timestamp <= range.end,
+			);
+			if (isInSelectedLap) {
+				filteredLapTimestamps.push(timestamp);
+				dataLength++;
+			}
+		}
+	}
+
+	// Store filtered lap data globally for auto-rho calculation
+	deps.appState.filteredLapData = {
+		position_lat: filteredLapPositionLat,
+		position_long: filteredLapPositionLong,
+		timestamps: filteredLapTimestamps,
+	};
+
+	return dataLength;
 }
 
 /**
@@ -1585,59 +1680,11 @@ async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
 		return;
 	}
 
-	const allTimestamps = fitData.timestamps;
-	const allPositionLat = fitData.position_lat;
-	const allPositionLong = fitData.position_long;
-
-	const hasGpsData =
-		deps.appState.currentFitResult.parsing_statistics?.has_gps_data ?? false;
-
-	// Get time ranges for selected laps
-	const selectedLapTimeRanges = selectedLapData.map((lap): TimeRange => ({
-		start: lap.start_time,
-		end: lap.end_time,
-	}));
-
-	// Filter GPS data for selected laps (if available)
-	const filteredLapPositionLat: number[] = [];
-	const filteredLapPositionLong: number[] = [];
-	const filteredLapTimestamps: number[] = [];
-
-	let dataLength = 0;
-
-	if (hasGpsData && allPositionLat && allPositionLong) {
-		for (let i = 0; i < allTimestamps.length; i++) {
-			const timestamp = allTimestamps[i];
-			const isInSelectedLap = selectedLapTimeRanges.some(
-				(range) => timestamp >= range.start && timestamp <= range.end,
-			);
-			if (isInSelectedLap) {
-				filteredLapPositionLat.push(allPositionLat[i]);
-				filteredLapPositionLong.push(allPositionLong[i]);
-				filteredLapTimestamps.push(timestamp);
-			}
-		}
-		dataLength = filteredLapPositionLat.length;
-	} else {
-		// Use timestamp count instead of GPS points
-		for (let i = 0; i < allTimestamps.length; i++) {
-			const timestamp = allTimestamps[i];
-			const isInSelectedLap = selectedLapTimeRanges.some(
-				(range) => timestamp >= range.start && timestamp <= range.end,
-			);
-			if (isInSelectedLap) {
-				filteredLapTimestamps.push(timestamp);
-				dataLength++;
-			}
-		}
-	}
-
-	// Store filtered lap data globally for auto-rho calculation
-	deps.appState.filteredLapData = {
-		position_lat: filteredLapPositionLat,
-		position_long: filteredLapPositionLong,
-		timestamps: filteredLapTimestamps,
-	};
+	const dataLength = publishFilteredLapData(selectedLapData);
+	const filteredLapPositionLat =
+		deps.appState.filteredLapData?.position_lat ?? [];
+	const filteredLapPositionLong =
+		deps.appState.filteredLapData?.position_long ?? [];
 
 	// Initialize the controls with correct data length
 	initializeMapTrimControls(dataLength);

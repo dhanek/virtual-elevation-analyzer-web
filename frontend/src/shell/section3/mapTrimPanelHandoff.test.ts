@@ -103,6 +103,7 @@ import { veViewMatchesSelection } from "../ve/veSelectionGuard";
 import {
 	configureSection3Orchestration,
 	initializeSection3,
+	setGpsAnalysisMode,
 	updateSelectedLaps,
 } from "./section3Orchestration";
 
@@ -369,6 +370,71 @@ describe("the map's trim face and the panel's, in one document", () => {
 		// And the panel actually shows the window it recomputed. A "fix" that
 		// recomputes while leaving the slider reading 200 is not a fix.
 		expect(el("trimStartSlider").value).toBe("150");
+	});
+});
+
+/**
+ * The GPS modes have no trim gesture, so the mode switch and the FIT-lap
+ * selection are the only things that can start their weather. A flight still
+ * running from Standard at the switch is abandoned by its key, so it must not
+ * suppress this one.
+ */
+describe("weather in the GPS modes", () => {
+	afterEach(() => {
+		setGpsAnalysisMode("None");
+	});
+
+	it("runs after the switch to a GPS mode, even with a Standard flight still active", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		appState.currentParameters!.auto_calculate_rho = true;
+		vi.useFakeTimers();
+		autoRho.calculate.mockClear();
+		appState.isCalculatingAutoRho = true;
+
+		// The re-render's post-render hook (100 ms), then the weather delay.
+		setGpsAnalysisMode("GPS based lap splitting");
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(autoRho.calculate).toHaveBeenCalled();
+	});
+
+	it("gives the weather the current FIT-lap selection, not Standard's last one", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		appState.currentParameters!.auto_calculate_rho = true;
+		appState.filteredLapData = null;
+		vi.useFakeTimers();
+
+		setGpsAnalysisMode("GPS based lap splitting");
+		await vi.advanceTimersByTimeAsync(600);
+		expect((appState as AppState).filteredLapData?.timestamps).toHaveLength(
+			SAMPLE_COUNT,
+		);
+
+		autoRho.calculate.mockClear();
+		document
+			.querySelectorAll<HTMLInputElement>(".lap-checkbox")
+			.forEach((box) => (box.checked = false));
+		updateSelectedLaps();
+		await vi.advanceTimersByTimeAsync(500);
+		expect(appState.filteredLapData).toBeNull();
+		expect(autoRho.calculate).not.toHaveBeenCalled();
+	});
+
+	it("stays away when auto-calculate is off", async () => {
+		const appState = makeAppState();
+		await renderSection3(appState);
+		await drainDeferredRestore();
+		vi.useFakeTimers();
+		autoRho.calculate.mockClear();
+
+		setGpsAnalysisMode("GPS based out and back");
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(autoRho.calculate).not.toHaveBeenCalled();
 	});
 });
 
