@@ -37,6 +37,7 @@ import {
 } from "../../analysis/unsetParameterFallbacks";
 import { applyVeStatus } from "../../state/veStatus";
 import { log } from "../../utils/log";
+import type { SaveSettingsOptions } from "../../utils/ParameterStorage";
 import { getSelectedWindSource, toWindSource } from "../dom/windSource";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
 import {
@@ -89,7 +90,7 @@ export interface ModeUpdateRequestDeps {
 	 * driven slider value: the interaction-time save fires before the async
 	 * pass resolves it, and would otherwise persist a stale value.
 	 */
-	saveSettings?: () => void;
+	saveSettings?: (options?: SaveSettingsOptions) => void;
 }
 
 let deps: ModeUpdateRequestDeps | null = null;

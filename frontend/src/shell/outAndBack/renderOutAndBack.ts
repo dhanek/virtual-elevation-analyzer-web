@@ -820,8 +820,8 @@ export function setupOutAndBackSliderSync(
 	return bindModeControls({
 		appState,
 		modeId: "outAndBack",
-		saveSettings: () => {
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
+		saveSettings: (options) => {
+			void saveCurrentMultiSegmentSettings(appState, parameterStorage, options);
 		},
 		// N-3: one sync-error window per section leg — outbound and inbound are
 		// separate windows, as they are everywhere else in this mode.

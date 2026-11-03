@@ -549,10 +549,11 @@ export async function handleAnalyze(): Promise<void> {
 							onExportBundle: () => {
 								void handleExportBundle(deps.appState, deps.parameterStorage);
 							},
-							saveCurrentLapSettings: () => {
+							saveCurrentLapSettings: (options) => {
 								void saveCurrentLapSettings(
 									deps.appState,
 									deps.parameterStorage,
+									options,
 								);
 							},
 						},

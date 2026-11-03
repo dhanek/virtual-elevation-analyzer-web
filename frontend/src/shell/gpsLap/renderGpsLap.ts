@@ -566,8 +566,8 @@ export function setupGpsLapSliderHandlers(
 	return bindModeControls({
 		appState,
 		modeId: "gpsLap",
-		saveSettings: () => {
-			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
+		saveSettings: (options) => {
+			void saveCurrentMultiSegmentSettings(appState, parameterStorage, options);
 		},
 		// N-3: one sync-error window per lap, where Standard supplies its single
 		// trim window. The binder displays the NaN-skipping mean over them, so

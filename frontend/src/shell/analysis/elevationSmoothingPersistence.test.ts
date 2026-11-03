@@ -369,6 +369,31 @@ describe.each(MODES)(
 			expect(storage.saveCalls[0].laps).toEqual(ANALYZED);
 		});
 
+		const dragSlider = async (id: string, value: string): Promise<void> => {
+			const slider = document.getElementById(id) as HTMLInputElement | null;
+			if (!slider) throw new Error(`#${id} is not rendered`);
+			slider.value = value;
+			slider.dispatchEvent(new Event("input", { bubbles: true }));
+			await settle();
+		};
+
+		it("a calibration drag writes the calibration", async () => {
+			await dragSlider("airSpeedCalibrationSlider", "5");
+
+			const stored = await storage.loadLapSettings(FILE_HASH, [...ANALYZED]);
+			expect(stored?.airSpeedCalibration).toBe(5);
+		});
+
+		it("a CdA drag writes a record with no calibration", async () => {
+			appState.airSpeedCalibrationPercent = 5;
+
+			await dragSlider("cdaSlider", "0.31");
+
+			const stored = await storage.loadLapSettings(FILE_HASH, [...ANALYZED]);
+			expect(stored).not.toBeNull();
+			expect(stored).not.toHaveProperty("airSpeedCalibration");
+		});
+
 		it("does NOT restore the toggle on a fresh load — the false half", async () => {
 			await toggleSmoothingOn();
 			expect(appState.activeDisplayProfile).toBe(

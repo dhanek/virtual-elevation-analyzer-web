@@ -169,3 +169,91 @@ describe("saveSection3", () => {
 		expect(await storage.loadParameters("hash_f")).not.toBeNull();
 	});
 });
+
+describe("saveLapSettings keeps a stored calibration", () => {
+	const HASH = "hash_cal";
+	const base = { trimStart: 0, trimEnd: 100, cda: 0.3, crr: 0.004 };
+
+	it("keeps a stored value through a save without one", async () => {
+		const storage = await freshStorage();
+		await storage.saveLapSettings(HASH, [1], {
+			...base,
+			airSpeedCalibration: 5,
+		});
+		await storage.saveLapSettings(HASH, [1], { ...base, cda: 0.25 });
+
+		const loaded = await storage.loadLapSettings(HASH, [1]);
+		expect(loaded?.airSpeedCalibration).toBe(5);
+		// The rest of the entry is still replaced.
+		expect(loaded?.cda).toBe(0.25);
+	});
+
+	it("keeps a stored 0 through a save without one", async () => {
+		const storage = await freshStorage();
+		await storage.saveLapSettings(HASH, [1], {
+			...base,
+			airSpeedCalibration: 0,
+		});
+		await storage.saveLapSettings(HASH, [1], base);
+
+		const loaded = await storage.loadLapSettings(HASH, [1]);
+		expect(loaded?.airSpeedCalibration).toBe(0);
+	});
+
+	it("lets a save with a value replace the stored one", async () => {
+		const storage = await freshStorage();
+		await storage.saveLapSettings(HASH, [1], {
+			...base,
+			airSpeedCalibration: 5,
+		});
+		await storage.saveLapSettings(HASH, [1], {
+			...base,
+			airSpeedCalibration: 0,
+		});
+
+		const loaded = await storage.loadLapSettings(HASH, [1]);
+		expect(loaded?.airSpeedCalibration).toBe(0);
+	});
+
+	it("leaves the field absent when no value was ever stored", async () => {
+		const storage = await freshStorage();
+		await storage.saveLapSettings(HASH, [1], base);
+		await storage.saveLapSettings(HASH, [1], { ...base, cda: 0.25 });
+
+		const loaded = await storage.loadLapSettings(HASH, [1]);
+		expect(loaded).not.toBeNull();
+		expect(loaded).not.toHaveProperty("airSpeedCalibration");
+	});
+
+	it("does not touch a different key", async () => {
+		const storage = await freshStorage();
+		await storage.saveLapSettings(HASH, [1], {
+			...base,
+			airSpeedCalibration: 5,
+		});
+		await storage.saveLapSettings(HASH, [2], base);
+
+		const other = await storage.loadLapSettings(HASH, [2]);
+		expect(other).not.toHaveProperty("airSpeedCalibration");
+		const first = await storage.loadLapSettings(HASH, [1]);
+		expect(first?.airSpeedCalibration).toBe(5);
+	});
+
+	it("keeps a stored value through the map-trim shape", async () => {
+		const storage = await freshStorage();
+		await storage.saveLapSettings(HASH, [1], {
+			...base,
+			airSpeedCalibration: 5,
+		});
+		await storage.saveLapSettings(HASH, [1], {
+			trimStart: 10,
+			trimEnd: 90,
+			cda: null,
+			crr: null,
+		});
+
+		const loaded = await storage.loadLapSettings(HASH, [1]);
+		expect(loaded?.airSpeedCalibration).toBe(5);
+		expect(loaded?.trimStart).toBe(10);
+	});
+});

@@ -473,8 +473,8 @@ describe("the map-trim sliders and the recompute funnel", () => {
 	 *
 	 * `saveMapTrimSettings` writes `{cda: null, crr: null}` and no
 	 * `airSpeedCalibration`, and `ParameterStorage.saveLapSettings` REPLACES the
-	 * whole entry. The removed `mapTrim` row carried `persistsSettings: true`, so
-	 * the binder's `finish()` also ran Standard's `saveCurrentLapSettings` — with
+	 * whole entry (a stored calibration survives a write without one). The removed
+	 * `mapTrim` row carried `persistsSettings: true`, so the binder's `finish()` also ran Standard's `saveCurrentLapSettings` — with
 	 * the real values — and that second write was the last one. Without it, one
 	 * map drag after tuning CdA erases the tuning from storage, and the next
 	 * Analyze of the same lap loads it back blank.

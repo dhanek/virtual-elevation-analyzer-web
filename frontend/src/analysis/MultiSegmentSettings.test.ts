@@ -6,10 +6,11 @@
  * it would test the mock rather than the function. Everything above is pure and
  * indifferent to the environment.
  */
-import { describe, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppState } from "../state/AppState";
-import type { ParameterStorage } from "../utils/ParameterStorage";
+import { ParameterStorage } from "../utils/ParameterStorage";
 import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
 import {
 	resolveMultiSegmentAnalysisParams,
@@ -166,5 +167,108 @@ describe("the analyze-time selection is the settings key (WR-01)", () => {
 		expect(key).toEqual([1, 2, 3, 4]);
 		expect(settings.cda).toBeCloseTo(0.231, 6);
 		expect(settings.crr).toBeCloseTo(0.0037, 6);
+	});
+});
+
+describe("the calibration travels only with a calibration gesture", () => {
+	const A = [1];
+	const B = [2];
+	const C = [3];
+	let appState: AppState;
+	let storage: ParameterStorage;
+
+	const analyze = async (items: number[]): Promise<number> => {
+		await resolveMultiSegmentAnalysisParams(appState, storage, items, {
+			...DEFAULT_PARAMETERS,
+		});
+		return appState.airSpeedCalibrationPercent;
+	};
+
+	const calibrate = async (percent: number): Promise<void> => {
+		appState.airSpeedCalibrationPercent = percent;
+		await saveCurrentMultiSegmentSettings(appState, storage, {
+			calibrationChanged: true,
+		});
+	};
+
+	beforeEach(async () => {
+		globalThis.indexedDB = new IDBFactory();
+		document.body.innerHTML = `
+            <input id="cdaValue" value="0.231">
+            <input id="crrValue" value="0.0037">
+        `;
+		appState = {
+			currentFileHash: "hash-1",
+			selectedFile: { name: "ride.fit" } as File,
+			currentAnalyzedLaps: [],
+			currentCoveredItems: null,
+			airSpeedCalibrationPercent: 0,
+		} as unknown as AppState;
+		storage = new ParameterStorage();
+		await storage.initialize();
+	});
+
+	it("leaves the field out with no option, even at a non-zero value", async () => {
+		const stub = {
+			saveLapSettings: vi.fn(async () => {}),
+		} as unknown as ParameterStorage & {
+			saveLapSettings: ReturnType<typeof vi.fn>;
+		};
+		appState.currentAnalyzedLaps = A;
+		appState.airSpeedCalibrationPercent = 5;
+
+		await saveCurrentMultiSegmentSettings(appState, stub);
+
+		expect(stub.saveLapSettings).toHaveBeenCalledTimes(1);
+		expect(stub.saveLapSettings.mock.calls[0][2]).not.toHaveProperty(
+			"airSpeedCalibration",
+		);
+	});
+
+	it("carries the value with the option", async () => {
+		const stub = {
+			saveLapSettings: vi.fn(async () => {}),
+		} as unknown as ParameterStorage & {
+			saveLapSettings: ReturnType<typeof vi.fn>;
+		};
+		appState.currentAnalyzedLaps = A;
+		appState.airSpeedCalibrationPercent = 5;
+
+		await saveCurrentMultiSegmentSettings(appState, stub, {
+			calibrationChanged: true,
+		});
+
+		expect(stub.saveLapSettings.mock.calls[0][2].airSpeedCalibration).toBe(5);
+	});
+
+	it("does not pin a carried value on a selection that only moved CdA", async () => {
+		await analyze(A);
+		await calibrate(5);
+
+		await analyze(B);
+		await saveCurrentMultiSegmentSettings(appState, storage);
+
+		await analyze(C);
+		await calibrate(9);
+
+		expect(await analyze(B)).toBe(9);
+		expect(await analyze(A)).toBe(5);
+	});
+
+	it("gives a selection tuned to 0 its 0 back", async () => {
+		await analyze(A);
+		await calibrate(5);
+
+		expect(await analyze(B)).toBe(5);
+		await calibrate(0);
+
+		expect(await analyze(A)).toBe(5);
+		expect(await analyze(B)).toBe(0);
+
+		// A CdA drag on B must not lose it.
+		await saveCurrentMultiSegmentSettings(appState, storage);
+
+		expect(await analyze(A)).toBe(5);
+		expect(await analyze(B)).toBe(0);
 	});
 });

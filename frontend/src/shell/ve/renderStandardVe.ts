@@ -39,7 +39,10 @@ import { windHeightControlsMarkup } from "./windHeightControls";
 import { airSpeedOffsetControlMarkup } from "./airSpeedOffsetControl";
 import { airSpeedCalibrationControlMarkup } from "./airSpeedCalibrationControl";
 import { fitWindVisibilityAttrs } from "./windSourceVisibility";
-import { ParameterStorage } from "../../utils/ParameterStorage";
+import {
+	ParameterStorage,
+	type SaveSettingsOptions,
+} from "../../utils/ParameterStorage";
 import { ShellServices } from "../analysis/types";
 import { resolveSelectionWindSeries } from "./standardSegments";
 import { applyVeStatus } from "../../state/veStatus";
@@ -70,7 +73,7 @@ export interface StandardVeCallbacks {
 	onExportSettings: () => void;
 	onExportBundle: () => void;
 	onShowAllResults: () => void;
-	saveCurrentLapSettings: () => void;
+	saveCurrentLapSettings: (options?: SaveSettingsOptions) => void;
 }
 
 /**

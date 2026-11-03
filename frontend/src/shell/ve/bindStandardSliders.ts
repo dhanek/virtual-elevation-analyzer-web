@@ -48,6 +48,7 @@ import {
 	requestRepeatsRedraw,
 	renderRepeatsView,
 } from "../analysis/repeatsView";
+import type { SaveSettingsOptions } from "../../utils/ParameterStorage";
 import { computeStandardAggregate } from "./standardAggregate";
 
 const MIN_TRIM_WINDOW_SAMPLES = 30;
@@ -434,7 +435,7 @@ export function setupVESliders(
 	parametersComponent: AnalysisParametersComponent | null,
 	services: ShellServices,
 	mapVisualization: MapVisualization | null,
-	saveCurrentLapSettings: () => void,
+	saveCurrentLapSettings: (options?: SaveSettingsOptions) => void,
 	// FOUR ARRAYS LESS than before 07-04. `selectedIndices`, `power`, `altitude`
 	// and `distance` were read only by the compare escape hatch this plan
 	// deleted; the primitive slices all four out of the resolved full-activity
