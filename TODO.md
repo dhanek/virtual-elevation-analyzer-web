@@ -621,8 +621,11 @@ stale hidden Standard sliders, and Standard reading its panel sliders. In the ap
 eight FIT laps of a closed loop in GPS lap splitting: rho 1.2218 for all eight (3085 samples),
 1.2200 for the first alone (341), 1.2236 for the cool-down lap alone (493), back to 1.2218 on
 restoring them; a restored GPS mode on file load also calculates. Those runs predate the stale-slider
-fix (`9c015f6`). The other two GPS modes, and a switch to a GPS mode after a Standard analysis, were
-not run in the app.
+fix (`9c015f6`). Re-run on that fix, same ride: Standard trimmed to the first 301 samples gives 1.2200;
+switching to each GPS mode with those sliders still in the page gives 1.2218, 1.2200 with one lap and
+1.2218 restored, with no error notification; Analyze in lap splitting removes them; back in Standard the
+trim drives rho again (1.2200, then 1.2218 untrimmed). A Standard panel from one file followed by another
+file restoring a GPS mode was not run in the app.
 
 ### Closure target pinned to 0 only for GPS lap splitting — 2026-10-28
 
