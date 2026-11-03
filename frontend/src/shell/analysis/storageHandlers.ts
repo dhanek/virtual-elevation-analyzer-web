@@ -45,10 +45,7 @@ export async function saveCurrentLapSettings(
 		trimEnd: parseInt(trimEndSlider.value),
 		cda: parseFloat(cdaSlider.value) || null,
 		crr: parseFloat(crrSlider.value) || null,
-		airSpeedCalibration:
-			appState.airSpeedCalibrationPercent !== 0
-				? appState.airSpeedCalibrationPercent
-				: undefined,
+		airSpeedCalibration: appState.airSpeedCalibrationPercent,
 	};
 
 	try {

@@ -123,12 +123,16 @@ import {
 	type AnalysisParameters,
 } from "../../components/AnalysisParameters";
 import type { AppState } from "../../state/AppState";
-import type { ParameterStorage } from "../../utils/ParameterStorage";
+import type {
+	LapSettings,
+	ParameterStorage,
+} from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "./types";
 import { showGpsLapVEPlot } from "../gpsLap/renderGpsLap";
 import { showVirtualElevationAnalysisInline } from "../ve/renderStandardVe";
 import { clearModeUpdateCallbacks } from "./modeUpdateCallbacks";
+import { saveCurrentLapSettings } from "./storageHandlers";
 import { resetRecomputeThrottle } from "./recomputeRunner";
 import {
 	requestModeUpdate,
@@ -261,6 +265,7 @@ async function renderStitched(
 		mapVisualization?: any;
 		parameterStorage?: ParameterStorage;
 		analyzedLaps?: number[];
+		saveCurrentLapSettings?: () => void;
 	} = {},
 ): Promise<void> {
 	const fit = makeFitData();
@@ -279,7 +284,7 @@ async function renderStitched(
 			onExportSettings: () => {},
 			onExportBundle: () => {},
 			onShowAllResults: () => {},
-			saveCurrentLapSettings: () => {},
+			saveCurrentLapSettings: options.saveCurrentLapSettings ?? (() => {}),
 		},
 		options.analyzedLaps ?? [1, 2],
 		fit.timestamps.map((_, i) => i),
@@ -1483,5 +1488,93 @@ describe("standard: a stored trim is fitted to the selection it is loaded agains
 		expect(appState.presetTrimStart).toBe(20);
 		expect(appState.presetTrimEnd).toBe(350);
 		expect(trimNumber().value).toBe("350");
+	});
+});
+
+describe("standard: a calibration drag reaches the settings saver", () => {
+	const dragCalibration = async (value: number): Promise<void> => {
+		const slider = document.getElementById(
+			"airSpeedCalibrationSlider",
+		) as HTMLInputElement | null;
+		if (!slider) throw new Error("the calibration slider is not rendered");
+		slider.value = value.toString();
+		slider.dispatchEvent(new Event("input", { bubbles: true }));
+		await settle();
+	};
+
+	let records: Map<string, LapSettings>;
+	let loadLapSettings: ReturnType<typeof vi.fn>;
+	let parameterStorage: ParameterStorage;
+	let saver: ReturnType<typeof vi.fn>;
+
+	const renderLap = async (lap: number): Promise<void> => {
+		await renderStitched({
+			parameterStorage,
+			analyzedLaps: [lap],
+			saveCurrentLapSettings: saver,
+		});
+		await settle();
+	};
+
+	beforeEach(() => {
+		records = new Map();
+		loadLapSettings = vi.fn(async (_hash: string, laps: number[]) => {
+			return records.get(laps.join("-")) ?? null;
+		});
+		parameterStorage = {
+			loadLapSettings,
+			saveLapSettings: async (
+				_hash: string,
+				laps: number[],
+				settings: LapSettings,
+			) => {
+				records.set(laps.join("-"), settings);
+			},
+		} as unknown as ParameterStorage;
+		saver = vi.fn(() => {
+			void saveCurrentLapSettings(appState, parameterStorage);
+		});
+		appState.currentFileHash = "hash";
+		appState.selectedFile = { name: "ride.fit" } as File;
+	});
+
+	it("gives a lap tuned to 0 its 0 back", async () => {
+		await renderLap(1);
+		await dragCalibration(5);
+
+		await renderLap(2);
+		expect(appState.airSpeedCalibrationPercent).toBe(5);
+		await dragCalibration(0);
+
+		await renderLap(1);
+		expect(appState.airSpeedCalibrationPercent).toBe(5);
+
+		loadLapSettings.mockClear();
+		await renderLap(2);
+		// Proves the read reached the saved-settings branch for this lap.
+		expect(loadLapSettings).toHaveBeenCalledWith("hash", [2]);
+		expect(appState.airSpeedCalibrationPercent).toBe(0);
+	});
+
+	it("a CdA drag on a lap stores the carried value", async () => {
+		await renderLap(1);
+		await dragCalibration(5);
+
+		await renderLap(2);
+		saver.mockClear();
+		const cda = document.getElementById("cdaSlider") as HTMLInputElement;
+		cda.value = "0.31";
+		cda.dispatchEvent(new Event("input", { bubbles: true }));
+		await settle();
+		expect(saver).toHaveBeenCalled();
+
+		await renderLap(3);
+		await dragCalibration(9);
+
+		loadLapSettings.mockClear();
+		await renderLap(2);
+		// Proves the read reached the saved-settings branch for this lap.
+		expect(loadLapSettings).toHaveBeenCalledWith("hash", [2]);
+		expect(appState.airSpeedCalibrationPercent).toBe(5);
 	});
 });

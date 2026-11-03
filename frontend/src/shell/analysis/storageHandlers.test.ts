@@ -132,6 +132,33 @@ describe("saveCurrentLapSettings", () => {
 			airSpeedCalibration: 1.5,
 		});
 	});
+
+	describe("every save stores the calibration", () => {
+		const save = async (airSpeedCalibrationPercent: number) => {
+			addInput("trimStartSlider", "30");
+			addInput("trimEndSlider", "600");
+			addInput("cdaSlider", "0.31");
+			addInput("crrSlider", "0.0045");
+			const calls: SaveCall[] = [];
+			await saveCurrentLapSettings(
+				makeAppStateStub({
+					currentAnalyzedLaps: [3],
+					airSpeedCalibrationPercent,
+				}),
+				makeParameterStorageStub(calls),
+			);
+			expect(calls).toHaveLength(1);
+			return calls[0].settings;
+		};
+
+		it("writes the value at 5", async () => {
+			expect((await save(5)).airSpeedCalibration).toBe(5);
+		});
+
+		it("writes 0 at 0", async () => {
+			expect((await save(0)).airSpeedCalibration).toBe(0);
+		});
+	});
 });
 
 /**

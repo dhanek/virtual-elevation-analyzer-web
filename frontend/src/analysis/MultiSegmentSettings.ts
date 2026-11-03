@@ -5,7 +5,6 @@ import type { getNormalizedActivityArrays } from "./ActivityArrayCache";
 import type { resolveWindSeries } from "./WindSourceResolver";
 import type { extractSegmentData } from "./SegmentExtractor";
 
-import { DEFAULT_AIR_SPEED_CALIBRATION_PERCENT } from "./AirSpeedCalibration";
 import { log } from "../utils/log";
 
 type GetNormalizedActivityArraysFn = typeof getNormalizedActivityArrays;
@@ -44,9 +43,11 @@ export function resolveMultiSegmentSettings(
 			cda: input.savedSettings?.cda ?? input.params.cda,
 			crr: input.savedSettings?.crr ?? input.params.crr,
 		},
+		// The sensor's scale belongs to the ride, not the selection, so a new
+		// selection keeps it. A new file resets it (`resetAnalysisForNewActivity`).
 		airSpeedCalibrationPercent:
 			input.savedSettings?.airSpeedCalibration ??
-			DEFAULT_AIR_SPEED_CALIBRATION_PERCENT,
+			input.currentAirSpeedCalibrationPercent,
 	};
 }
 
@@ -120,10 +121,7 @@ export async function saveCurrentMultiSegmentSettings(
 		trimEnd: 0,
 		cda: Number.isFinite(parsedCda) ? parsedCda : null,
 		crr: Number.isFinite(parsedCrr) ? parsedCrr : null,
-		airSpeedCalibration:
-			appState.airSpeedCalibrationPercent !== 0
-				? appState.airSpeedCalibrationPercent
-				: undefined,
+		airSpeedCalibration: appState.airSpeedCalibrationPercent,
 	};
 
 	try {

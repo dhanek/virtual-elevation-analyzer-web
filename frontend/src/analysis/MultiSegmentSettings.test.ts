@@ -6,12 +6,12 @@
  * it would test the mock rather than the function. Everything above is pure and
  * indifferent to the environment.
  */
-import { describe, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppState } from "../state/AppState";
-import type { ParameterStorage } from "../utils/ParameterStorage";
+import { ParameterStorage } from "../utils/ParameterStorage";
 import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
-import { DEFAULT_AIR_SPEED_CALIBRATION_PERCENT } from "./AirSpeedCalibration";
 import {
 	resolveMultiSegmentAnalysisParams,
 	resolveMultiSegmentSettings,
@@ -69,7 +69,7 @@ describe("resolveMultiSegmentSettings", () => {
 		expect(resolved.airSpeedCalibrationPercent).toBe(-4.5);
 	});
 
-	it("resets calibration to default when a new selection has no saved settings", () => {
+	it("keeps the current calibration when a new selection has no saved settings", () => {
 		const resolved = resolveMultiSegmentSettings({
 			currentAnalyzedItems: [1, 2],
 			nextAnalyzedItems: [7],
@@ -80,9 +80,19 @@ describe("resolveMultiSegmentSettings", () => {
 
 		expect(resolved.params.cda).toBe(0.21);
 		expect(resolved.params.crr).toBe(0.0042);
-		expect(resolved.airSpeedCalibrationPercent).toBe(
-			DEFAULT_AIR_SPEED_CALIBRATION_PERCENT,
-		);
+		expect(resolved.airSpeedCalibrationPercent).toBe(9);
+	});
+
+	it("keeps the current calibration when the saved settings carry none", () => {
+		const resolved = resolveMultiSegmentSettings({
+			currentAnalyzedItems: [1, 2],
+			nextAnalyzedItems: [7],
+			params: DEFAULT_PARAMETERS,
+			currentAirSpeedCalibrationPercent: 9,
+			savedSettings: { cda: 0.3, crr: 0.005 },
+		});
+
+		expect(resolved.airSpeedCalibrationPercent).toBe(9);
 	});
 });
 
@@ -157,5 +167,141 @@ describe("the analyze-time selection is the settings key (WR-01)", () => {
 		expect(key).toEqual([1, 2, 3, 4]);
 		expect(settings.cda).toBeCloseTo(0.231, 6);
 		expect(settings.crr).toBeCloseTo(0.0037, 6);
+	});
+});
+
+describe("every save stores the calibration", () => {
+	const A = [1];
+	const B = [2];
+	const C = [3];
+	let appState: AppState;
+	let storage: ParameterStorage;
+
+	const analyze = async (items: number[]): Promise<number> => {
+		await resolveMultiSegmentAnalysisParams(appState, storage, items, {
+			...DEFAULT_PARAMETERS,
+		});
+		return appState.airSpeedCalibrationPercent;
+	};
+
+	const calibrate = async (percent: number): Promise<void> => {
+		appState.airSpeedCalibrationPercent = percent;
+		await saveCurrentMultiSegmentSettings(appState, storage);
+	};
+
+	const freshAppState = (): AppState =>
+		({
+			currentFileHash: "hash-1",
+			selectedFile: { name: "ride.fit" } as File,
+			currentAnalyzedLaps: [],
+			currentCoveredItems: null,
+			airSpeedCalibrationPercent: 0,
+		}) as unknown as AppState;
+
+	beforeEach(async () => {
+		globalThis.indexedDB = new IDBFactory();
+		document.body.innerHTML = `
+            <input id="cdaValue" value="0.231">
+            <input id="crrValue" value="0.0037">
+        `;
+		appState = freshAppState();
+		storage = new ParameterStorage();
+		await storage.initialize();
+	});
+
+	const savedBySave = async (percent: number) => {
+		const stub = {
+			saveLapSettings: vi.fn(async () => {}),
+		} as unknown as ParameterStorage & {
+			saveLapSettings: ReturnType<typeof vi.fn>;
+		};
+		appState.currentAnalyzedLaps = A;
+		appState.airSpeedCalibrationPercent = percent;
+
+		await saveCurrentMultiSegmentSettings(appState, stub);
+
+		expect(stub.saveLapSettings).toHaveBeenCalledTimes(1);
+		return stub.saveLapSettings.mock.calls[0][2];
+	};
+
+	it("writes the value on a save", async () => {
+		expect((await savedBySave(5)).airSpeedCalibration).toBe(5);
+	});
+
+	it("writes 0 on a save", async () => {
+		expect((await savedBySave(0)).airSpeedCalibration).toBe(0);
+	});
+
+	it("gives a selection tuned to 0 its 0 back", async () => {
+		await analyze(A);
+		await calibrate(5);
+
+		expect(await analyze(B)).toBe(5);
+		await calibrate(0);
+
+		expect(await analyze(A)).toBe(5);
+		expect(await analyze(B)).toBe(0);
+
+		// A CdA drag on B must not lose it.
+		await saveCurrentMultiSegmentSettings(appState, storage);
+
+		expect(await analyze(A)).toBe(5);
+		expect(await analyze(B)).toBe(0);
+	});
+
+	it("a reload gives a selection the calibration it was saved with, in either analyze order", async () => {
+		await analyze(A);
+		await calibrate(5);
+		await analyze(B);
+		await saveCurrentMultiSegmentSettings(appState, storage);
+
+		// Reload: nothing in memory, same IndexedDB. B first.
+		appState = freshAppState();
+		storage = new ParameterStorage();
+		await storage.initialize();
+		const params = await resolveMultiSegmentAnalysisParams(
+			appState,
+			storage,
+			B,
+			{ ...DEFAULT_PARAMETERS },
+		);
+		expect(appState.airSpeedCalibrationPercent).toBe(5);
+		expect(params.cda).toBeCloseTo(0.231, 6);
+
+		// Reload again: A, then B.
+		appState = freshAppState();
+		await analyze(A);
+		expect(await analyze(B)).toBe(5);
+	});
+
+	it("a save pins the carried value", async () => {
+		await analyze(A);
+		await calibrate(5);
+		await analyze(B);
+		await saveCurrentMultiSegmentSettings(appState, storage);
+		await analyze(C);
+		await calibrate(9);
+
+		expect(await analyze(B)).toBe(5);
+		expect(await analyze(A)).toBe(5);
+	});
+
+	it("a selection never saved still follows the current value", async () => {
+		await analyze(A);
+		await calibrate(5);
+		await analyze(B);
+		await analyze(C);
+		await calibrate(9);
+
+		expect(await analyze(B)).toBe(9);
+	});
+
+	it("a save at 0 pins 0", async () => {
+		await analyze(A);
+		await saveCurrentMultiSegmentSettings(appState, storage);
+		await analyze(B);
+		await calibrate(5);
+
+		expect(await analyze(A)).toBe(0);
 	});
 });
