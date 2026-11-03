@@ -235,6 +235,25 @@ describe("calculateAutoRho — modes without trim sliders", () => {
 		document.getElementById("mapTrimEndSlider")?.remove();
 	}
 
+	/**
+	 * A hidden Standard panel's sliders. The `max` matters: without it a range
+	 * input can clamp the stale value and change what is tested.
+	 */
+	function addPanelTrimSliders(start: number, end: number): void {
+		for (const [id, value] of [
+			["trimStartSlider", start],
+			["trimEndSlider", end],
+		] as const) {
+			const slider = document.createElement("input");
+			slider.type = "range";
+			slider.id = id;
+			slider.min = "0";
+			slider.max = "1000";
+			slider.value = String(value);
+			document.body.appendChild(slider);
+		}
+	}
+
 	test.each([
 		"GPS based lap splitting",
 		"GPS based out and back",
@@ -258,6 +277,45 @@ describe("calculateAutoRho — modes without trim sliders", () => {
 		const metadata = mocks.getWeatherData.mock
 			.calls[0][0] as TrimRegionMetadata;
 		expect(metadata.dataPointCount).toBe(REGION_POINTS);
+	});
+
+	test.each([
+		["past the end of the selection", 0, 500],
+		["a trimmed part of the selection", 2, 5],
+	])(
+		"a GPS mode ignores hidden Standard sliders holding %s",
+		async (_row, panelStart, panelEnd) => {
+			const h = setupHarness();
+			removeTrimSliders();
+			addPanelTrimSliders(panelStart, panelEnd);
+			mocks.gpsAnalysisMode = "GPS based lap splitting";
+			mocks.getWeatherData.mockResolvedValue(weatherEntry(14.2));
+
+			await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+			expect(mocks.showNotification).not.toHaveBeenCalledWith(
+				expect.anything(),
+				"error",
+			);
+			expect(mocks.getWeatherData).toHaveBeenCalled();
+			const metadata = mocks.getWeatherData.mock
+				.calls[0][0] as TrimRegionMetadata;
+			expect(metadata.dataPointCount).toBe(REGION_POINTS);
+		},
+	);
+
+	test("Standard without map sliders reads the panel sliders", async () => {
+		const h = setupHarness();
+		removeTrimSliders();
+		addPanelTrimSliders(2, 5);
+		mocks.getWeatherData.mockResolvedValue(weatherEntry(14.2));
+
+		await calculateAutoRho(h.appState, h.parametersComponent, h.services);
+
+		expect(mocks.getWeatherData).toHaveBeenCalled();
+		const metadata = mocks.getWeatherData.mock
+			.calls[0][0] as TrimRegionMetadata;
+		expect(metadata.dataPointCount).toBe(4);
 	});
 
 	test("a GPS mode with no usable selection stays quiet", async () => {

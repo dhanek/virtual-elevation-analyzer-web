@@ -138,13 +138,19 @@ function captureAutoRhoFlightKey(appState: AppState): string {
 /**
  * The samples of the filtered lap data the weather should describe.
  *
- * Standard's trim sliders give the region, and without them Standard's panel
- * is not ready yet. The GPS modes render no trim sliders at all: they select
- * inside the FIT laps, so their region is the whole FIT-lap selection.
+ * The mode decides. A GPS mode's region is the whole FIT-lap selection, and any
+ * trim sliders still in the DOM there are a hidden Standard panel's, which is
+ * why they are not read. In Standard the sliders give the region, and without
+ * them the panel is not ready yet.
  */
 function resolveTrimRegion(
 	appState: AppState,
 ): { start: number; end: number } | null {
+	if (getGpsAnalysisMode() !== "None") {
+		const sampleCount = appState.filteredLapData?.timestamps.length ?? 0;
+		return sampleCount >= 2 ? { start: 0, end: sampleCount - 1 } : null;
+	}
+
 	// IMPORTANT: For auto-rho calculation, always use map trim sliders
 	// Map trim sliders are relative to filtered lap data, which is what we need
 	// Section 3 trim sliders are relative to full FIT data
@@ -178,10 +184,7 @@ function resolveTrimRegion(
 		};
 	}
 
-	if (getGpsAnalysisMode() === "None") return null;
-
-	const sampleCount = appState.filteredLapData?.timestamps.length ?? 0;
-	return sampleCount >= 2 ? { start: 0, end: sampleCount - 1 } : null;
+	return null;
 }
 
 async function performAutoRho(
