@@ -384,14 +384,13 @@ describe.each(MODES)(
 			expect(stored?.airSpeedCalibration).toBe(5);
 		});
 
-		it("a CdA drag writes a record with no calibration", async () => {
+		it("a CdA drag stores the current calibration", async () => {
 			appState.airSpeedCalibrationPercent = 5;
 
 			await dragSlider("cdaSlider", "0.31");
 
 			const stored = await storage.loadLapSettings(FILE_HASH, [...ANALYZED]);
-			expect(stored).not.toBeNull();
-			expect(stored).not.toHaveProperty("airSpeedCalibration");
+			expect(stored?.airSpeedCalibration).toBe(5);
 		});
 
 		it("does NOT restore the toggle on a fresh load — the false half", async () => {

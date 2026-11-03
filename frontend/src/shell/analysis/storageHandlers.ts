@@ -9,11 +9,7 @@ import {
 	ResultsStorage,
 	type StoredVEResult,
 } from "../../utils/ResultsStorage";
-import {
-	ParameterStorage,
-	LapSettings,
-	type SaveSettingsOptions,
-} from "../../utils/ParameterStorage";
+import { ParameterStorage, LapSettings } from "../../utils/ParameterStorage";
 import { buildSaveResultData } from "./buildSaveResultData";
 
 /**
@@ -22,7 +18,6 @@ import { buildSaveResultData } from "./buildSaveResultData";
 export async function saveCurrentLapSettings(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
-	options?: SaveSettingsOptions,
 ) {
 	if (!appState.currentFileHash || !appState.selectedFile) return;
 
@@ -50,10 +45,8 @@ export async function saveCurrentLapSettings(
 		trimEnd: parseInt(trimEndSlider.value),
 		cda: parseFloat(cdaSlider.value) || null,
 		crr: parseFloat(crrSlider.value) || null,
+		airSpeedCalibration: appState.airSpeedCalibrationPercent,
 	};
-	if (options?.calibrationChanged) {
-		settings.airSpeedCalibration = appState.airSpeedCalibrationPercent;
-	}
 
 	try {
 		await parameterStorage.saveLapSettings(

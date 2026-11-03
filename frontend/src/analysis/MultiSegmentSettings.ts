@@ -1,9 +1,5 @@
 import type { AnalysisParameters } from "../components/AnalysisParameters";
-import type {
-	LapSettings,
-	ParameterStorage,
-	SaveSettingsOptions,
-} from "../utils/ParameterStorage";
+import type { LapSettings, ParameterStorage } from "../utils/ParameterStorage";
 import type { AppState } from "../state/AppState";
 import type { getNormalizedActivityArrays } from "./ActivityArrayCache";
 import type { resolveWindSeries } from "./WindSourceResolver";
@@ -99,7 +95,6 @@ export async function resolveMultiSegmentAnalysisParams(
 export async function saveCurrentMultiSegmentSettings(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
-	options?: SaveSettingsOptions,
 ): Promise<void> {
 	if (
 		!appState.currentFileHash ||
@@ -126,10 +121,8 @@ export async function saveCurrentMultiSegmentSettings(
 		trimEnd: 0,
 		cda: Number.isFinite(parsedCda) ? parsedCda : null,
 		crr: Number.isFinite(parsedCrr) ? parsedCrr : null,
+		airSpeedCalibration: appState.airSpeedCalibrationPercent,
 	};
-	if (options?.calibrationChanged) {
-		settings.airSpeedCalibration = appState.airSpeedCalibrationPercent;
-	}
 
 	try {
 		await parameterStorage.saveLapSettings(

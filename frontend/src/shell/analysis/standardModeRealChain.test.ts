@@ -126,7 +126,6 @@ import type { AppState } from "../../state/AppState";
 import type {
 	LapSettings,
 	ParameterStorage,
-	SaveSettingsOptions,
 } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { ShellServices } from "./types";
@@ -266,7 +265,7 @@ async function renderStitched(
 		mapVisualization?: any;
 		parameterStorage?: ParameterStorage;
 		analyzedLaps?: number[];
-		saveCurrentLapSettings?: (options?: SaveSettingsOptions) => void;
+		saveCurrentLapSettings?: () => void;
 	} = {},
 ): Promise<void> {
 	const fit = makeFitData();
@@ -1503,23 +1502,26 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 		await settle();
 	};
 
-	it("hands the option to the render's callback", async () => {
-		const saver = vi.fn();
-		await renderStitched({ saveCurrentLapSettings: saver });
+	let records: Map<string, LapSettings>;
+	let loadLapSettings: ReturnType<typeof vi.fn>;
+	let parameterStorage: ParameterStorage;
+	let saver: ReturnType<typeof vi.fn>;
+
+	const renderLap = async (lap: number): Promise<void> => {
+		await renderStitched({
+			parameterStorage,
+			analyzedLaps: [lap],
+			saveCurrentLapSettings: saver,
+		});
 		await settle();
-		saver.mockClear();
+	};
 
-		await dragCalibration(5);
-
-		expect(saver).toHaveBeenCalledWith({ calibrationChanged: true });
-	});
-
-	it("gives a lap tuned to 0 its 0 back", async () => {
-		const records = new Map<string, LapSettings>();
-		const loadLapSettings = vi.fn(async (_hash: string, laps: number[]) => {
+	beforeEach(() => {
+		records = new Map();
+		loadLapSettings = vi.fn(async (_hash: string, laps: number[]) => {
 			return records.get(laps.join("-")) ?? null;
 		});
-		const parameterStorage = {
+		parameterStorage = {
 			loadLapSettings,
 			saveLapSettings: async (
 				_hash: string,
@@ -1529,20 +1531,14 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 				records.set(laps.join("-"), settings);
 			},
 		} as unknown as ParameterStorage;
+		saver = vi.fn(() => {
+			void saveCurrentLapSettings(appState, parameterStorage);
+		});
 		appState.currentFileHash = "hash";
 		appState.selectedFile = { name: "ride.fit" } as File;
+	});
 
-		const renderLap = async (lap: number): Promise<void> => {
-			await renderStitched({
-				parameterStorage,
-				analyzedLaps: [lap],
-				saveCurrentLapSettings: (options) => {
-					void saveCurrentLapSettings(appState, parameterStorage, options);
-				},
-			});
-			await settle();
-		};
-
+	it("gives a lap tuned to 0 its 0 back", async () => {
 		await renderLap(1);
 		await dragCalibration(5);
 
@@ -1558,5 +1554,27 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 		// Proves the read reached the saved-settings branch for this lap.
 		expect(loadLapSettings).toHaveBeenCalledWith("hash", [2]);
 		expect(appState.airSpeedCalibrationPercent).toBe(0);
+	});
+
+	it("a CdA drag on a lap stores the carried value", async () => {
+		await renderLap(1);
+		await dragCalibration(5);
+
+		await renderLap(2);
+		saver.mockClear();
+		const cda = document.getElementById("cdaSlider") as HTMLInputElement;
+		cda.value = "0.31";
+		cda.dispatchEvent(new Event("input", { bubbles: true }));
+		await settle();
+		expect(saver).toHaveBeenCalled();
+
+		await renderLap(3);
+		await dragCalibration(9);
+
+		loadLapSettings.mockClear();
+		await renderLap(2);
+		// Proves the read reached the saved-settings branch for this lap.
+		expect(loadLapSettings).toHaveBeenCalledWith("hash", [2]);
+		expect(appState.airSpeedCalibrationPercent).toBe(5);
 	});
 });

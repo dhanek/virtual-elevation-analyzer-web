@@ -17,12 +17,6 @@ export interface LapSettings {
 	airSpeedCalibration?: number; // Air speed calibration percentage (-20 to +20)
 }
 
-/** How a settings saver was asked to save. */
-export interface SaveSettingsOptions {
-	/** The gesture set the calibration, so the save carries it (0 included). */
-	calibrationChanged?: boolean;
-}
-
 // GPS marker settings for lap detection (time-based)
 export interface GpsMarkerSettings {
 	gateTimeOffset: number; // Time offset in seconds from start of selected data
@@ -563,13 +557,7 @@ export class ParameterStorage {
 	}
 
 	/**
-	 * Save lap-specific settings (trim indices, CdA/Crr and calibration).
-	 *
-	 * Replaces the selection's entry, with one exception: when
-	 * `settings.airSpeedCalibration` is undefined, the calibration already stored
-	 * under this lap key is kept. Only a calibration gesture carries a value (0
-	 * included); every other save leaves a stored value alone and an absent one
-	 * absent.
+	 * Save lap-specific settings (trim indices and CdA/Crr values)
 	 */
 	async saveLapSettings(
 		fileHash: string,
@@ -605,13 +593,7 @@ export class ParameterStorage {
 				}
 
 				// Update lap settings
-				const storedCalibration =
-					existingData.lapSettings[lapKey]?.airSpeedCalibration;
-				existingData.lapSettings[lapKey] =
-					settings.airSpeedCalibration === undefined &&
-					storedCalibration !== undefined
-						? { ...settings, airSpeedCalibration: storedCalibration }
-						: settings;
+				existingData.lapSettings[lapKey] = settings;
 				existingData.lastUsed = Date.now();
 
 				const putRequest = objectStore.put(existingData);

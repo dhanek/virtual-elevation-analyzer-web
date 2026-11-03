@@ -63,7 +63,6 @@ vi.mock("../ve/calibrationTab", async (importOriginal) => {
 
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
-import type { SaveSettingsOptions } from "../../utils/ParameterStorage";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import { setCalibrationTabState } from "../ve/calibrationTab";
 import { veViewMatchesSelection } from "../ve/veSelectionGuard";
@@ -222,10 +221,7 @@ interface Harness {
 	trimMapUpdates: Array<{ start: number; end: number }>;
 }
 
-function setup(
-	overrides: Partial<AppState> = {},
-	saveSettings: (options?: SaveSettingsOptions) => void = () => {},
-): Harness {
+function setup(overrides: Partial<AppState> = {}): Harness {
 	renderPanel();
 	primitive.mockClear();
 
@@ -243,7 +239,7 @@ function setup(
 	bindModeControls({
 		appState,
 		modeId: "standard",
-		saveSettings,
+		saveSettings: () => {},
 		onTrimMapUpdate: (start, end) => trimMapUpdates.push({ start, end }),
 		mapCanFollow: () =>
 			veViewMatchesSelection(
@@ -688,37 +684,6 @@ describe("standard: the air-speed offset row is bound and writes its readout", (
 		const metric = document.getElementById("airSpeedOffsetErrorMetric")!;
 		expect(metric.textContent).not.toBe("");
 		expect(Number.isNaN(Number(metric.textContent))).toBe(false);
-	});
-});
-
-describe("standard: which rows tell the saver the calibration changed", () => {
-	const row = (reason: ModeControlSpec["reason"]) => {
-		const spec = MODE_CONTROL_TABLE.find(
-			(candidate) =>
-				candidate.reason === reason && candidate.modes.includes("standard"),
-		);
-		if (!spec) throw new Error(`no standard row for ${reason}`);
-		return spec;
-	};
-
-	it("passes true for the calibration row", async () => {
-		const saveSettings = vi.fn();
-		setup({}, saveSettings);
-
-		await interact(row("calibration"));
-
-		expect(saveSettings).toHaveBeenCalled();
-		expect(saveSettings).toHaveBeenCalledWith({ calibrationChanged: true });
-	});
-
-	it("passes false for the CdA row", async () => {
-		const saveSettings = vi.fn();
-		setup({}, saveSettings);
-
-		await interact(row("cda"));
-
-		expect(saveSettings).toHaveBeenCalled();
-		expect(saveSettings).toHaveBeenCalledWith({ calibrationChanged: false });
 	});
 });
 

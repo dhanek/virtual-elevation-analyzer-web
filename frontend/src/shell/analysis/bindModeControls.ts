@@ -44,7 +44,6 @@ import { calculateAirSpeedSyncError } from "../../analysis/WindSourceResolver";
 import type { AnalysisModeId } from "../../modes/analysis/types";
 import type { AppState } from "../../state/AppState";
 import { log } from "../../utils/log";
-import type { SaveSettingsOptions } from "../../utils/ParameterStorage";
 import { syncRangeAndNumber } from "../dom/rangeNumberPair";
 import { bindWindSourceRadios } from "../dom/windSource";
 import { bindAutoConvergeLocks } from "../ve/autoConvergeLocks";
@@ -120,7 +119,7 @@ export interface BindModeControlsOptions {
 	appState: AppState;
 	modeId: AnalysisModeId;
 	/** The mode's own settings saver — Standard and the GPS modes differ. */
-	saveSettings: (options?: SaveSettingsOptions) => void;
+	saveSettings: () => void;
 	/** Repaint the map trim markers. Only called when `mapCanFollow` agrees. */
 	onTrimMapUpdate?: (trimStart: number, trimEnd: number) => void;
 	/**
@@ -221,9 +220,7 @@ export function bindModeControls(
 			refreshOffsetMetric(spec);
 		}
 		if (spec.persistsSettings) {
-			saveSettings({
-				calibrationChanged: spec.writes === "appStateCalibration",
-			});
+			saveSettings();
 		}
 	}
 

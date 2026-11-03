@@ -29,24 +29,6 @@ vi.mock("../section3/section3Orchestration", async (importOriginal) => ({
 	getGpsAnalysisMode: () => modeState.gps,
 }));
 
-const standardRender = vi.hoisted(() => ({ show: vi.fn() }));
-const lapSaver = vi.hoisted(() => ({ save: vi.fn() }));
-
-vi.mock("../ve/renderStandardVe", async (importOriginal) => ({
-	...(await importOriginal<Record<string, unknown>>()),
-	showVirtualElevationAnalysisInline: standardRender.show,
-}));
-
-vi.mock("./storageHandlers", async (importOriginal) => ({
-	...(await importOriginal<Record<string, unknown>>()),
-	saveCurrentLapSettings: lapSaver.save,
-}));
-
-vi.mock("./plotlyLoader", async (importOriginal) => ({
-	...(await importOriginal<Record<string, unknown>>()),
-	waitForPlotly: async () => {},
-}));
-
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
 import type { AppState } from "../../state/AppState";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
@@ -238,33 +220,5 @@ describe("veStatus at analyze entry", () => {
 		expect(loadingStatuses.length).toBeGreaterThan(0);
 		expect(loadingStatuses[0]).toBe("computing");
 		expect(appState.veStatus).not.toBe("ready");
-	});
-});
-
-/**
- * The closure the analyze path hands Standard's render. TypeScript accepts a
- * closure that drops the argument, so only running it shows the option arrives.
- */
-describe("Standard's settings callback", () => {
-	it("forwards the option to the saver", async () => {
-		modeState.gps = "None";
-		errors.length = 0;
-		standardRender.show.mockReset();
-		lapSaver.save.mockReset();
-		document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div>`;
-		const appState = makeAppState();
-		appState.currentFitResult = {} as never;
-		configure(appState);
-
-		await handleAnalyze();
-
-		expect(errors).toEqual([]);
-		expect(standardRender.show).toHaveBeenCalledTimes(1);
-		const callbacks = standardRender.show.mock.calls[0][5];
-		callbacks.saveCurrentLapSettings({ calibrationChanged: true });
-
-		expect(lapSaver.save).toHaveBeenCalledWith(appState, expect.anything(), {
-			calibrationChanged: true,
-		});
 	});
 });

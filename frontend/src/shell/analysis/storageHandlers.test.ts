@@ -119,9 +119,7 @@ describe("saveCurrentLapSettings", () => {
 		});
 
 		const calls: SaveCall[] = [];
-		await saveCurrentLapSettings(appState, makeParameterStorageStub(calls), {
-			calibrationChanged: true,
-		});
+		await saveCurrentLapSettings(appState, makeParameterStorageStub(calls));
 
 		expect(calls).toHaveLength(1);
 		expect(calls[0].fileHash).toBe("hash-abc");
@@ -135,8 +133,8 @@ describe("saveCurrentLapSettings", () => {
 		});
 	});
 
-	describe("the calibration travels only with a calibration gesture", () => {
-		const save = async (calibrationChanged?: boolean) => {
+	describe("every save stores the calibration", () => {
+		const save = async (airSpeedCalibrationPercent: number) => {
 			addInput("trimStartSlider", "30");
 			addInput("trimEndSlider", "600");
 			addInput("cdaSlider", "0.31");
@@ -145,21 +143,20 @@ describe("saveCurrentLapSettings", () => {
 			await saveCurrentLapSettings(
 				makeAppStateStub({
 					currentAnalyzedLaps: [3],
-					airSpeedCalibrationPercent: 5,
+					airSpeedCalibrationPercent,
 				}),
 				makeParameterStorageStub(calls),
-				calibrationChanged === undefined ? undefined : { calibrationChanged },
 			);
 			expect(calls).toHaveLength(1);
 			return calls[0].settings;
 		};
 
-		it("leaves the field out with no option", async () => {
-			expect(await save()).not.toHaveProperty("airSpeedCalibration");
+		it("writes the value at 5", async () => {
+			expect((await save(5)).airSpeedCalibration).toBe(5);
 		});
 
-		it("carries the value with the option", async () => {
-			expect((await save(true)).airSpeedCalibration).toBe(5);
+		it("writes 0 at 0", async () => {
+			expect((await save(0)).airSpeedCalibration).toBe(0);
 		});
 	});
 });

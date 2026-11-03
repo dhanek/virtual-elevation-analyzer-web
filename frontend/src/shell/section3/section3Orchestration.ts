@@ -1886,8 +1886,7 @@ async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
 
 			// TWO WRITES, AND THE ORDER IS LOAD-BEARING. `saveLapSettings` REPLACES
 			// the whole entry, and `saveMapTrimSettings` writes `cda: null`,
-			// `crr: null` and no `airSpeedCalibration` (a stored calibration
-			// survives a write without one). The second call is what the
+			// `crr: null` and no `airSpeedCalibration`. The second call is what the
 			// removed `mapTrim` row's `persistsSettings: true` did — Standard's
 			// `saveCurrentLapSettings`, with the real tuned values — and it has to
 			// be last, exactly as it was on `origin/main`. It self-gates on
