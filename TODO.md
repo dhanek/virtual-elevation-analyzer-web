@@ -586,8 +586,9 @@ lap 6 alone −3.6 pp (2026-08-14) and −2.0 pp (2026-05-19), all laps −0.6 p
 CdA, same mass and Crr throughout: 2026-08-14 lap 6 0.283 → 0.267 corrected against 0.270 before the
 event; 2026-05-19 lap 6 0.315 → 0.306 against 0.308. The absolute 0.284 in the original criterion
 came from different parameters; the criterion it stood for — the corrected lap agrees with its
-unshadowed part — holds to 1 %. Scripts: `vw-demo/analysis/shadow_20261110/` (`shadow-scan.ts`,
-`shadow-cda.ts`), run with vite-node from `frontend/scripts/.scratch/`.
+unshadowed part — holds to about 1 % (1.06 % in the app, 1.11 % offline). Scripts:
+`vw-demo/analysis/shadow_20261110/` (`shadow-scan.ts`, `shadow-cda.ts`), run with vite-node from
+`frontend/scripts/.scratch/`.
 **Checked in the app** 2026-11-10, Standard, 2026-08-14 session lap 6 alone: the notification names
 lap 6 (62 s); Auto Adjust gives +7.7 % (offline 7.70 %) with the shadow warning, 62 s from 204 s;
 the Calibration tab plots 204 of the lap's samples, the masked seconds left out. Lap 6 CdA from
