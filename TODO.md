@@ -586,10 +586,15 @@ lap 6 alone −3.6 pp (2026-08-14) and −2.0 pp (2026-05-19), all laps −0.6 p
 CdA, same mass and Crr throughout: 2026-08-14 lap 6 0.283 → 0.267 corrected against 0.270 before the
 event; 2026-05-19 lap 6 0.315 → 0.306 against 0.308. The absolute 0.284 in the original criterion
 came from different parameters; the criterion it stood for — the corrected lap agrees with its
-unshadowed part — holds to 1 %. Scripts in the session scratchpad, not the repo.
+unshadowed part — holds to 1 %. Scripts: `vw-demo/analysis/shadow_20261110/` (`shadow-scan.ts`,
+`shadow-cda.ts`), run with vite-node from `frontend/scripts/.scratch/`.
 **Checked in the app** 2026-11-10, Standard, 2026-08-14 session lap 6 alone: the notification names
 lap 6 (62 s); Auto Adjust gives +7.7 % (offline 7.70 %) with the shadow warning, 62 s from 204 s;
-the Calibration tab plots 204 of the lap's samples, the masked seconds left out. Not driven in the
+the Calibration tab plots 204 of the lap's samples, the masked seconds left out. Lap 6 CdA from
+Automatic CdA (auto-converge, Crr held at 0.004), calibration typed at +7.7 % on both builds, offset
++2 s, m 80 kg, η 0.98, ρ 1.1582 typed, velodrome on: 0.279 corrected, 0.295 on a build without the
+correction (9d7c721), and 0.282 on both builds for the lap trimmed to 0–203 s, before the masked
+seconds. Not driven in the
 app: the GPS modes' VE with a shadowed lap, and a selection too short to check. Unit tests: detection, threshold, too few windows, no circuit,
 substitution and its write-back under trim, Auto Adjust's scale and warning (fails with masking
 off), and the notification's once-per-selection rule.
