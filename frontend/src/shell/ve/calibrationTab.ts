@@ -141,7 +141,11 @@ export function renderCalibrationTab(): void {
 
 	const warned = new Set(
 		outcome.warnings.flatMap((w) =>
-			w.kind === "gusty" || w.kind === "windChanged" ? [w.label] : [],
+			w.kind === "gusty" ||
+			w.kind === "windChanged" ||
+			w.kind === "sensorShadow"
+				? [w.label]
+				: [],
 		),
 	);
 	const figures: Array<{ host: HTMLElement; figure: PlotDefinition }> = [];
@@ -170,7 +174,12 @@ export function renderCalibrationTab(): void {
 			continue;
 		}
 		fitLaps.push({
-			series: calibrationSeries(segment, row.coefficients, outcome.scale),
+			series: calibrationSeries(
+				segment,
+				row.coefficients,
+				outcome.scale,
+				row.shadowMask,
+			),
 			percent: row.percent,
 			windSpeed: row.windSpeed,
 			windDirDeg: row.windDirDeg,

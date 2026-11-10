@@ -8,6 +8,7 @@
  * AnalysisParameters and computed numeric stats (no user-provided strings).
  * This matches the prior main.ts behavior; no new XSS surface is introduced.
  */
+import { resolveSyncErrorSeries } from "../analysis/syncErrorSeries";
 import {
 	displayCdaBounds,
 	displayCrrBounds,
@@ -830,7 +831,8 @@ export function setupOutAndBackSliderSync(
 				start: range.startIdx,
 				end: range.endIdx,
 			})),
-		getSyncErrorSeries: () => syncErrorSeries(appState),
+		getSyncErrorSeries: () =>
+			resolveSyncErrorSeries(appState, getSelectedWindSource()),
 		getAutoCalibration: () =>
 			calculateAutoAirSpeedCalibration({
 				...headingCalibrationInput(appState),
@@ -855,35 +857,4 @@ function outAndBackRanges(
 			{ startIdx: section.inboundStartIdx, endIdx: section.inboundEndIdx },
 		],
 	);
-}
-
-/**
- * The ground- and air-speed series the offset metric is measured between.
- *
- * Resolved on demand rather than captured at render time, so the number follows
- * the CURRENTLY selected wind source. Both lookups are cached, so this is a map
- * read per interaction.
- */
-function syncErrorSeries(appState: AppState): {
-	groundSpeed: number[];
-	airSpeed: number[];
-	timestamps: number[];
-} {
-	const fitData = appState.currentFitData;
-	const params = appState.currentParameters;
-	if (!fitData || !params) {
-		return { groundSpeed: [], airSpeed: [], timestamps: [] };
-	}
-	const normalized = getNormalizedActivityArrays(fitData);
-	const resolution = resolveWindSeries({
-		fitData,
-		windSource: getSelectedWindSource(),
-		params,
-		airSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
-	});
-	return {
-		groundSpeed: normalized.velocity,
-		airSpeed: resolution.windSpeed,
-		timestamps: normalized.timestamps,
-	};
 }

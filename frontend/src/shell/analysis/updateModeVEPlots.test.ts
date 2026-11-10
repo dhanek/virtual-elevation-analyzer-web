@@ -56,6 +56,7 @@ import { AppState } from "../../state/AppState";
 import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import type { ModeUpdateCallbacks } from "../../modes/analysis/types";
 import * as WindSourceResolver from "../../analysis/WindSourceResolver";
+import * as SensorShadow from "../../analysis/SensorShadow";
 import { applyVeStatus } from "../../state/veStatus";
 import { updateModeVEPlots } from "./updateModeVEPlots";
 
@@ -690,4 +691,181 @@ describe("guards", () => {
 		expect(outcome).toBeNull();
 		expect(calls.renderVe).toBe(0);
 	});
+});
+
+/**
+ * SENSOR SHADOWING REACHES THE CALCULATOR (F83-02 a).
+ *
+ * `correctSensorShadow`'s unit tests own the substituted value; this owns the
+ * WIRING: hook (3a) in the real primitive hands the corrected series to the
+ * calculator under 'fit' and leaves 'constant' alone. The fixture is
+ * `SensorShadow.test.ts`'s `circuitRide`: an 80 m circle at 10 m/s, 1 Hz,
+ * steady 2 m/s wind from the north, the measured air speed reading 20 % low
+ * over [300, 360) s. Offset and calibration are 0 so `clean` is exactly what
+ * the resolver would return unshadowed.
+ */
+describe("sensor shadowing is corrected on the VE path (hook 3a)", () => {
+	const SHADOW_SECONDS = 600;
+	const SHADOW_FROM = 300;
+	const SHADOW_TO = 360;
+	const T0 = 1_000;
+
+	function shadowedCircuit() {
+		const LAT0 = 52.5;
+		const LON0 = 13.4;
+		const M_PER_DEG = 6_371_000 * (Math.PI / 180);
+		const RADIUS = 80;
+		const SPEED = 10;
+		const WIND = 2;
+		const timestamps: number[] = [];
+		const lat: number[] = [];
+		const lon: number[] = [];
+		const clean: number[] = [];
+		const air: number[] = [];
+		for (let t = 0; t < SHADOW_SECONDS; t++) {
+			const alpha = (SPEED * t) / RADIUS;
+			timestamps.push(T0 + t);
+			lat.push(LAT0 + (RADIUS * Math.cos(alpha)) / M_PER_DEG);
+			lon.push(
+				LON0 +
+					(RADIUS * Math.sin(alpha)) /
+						(M_PER_DEG * Math.cos((LAT0 * Math.PI) / 180)),
+			);
+			const va = SPEED + WIND * Math.cos(alpha + Math.PI / 2);
+			clean.push(va);
+			air.push(t >= SHADOW_FROM && t < SHADOW_TO ? va * 0.8 : va);
+		}
+		const fitData = {
+			timestamps,
+			power: timestamps.map(() => 200),
+			velocity: timestamps.map(() => SPEED),
+			position_lat: lat,
+			position_long: lon,
+			altitude: timestamps.map(() => 100),
+			distance: timestamps.map((_, i) => i * SPEED),
+			air_speed: air,
+			wind_speed: timestamps.map(() => 0),
+			wind_yaw: timestamps.map(() => 0),
+			air_density_data: timestamps.map(() => 0),
+			road_speed: timestamps.map(() => 0),
+			temperature: timestamps.map(() => 16),
+			record_count: SHADOW_SECONDS,
+		} as any;
+		return { fitData, clean, air };
+	}
+
+	function shadowState(mode: (typeof MODES)[number]): AppState {
+		const appState = new AppState();
+		appState.currentFitData = shadowedCircuit().fitData;
+		appState.currentParameters = { ...makeParams(), air_speed_offset: 0 };
+		appState.airSpeedCalibrationPercent = 0;
+		const half = SHADOW_SECONDS / 2;
+		if (mode === "standard") {
+			appState.currentLaps = [
+				{ start_time: T0, end_time: T0 + half - 1 },
+				{ start_time: T0 + half, end_time: T0 + SHADOW_SECONDS - 1 },
+			] as any;
+			appState.selectedLaps = [1, 2];
+		} else if (mode === "gpsLap") {
+			appState.currentGpsLapIndexRanges = [
+				{ startIdx: 0, endIdx: half - 1 },
+				{ startIdx: half, endIdx: SHADOW_SECONDS - 1 },
+			];
+			appState.currentOverlayLapNumbers = [1, 2];
+		} else {
+			appState.outAndBackSections = [
+				{
+					sectionNumber: 1,
+					outboundStartIdx: 0,
+					outboundEndIdx: half - 1,
+					inboundStartIdx: half,
+					inboundEndIdx: SHADOW_SECONDS - 1,
+				},
+			] as any;
+			appState.outAndBackSelectedSections = [1];
+		}
+		return appState;
+	}
+
+	async function runShadow(
+		mode: (typeof MODES)[number],
+		windSource: "fit" | "constant",
+	) {
+		const { callbacks } = spyCallbacks();
+		return updateModeVEPlots({
+			appState: shadowState(mode),
+			handler: getAnalysisModeHandler(HANDLER_KEY[mode]),
+			lapDetectionMode: HANDLER_KEY[mode] ?? "None",
+			makeCallbacks: () => callbacks,
+			windSource,
+			cda: 0.3,
+			crr: 0.005,
+			isTabActive: () => false,
+		});
+	}
+
+	/** Every calculator sample, keyed by ride second. */
+	function calculatorWindBySecond(): Map<number, number> {
+		const bySecond = new Map<number, number>();
+		for (const call of calculatorCalls) {
+			const ts = Array.from(call.timestamps as ArrayLike<number>);
+			const ws = Array.from(call.windSpeed as ArrayLike<number>);
+			ts.forEach((t, i) => bySecond.set(t - T0, ws[i]));
+		}
+		return bySecond;
+	}
+
+	for (const mode of MODES) {
+		it(`${mode}: 'fit' hands the calculator the corrected series`, async () => {
+			const spy = vi.spyOn(SensorShadow, "correctSensorShadow");
+			const { clean, air } = shadowedCircuit();
+
+			const outcome = await runShadow(mode, "fit");
+
+			expect(outcome).not.toBeNull();
+			// Reach: without calculator input the assertions below are vacuous.
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			const bySecond = calculatorWindBySecond();
+			expect(bySecond.size).toBe(SHADOW_SECONDS);
+
+			// Inside the shadowed stretch: NOT the raw 20 %-low reading, but
+			// close to what the sensor would have read unshadowed.
+			for (let t = SHADOW_FROM; t < SHADOW_TO; t++) {
+				const v = bySecond.get(t)!;
+				expect(Math.abs(v - air[t])).toBeGreaterThan(1);
+				expect(Math.abs(v - clean[t])).toBeLessThan(0.2);
+			}
+			// Every substituted sample is close to clean, and every sample the
+			// mask left alone is the raw value exactly.
+			let substituted = 0;
+			for (let t = 0; t < SHADOW_SECONDS; t++) {
+				const v = bySecond.get(t)!;
+				if (v === air[t]) continue;
+				substituted++;
+				expect(Math.abs(v - clean[t])).toBeLessThan(0.2);
+			}
+			// The mask is wider than the event (a whole circuit), never the ride.
+			expect(substituted).toBeGreaterThanOrEqual(SHADOW_TO - SHADOW_FROM);
+			expect(substituted).toBeLessThan(SHADOW_SECONDS / 2);
+			// Last, so that dropping the call fails on the series above first.
+			expect(outcome!.sensorShadow).toHaveLength(1);
+			expect(spy).toHaveBeenCalledTimes(1);
+		});
+
+		it(`${mode}: 'constant' passes through, the correction never called`, async () => {
+			const spy = vi.spyOn(SensorShadow, "correctSensorShadow");
+
+			const outcome = await runShadow(mode, "constant");
+
+			expect(outcome).not.toBeNull();
+			expect(calculatorCalls.length).toBeGreaterThan(0);
+			expect(outcome!.sensorShadow).toEqual([]);
+			expect(spy).not.toHaveBeenCalled();
+			for (const call of calculatorCalls) {
+				expect(
+					Array.from(call.windSpeed as number[]).every((v) => Number.isNaN(v)),
+				).toBe(true);
+			}
+		});
+	}
 });

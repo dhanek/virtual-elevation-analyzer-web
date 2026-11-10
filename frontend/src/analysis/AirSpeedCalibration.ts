@@ -10,6 +10,7 @@ import {
 	type ScaleFitSegment,
 	type WindowRefusal,
 } from "./HeadingCalibration";
+import { detectSensorShadow } from "./SensorShadow";
 import { stepMeanSpeed } from "./VirtualDistance";
 
 export const DEFAULT_AIR_SPEED_CALIBRATION_PERCENT = 0.0;
@@ -149,6 +150,12 @@ interface SegmentCalibration {
 	 * these to redraw the model without refitting.
 	 */
 	coefficients?: { a: number; b: number };
+	/**
+	 * Samples kept out of the fit as sensor shadowing (`SensorShadow.ts`),
+	 * aligned to the segment's input. Present only when some were found;
+	 * `calibrationSeries` needs it to plot exactly the fitted population.
+	 */
+	shadowMask?: boolean[];
 	refusal?: CalibrationRefusal;
 }
 
@@ -159,7 +166,15 @@ export type CalibrationWarning =
 	| { kind: "stationarityUnavailable"; label: string }
 	| { kind: "fewCircuits"; circuits: number }
 	| { kind: "segmentSpread"; spreadPercent: number }
-	| { kind: "clamped"; unclampedPercent: number };
+	| { kind: "clamped"; unclampedPercent: number }
+	| {
+			kind: "sensorShadow";
+			label: string;
+			/** Seconds into the segment the masked stretch starts. */
+			startSeconds: number;
+			seconds: number;
+			peakExcess: number;
+	  };
 
 export type AutoCalibrationOutcome =
 	| {
@@ -186,7 +201,10 @@ interface PreparedSegment {
 	fit: ScaleFitSegment;
 }
 
-function prepareSegment(segment: HeadingCalibrationSegment): PreparedSegment {
+function prepareSegment(
+	segment: HeadingCalibrationSegment,
+	shadow?: ArrayLike<boolean>,
+): PreparedSegment {
 	const length = Math.min(
 		segment.timestamps.length,
 		segment.velocity.length,
@@ -208,7 +226,8 @@ function prepareSegment(segment: HeadingCalibrationSegment): PreparedSegment {
 			v > HEADING_FIT_MIN_VELOCITY &&
 			Number.isFinite(airSpeed[i]) &&
 			airSpeed[i] > 0 &&
-			Number.isFinite(heading[i]),
+			Number.isFinite(heading[i]) &&
+			shadow?.[i] !== true,
 	);
 	const windows = circuitWindows({
 		timestamps,
@@ -258,8 +277,9 @@ export function calibrationSeries(
 	segment: HeadingCalibrationSegment,
 	coefficients: { a: number; b: number },
 	scale: number,
+	shadowMask?: ArrayLike<boolean>,
 ): CalibrationSeries {
-	const prepared = prepareSegment(segment);
+	const prepared = prepareSegment(segment, shadowMask);
 	const { velocity, airSpeed, headingDeg, mask } = prepared.fit;
 	const length = Math.min(
 		velocity.length,
@@ -341,7 +361,9 @@ export function calibrationEligibility(
 	if (input.headingSegments.length === 0)
 		return { method: "vdRatio", reason: "noWholeCircuit" };
 
-	const prepared = input.headingSegments.map(prepareSegment);
+	const prepared = input.headingSegments.map((segment) =>
+		prepareSegment(segment),
+	);
 	if (prepared.every((p) => !p.hasUsableFix))
 		return { method: "vdRatio", reason: "noUsablePositions" };
 
@@ -379,7 +401,13 @@ export function calculateAutoAirSpeedCalibration(
 	// positions" for what is really "nothing was selected" (finding 3). Give it
 	// its own honest reason rather than falling into that vacuous truth.
 	if (input.headingSegments.length === 0) return fallback("noWholeCircuit");
-	const prepared = input.headingSegments.map(prepareSegment);
+	// Shadowed samples leave the fit before anything else sees them: a hand in
+	// front of the sensor reads as a low scale, not as wind (TODO, "Mask
+	// air-speed sensor shadowing"). Selections without circuits are not checked.
+	const shadow = detectSensorShadow(input.headingSegments);
+	const prepared = input.headingSegments.map((segment, i) =>
+		prepareSegment(segment, shadow.masks[i]),
+	);
 	if (prepared.every((p) => !p.hasUsableFix))
 		return fallback("noUsablePositions");
 
@@ -405,6 +433,8 @@ export function calculateAutoAirSpeedCalibration(
 			continue;
 		}
 		const row: SegmentCalibration = { ...base, percent: (own.scale - 1) * 100 };
+		const segmentShadow = shadow.masks[prepared.indexOf(segment)];
+		if (segmentShadow?.some(Boolean)) row.shadowMask = segmentShadow;
 		rows.push(row);
 		pool.push({ row, segment });
 	}
@@ -421,7 +451,16 @@ export function calculateAutoAirSpeedCalibration(
 	const joint = fitSharedScale(pool.map((p) => p.segment.fit));
 	if (!joint.ok) return fallback(joint.reason);
 
-	const warnings: CalibrationWarning[] = [];
+	const warnings: CalibrationWarning[] = shadow.events.map((event) => {
+		const ts = input.headingSegments[event.segment].timestamps;
+		return {
+			kind: "sensorShadow",
+			label: event.label,
+			startSeconds: ts[event.startIdx] - ts[0],
+			seconds: event.seconds,
+			peakExcess: event.peakExcess,
+		};
+	});
 	let circuits = 0;
 	pool.forEach(({ row, segment }, l) => {
 		row.windSpeed = joint.winds[l].windSpeed;

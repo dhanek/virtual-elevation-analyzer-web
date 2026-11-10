@@ -531,58 +531,6 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
       auto-rho settle loop) · *origin: PR #14 review round 20, F20-05 — deferred by the
       maintainer 2026-09-04*
 
-- [ ] **[M] Mask air-speed sensor shadowing before Auto Adjust and the CdA fit.** Something in
-      front of the air-speed sensor (hands or forearms leaning on the bars) deflects the flow, so
-      the sensor reads low while power and ground speed are unchanged. Neither the k fit (PR #30)
-      nor the VE/CdA path notices; both treat the low reading as a real drop in air speed.
-
-      *Evidence (2026-10-14, all 8 outdoor-velodrome sessions scanned offline):*
-      - **2026-08-14 session, lap 6 (breakaway), last 49 s.** Measured air speed 4–9 km/h below
-        ground speed; power 232 → 223 W and ground speed 37.9 → 38.1 km/h, both flat. Closure CdA
-        over the tail jumps 0.282 → 0.366 with measured air speed but stays at 0.296 → 0.279 with
-        ground speed only. The rider confirmed leaning on the bars. Effect: lap CdA 0.293 (gated)
-        against 0.284 on the 5 whole circuits before the event, about +6 %.
-      - **2026-05-19 session, lap 6, 412–452 s into the lap.** Air speed about 20 km/h at
-        38 km/h ground speed, power flat. Lap CdA about +2.5 %.
-      - No other window in the 8 sessions exceeds the wind band.
-
-      *Detector.* For every sliding one-circuit window (the same circuit windows Auto Adjust
-      already builds), compute D = Σv³ / Σ(va²·v), with va the resolved, offset-aligned air
-      speed. D equals CdA(air speed) / CdA(ground speed) for that window; power cancels, and so
-      does k when D is taken relative to the session median. Steady wind keeps D/median within
-      about ±10 % (5–95 % of windows: ±9–12 %); the two shadow events read +46 % and +75 %. Flag
-      windows with D/median − 1 > 0.25 and mask their samples.
-
-      *Hooks.*
-      1. Auto Adjust: drop masked samples from the `usable` mask in `prepareSegment`
-         (`AirSpeedCalibration.ts`) before `fitSharedScale`.
-      2. VE/CdA: masked seconds can NOT simply be dropped, because removing samples breaks
-         closure. Substitute air speed = ground speed + the fitted wind component from that lap's
-         heading fit (a·cos θ + b·sin θ, scaled by k).
-      3. Report: a warning naming the lap and the masked seconds, and a marker in the Calibration
-         tab.
-
-      *Open questions.*
-      - Threshold 0.25: one value for every sensor, or per sensor family? Both events were on the
-        ACE; check the `wind_speed`/`wind_yaw` path too.
-      - Rides with no circuit windows (out-and-back, open road): skip the detector, or use pair
-        windows?
-      - How much k moves on the two affected laps once masked: not yet measured.
-
-      *Done when:* both events above are flagged and masked; nothing else on the 8 velodrome
-      sessions is flagged; the 2026-08-14 lap 6 CdA lands near 0.284; the warning appears in the
-      app.
-
-- [ ] **[S] The GPS modes' ground/air-speed sync error shifts the air speed twice.** The
-      "Ground/air speed sync error" readout under the air-speed offset slider
-      (`refreshOffsetMetric`, `bindModeControls.ts`) shifts the air-speed series by the slider's
-      offset (`calculateAirSpeedSyncError`). Standard mode hands it the UNSHIFTED series
-      (`prepareAnalysisPayload`, `applyOffset: false`); GPS-lap and out-and-back hand it
-      `resolveWindSeries`'s default, which already carries `params.air_speed_offset` — so there
-      the number is measured at twice the offset. *Done when:* every mode's readout is measured
-      at the slider's offset once, with a test per mode. *origin: noticed while moving the lags
-      to seconds, 2026-10-21*
-
 - [ ] **[XL] A ride-level air speed calibration with per-selection overrides.** The sensor's scale
       belongs to the ride, but the calibration is stored per selection. A new selection starts from
       the current value and any settings save pins that value to the selection, so a later
@@ -602,6 +550,74 @@ the session; bracket comparisons A-B-A-B; share Crr across sessions only for the
 
 Completed items move here with their commit and date, keeping their anchors — the record of what
 changed and why.
+
+### Air-speed sensor shadowing is masked — 2026-11-10
+
+**The problem.** Something in front of the air-speed sensor (hands or forearms on the bars) deflects
+the flow, so it reads low while power and ground speed hold. Auto Adjust read that as a low sensor
+scale, and the VE/CdA path as a real drop in air speed. Two events in the 8 outdoor-velodrome
+sessions: 2026-08-14 lap 6 (last ~49 s) and 2026-05-19 lap 6 (412–452 s).
+
+**Commits:** on `fix/air-speed-sync-and-shadowing`.
+
+**What it does.** `SensorShadow.ts` computes D = Σv³ / Σ(va²·v) for every sliding one-circuit window
+(`slidingCircuitWindows`, `HeadingCalibration.ts`) over the selection, and flags windows more than
+25 % above the selection's median; a flagged window's samples are masked. Then:
+
+1. Auto Adjust drops masked samples from the fit (`prepareSegment`), reports a `sensorShadow` warning
+   naming the lap, its start and its length, and the Calibration tab marks the lap and plots only
+   the fitted samples.
+2. The VE path (`updateModeVEPlots`, all three modes) replaces masked seconds with ground speed plus
+   the lap's fitted wind, `v / scale + a·cos θ + b·sin θ`, from a heading fit over the lap's
+   unmasked samples. Without a usable fit it falls back to `v / √median D`. Only the measured
+   channel is corrected; constant and none pass through.
+3. A warning notification names the laps and seconds, once per distinct set of events.
+
+**Open questions, as answered.** One threshold (0.25) for every sensor: both events were on the
+ACE, and the `wind_speed`/`wind_yaw` path goes through the same resolved series, but no shadowed
+`wind_speed` ride exists to check it on. Rides with fewer than 20 one-circuit windows
+(out-and-back, open road, or a lap that is barely one circuit) are not checked, and the detection
+says so rather than reporting clean.
+
+**Checked offline** on all 8 velodrome sessions, each lap a segment, air speed at +2 s: exactly the
+two events are flagged, +46 % and +75 % (the prototype's numbers), nothing else. The masks run 61 s
+and 70 s, wider than the events, because a flagged window spans a whole circuit. k with masking:
+lap 6 alone −3.6 pp (2026-08-14) and −2.0 pp (2026-05-19), all laps −0.6 pp each. Whole-lap closure
+CdA, same mass and Crr throughout: 2026-08-14 lap 6 0.283 → 0.267 corrected against 0.270 before the
+event; 2026-05-19 lap 6 0.315 → 0.306 against 0.308. The absolute 0.284 in the original criterion
+came from different parameters; the criterion it stood for — the corrected lap agrees with its
+unshadowed part — holds to about 1 % (1.06 % in the app, 1.11 % offline). Scripts:
+`vw-demo/analysis/shadow_20261110/` (`shadow-scan.ts`, `shadow-cda.ts`), run with vite-node from
+`frontend/scripts/.scratch/`.
+**Checked in the app** 2026-11-10, Standard, 2026-08-14 session lap 6 alone: the notification names
+lap 6 (62 s); Auto Adjust gives +7.7 % (offline 7.70 %) with the shadow warning, 62 s from 204 s;
+the Calibration tab plots 204 of the lap's samples, the masked seconds left out. Lap 6 CdA from
+Automatic CdA (auto-converge, Crr held at 0.004), calibration typed at +7.7 % on both builds, offset
++2 s, m 80 kg, η 0.98, ρ 1.1582 typed, velodrome on: 0.279 corrected, 0.295 on a build without the
+correction (9d7c721), and 0.282 on both builds for the lap trimmed to 0–203 s, before the masked
+seconds. Not driven in the
+app: the GPS modes' VE with a shadowed lap, and a selection too short to check. Unit tests: detection, threshold, too few windows, no circuit,
+substitution and its write-back under trim, Auto Adjust's scale and warning (fails with masking
+off), and the notification's once-per-selection rule.
+
+### The GPS modes' sync-error readout shifts the air speed once — 2026-11-10
+
+**The bug.** The "Ground/air speed sync error" readout shifts the air speed by the slider's offset
+(`calculateAirSpeedSyncError`). Standard handed it the unshifted series; GPS lap splitting and
+out-and-back handed it `resolveWindSeries`'s default, which already carries `air_speed_offset`, so
+their readout was measured at twice the offset.
+
+**Commits:** on `fix/air-speed-sync-and-shadowing`.
+
+**What it does.** One `resolveSyncErrorSeries` (`shell/analysis/syncErrorSeries.ts`) with
+`applyOffset: false` replaces the two identical copies in the GPS renderers. The calibration percent
+still applies in the GPS modes and not in Standard, as before.
+
+**Checked.** A test per mode on a ride whose sensor is exactly 2 s late: the readout at offset 2 is
+0 in all three; the GPS cases fail with the offset applied. In the app, GPS lap splitting, 2026-08-14
+session lap 6 cut into 7 virtual laps: the readout at slider 0/1/2/3/4 reads 1.40/1.38/1.36/1.34/1.32
+with the fix and 1.40/1.36/1.32/1.29/1.25 without it — the old value at k is the new one at 2k.
+Out-and-back shares the helper and was not driven in the app.
 
 ### Air speed calibration carries across selections — 2026-11-03
 

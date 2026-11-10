@@ -54,6 +54,8 @@ function warningText(warning: CalibrationWarning): string {
 			return `Laps differ by ${warning.spreadPercent.toFixed(1)} pp. Calibration depends on riding position; select laps ridden in one position.`;
 		case "clamped":
 			return `The fitted ${signed(warning.unclampedPercent)} is outside the ±20 % control and was clamped.`;
+		case "sensorShadow":
+			return `${warning.label}: the air-speed sensor read low for ${Math.round(warning.seconds)} s from ${Math.round(warning.startSeconds)} s into the lap while ground speed did not drop (+${Math.round(warning.peakExcess * 100)} % against the selection). Something was likely in front of the sensor; those seconds are left out of the fit.`;
 	}
 }
 
