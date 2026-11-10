@@ -439,27 +439,7 @@ export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
 		input.positionLong.length,
 		input.usable.length,
 	);
-	const runs: number[][] = [];
-	let run: number[] = [];
-	for (let i = 0; i < n; i++) {
-		const t = input.timestamps[i];
-		if (
-			!Number.isFinite(t) ||
-			!isValidFix(input.positionLat[i], input.positionLong[i])
-		) {
-			continue;
-		}
-		const last = run[run.length - 1];
-		if (last !== undefined) {
-			const dt = t - input.timestamps[last];
-			if (!(dt > 0) || dt > MAX_SAMPLE_GAP_SECONDS) {
-				runs.push(run);
-				run = [];
-			}
-		}
-		run.push(i);
-	}
-	if (run.length > 0) runs.push(run);
+	const runs = gpsRuns(input, n);
 
 	const mask = new Array<boolean>(n).fill(false);
 	const windows: CircuitWindow[] = [];
@@ -491,11 +471,55 @@ export function circuitWindows(input: CircuitWindowInput): CircuitWindows {
 	return { windows, mask, circuits: 0, refusal };
 }
 
-function windowForRun(
-	input: CircuitWindowInput,
+/**
+ * Stretches of continuous GPS: split at an invalid fix, a non-increasing
+ * timestamp, or a gap over `MAX_SAMPLE_GAP_SECONDS`.
+ */
+function gpsRuns(
+	input: Pick<
+		CircuitWindowInput,
+		"timestamps" | "positionLat" | "positionLong"
+	>,
+	n: number,
+): number[][] {
+	const runs: number[][] = [];
+	let run: number[] = [];
+	for (let i = 0; i < n; i++) {
+		const t = input.timestamps[i];
+		if (
+			!Number.isFinite(t) ||
+			!isValidFix(input.positionLat[i], input.positionLong[i])
+		) {
+			continue;
+		}
+		const last = run[run.length - 1];
+		if (last !== undefined) {
+			const dt = t - input.timestamps[last];
+			if (!(dt > 0) || dt > MAX_SAMPLE_GAP_SECONDS) {
+				runs.push(run);
+				run = [];
+			}
+		}
+		run.push(i);
+	}
+	if (run.length > 0) runs.push(run);
+	return runs;
+}
+
+interface RunProgress {
+	/** Local metres about the run's bounding-box centre. */
+	x: number[];
+	y: number[];
+	/** Track azimuth swept since the run's first sample, degrees, positive in the direction of travel. */
+	signed: number[];
+}
+
+/** Null when the run sweeps no net azimuth (fewer than 3 fixes, or a run that ends where it began in angle). */
+function runProgress(
+	input: Pick<CircuitWindowInput, "positionLat" | "positionLong">,
 	indices: number[],
-): CircuitWindow | { refusal: WindowRefusal } {
-	if (indices.length < 3) return { refusal: "noWholeCircuit" };
+): RunProgress | null {
+	if (indices.length < 3) return null;
 	let minLat = Infinity;
 	let maxLat = -Infinity;
 	let minLon = Infinity;
@@ -525,8 +549,60 @@ function windowForRun(
 		previousAz = az;
 	}
 	const sign = Math.sign(progress[progress.length - 1]);
-	if (sign === 0) return { refusal: "noWholeCircuit" };
+	if (sign === 0) return null;
 	const signed = progress.map((value) => value * sign);
+
+	return { x, y, signed };
+}
+
+export interface SlidingCircuit {
+	startIdx: number;
+	/** Last sample of the window: the one before the track completes 360° of azimuth from `startIdx`. */
+	endIdx: number;
+}
+
+/**
+ * Every one-circuit window, one per start sample: from each sample of a GPS
+ * run to the sample before the track has swept a full turn of azimuth about
+ * the run's centre. Overlapping by construction — these are the sliding
+ * windows the sensor-shadow detector compares, not the disjoint whole circuits
+ * the scale fit uses (`circuitWindows`). A run that never completes a turn
+ * contributes none.
+ */
+export function slidingCircuitWindows(
+	input: Pick<
+		CircuitWindowInput,
+		"timestamps" | "positionLat" | "positionLong"
+	>,
+): SlidingCircuit[] {
+	const n = Math.min(
+		input.timestamps.length,
+		input.positionLat.length,
+		input.positionLong.length,
+	);
+	const out: SlidingCircuit[] = [];
+	for (const indices of gpsRuns(input, n)) {
+		const track = runProgress(input, indices);
+		if (!track) continue;
+		const { signed } = track;
+		let end = 0;
+		for (let s = 0; s < indices.length; s++) {
+			if (end < s) end = s;
+			while (end < indices.length && signed[end] - signed[s] < 360) end++;
+			if (end >= indices.length) break;
+			out.push({ startIdx: indices[s], endIdx: indices[end - 1] });
+		}
+	}
+	return out;
+}
+
+function windowForRun(
+	input: CircuitWindowInput,
+	indices: number[],
+): CircuitWindow | { refusal: WindowRefusal } {
+	const track = runProgress(input, indices);
+	if (!track) return { refusal: "noWholeCircuit" };
+	const { x, y, signed } = track;
 
 	let peak = 0;
 	for (const value of signed) {

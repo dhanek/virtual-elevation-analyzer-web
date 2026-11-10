@@ -22,6 +22,7 @@
  * primitive — and D-07/D-20 folded it in. Every wind source in every mode now
  * takes this road.
  */
+import { noteSensorShadow } from "../ve/sensorShadowNotice";
 import { getNormalizedActivityArrays } from "../../analysis/ActivityArrayCache";
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import {
@@ -391,6 +392,7 @@ export function requestModeUpdate(reason: ModeUpdateReason): void {
 				if (outcome && syncDrivenControls(outcome)) {
 					saveSettings?.();
 				}
+				if (outcome) noteSensorShadow(outcome.sensorShadow);
 			} catch (err) {
 				// The runner logs and swallows. Without this the status would stay
 				// `computing` for the panel's lifetime and Store Result would never

@@ -43,6 +43,10 @@ import {
 import { resolveAppliedCrr } from "../../analysis/CrrTemperatureCorrection";
 import { TIMING_SHIFTS } from "../../analysis/TimingSweep";
 import { airSpeedSource } from "../../analysis/KalmanFit";
+import {
+	correctSensorShadow,
+	type ShadowEvent,
+} from "../../analysis/SensorShadow";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import { DEFAULT_PARAMETERS } from "../../components/AnalysisParameters";
 import type {
@@ -133,6 +137,8 @@ export interface ModeUpdateOutcome {
 	 * (`drivenControls.ts`); the primitive itself never touches the DOM.
 	 */
 	autoConverge: AutoConvergeResolution;
+	/** Sensor-shadow stretches replaced in this pass's air speed; empty when none or not checked. */
+	sensorShadow: ShadowEvent[];
 }
 
 /**
@@ -198,7 +204,7 @@ export async function updateModeVEPlots(
 	//     with no blast radius outside this function.
 	const isCompare = args.windSource === "compare";
 
-	const wind = resolveWindSeries({
+	const resolvedWind = resolveWindSeries({
 		fitData,
 		windSource: isCompare ? "fit" : args.windSource,
 		params,
@@ -237,6 +243,19 @@ export async function updateModeVEPlots(
 	const rhoArray = resolveRho(fitData, normalized);
 
 	const segments = args.segments ?? handler.getUpdateSegments(appState);
+
+	// (3a) Sensor shadowing, ONCE per pass, over the segments being drawn.
+	//      Shadowed seconds cannot be dropped — closure needs every one — so
+	//      they are replaced by ground speed plus the lap's fitted wind
+	//      (`correctSensorShadow`). Only a measured channel can be shadowed;
+	//      'constant' and 'none' pass through untouched.
+	const shadow =
+		resolvedWind.selectedWindSource === "fit"
+			? correctSensorShadow(segments, normalized, resolvedWind.windSpeed)
+			: null;
+	const wind = shadow
+		? { ...resolvedWind, windSpeed: shadow.windSpeed }
+		: resolvedWind;
 
 	// The CdA/Crr-independent front half of the loop lives in
 	// `segmentPreparation.ts` so the Convergence grid and the auto-converge
@@ -550,5 +569,11 @@ export async function updateModeVEPlots(
 		`VE plots updated with ${profiles.length} segments, CdA=${cda.toFixed(3)}, Crr=${crr.toFixed(4)}`,
 	);
 
-	return { inputs, profiles, aggregate, autoConverge };
+	return {
+		inputs,
+		profiles,
+		aggregate,
+		autoConverge,
+		sensorShadow: shadow?.detection.events ?? [],
+	};
 }
