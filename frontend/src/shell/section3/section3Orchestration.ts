@@ -570,6 +570,9 @@ export function resetAnalysisForNewActivity(): void {
 	// (`renderStandardVe.ts:331-332`) still runs AFTER this, at Analyze time, so a
 	// file WITH stored settings keeps getting its own value back.
 	appState.airSpeedCalibrationPercent = DEFAULT_AIR_SPEED_CALIBRATION_PERCENT;
+	appState.airSpeedCalibrationSource = "ride";
+	appState.rideAirSpeedCalibrationPercent =
+		DEFAULT_AIR_SPEED_CALIBRATION_PERCENT;
 
 	// The detections those selections indexed into. All are derived from the
 	// activity that has just been replaced.
@@ -1886,7 +1889,7 @@ async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
 
 			// TWO WRITES, AND THE ORDER IS LOAD-BEARING. `saveLapSettings` REPLACES
 			// the whole entry, and `saveMapTrimSettings` writes `cda: null`,
-			// `crr: null` and no `airSpeedCalibration`. The second call is what the
+			// `crr: null`. The second call is what the
 			// removed `mapTrim` row's `persistsSettings: true` did — Standard's
 			// `saveCurrentLapSettings`, with the real tuned values — and it has to
 			// be last, exactly as it was on `origin/main`. It self-gates on

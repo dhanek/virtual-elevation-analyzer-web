@@ -36,7 +36,9 @@ import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplemen
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import {
+	persistAirSpeedCalibration,
 	resolveMultiSegmentAnalysisParams,
+	setAirSpeedCalibrationScope,
 	saveCurrentMultiSegmentSettings,
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
@@ -570,6 +572,11 @@ export function setupGpsLapSliderHandlers(
 		saveSettings: () => {
 			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
 		},
+		persistCalibration: () => {
+			void persistAirSpeedCalibration(appState, parameterStorage);
+		},
+		setCalibrationScope: (scope) =>
+			setAirSpeedCalibrationScope(appState, parameterStorage, scope),
 		// N-3: one sync-error window per lap, where Standard supplies its single
 		// trim window. The binder displays the NaN-skipping mean over them, so
 		// Standard's displayed number is unchanged and the GPS modes gain one.

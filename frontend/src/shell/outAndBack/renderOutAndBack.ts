@@ -37,7 +37,9 @@ import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplemen
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import {
+	persistAirSpeedCalibration,
 	resolveMultiSegmentAnalysisParams,
+	setAirSpeedCalibrationScope,
 	saveCurrentMultiSegmentSettings,
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
@@ -824,6 +826,11 @@ export function setupOutAndBackSliderSync(
 		saveSettings: () => {
 			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
 		},
+		persistCalibration: () => {
+			void persistAirSpeedCalibration(appState, parameterStorage);
+		},
+		setCalibrationScope: (scope) =>
+			setAirSpeedCalibrationScope(appState, parameterStorage, scope),
 		// N-3: one sync-error window per section leg — outbound and inbound are
 		// separate windows, as they are everywhere else in this mode.
 		getOffsetMetricWindows: () =>

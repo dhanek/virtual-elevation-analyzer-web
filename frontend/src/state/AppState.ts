@@ -1,4 +1,5 @@
 import type { WeatherSlot } from "../analysis/segmentWeather";
+import type { CalibrationSource } from "../analysis/RideCalibration";
 import type { SegmentWeatherRecord } from "../utils/ResultsStorage";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import type { AutoConvergeState } from "../analysis/AutoConverge";
@@ -234,6 +235,14 @@ export interface AnalysisState {
 	veStatus: VeStatus;
 	airSpeedCalibrationPercent: number;
 	/**
+	 * Where `airSpeedCalibrationPercent` came from: the file's ride value, or
+	 * this selection's own override ("this selection only"). A calibration
+	 * change is stored to the matching place (`RideCalibration.ts`).
+	 */
+	airSpeedCalibrationSource: CalibrationSource;
+	/** The file's ride value as last read or written; 0 when never calibrated. */
+	rideAirSpeedCalibrationPercent: number;
+	/**
 	 * Auto-converge UI state (Convergence plan, phase 1). Runtime, like the
 	 * calibration above — deliberately NOT on AnalysisParameters, so the
 	 * Section-3 template never emits `checked` and no merge route is needed;
@@ -345,6 +354,8 @@ export class AppState {
 		currentWindSource: "none",
 		veStatus: "idle",
 		airSpeedCalibrationPercent: 0,
+		airSpeedCalibrationSource: "ride",
+		rideAirSpeedCalibrationPercent: 0,
 		autoConverge: {
 			enabled: false,
 			cdaLocked: false,
@@ -679,6 +690,22 @@ export class AppState {
 
 	set airSpeedCalibrationPercent(calibrationPercent: number) {
 		this.analysis.airSpeedCalibrationPercent = calibrationPercent;
+	}
+
+	get airSpeedCalibrationSource(): CalibrationSource {
+		return this.analysis.airSpeedCalibrationSource;
+	}
+
+	set airSpeedCalibrationSource(source: CalibrationSource) {
+		this.analysis.airSpeedCalibrationSource = source;
+	}
+
+	get rideAirSpeedCalibrationPercent(): number {
+		return this.analysis.rideAirSpeedCalibrationPercent;
+	}
+
+	set rideAirSpeedCalibrationPercent(percent: number) {
+		this.analysis.rideAirSpeedCalibrationPercent = percent;
 	}
 
 	get autoConverge(): AutoConvergeState {

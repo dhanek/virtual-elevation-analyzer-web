@@ -879,3 +879,46 @@
 	.plot-x-axis-toggle__btn.ve-checkpoints__place-btn.plot-x-axis-toggle__btn--active {
 	border-color: var(--color-primary);
 }
+
+/* Air speed calibration: where the value comes from (ride or this selection
+   only), the switch that changes it, and the reset back to the ride value. */
+.ve-parameter__scope {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-sm);
+	margin-top: var(--space-sm);
+	font-size: 0.85em;
+}
+
+.ve-parameter__source {
+	padding: 1px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--color-border-strong);
+	color: var(--color-text-secondary);
+	background: var(--color-surface);
+}
+
+.ve-parameter__source--selection {
+	border-color: var(--color-primary);
+	color: var(--color-primary);
+}
+
+.ve-parameter__link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--color-primary);
+	text-decoration: underline;
+	cursor: pointer;
+	font: inherit;
+}
+
+.ve-parameter__scope-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: auto;
+	color: var(--color-text-secondary);
+	cursor: pointer;
+}

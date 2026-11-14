@@ -52,6 +52,11 @@ import {
 	renderCalibrationReport,
 } from "../ve/airSpeedCalibrationReport";
 import { refreshCalibrationMethodHint } from "../ve/calibrationMethodHint";
+import {
+	bindCalibrationScope,
+	refreshCalibrationScope,
+} from "../ve/airSpeedCalibrationScope";
+import type { CalibrationSource } from "../../analysis/RideCalibration";
 import { setCalibrationTabState } from "../ve/calibrationTab";
 import { bindCrrTempControls } from "../ve/crrTempControls";
 import { bindElevationDiffControls } from "../ve/elevationDiffControls";
@@ -147,6 +152,18 @@ export interface BindModeControlsOptions {
 	 * returns an explicit `none` outcome instead of nothing (review R10).
 	 */
 	getAutoCalibration?: () => AutoCalibrationOutcome | null;
+	/**
+	 * Store a calibration change (slider, number box, Auto Adjust) as the ride
+	 * value or this selection's override, whichever `appState` says the value
+	 * came from (`persistAirSpeedCalibration`). Settings saves no longer carry
+	 * the calibration, so without this a change would live in memory only.
+	 */
+	persistCalibration?: () => void;
+	/**
+	 * The "this selection only" switch (`setAirSpeedCalibrationScope`). Without
+	 * it the switch is left unbound.
+	 */
+	setCalibrationScope?: (scope: CalibrationSource) => Promise<void>;
 }
 
 /**
@@ -423,6 +440,8 @@ export function bindModeControls(
 				// Lives in AppState and is saved with the lap settings
 				// (`saveCurrentMultiSegmentSettings`, `buildSaveResultData`).
 				appState.airSpeedCalibrationPercent = value;
+				options.persistCalibration?.();
+				refreshCalibrationScope(appState);
 				finish(spec);
 				return;
 			}
@@ -525,6 +544,8 @@ export function bindModeControls(
 					if (slider) slider.value = value.toFixed(1);
 					if (number) number.value = value.toFixed(1);
 					appState.airSpeedCalibrationPercent = value;
+					options.persistCalibration?.();
+					refreshCalibrationScope(appState);
 					renderCalibrationReport(reportElement, outcome);
 					finish(spec);
 				});
@@ -594,6 +615,21 @@ export function bindModeControls(
 		if (spec.refreshesOffsetMetric) {
 			refreshOffsetMetric(spec);
 		}
+	}
+
+	// The "this selection only" switch belongs to the calibration row: switching
+	// back to the ride value changes the value, so it repaints the pair and
+	// recomputes exactly as a calibration change does.
+	const calibrationSpec = bound.find((spec) => spec.reason === "calibration");
+	if (calibrationSpec && options.setCalibrationScope) {
+		bindCalibrationScope({
+			appState,
+			setScope: options.setCalibrationScope,
+			onRideValueRestored: () => {
+				writeBoth(calibrationSpec, appState.airSpeedCalibrationPercent, 1);
+				finish(calibrationSpec);
+			},
+		});
 	}
 
 	// The initial selection exists before any change; describe it too.

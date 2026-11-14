@@ -162,6 +162,10 @@ export function buildSaveResultData(
 			appState.airSpeedCalibrationPercent !== 0
 				? appState.airSpeedCalibrationPercent
 				: undefined,
+		airSpeedCalibrationSource:
+			appState.airSpeedCalibrationPercent !== 0
+				? appState.airSpeedCalibrationSource
+				: undefined,
 		windSource: appState.currentWindSource,
 		parameters: params,
 		result: result,

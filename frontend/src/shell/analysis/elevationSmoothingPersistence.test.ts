@@ -14,7 +14,7 @@
  * THE SECOND HALF OF THE CLAIM IS FALSE, AND SAYING SO IS THE POINT OF THIS
  * FILE. The toggle's state lives on `appState.activeDisplayProfile`. What the
  * save writes is a `LapSettings` record, and `LapSettings` is
- * `{ trimStart, trimEnd, cda, crr, airSpeedCalibration? }` — there is no field
+ * `{ trimStart, trimEnd, cda, crr }` — there is no field
  * for the display profile, in that record or anywhere else in
  * `ParameterStorage`. `grep -rn activeDisplayProfile src` returns readers, the
  * two setters in `elevationProfileCycle.ts`, and the file-load defaults in
@@ -136,6 +136,37 @@ class InMemoryParameterStorage {
 		selectedLaps: number[],
 	): Promise<LapSettings | null> {
 		return this.records.get(this.key(fileHash, selectedLaps)) ?? null;
+	}
+
+	/** The ride calibration, per file, and the per-selection overrides. */
+	readonly rides = new Map<string, number>();
+	readonly overrides = new Map<string, number>();
+
+	async loadAirSpeedCalibration(
+		fileHash: string,
+		selectedLaps: number[],
+	): Promise<{ ride?: number; override?: number }> {
+		return {
+			ride: this.rides.get(fileHash),
+			override: this.overrides.get(this.key(fileHash, selectedLaps)),
+		};
+	}
+
+	async saveRideAirSpeedCalibration(
+		fileHash: string,
+		percent: number,
+	): Promise<void> {
+		this.rides.set(fileHash, percent);
+	}
+
+	async saveAirSpeedCalibrationOverride(
+		fileHash: string,
+		selectedLaps: number[],
+		percent: number | null,
+	): Promise<void> {
+		const key = this.key(fileHash, selectedLaps);
+		if (percent === null) this.overrides.delete(key);
+		else this.overrides.set(key, percent);
 	}
 
 	asParameterStorage(): ParameterStorage {
@@ -377,20 +408,20 @@ describe.each(MODES)(
 			await settle();
 		};
 
-		it("a calibration drag writes the calibration", async () => {
+		it("a calibration drag stores the ride value", async () => {
 			await dragSlider("airSpeedCalibrationSlider", "5");
 
-			const stored = await storage.loadLapSettings(FILE_HASH, [...ANALYZED]);
-			expect(stored?.airSpeedCalibration).toBe(5);
+			expect(storage.rides.get(FILE_HASH)).toBe(5);
 		});
 
-		it("a CdA drag stores the current calibration", async () => {
+		it("a CdA drag stores no calibration", async () => {
 			appState.airSpeedCalibrationPercent = 5;
 
 			await dragSlider("cdaSlider", "0.31");
 
 			const stored = await storage.loadLapSettings(FILE_HASH, [...ANALYZED]);
-			expect(stored?.airSpeedCalibration).toBe(5);
+			expect(stored && "airSpeedCalibration" in stored).toBe(false);
+			expect(storage.rides.has(FILE_HASH)).toBe(false);
 		});
 
 		it("does NOT restore the toggle on a fresh load — the false half", async () => {

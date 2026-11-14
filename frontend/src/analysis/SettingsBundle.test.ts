@@ -186,6 +186,88 @@ describe("buildSettingsEnvelope / parseSettingsEnvelope", () => {
 	});
 });
 
+describe("the ride air speed calibration in a settings bundle", () => {
+	const build = (record: StoredParameters) =>
+		buildSettingsEnvelope({
+			record,
+			parameters: params(),
+			activityFileName: "ride.fit",
+			activityFileHash: "abc_ride",
+			section3: null,
+		});
+
+	it("carries the ride value and the overrides through export and import", () => {
+		const parsed = parseSettingsEnvelope(
+			JSON.stringify(
+				build({
+					...storedRecord(),
+					rideAirSpeedCalibration: 7.7,
+					airSpeedCalibrationOverrides: { "4-5-6": 0 },
+				}),
+			),
+		);
+		if (!parsed.ok) throw new Error(parsed.error);
+		const record = envelopeToStoredRecord(parsed.envelope, "target", "t.fit");
+		expect(record.rideAirSpeedCalibration).toBe(7.7);
+		expect(record.airSpeedCalibrationOverrides).toEqual({ "4-5-6": 0 });
+	});
+
+	it("exports a record saved before the change already migrated", () => {
+		const envelope = build({
+			...storedRecord(),
+			lapSettings: {
+				"1": {
+					trimStart: 0,
+					trimEnd: 9,
+					cda: 0.3,
+					crr: 0.004,
+					airSpeedCalibration: 7.7,
+				},
+				"2": {
+					trimStart: 0,
+					trimEnd: 9,
+					cda: 0.3,
+					crr: 0.004,
+					airSpeedCalibration: 7.7,
+				},
+				"3": {
+					trimStart: 0,
+					trimEnd: 9,
+					cda: 0.3,
+					crr: 0.004,
+					airSpeedCalibration: 5,
+				},
+			},
+		});
+		expect(envelope.rideAirSpeedCalibration).toBe(7.7);
+		expect(envelope.airSpeedCalibrationOverrides).toEqual({ "3": 5 });
+		expect(
+			Object.values(envelope.lapSettings).some(
+				(s) => "airSpeedCalibration" in s,
+			),
+		).toBe(false);
+	});
+
+	it("drops out-of-range or non-numeric calibrations instead of refusing the file", () => {
+		const envelope = {
+			...build(storedRecord()),
+			rideAirSpeedCalibration: 99,
+			airSpeedCalibrationOverrides: { "1": "x", "2": -3 },
+		};
+		const parsed = parseSettingsEnvelope(JSON.stringify(envelope));
+		if (!parsed.ok) throw new Error(parsed.error);
+		expect(parsed.envelope.rideAirSpeedCalibration).toBeUndefined();
+		expect(parsed.envelope.airSpeedCalibrationOverrides).toEqual({ "2": -3 });
+	});
+
+	it("an old export has neither field", () => {
+		const parsed = parseSettingsEnvelope(JSON.stringify(build(storedRecord())));
+		if (!parsed.ok) throw new Error(parsed.error);
+		expect("rideAirSpeedCalibration" in parsed.envelope).toBe(false);
+		expect("airSpeedCalibrationOverrides" in parsed.envelope).toBe(false);
+	});
+});
+
 describe("envelopeToStoredRecord", () => {
 	it("re-keys the record to the TARGET file, not the exporting one", () => {
 		const envelope = buildSettingsEnvelope({

@@ -6,6 +6,10 @@ import type { resolveWindSeries } from "./WindSourceResolver";
 import type { extractSegmentData } from "./SegmentExtractor";
 
 import { log } from "../utils/log";
+import {
+	resolveSelectionCalibration,
+	type CalibrationSource,
+} from "./RideCalibration";
 
 type GetNormalizedActivityArraysFn = typeof getNormalizedActivityArrays;
 type ResolveWindSeriesFn = typeof resolveWindSeries;
@@ -13,28 +17,25 @@ type ExtractSegmentDataFn = typeof extractSegmentData;
 
 export interface ResolvedMultiSegmentSettings {
 	params: AnalysisParameters;
-	airSpeedCalibrationPercent: number;
 }
 
 interface ResolveMultiSegmentSettingsInput {
 	currentAnalyzedItems: number[];
 	nextAnalyzedItems: number[];
 	params: AnalysisParameters;
-	currentAirSpeedCalibrationPercent: number;
-	savedSettings?: Pick<
-		LapSettings,
-		"cda" | "crr" | "airSpeedCalibration"
-	> | null;
+	savedSettings?: Pick<LapSettings, "cda" | "crr"> | null;
 }
 
+/**
+ * CdA and Crr for the next analyzed selection. The calibration is not here:
+ * it belongs to the ride, not to the lap settings
+ * (`resolveSelectionAirSpeedCalibration`).
+ */
 export function resolveMultiSegmentSettings(
 	input: ResolveMultiSegmentSettingsInput,
 ): ResolvedMultiSegmentSettings {
 	if (sameSelection(input.currentAnalyzedItems, input.nextAnalyzedItems)) {
-		return {
-			params: input.params,
-			airSpeedCalibrationPercent: input.currentAirSpeedCalibrationPercent,
-		};
+		return { params: input.params };
 	}
 
 	return {
@@ -43,11 +44,6 @@ export function resolveMultiSegmentSettings(
 			cda: input.savedSettings?.cda ?? input.params.cda,
 			crr: input.savedSettings?.crr ?? input.params.crr,
 		},
-		// The sensor's scale belongs to the ride, not the selection, so a new
-		// selection keeps it. A new file resets it (`resetAnalysisForNewActivity`).
-		airSpeedCalibrationPercent:
-			input.savedSettings?.airSpeedCalibration ??
-			input.currentAirSpeedCalibrationPercent,
 	};
 }
 
@@ -56,6 +52,88 @@ export function sameSelection(left: number[], right: number[]): boolean {
 		left.length === right.length &&
 		left.every((value, index) => value === right[index])
 	);
+}
+
+/**
+ * The calibration a selection analyzes with: its own override, else the
+ * file's ride value, else 0 (`resolveSelectionCalibration`). Written into
+ * `appState` with its source, so the control can say which it is and a later
+ * change is stored to the same place. Without a stored file there is nothing
+ * to read, and the value in memory stays.
+ */
+async function resolveSelectionAirSpeedCalibration(
+	appState: AppState,
+	parameterStorage: ParameterStorage,
+	analyzedItems: number[],
+): Promise<void> {
+	if (!appState.currentFileHash) return;
+	const stored = await parameterStorage.loadAirSpeedCalibration(
+		appState.currentFileHash,
+		analyzedItems,
+	);
+	const resolved = resolveSelectionCalibration(stored.ride, stored.override);
+	appState.rideAirSpeedCalibrationPercent = stored.ride ?? 0;
+	appState.airSpeedCalibrationPercent = resolved.percent;
+	appState.airSpeedCalibrationSource = resolved.source;
+}
+
+/**
+ * Store a calibration change (slider, number box, Auto Adjust) where the
+ * current selection takes it from (D1): the ride value, which every selection
+ * without an override follows, or this exact selection's override.
+ */
+export async function persistAirSpeedCalibration(
+	appState: AppState,
+	parameterStorage: ParameterStorage,
+): Promise<void> {
+	if (!appState.currentFileHash) return;
+	const percent = appState.airSpeedCalibrationPercent;
+	try {
+		if (appState.airSpeedCalibrationSource === "selection") {
+			if (appState.currentAnalyzedLaps.length === 0) return;
+			await parameterStorage.saveAirSpeedCalibrationOverride(
+				appState.currentFileHash,
+				appState.currentAnalyzedLaps,
+				percent,
+			);
+		} else {
+			appState.rideAirSpeedCalibrationPercent = percent;
+			await parameterStorage.saveRideAirSpeedCalibration(
+				appState.currentFileHash,
+				percent,
+			);
+		}
+	} catch (err) {
+		log.error("Failed to save the air speed calibration:", err);
+	}
+}
+
+/**
+ * The "this selection only" switch. On: the selection keeps the value it has
+ * now as its own override. Off ("Use ride value"): the override is removed and
+ * the selection takes the ride value again, so its VE changes.
+ */
+export async function setAirSpeedCalibrationScope(
+	appState: AppState,
+	parameterStorage: ParameterStorage,
+	scope: CalibrationSource,
+): Promise<void> {
+	appState.airSpeedCalibrationSource = scope;
+	if (scope === "ride") {
+		appState.airSpeedCalibrationPercent =
+			appState.rideAirSpeedCalibrationPercent;
+	}
+	if (!appState.currentFileHash || appState.currentAnalyzedLaps.length === 0)
+		return;
+	try {
+		await parameterStorage.saveAirSpeedCalibrationOverride(
+			appState.currentFileHash,
+			appState.currentAnalyzedLaps,
+			scope === "selection" ? appState.airSpeedCalibrationPercent : null,
+		);
+	} catch (err) {
+		log.error("Failed to save the air speed calibration scope:", err);
+	}
 }
 
 export async function resolveMultiSegmentAnalysisParams(
@@ -72,15 +150,24 @@ export async function resolveMultiSegmentAnalysisParams(
 			)
 		: null;
 
+	const sameAsCurrent =
+		reuseCurrentSettings &&
+		sameSelection(appState.currentAnalyzedLaps, analyzedItems);
 	const resolved = resolveMultiSegmentSettings({
 		currentAnalyzedItems: reuseCurrentSettings
 			? appState.currentAnalyzedLaps
 			: [],
 		nextAnalyzedItems: analyzedItems,
 		params,
-		currentAirSpeedCalibrationPercent: appState.airSpeedCalibrationPercent,
 		savedSettings,
 	});
+	if (!sameAsCurrent) {
+		await resolveSelectionAirSpeedCalibration(
+			appState,
+			parameterStorage,
+			analyzedItems,
+		);
+	}
 
 	appState.currentAnalyzedLaps = analyzedItems;
 	// The new selection has produced nothing yet, so it covers nothing yet
@@ -88,7 +175,6 @@ export async function resolveMultiSegmentAnalysisParams(
 	// ride along until the first recompute, and Store Result pressed in between
 	// would persist them as this analysis's coverage.
 	appState.currentCoveredItems = null;
-	appState.airSpeedCalibrationPercent = resolved.airSpeedCalibrationPercent;
 	return resolved.params;
 }
 
@@ -116,12 +202,13 @@ export async function saveCurrentMultiSegmentSettings(
 
 	const parsedCda = parseFloat(cdaValueEl.value);
 	const parsedCrr = parseFloat(crrValueEl.value);
+	// No calibration here: a settings save used to pin the current percent onto
+	// the selection, which is what kept a later calibration from reaching it.
 	const settings: LapSettings = {
 		trimStart: 0,
 		trimEnd: 0,
 		cda: Number.isFinite(parsedCda) ? parsedCda : null,
 		crr: Number.isFinite(parsedCrr) ? parsedCrr : null,
-		airSpeedCalibration: appState.airSpeedCalibrationPercent,
 	};
 
 	try {

@@ -65,6 +65,12 @@ export interface SaveResultData {
 	ambientTemp?: number; // ambient °C used for the Crr temperature correction
 	tireSensitivity?: string; // tire sensitivity preset (stiff/typical/supple)
 	airSpeedCalibration?: number; // Air speed calibration percentage
+	/**
+	 * Where the calibration came from: the file's ride value, or this
+	 * selection's own override (`RideCalibration.ts`). Absent on results stored
+	 * before the ride calibration, and whenever the calibration is 0.
+	 */
+	airSpeedCalibrationSource?: "ride" | "selection";
 	windSource: "constant" | "fit" | "compare" | "none";
 	parameters: AnalysisParameters;
 	result: VEAnalysisResult;
@@ -119,6 +125,12 @@ export interface StoredVEResult {
 	ambientTemp?: number; // ambient °C used for the Crr temperature correction
 	tireSensitivity?: string; // tire sensitivity preset (stiff/typical/supple)
 	airSpeedCalibration?: number; // Air speed calibration percentage
+	/**
+	 * Where the calibration came from: the file's ride value, or this
+	 * selection's own override (`RideCalibration.ts`). Absent on results stored
+	 * before the ride calibration, and whenever the calibration is 0.
+	 */
+	airSpeedCalibrationSource?: "ride" | "selection";
 	windSource: string;
 	windSpeed: number | string;
 	windDirection: number | string;
@@ -313,6 +325,7 @@ export function toStoredVEResult(data: SaveResultData): StoredVEResult {
 		ambientTemp: data.ambientTemp,
 		tireSensitivity: data.tireSensitivity,
 		airSpeedCalibration: data.airSpeedCalibration,
+		airSpeedCalibrationSource: data.airSpeedCalibrationSource,
 		windSource: data.windSource,
 		windSpeed: data.parameters.wind_speed ?? "",
 		windDirection: data.parameters.wind_direction ?? "",
