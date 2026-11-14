@@ -1,5 +1,8 @@
 import { MAX_CHECKPOINTS } from "../analysis/Checkpoints";
-import { normalizeRideCalibration } from "../analysis/RideCalibration";
+import {
+	calibrationOverrideKey,
+	normalizeRideCalibration,
+} from "../analysis/RideCalibration";
 import {
 	DEFAULT_WIND_HEIGHT_FACTOR,
 	LEGACY_WIND_HEIGHT_FACTOR,
@@ -8,6 +11,7 @@ import {
 	AnalysisParameters,
 	DEFAULT_PARAMETERS,
 } from "../components/AnalysisParameters";
+import type { AnalysisModeId } from "../modes/analysis/types";
 import { log } from "./log";
 
 export interface LapSettings {
@@ -87,8 +91,11 @@ export interface StoredParameters {
 	 */
 	rideAirSpeedCalibration?: number;
 	/**
-	 * "This selection only": the percent an exact selection (lap key, as
-	 * `lapSettings`) uses instead of the ride value; 0 is a valid override.
+	 * "This selection only": the percent an exact selection uses instead of the
+	 * ride value; 0 is a valid override. Keyed by mode and exact selection
+	 * (`calibrationOverrideKey`, e.g. `"gpsLap:1-2"`), so the same lap numbers in
+	 * another mode are a different selection; `lapSettings` itself stays shared
+	 * across modes.
 	 * Kept apart from `lapSettings` because `saveLapSettings` replaces a whole
 	 * entry on every trim or CdA save and would drop it.
 	 */
@@ -680,11 +687,12 @@ export class ParameterStorage {
 	}
 
 	/**
-	 * The file's ride calibration and this exact selection's override, both
-	 * read through the per-file migration (`normalizeRideCalibration`).
+	 * The file's ride calibration and this mode's exact selection's override,
+	 * both read through the per-file migration (`normalizeRideCalibration`).
 	 */
 	async loadAirSpeedCalibration(
 		fileHash: string,
+		mode: AnalysisModeId,
 		selectedLaps: number[],
 	): Promise<{ ride?: number; override?: number }> {
 		const record = await this.getStoredRecord(fileHash);
@@ -694,7 +702,7 @@ export class ParameterStorage {
 			ride: normalized.rideAirSpeedCalibration,
 			override:
 				normalized.airSpeedCalibrationOverrides?.[
-					this.getLapKey([...selectedLaps])
+					calibrationOverrideKey(mode, this.getLapKey([...selectedLaps]))
 				],
 		};
 	}
@@ -710,13 +718,17 @@ export class ParameterStorage {
 		}));
 	}
 
-	/** Set (a number, 0 included) or remove (null) this exact selection's override. */
+	/** Set (a number, 0 included) or remove (null) this mode's exact selection's override. */
 	async saveAirSpeedCalibrationOverride(
 		fileHash: string,
+		mode: AnalysisModeId,
 		selectedLaps: number[],
 		percent: number | null,
 	): Promise<void> {
-		const lapKey = this.getLapKey([...selectedLaps]);
+		const lapKey = calibrationOverrideKey(
+			mode,
+			this.getLapKey([...selectedLaps]),
+		);
 		await this.updateRecord(fileHash, (record) => {
 			const overrides = { ...(record.airSpeedCalibrationOverrides ?? {}) };
 			if (percent === null) delete overrides[lapKey];

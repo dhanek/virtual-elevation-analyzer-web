@@ -437,8 +437,9 @@ export function bindModeControls(
 			case "calibration": {
 				const value = clampAirSpeedCalibrationPercent(rawValue);
 				writeBoth(spec, value, 1);
-				// Lives in AppState and is saved with the lap settings
-				// (`saveCurrentMultiSegmentSettings`, `buildSaveResultData`).
+				// Lives in AppState; stored as the ride value or this selection's
+				// override by `persistCalibration` below (`persistAirSpeedCalibration`).
+				// A stored result records it (`buildSaveResultData`).
 				appState.airSpeedCalibrationPercent = value;
 				options.persistCalibration?.();
 				refreshCalibrationScope(appState);

@@ -109,22 +109,30 @@ function makeAppState(): AppState {
 function makeStorage() {
 	const overrides = new Map<string, number>();
 	const state = { ride: undefined as number | undefined, overrides };
-	const key = (laps: number[]) => [...laps].sort((a, b) => a - b).join("-");
+	// Records the mode argument it receives, so a renderer passing the wrong
+	// mode fails here.
+	const key = (mode: string, laps: number[]) =>
+		`${mode}|${[...laps].sort((a, b) => a - b).join("-")}`;
 	const storage = {
-		loadAirSpeedCalibration: async (_h: string, laps: number[]) => ({
+		loadAirSpeedCalibration: async (
+			_h: string,
+			mode: string,
+			laps: number[],
+		) => ({
 			ride: state.ride,
-			override: overrides.get(key(laps)),
+			override: overrides.get(key(mode, laps)),
 		}),
 		saveRideAirSpeedCalibration: async (_h: string, percent: number) => {
 			state.ride = percent;
 		},
 		saveAirSpeedCalibrationOverride: async (
 			_h: string,
+			mode: string,
 			laps: number[],
 			percent: number | null,
 		) => {
-			if (percent === null) overrides.delete(key(laps));
-			else overrides.set(key(laps), percent);
+			if (percent === null) overrides.delete(key(mode, laps));
+			else overrides.set(key(mode, laps), percent);
 		},
 		saveLapSettings: async () => {},
 	} as unknown as ParameterStorage;
@@ -146,6 +154,7 @@ const FLAGS = {
 const MODES = [
 	{
 		name: "GPS lap splitting",
+		mode: "gpsLap",
 		renderSidebar: (appState: AppState) =>
 			buildGpsLapVeAnalysisTemplate({
 				...FLAGS,
@@ -163,6 +172,7 @@ const MODES = [
 	},
 	{
 		name: "out-and-back",
+		mode: "outAndBack",
 		renderSidebar: (appState: AppState) =>
 			buildOutAndBackVeAnalysisTemplate({
 				...FLAGS,
@@ -188,7 +198,7 @@ const MODES = [
 
 describe.each(MODES)(
 	"$name: the calibration is stored on the ride or the selection",
-	({ renderSidebar, bind }) => {
+	({ mode, renderSidebar, bind }) => {
 		let appState: AppState;
 		let state: ReturnType<typeof makeStorage>["state"];
 		const el = <T extends HTMLElement>(id: string) =>
@@ -226,13 +236,13 @@ describe.each(MODES)(
 			scope.checked = true;
 			scope.dispatchEvent(new Event("change", { bubbles: true }));
 			await flushPromises();
-			expect(state.overrides.get("1-2")).toBe(5);
+			expect(state.overrides.get(`${mode}|1-2`)).toBe(5);
 			expect(el("airSpeedCalibrationSource").textContent).toBe(
 				"This selection only",
 			);
 
 			await drag(0);
-			expect(state.overrides.get("1-2")).toBe(0);
+			expect(state.overrides.get(`${mode}|1-2`)).toBe(0);
 			expect(state.ride).toBe(5);
 			expect(el("airSpeedCalibrationUseRide").textContent).toBe(
 				"Use ride value (+5.0 %)",
@@ -250,7 +260,7 @@ describe.each(MODES)(
 			el("airSpeedCalibrationUseRide").click();
 			await flushPromises();
 
-			expect(state.overrides.has("1-2")).toBe(false);
+			expect(state.overrides.has(`${mode}|1-2`)).toBe(false);
 			expect(appState.airSpeedCalibrationPercent).toBe(5);
 			expect(el<HTMLInputElement>("airSpeedCalibrationValue").value).toBe(
 				"5.0",
@@ -261,3 +271,27 @@ describe.each(MODES)(
 		});
 	},
 );
+
+describe("GPS-lap renderer drawing Standard's Stacked FIT laps", () => {
+	it("stores the override under Standard, not GPS-lap", async () => {
+		resetModeUpdateRequests();
+		const made = makeStorage();
+		parameterStorage = made.storage;
+		const appState = makeAppState();
+		appState.currentOverlayLapNumbers = [1, 2];
+		document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div>`;
+		document.getElementById("veAnalysisContent")!.innerHTML =
+			MODES[0].renderSidebar(appState);
+		MODES[0].bind(appState);
+
+		const scope = document.getElementById(
+			"airSpeedCalibrationScope",
+		) as HTMLInputElement;
+		scope.checked = true;
+		scope.dispatchEvent(new Event("change", { bubbles: true }));
+		await flushPromises();
+
+		expect(made.state.overrides.get("standard|1-2")).toBe(0);
+		expect(made.state.overrides.has("gpsLap|1-2")).toBe(false);
+	});
+});

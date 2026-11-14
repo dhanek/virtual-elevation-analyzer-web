@@ -1,6 +1,7 @@
 /**
  * A stored result records the calibration and where it came from (D6): the
- * ride value or this selection's own override. Absent at 0, like the percent.
+ * ride value or this selection's own override. Absent at a ride-value 0, like
+ * the percent; a 0 override is recorded.
  */
 import { describe, expect, it } from "vitest";
 import type { CalibrationSource } from "../../analysis/RideCalibration";
@@ -51,8 +52,15 @@ describe("a stored result's calibration source", () => {
 		expect(outcome.data.airSpeedCalibrationSource).toBe("ride");
 	});
 
-	it("records neither at 0", () => {
+	it("records a 0 override as the selection's", () => {
 		const outcome = build(appStateWith(0, "selection"));
+		if (!outcome.ok) throw new Error(outcome.alertMessage);
+		expect(outcome.data.airSpeedCalibration).toBe(0);
+		expect(outcome.data.airSpeedCalibrationSource).toBe("selection");
+	});
+
+	it("records neither at a ride-value 0", () => {
+		const outcome = build(appStateWith(0, "ride"));
 		if (!outcome.ok) throw new Error(outcome.alertMessage);
 		expect(outcome.data.airSpeedCalibration).toBeUndefined();
 		expect(outcome.data.airSpeedCalibrationSource).toBeUndefined();

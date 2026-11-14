@@ -144,11 +144,14 @@ class InMemoryParameterStorage {
 
 	async loadAirSpeedCalibration(
 		fileHash: string,
+		mode: string,
 		selectedLaps: number[],
 	): Promise<{ ride?: number; override?: number }> {
 		return {
 			ride: this.rides.get(fileHash),
-			override: this.overrides.get(this.key(fileHash, selectedLaps)),
+			override: this.overrides.get(
+				`${mode}|${this.key(fileHash, selectedLaps)}`,
+			),
 		};
 	}
 
@@ -161,10 +164,11 @@ class InMemoryParameterStorage {
 
 	async saveAirSpeedCalibrationOverride(
 		fileHash: string,
+		mode: string,
 		selectedLaps: number[],
 		percent: number | null,
 	): Promise<void> {
-		const key = this.key(fileHash, selectedLaps);
+		const key = `${mode}|${this.key(fileHash, selectedLaps)}`;
 		if (percent === null) this.overrides.delete(key);
 		else this.overrides.set(key, percent);
 	}
@@ -439,6 +443,7 @@ describe.each(MODES)(
 			const restoredParams = await resolveMultiSegmentAnalysisParams(
 				reloaded,
 				storage.asParameterStorage(),
+				"gpsLap",
 				[...ANALYZED],
 				{ ...params, cda: 0.2, crr: 0.001 },
 			);

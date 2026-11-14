@@ -19,6 +19,7 @@ import {
 	resolveDisplayCrr,
 } from "../../analysis/unsetParameterFallbacks";
 import type { AppState } from "../../state/AppState";
+import type { AnalysisModeId } from "../../modes/analysis/types";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
@@ -89,6 +90,15 @@ import { requestConvergenceRedraw } from "../analysis/convergenceView";
 import { requestRepeatsRedraw } from "../analysis/repeatsView";
 
 /**
+ * The mode a calibration override is stored under. This renderer also draws
+ * Standard's Stacked view of FIT laps (`currentOverlayLapNumbers` set): those
+ * are FIT lap numbers in Standard, not GPS-detected laps with the same numbers.
+ */
+function gpsLapCalibrationMode(appState: AppState): AnalysisModeId {
+	return appState.currentOverlayLapNumbers ? "standard" : "gpsLap";
+}
+
+/**
  * Select the GPS-detected laps and put the stacked panel on screen.
  *
  * THIS LEG NO LONGER RUNS THE PHYSICS. It used to build one calculator per lap
@@ -131,6 +141,7 @@ export async function showGpsLapVEAnalysis(
 	const resolvedParams = await resolveMultiSegmentAnalysisParams(
 		appState,
 		parameterStorage,
+		gpsLapCalibrationMode(appState),
 		analyzedLapNumbers,
 		params,
 		reuseCurrentSettings,
@@ -573,10 +584,19 @@ export function setupGpsLapSliderHandlers(
 			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
 		},
 		persistCalibration: () => {
-			void persistAirSpeedCalibration(appState, parameterStorage);
+			void persistAirSpeedCalibration(
+				appState,
+				parameterStorage,
+				gpsLapCalibrationMode(appState),
+			);
 		},
 		setCalibrationScope: (scope) =>
-			setAirSpeedCalibrationScope(appState, parameterStorage, scope),
+			setAirSpeedCalibrationScope(
+				appState,
+				parameterStorage,
+				gpsLapCalibrationMode(appState),
+				scope,
+			),
 		// N-3: one sync-error window per lap, where Standard supplies its single
 		// trim window. The binder displays the NaN-skipping mean over them, so
 		// Standard's displayed number is unchanged and the GPS modes gain one.

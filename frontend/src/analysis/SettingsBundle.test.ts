@@ -209,7 +209,12 @@ describe("the ride air speed calibration in a settings bundle", () => {
 		if (!parsed.ok) throw new Error(parsed.error);
 		const record = envelopeToStoredRecord(parsed.envelope, "target", "t.fit");
 		expect(record.rideAirSpeedCalibration).toBe(7.7);
-		expect(record.airSpeedCalibrationOverrides).toEqual({ "4-5-6": 0 });
+		// An unprefixed key from before the mode was in it reads in all three.
+		expect(record.airSpeedCalibrationOverrides).toEqual({
+			"standard:4-5-6": 0,
+			"gpsLap:4-5-6": 0,
+			"outAndBack:4-5-6": 0,
+		});
 	});
 
 	it("exports a record saved before the change already migrated", () => {
@@ -240,7 +245,11 @@ describe("the ride air speed calibration in a settings bundle", () => {
 			},
 		});
 		expect(envelope.rideAirSpeedCalibration).toBe(7.7);
-		expect(envelope.airSpeedCalibrationOverrides).toEqual({ "3": 5 });
+		expect(envelope.airSpeedCalibrationOverrides).toEqual({
+			"standard:3": 5,
+			"gpsLap:3": 5,
+			"outAndBack:3": 5,
+		});
 		expect(
 			Object.values(envelope.lapSettings).some(
 				(s) => "airSpeedCalibration" in s,

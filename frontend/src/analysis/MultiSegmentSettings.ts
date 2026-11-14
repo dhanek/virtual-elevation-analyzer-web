@@ -1,6 +1,7 @@
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import type { LapSettings, ParameterStorage } from "../utils/ParameterStorage";
 import type { AppState } from "../state/AppState";
+import type { AnalysisModeId } from "../modes/analysis/types";
 import type { getNormalizedActivityArrays } from "./ActivityArrayCache";
 import type { resolveWindSeries } from "./WindSourceResolver";
 import type { extractSegmentData } from "./SegmentExtractor";
@@ -64,11 +65,13 @@ export function sameSelection(left: number[], right: number[]): boolean {
 async function resolveSelectionAirSpeedCalibration(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
+	mode: AnalysisModeId,
 	analyzedItems: number[],
 ): Promise<void> {
 	if (!appState.currentFileHash) return;
 	const stored = await parameterStorage.loadAirSpeedCalibration(
 		appState.currentFileHash,
+		mode,
 		analyzedItems,
 	);
 	const resolved = resolveSelectionCalibration(stored.ride, stored.override);
@@ -85,6 +88,7 @@ async function resolveSelectionAirSpeedCalibration(
 export async function persistAirSpeedCalibration(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
+	mode: AnalysisModeId,
 ): Promise<void> {
 	if (!appState.currentFileHash) return;
 	const percent = appState.airSpeedCalibrationPercent;
@@ -93,6 +97,7 @@ export async function persistAirSpeedCalibration(
 			if (appState.currentAnalyzedLaps.length === 0) return;
 			await parameterStorage.saveAirSpeedCalibrationOverride(
 				appState.currentFileHash,
+				mode,
 				appState.currentAnalyzedLaps,
 				percent,
 			);
@@ -116,6 +121,7 @@ export async function persistAirSpeedCalibration(
 export async function setAirSpeedCalibrationScope(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
+	mode: AnalysisModeId,
 	scope: CalibrationSource,
 ): Promise<void> {
 	appState.airSpeedCalibrationSource = scope;
@@ -128,6 +134,7 @@ export async function setAirSpeedCalibrationScope(
 	try {
 		await parameterStorage.saveAirSpeedCalibrationOverride(
 			appState.currentFileHash,
+			mode,
 			appState.currentAnalyzedLaps,
 			scope === "selection" ? appState.airSpeedCalibrationPercent : null,
 		);
@@ -139,6 +146,7 @@ export async function setAirSpeedCalibrationScope(
 export async function resolveMultiSegmentAnalysisParams(
 	appState: AppState,
 	parameterStorage: ParameterStorage,
+	mode: AnalysisModeId,
 	analyzedItems: number[],
 	params: AnalysisParameters,
 	reuseCurrentSettings: boolean = false,
@@ -165,6 +173,7 @@ export async function resolveMultiSegmentAnalysisParams(
 		await resolveSelectionAirSpeedCalibration(
 			appState,
 			parameterStorage,
+			mode,
 			analyzedItems,
 		);
 	}

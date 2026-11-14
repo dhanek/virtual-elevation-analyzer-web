@@ -27,43 +27,69 @@ describe("ride calibration storage", () => {
 	});
 
 	it("reads nothing for a file never calibrated", async () => {
-		expect(await storage.loadAirSpeedCalibration(FILE, [1])).toEqual({
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "standard", [1]),
+		).toEqual({
 			ride: undefined,
 			override: undefined,
 		});
-		expect(await storage.loadAirSpeedCalibration("unknown", [1])).toEqual({});
+		expect(
+			await storage.loadAirSpeedCalibration("unknown", "standard", [1]),
+		).toEqual({});
 	});
 
 	it("a ride value reaches every selection; an override only its own", async () => {
 		await storage.saveRideAirSpeedCalibration(FILE, 7.7);
-		await storage.saveAirSpeedCalibrationOverride(FILE, [4, 5, 6], 0);
+		await storage.saveAirSpeedCalibrationOverride(
+			FILE,
+			"standard",
+			[4, 5, 6],
+			0,
+		);
 
-		expect(await storage.loadAirSpeedCalibration(FILE, [1, 2, 3])).toEqual({
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "standard", [1, 2, 3]),
+		).toEqual({
 			ride: 7.7,
 			override: undefined,
 		});
-		expect(await storage.loadAirSpeedCalibration(FILE, [6, 4, 5])).toEqual({
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "standard", [6, 4, 5]),
+		).toEqual({
 			ride: 7.7,
 			override: 0,
 		});
 		// Another combination of the same laps is another selection (D7).
 		expect(
-			(await storage.loadAirSpeedCalibration(FILE, [5])).override,
+			(await storage.loadAirSpeedCalibration(FILE, "standard", [5])).override,
 		).toBeUndefined();
 
-		await storage.saveAirSpeedCalibrationOverride(FILE, [4, 5, 6], null);
+		await storage.saveAirSpeedCalibrationOverride(
+			FILE,
+			"standard",
+			[4, 5, 6],
+			null,
+		);
 		expect(
-			(await storage.loadAirSpeedCalibration(FILE, [4, 5, 6])).override,
+			(await storage.loadAirSpeedCalibration(FILE, "standard", [4, 5, 6]))
+				.override,
 		).toBeUndefined();
 	});
 
 	it("a trim or CdA save keeps the override and the ride value", async () => {
 		await storage.saveRideAirSpeedCalibration(FILE, 7.7);
-		await storage.saveAirSpeedCalibrationOverride(FILE, [4, 5, 6], 5);
+		await storage.saveAirSpeedCalibrationOverride(
+			FILE,
+			"standard",
+			[4, 5, 6],
+			5,
+		);
 		await storage.saveLapSettings(FILE, [4, 5, 6], entry({ cda: 0.25 }));
 		await storage.saveParameters(FILE, DEFAULT_PARAMETERS, "ride.fit");
 
-		expect(await storage.loadAirSpeedCalibration(FILE, [4, 5, 6])).toEqual({
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "standard", [4, 5, 6]),
+		).toEqual({
 			ride: 7.7,
 			override: 5,
 		});
@@ -74,10 +100,40 @@ describe("ride calibration storage", () => {
 		await storage.saveLapSettings(FILE, [1], entry({ airSpeedCalibration: 9 }));
 		const stored = await storage.loadLapSettings(FILE, [1]);
 		expect(stored && "airSpeedCalibration" in stored).toBe(false);
-		expect(await storage.loadAirSpeedCalibration(FILE, [1])).toEqual({
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "standard", [1]),
+		).toEqual({
 			ride: undefined,
 			override: undefined,
 		});
+	});
+
+	it("an override belongs to one mode: the same laps in another read the ride", async () => {
+		await storage.saveRideAirSpeedCalibration(FILE, 9);
+		await storage.saveAirSpeedCalibrationOverride(FILE, "standard", [2], 0);
+		expect(await storage.loadAirSpeedCalibration(FILE, "gpsLap", [2])).toEqual({
+			ride: 9,
+			override: undefined,
+		});
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "outAndBack", [2]),
+		).toEqual({ ride: 9, override: undefined });
+		expect(
+			await storage.loadAirSpeedCalibration(FILE, "standard", [2]),
+		).toEqual({ ride: 9, override: 0 });
+	});
+
+	it("an override stored before the mode was in the key reads in all three modes", async () => {
+		const record = await storage.getStoredRecord(FILE);
+		await storage.importStoredRecord({
+			...record!,
+			airSpeedCalibrationOverrides: { "2": 5 },
+		});
+		for (const mode of ["standard", "gpsLap", "outAndBack"] as const) {
+			expect(
+				(await storage.loadAirSpeedCalibration(FILE, mode, [2])).override,
+			).toBe(5);
+		}
 	});
 
 	describe("a record saved before the change (D2)", () => {
@@ -95,11 +151,15 @@ describe("ride calibration storage", () => {
 		});
 
 		it("reads as a ride value plus the one deliberate-looking override", async () => {
-			expect(await storage.loadAirSpeedCalibration(FILE, [1, 2, 3])).toEqual({
+			expect(
+				await storage.loadAirSpeedCalibration(FILE, "standard", [1, 2, 3]),
+			).toEqual({
 				ride: 7.7,
 				override: undefined,
 			});
-			expect(await storage.loadAirSpeedCalibration(FILE, [4, 5, 6])).toEqual({
+			expect(
+				await storage.loadAirSpeedCalibration(FILE, "standard", [4, 5, 6]),
+			).toEqual({
 				ride: 7.7,
 				override: 5,
 			});
@@ -109,7 +169,9 @@ describe("ride calibration storage", () => {
 			// Moving CdA on laps 4-6 replaces that entry. Its legacy +5.0 must
 			// still become the override rather than vanish with the old entry.
 			await storage.saveLapSettings(FILE, [4, 5, 6], entry({ cda: 0.25 }));
-			expect(await storage.loadAirSpeedCalibration(FILE, [4, 5, 6])).toEqual({
+			expect(
+				await storage.loadAirSpeedCalibration(FILE, "standard", [4, 5, 6]),
+			).toEqual({
 				ride: 7.7,
 				override: 5,
 			});
@@ -123,8 +185,12 @@ describe("ride calibration storage", () => {
 
 		it("a later ride calibration reaches the selections that followed", async () => {
 			await storage.saveRideAirSpeedCalibration(FILE, 8);
-			expect((await storage.loadAirSpeedCalibration(FILE, [6])).ride).toBe(8);
-			expect(await storage.loadAirSpeedCalibration(FILE, [4, 5, 6])).toEqual({
+			expect(
+				(await storage.loadAirSpeedCalibration(FILE, "standard", [6])).ride,
+			).toBe(8);
+			expect(
+				await storage.loadAirSpeedCalibration(FILE, "standard", [4, 5, 6]),
+			).toEqual({
 				ride: 8,
 				override: 5,
 			});

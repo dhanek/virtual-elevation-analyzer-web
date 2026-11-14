@@ -111,6 +111,7 @@ export async function showOutAndBackVEAnalysis(
 	const resolvedParams = await resolveMultiSegmentAnalysisParams(
 		appState,
 		parameterStorage,
+		"outAndBack",
 		analyzedSectionNumbers,
 		params,
 		reuseCurrentSettings,
@@ -827,10 +828,15 @@ export function setupOutAndBackSliderSync(
 			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
 		},
 		persistCalibration: () => {
-			void persistAirSpeedCalibration(appState, parameterStorage);
+			void persistAirSpeedCalibration(appState, parameterStorage, "outAndBack");
 		},
 		setCalibrationScope: (scope) =>
-			setAirSpeedCalibrationScope(appState, parameterStorage, scope),
+			setAirSpeedCalibrationScope(
+				appState,
+				parameterStorage,
+				"outAndBack",
+				scope,
+			),
 		// N-3: one sync-error window per section leg — outbound and inbound are
 		// separate windows, as they are everywhere else in this mode.
 		getOffsetMetricWindows: () =>

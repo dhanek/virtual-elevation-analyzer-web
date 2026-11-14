@@ -566,9 +566,11 @@ export function resetAnalysisForNewActivity(): void {
 	// new activity it silently recalibrates someone else's sensor: the new ride's
 	// first Analyze computes its VE with the previous ride's percent, and the
 	// slider renders that foreign value from state, so the UI agrees with itself
-	// and nothing looks wrong. The saved-settings restore
-	// (`renderStandardVe.ts:331-332`) still runs AFTER this, at Analyze time, so a
-	// file WITH stored settings keeps getting its own value back.
+	// and nothing looks wrong. The stored calibration is read again AFTER
+	// this, at Analyze time (`loadAirSpeedCalibration`, from `renderStandardVe`
+	// and `resolveMultiSegmentAnalysisParams`), so a file WITH a stored
+	// calibration keeps getting its own value back: its override, else its ride
+	// value.
 	appState.airSpeedCalibrationPercent = DEFAULT_AIR_SPEED_CALIBRATION_PERCENT;
 	appState.airSpeedCalibrationSource = "ride";
 	appState.rideAirSpeedCalibrationPercent =

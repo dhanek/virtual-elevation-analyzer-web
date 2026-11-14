@@ -68,7 +68,8 @@ export interface SaveResultData {
 	/**
 	 * Where the calibration came from: the file's ride value, or this
 	 * selection's own override (`RideCalibration.ts`). Absent on results stored
-	 * before the ride calibration, and whenever the calibration is 0.
+	 * before the ride calibration, and when the calibration is 0 from the ride
+	 * value; a 0 override is recorded as 0 with source "selection".
 	 */
 	airSpeedCalibrationSource?: "ride" | "selection";
 	windSource: "constant" | "fit" | "compare" | "none";
@@ -128,7 +129,8 @@ export interface StoredVEResult {
 	/**
 	 * Where the calibration came from: the file's ride value, or this
 	 * selection's own override (`RideCalibration.ts`). Absent on results stored
-	 * before the ride calibration, and whenever the calibration is 0.
+	 * before the ride calibration, and when the calibration is 0 from the ride
+	 * value; a 0 override is recorded as 0 with source "selection".
 	 */
 	airSpeedCalibrationSource?: "ride" | "selection";
 	windSource: string;

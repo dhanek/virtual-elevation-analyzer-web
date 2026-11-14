@@ -551,8 +551,9 @@ reload a new selection's value depended on the order things were opened.
 **What it does**, per the maintainer's decisions D1–D7 (2026-11-14):
 
 - **Storage.** One ride value per file (`StoredParameters.rideAirSpeedCalibration`), shared by all
-  three modes, and a per-file map of overrides keyed by exact selection
-  (`airSpeedCalibrationOverrides`, 0 a valid override). The map sits apart from `lapSettings`
+  three modes, and a per-file map of overrides keyed by mode and exact selection
+  (`airSpeedCalibrationOverrides`, 0 a valid override; the same lap numbers in another mode are
+  another selection; CdA/Crr stay shared across modes). The map sits apart from `lapSettings`
   because `saveLapSettings` replaces a whole entry on every save. Settings saves store no
   calibration any more. No IndexedDB version change: both fields are optional.
 - **Migration (D2).** `normalizeRideCalibration` (`RideCalibration.ts`) reads a record saved before
@@ -560,7 +561,9 @@ reload a new selection's value depended on the order things were opened.
   more laps covered, then the larger value); another non-zero value becomes that selection's
   override; a stored 0 or a value equal to the ride follows the ride. It runs on every read and
   before any write that replaces a lap entry, so a CdA save on a legacy selection cannot lose its
-  override. Settings export writes the migrated shape; an old export migrates on import.
+  override. Settings export writes the migrated shape; an old export migrates on import. An
+  override written before the mode was in the key, and a legacy per-selection value, is copied to
+  all three modes, so each reads what it read before.
 - **Resolution.** A selection uses its override, else the ride value, else 0
   (`resolveSelectionCalibration`), in Standard (`renderStandardVe`) and in both GPS modes
   (`resolveMultiSegmentAnalysisParams`). Re-analyzing the same selection keeps the value in memory.
@@ -570,7 +573,8 @@ reload a new selection's value depended on the order things were opened.
 - **UI (D4).** Under the slider: a tag ("Ride value" / "This selection only"), the switch, and
   "Use ride value (+x %)", which removes the override and recomputes.
 - **Results (D6).** A stored result records `airSpeedCalibrationSource`; the CSV gains an
-  `AirSpeedCalSource` column after `AirSpeedCal` (the CSV pin was re-baselined for it).
+  `AirSpeedCalSource` column after `AirSpeedCal` (the CSV pin was re-baselined for it). A 0
+  override is recorded (0, "selection"); a 0 from the ride value leaves both blank.
 
 > **Behaviour change.** On files saved before this, a selection with a stored 0 while the file has
 > other non-zero values now follows the ride value, so its CdA moves once on the first reload. A

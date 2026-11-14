@@ -306,6 +306,7 @@ export async function showVirtualElevationAnalysisInline(
 			parameterStorage.loadLapSettings(appState.currentFileHash, analyzedLaps),
 			parameterStorage.loadAirSpeedCalibration(
 				appState.currentFileHash,
+				"standard",
 				analyzedLaps,
 			),
 		]);
@@ -720,11 +721,16 @@ export async function showVirtualElevationAnalysisInline(
 		defaultAirSpeedOffset,
 		() => {
 			if (parameterStorage)
-				void persistAirSpeedCalibration(appState, parameterStorage);
+				void persistAirSpeedCalibration(appState, parameterStorage, "standard");
 		},
 		parameterStorage
 			? (scope) =>
-					setAirSpeedCalibrationScope(appState, parameterStorage, scope)
+					setAirSpeedCalibrationScope(
+						appState,
+						parameterStorage,
+						"standard",
+						scope,
+					)
 			: undefined,
 	);
 

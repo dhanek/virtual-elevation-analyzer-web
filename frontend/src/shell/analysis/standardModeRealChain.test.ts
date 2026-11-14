@@ -1507,6 +1507,8 @@ describe("standard: the ride calibration and per-lap overrides", () => {
 
 	let parameterStorage: ParameterStorage;
 	let saver: ReturnType<typeof vi.fn>;
+	/** The mode every calibration read and override write was made with. */
+	let modesSeen: string[];
 
 	const renderLap = async (lap: number): Promise<void> => {
 		await renderStitched({
@@ -1524,6 +1526,7 @@ describe("standard: the ride calibration and per-lap overrides", () => {
 		const lapSettings = new Map<string, LapSettings>();
 		const overrides = new Map<string, number>();
 		let ride: number | undefined;
+		modesSeen = [];
 		const key = (laps: number[]) => [...laps].sort((a, b) => a - b).join("-");
 		parameterStorage = {
 			loadLapSettings: async (_hash: string, laps: number[]) =>
@@ -1535,20 +1538,26 @@ describe("standard: the ride calibration and per-lap overrides", () => {
 			) => {
 				lapSettings.set(key(laps), settings);
 			},
-			loadAirSpeedCalibration: async (_hash: string, laps: number[]) => ({
-				ride,
-				override: overrides.get(key(laps)),
-			}),
+			loadAirSpeedCalibration: async (
+				_hash: string,
+				mode: string,
+				laps: number[],
+			) => {
+				modesSeen.push(mode);
+				return { ride, override: overrides.get(`${mode}|${key(laps)}`) };
+			},
 			saveRideAirSpeedCalibration: async (_hash: string, percent: number) => {
 				ride = percent;
 			},
 			saveAirSpeedCalibrationOverride: async (
 				_hash: string,
+				mode: string,
 				laps: number[],
 				percent: number | null,
 			) => {
-				if (percent === null) overrides.delete(key(laps));
-				else overrides.set(key(laps), percent);
+				modesSeen.push(mode);
+				if (percent === null) overrides.delete(`${mode}|${key(laps)}`);
+				else overrides.set(`${mode}|${key(laps)}`, percent);
 			},
 		} as unknown as ParameterStorage;
 		saver = vi.fn(() => {
@@ -1608,5 +1617,8 @@ describe("standard: the ride calibration and per-lap overrides", () => {
 		expect(appState.airSpeedCalibrationSource).toBe("selection");
 		await renderLap(1);
 		expect(appState.airSpeedCalibrationPercent).toBe(9);
+		// Standard reads and writes its overrides as Standard's.
+		expect(modesSeen.length).toBeGreaterThan(0);
+		expect(new Set(modesSeen)).toEqual(new Set(["standard"]));
 	});
 });

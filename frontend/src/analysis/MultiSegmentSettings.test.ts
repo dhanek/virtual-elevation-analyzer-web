@@ -10,6 +10,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppState } from "../state/AppState";
+import type { AnalysisModeId } from "../modes/analysis/types";
 import { ParameterStorage } from "../utils/ParameterStorage";
 import { DEFAULT_PARAMETERS } from "../components/AnalysisParameters";
 import {
@@ -111,6 +112,7 @@ describe("the analyze-time selection is the settings key (WR-01)", () => {
 		await resolveMultiSegmentAnalysisParams(
 			appState,
 			makeStorage(),
+			"gpsLap",
 			[1, 2, 3, 4],
 			{ ...DEFAULT_PARAMETERS },
 		);
@@ -130,9 +132,13 @@ describe("the analyze-time selection is the settings key (WR-01)", () => {
 		const appState = makeAppState();
 		const storage = makeStorage();
 
-		await resolveMultiSegmentAnalysisParams(appState, storage, [1, 2, 3, 4], {
-			...DEFAULT_PARAMETERS,
-		});
+		await resolveMultiSegmentAnalysisParams(
+			appState,
+			storage,
+			"gpsLap",
+			[1, 2, 3, 4],
+			{ ...DEFAULT_PARAMETERS },
+		);
 		// Lap 3 fell under MIN_SEGMENT_SAMPLES, or its calculator threw. This is
 		// exactly what `writeSegmentModeResultState` now records.
 		appState.currentCoveredItems = [1, 2, 4];
@@ -154,17 +160,23 @@ describe("the ride calibration and per-selection overrides", () => {
 	let appState: AppState;
 	let storage: ParameterStorage;
 
-	const analyze = async (items: number[]): Promise<number> => {
-		await resolveMultiSegmentAnalysisParams(appState, storage, items, {
+	const analyze = async (
+		items: number[],
+		mode: AnalysisModeId = "gpsLap",
+	): Promise<number> => {
+		await resolveMultiSegmentAnalysisParams(appState, storage, mode, items, {
 			...DEFAULT_PARAMETERS,
 		});
 		return appState.airSpeedCalibrationPercent;
 	};
 
 	/** A slider, number box or Auto Adjust change, as the binder stores it. */
-	const calibrate = async (percent: number): Promise<void> => {
+	const calibrate = async (
+		percent: number,
+		mode: AnalysisModeId = "gpsLap",
+	): Promise<void> => {
 		appState.airSpeedCalibrationPercent = percent;
-		await persistAirSpeedCalibration(appState, storage);
+		await persistAirSpeedCalibration(appState, storage, mode);
 	};
 
 	const freshAppState = (): AppState =>
@@ -229,7 +241,7 @@ describe("the ride calibration and per-selection overrides", () => {
 		await analyze(A);
 		await calibrate(5);
 		await analyze(B);
-		await setAirSpeedCalibrationScope(appState, storage, "selection");
+		await setAirSpeedCalibrationScope(appState, storage, "gpsLap", "selection");
 		await calibrate(0);
 		await saveCurrentMultiSegmentSettings(appState, storage);
 
@@ -246,7 +258,7 @@ describe("the ride calibration and per-selection overrides", () => {
 		await analyze(A);
 		await calibrate(5);
 		await analyze(B);
-		await setAirSpeedCalibrationScope(appState, storage, "selection");
+		await setAirSpeedCalibrationScope(appState, storage, "gpsLap", "selection");
 		await calibrate(2);
 		await analyze(C);
 
@@ -265,15 +277,33 @@ describe("the ride calibration and per-selection overrides", () => {
 		await analyze(A);
 		await calibrate(5);
 		await analyze(B);
-		await setAirSpeedCalibrationScope(appState, storage, "selection");
+		await setAirSpeedCalibrationScope(appState, storage, "gpsLap", "selection");
 		await calibrate(2);
 
-		await setAirSpeedCalibrationScope(appState, storage, "ride");
+		await setAirSpeedCalibrationScope(appState, storage, "gpsLap", "ride");
 		expect(appState.airSpeedCalibrationPercent).toBe(5);
 
 		await reload();
 		expect(await analyze(B)).toBe(5);
 		expect(appState.airSpeedCalibrationSource).toBe("ride");
+	});
+
+	it("an override saved for Standard is not applied to the same items in GPS-lap", async () => {
+		await analyze(A, "standard");
+		await calibrate(9, "standard");
+		await setAirSpeedCalibrationScope(
+			appState,
+			storage,
+			"standard",
+			"selection",
+		);
+		await calibrate(0, "standard");
+
+		await analyze(C, "standard");
+		expect(await analyze(A, "gpsLap")).toBe(9);
+		expect(appState.airSpeedCalibrationSource).toBe("ride");
+		expect(await analyze(A, "standard")).toBe(0);
+		expect(appState.airSpeedCalibrationSource).toBe("selection");
 	});
 
 	it("re-analyzing the same selection keeps the value in memory", async () => {
@@ -282,6 +312,7 @@ describe("the ride calibration and per-selection overrides", () => {
 		await resolveMultiSegmentAnalysisParams(
 			appState,
 			storage,
+			"gpsLap",
 			A,
 			{ ...DEFAULT_PARAMETERS },
 			true,

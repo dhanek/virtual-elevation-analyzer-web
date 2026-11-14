@@ -26,6 +26,13 @@ function record(
 	};
 }
 
+/** The three prefixed keys one pre-mode override migrates to. */
+const allModes = (lapKey: string, value: number): Record<string, number> => ({
+	[`standard:${lapKey}`]: value,
+	[`gpsLap:${lapKey}`]: value,
+	[`outAndBack:${lapKey}`]: value,
+});
+
 describe("normalizeRideCalibration (D2: per-file migration)", () => {
 	it("promotes the value most selections share and keeps the others as overrides", () => {
 		const out = normalizeRideCalibration(
@@ -37,11 +44,9 @@ describe("normalizeRideCalibration (D2: per-file migration)", () => {
 			}),
 		);
 		expect(out.rideAirSpeedCalibration).toBe(7.7);
-		expect(out.airSpeedCalibrationOverrides?.["4-5-6"]).toBe(5);
-		// Zeros and values equal to the ride follow the ride: no override.
-		expect(Object.keys(out.airSpeedCalibrationOverrides ?? {})).toEqual([
-			"4-5-6",
-		]);
+		// Zeros and values equal to the ride follow the ride: no override. The
+		// one override is copied to all three modes.
+		expect(out.airSpeedCalibrationOverrides).toEqual(allModes("4-5-6", 5));
 		// The ambiguous legacy field is gone from every entry.
 		for (const entry of Object.values(out.lapSettings)) {
 			expect("airSpeedCalibration" in entry).toBe(false);
@@ -74,7 +79,7 @@ describe("normalizeRideCalibration (D2: per-file migration)", () => {
 			}),
 		);
 		expect(byLaps.rideAirSpeedCalibration).toBe(6);
-		expect(byLaps.airSpeedCalibrationOverrides).toEqual({ "1": 3 });
+		expect(byLaps.airSpeedCalibrationOverrides).toEqual(allModes("1", 3));
 
 		const byValue = normalizeRideCalibration(
 			record({
@@ -112,16 +117,19 @@ describe("normalizeRideCalibration (D2: per-file migration)", () => {
 		);
 		expect(out.rideAirSpeedCalibration).toBe(9);
 		expect(out.airSpeedCalibrationOverrides).toEqual({
-			"1": 4,
-			"2": 4,
-			"3": 0,
+			...allModes("1", 4),
+			...allModes("2", 4),
+			...allModes("3", 0),
 		});
 	});
 
 	it("returns the same record when there is nothing to migrate", () => {
 		const input = record(
 			{ "1": lap({}) },
-			{ rideAirSpeedCalibration: 5, airSpeedCalibrationOverrides: { "1": 2 } },
+			{
+				rideAirSpeedCalibration: 5,
+				airSpeedCalibrationOverrides: { "standard:1": 2 },
+			},
 		);
 		expect(normalizeRideCalibration(input)).toBe(input);
 	});
@@ -135,6 +143,60 @@ describe("normalizeRideCalibration (D2: per-file migration)", () => {
 			}),
 		);
 		expect(normalizeRideCalibration(once)).toEqual(once);
+	});
+
+	it("(a) copies an unprefixed override to all three modes", () => {
+		const out = normalizeRideCalibration(
+			record({}, { airSpeedCalibrationOverrides: { "2": 5 } }),
+		);
+		expect(out.airSpeedCalibrationOverrides).toEqual({
+			"standard:2": 5,
+			"gpsLap:2": 5,
+			"outAndBack:2": 5,
+		});
+		expect(out.airSpeedCalibrationOverrides).not.toHaveProperty("2");
+	});
+
+	it("(b) an existing prefixed key wins over the unprefixed copy", () => {
+		const out = normalizeRideCalibration(
+			record({}, { airSpeedCalibrationOverrides: { "2": 5, "gpsLap:2": 1 } }),
+		);
+		expect(out.airSpeedCalibrationOverrides).toEqual({
+			"standard:2": 5,
+			"gpsLap:2": 1,
+			"outAndBack:2": 5,
+		});
+	});
+
+	it("(c) a legacy override becomes the three prefixed keys", () => {
+		const out = normalizeRideCalibration(
+			record({
+				"1": lap({ airSpeedCalibration: 9 }),
+				"2": lap({ airSpeedCalibration: 5 }),
+				"3": lap({ airSpeedCalibration: 9 }),
+			}),
+		);
+		expect(out.rideAirSpeedCalibration).toBe(9);
+		expect(out.airSpeedCalibrationOverrides).toEqual({
+			"standard:2": 5,
+			"gpsLap:2": 5,
+			"outAndBack:2": 5,
+		});
+	});
+
+	it("(d) normalizing a migrated record returns it unchanged", () => {
+		const a = normalizeRideCalibration(
+			record({}, { airSpeedCalibrationOverrides: { "2": 5 } }),
+		);
+		expect(normalizeRideCalibration(a)).toBe(a);
+		const c = normalizeRideCalibration(
+			record({
+				"1": lap({ airSpeedCalibration: 9 }),
+				"2": lap({ airSpeedCalibration: 5 }),
+				"3": lap({ airSpeedCalibration: 9 }),
+			}),
+		);
+		expect(normalizeRideCalibration(c)).toBe(c);
 	});
 
 	it("does not mutate its input", () => {
