@@ -276,9 +276,7 @@ describe.each(MODES)(
 			scope.dispatchEvent(new Event("change", { bubbles: true }));
 			await flushPromises();
 			expect(state.overrides.get(`${mode}|1-2`)).toBe(5);
-			expect(el("airSpeedCalibrationSource").textContent).toBe(
-				"This selection only",
-			);
+			expect(el("airSpeedCalibrationSource").textContent).toBe("Own value");
 
 			await drag(0);
 			expect(state.overrides.get(`${mode}|1-2`)).toBe(0);
