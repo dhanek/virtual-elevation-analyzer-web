@@ -24,6 +24,10 @@
  * the NEW order. The cell FORMATS are unchanged from the original capture, and
  * that is the part still being pinned: same values, same precision, same
  * escaping, different columns.
+ *
+ * And extended once more on 2026-11-14 by one column, AirSpeedCalSource after
+ * AirSpeedCal: whether the calibration was the ride value or the selection's
+ * own (maintainer decision D6, TODO.md ride-level calibration).
  */
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -51,6 +55,7 @@ function fullRecord(): StoredVEResult {
 		ambientTemp: 18.5,
 		tireSensitivity: "typical",
 		airSpeedCalibration: 5,
+		airSpeedCalibrationSource: "selection",
 		windSource: "fit",
 		windSpeed: 3.5,
 		windDirection: 220,
@@ -114,20 +119,21 @@ function legacyRecord(): StoredVEResult {
 const HEADER_LINE =
 	"RecordingDate,FileName,Notes,CdA,Crr,AvgPower,AvgSpeed,RMSE,R2,AvgTemp," +
 	"Timestamp,Laps,LapsCovered,VEGain,ActualGain,WindSource,WindSpeed,WindDir," +
-	"WindHeightPct,AirSpeedCal,CrrApplied,AmbientTemp,TireSensitivity,SystemMass," +
+	"WindHeightPct,AirSpeedCal,AirSpeedCalSource,CrrApplied,AmbientTemp," +
+	"TireSensitivity,SystemMass," +
 	"Rho,Eta,TrimStart,TrimEnd,VDSegments,VDAirKm,VDGroundKm,VDDiffPercent," +
 	"LapWeatherSegments,LapRho,LapWindSpeed,LapWindDirection";
 
 const FULL_ROW =
 	'2026-08-04,ride.fit,"has ""quotes"", and commas",0.250,0.0040,250.0,' +
 	"36.00,1.23,0.9800,18.0,2026-08-04T10:00:00.000Z,2-3,2,4.00,5.00,fit," +
-	"3.5,220,72,5.0,0.0043,18.5,typical,80,1.225,0.970,0,100,Lap 2;Lap 3," +
+	"3.5,220,72,5.0,selection,0.0043,18.5,typical,80,1.225,0.970,0,100,Lap 2;Lap 3," +
 	"0.108;0.126,0.090;0.090,20.00;40.00,Lap 2;Lap 3,1.2210;1.2265," +
 	"3.40;4.10,215;231";
 
 const LEGACY_ROW =
 	'2026-01-01,old.fit,"",0.300,0.0050,200.0,30.00,2.00,0.9000,,' +
-	"2026-01-01T00:00:00.000Z,1,,1.00,2.00,constant,,,,,,,,75,1.200,0.970," +
+	"2026-01-01T00:00:00.000Z,1,,1.00,2.00,constant,,,,,,,,,75,1.200,0.970," +
 	"0,10,,,,,,,,";
 
 describe("the exported CSV", () => {

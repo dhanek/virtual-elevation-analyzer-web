@@ -2,6 +2,11 @@ import {
 	displayCdaBounds,
 	displayCrrBounds,
 } from "../../analysis/sliderBounds";
+import { resolveSelectionCalibration } from "../../analysis/RideCalibration";
+import {
+	persistAirSpeedCalibration,
+	setAirSpeedCalibrationScope,
+} from "../../analysis/MultiSegmentSettings";
 import {
 	clampTrimWindow,
 	MIN_TRIM_WINDOW_SAMPLES,
@@ -297,14 +302,27 @@ export async function showVirtualElevationAnalysisInline(
 		(appState.autoRhoInputRevision ?? 0) === autoRhoRevisionAtRender;
 
 	if (appState.currentFileHash && parameterStorage) {
-		const savedParams = await parameterStorage.loadLapSettings(
-			appState.currentFileHash,
-			analyzedLaps,
-		);
+		const [savedParams, calibration] = await Promise.all([
+			parameterStorage.loadLapSettings(appState.currentFileHash, analyzedLaps),
+			parameterStorage.loadAirSpeedCalibration(
+				appState.currentFileHash,
+				"standard",
+				analyzedLaps,
+			),
+		]);
 		// Saved settings are the first yielding boundary. A newer render or a
 		// teardown may have taken ownership while storage was pending; in that
 		// case this continuation must not write shared state or mount controls.
 		if (!stillOwnsRenderState()) return;
+		// The ride's calibration, or this selection's override (`RideCalibration.ts`),
+		// whether or not the selection has lap settings of its own.
+		const resolvedCalibration = resolveSelectionCalibration(
+			calibration.ride,
+			calibration.override,
+		);
+		appState.rideAirSpeedCalibrationPercent = calibration.ride ?? 0;
+		appState.airSpeedCalibrationPercent = resolvedCalibration.percent;
+		appState.airSpeedCalibrationSource = resolvedCalibration.source;
 		if (savedParams) {
 			if (savedParams.cda !== null)
 				appState.currentParameters.cda = savedParams.cda;
@@ -330,9 +348,6 @@ export async function showVirtualElevationAnalysisInline(
 			);
 			appState.presetTrimStart = fittedTrim.start;
 			appState.presetTrimEnd = fittedTrim.end;
-			if (savedParams.airSpeedCalibration !== undefined) {
-				appState.airSpeedCalibrationPercent = savedParams.airSpeedCalibration;
-			}
 			log.debug("Loaded saved analysis parameters");
 		} else {
 			// No saved settings for this file/lap combination — reset trim to
@@ -495,6 +510,7 @@ export async function showVirtualElevationAnalysisInline(
 																		appState.airSpeedCalibrationPercent.toFixed(
 																			1,
 																		),
+																		appState.airSpeedCalibrationSource,
 																	)
 																: ""
 														}
@@ -703,6 +719,19 @@ export async function showVirtualElevationAnalysisInline(
 		positionLong,
 		windSpeed,
 		defaultAirSpeedOffset,
+		() => {
+			if (parameterStorage)
+				void persistAirSpeedCalibration(appState, parameterStorage, "standard");
+		},
+		parameterStorage
+			? (scope) =>
+					setAirSpeedCalibrationScope(
+						appState,
+						parameterStorage,
+						"standard",
+						scope,
+					)
+			: undefined,
 	);
 
 	// Standard's first result is atomic with its automatic weather input. The

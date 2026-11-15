@@ -156,6 +156,11 @@ export const RESULT_COLUMNS: readonly ResultColumn[] = [
 		cell: (r) => optional(r.airSpeedCalibration, 1),
 	},
 	{
+		id: "airSpeedCalSource",
+		header: "AirSpeedCalSource",
+		cell: (r) => r.airSpeedCalibrationSource ?? "",
+	},
+	{
 		id: "crrApplied",
 		header: "CrrApplied",
 		cell: (r) => optional(r.crrApplied, 4),

@@ -45,7 +45,8 @@ export async function saveCurrentLapSettings(
 		trimEnd: parseInt(trimEndSlider.value),
 		cda: parseFloat(cdaSlider.value) || null,
 		crr: parseFloat(crrSlider.value) || null,
-		airSpeedCalibration: appState.airSpeedCalibrationPercent,
+		// No calibration: it belongs to the ride or to an explicit override
+		// (`persistAirSpeedCalibration`), never pinned by a trim or CdA save.
 	};
 
 	try {

@@ -129,35 +129,24 @@ describe("saveCurrentLapSettings", () => {
 			trimEnd: 600,
 			cda: 0.31,
 			crr: 0.0045,
-			airSpeedCalibration: 1.5,
 		});
 	});
 
-	describe("every save stores the calibration", () => {
-		const save = async (airSpeedCalibrationPercent: number) => {
-			addInput("trimStartSlider", "30");
-			addInput("trimEndSlider", "600");
-			addInput("cdaSlider", "0.31");
-			addInput("crrSlider", "0.0045");
-			const calls: SaveCall[] = [];
-			await saveCurrentLapSettings(
-				makeAppStateStub({
-					currentAnalyzedLaps: [3],
-					airSpeedCalibrationPercent,
-				}),
-				makeParameterStorageStub(calls),
-			);
-			expect(calls).toHaveLength(1);
-			return calls[0].settings;
-		};
-
-		it("writes the value at 5", async () => {
-			expect((await save(5)).airSpeedCalibration).toBe(5);
-		});
-
-		it("writes 0 at 0", async () => {
-			expect((await save(0)).airSpeedCalibration).toBe(0);
-		});
+	it("stores no calibration: it belongs to the ride or an explicit override", async () => {
+		addInput("trimStartSlider", "30");
+		addInput("trimEndSlider", "600");
+		addInput("cdaSlider", "0.31");
+		addInput("crrSlider", "0.0045");
+		const calls: SaveCall[] = [];
+		await saveCurrentLapSettings(
+			makeAppStateStub({
+				currentAnalyzedLaps: [3],
+				airSpeedCalibrationPercent: 5,
+			}),
+			makeParameterStorageStub(calls),
+		);
+		expect(calls).toHaveLength(1);
+		expect("airSpeedCalibration" in calls[0].settings).toBe(false);
 	});
 });
 

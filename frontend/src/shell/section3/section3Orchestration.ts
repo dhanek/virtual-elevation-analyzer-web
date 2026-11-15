@@ -566,10 +566,15 @@ export function resetAnalysisForNewActivity(): void {
 	// new activity it silently recalibrates someone else's sensor: the new ride's
 	// first Analyze computes its VE with the previous ride's percent, and the
 	// slider renders that foreign value from state, so the UI agrees with itself
-	// and nothing looks wrong. The saved-settings restore
-	// (`renderStandardVe.ts:331-332`) still runs AFTER this, at Analyze time, so a
-	// file WITH stored settings keeps getting its own value back.
+	// and nothing looks wrong. The stored calibration is read again AFTER
+	// this, at Analyze time (`loadAirSpeedCalibration`, from `renderStandardVe`
+	// and `resolveMultiSegmentAnalysisParams`), so a file WITH a stored
+	// calibration keeps getting its own value back: its override, else its ride
+	// value.
 	appState.airSpeedCalibrationPercent = DEFAULT_AIR_SPEED_CALIBRATION_PERCENT;
+	appState.airSpeedCalibrationSource = "ride";
+	appState.rideAirSpeedCalibrationPercent =
+		DEFAULT_AIR_SPEED_CALIBRATION_PERCENT;
 
 	// The detections those selections indexed into. All are derived from the
 	// activity that has just been replaced.
@@ -1886,7 +1891,7 @@ async function initializeMapTrimControlsForSelectedLaps(): Promise<void> {
 
 			// TWO WRITES, AND THE ORDER IS LOAD-BEARING. `saveLapSettings` REPLACES
 			// the whole entry, and `saveMapTrimSettings` writes `cda: null`,
-			// `crr: null` and no `airSpeedCalibration`. The second call is what the
+			// `crr: null`. The second call is what the
 			// removed `mapTrim` row's `persistsSettings: true` did — Standard's
 			// `saveCurrentLapSettings`, with the real tuned values — and it has to
 			// be last, exactly as it was on `origin/main`. It self-gates on

@@ -16,6 +16,11 @@
  * uses (D-07 there: a legacy record without `wind_height_factor` must load
  * at the legacy factor, and that must hold for imported files too).
  */
+import {
+	AIR_SPEED_CALIBRATION_MAX_PERCENT,
+	AIR_SPEED_CALIBRATION_MIN_PERCENT,
+} from "./AirSpeedCalibration";
+import { normalizeRideCalibration } from "./RideCalibration";
 import type { AnalysisParameters } from "../components/AnalysisParameters";
 import {
 	normalizeLoadedParameters,
@@ -79,6 +84,14 @@ export interface SettingsEnvelope {
 	 * exports predating checkpoints, and read back as none.
 	 */
 	checkpoints: number[];
+	/**
+	 * The ride's air speed calibration and the selections tuned apart from it
+	 * (`RideCalibration.ts`). Absent on exports predating them; an old export
+	 * carries its calibrations inside `lapSettings` instead, and the per-file
+	 * migration reads those on import.
+	 */
+	rideAirSpeedCalibration?: number;
+	airSpeedCalibrationOverrides?: Record<string, number>;
 }
 
 export function buildSettingsEnvelope(input: {
@@ -95,6 +108,7 @@ export function buildSettingsEnvelope(input: {
 	section3: Section3Selection | null;
 	now?: Date;
 }): SettingsEnvelope {
+	const record = input.record ? normalizeRideCalibration(input.record) : null;
 	return {
 		format: SETTINGS_FORMAT,
 		schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -103,11 +117,17 @@ export function buildSettingsEnvelope(input: {
 		activityFileHash: input.activityFileHash,
 		section3: input.section3,
 		parameters: input.parameters,
-		lapSettings: input.record?.lapSettings ?? {},
-		gpsMarkerSettings: input.record?.gpsMarkerSettings ?? {},
-		outAndBackMarkerSettings: input.record?.outAndBackMarkerSettings ?? {},
-		oneWayMarkerSettings: input.record?.oneWayMarkerSettings ?? {},
-		checkpoints: sanitizeCheckpoints(input.record?.checkpoints),
+		lapSettings: record?.lapSettings ?? {},
+		gpsMarkerSettings: record?.gpsMarkerSettings ?? {},
+		outAndBackMarkerSettings: record?.outAndBackMarkerSettings ?? {},
+		oneWayMarkerSettings: record?.oneWayMarkerSettings ?? {},
+		checkpoints: sanitizeCheckpoints(record?.checkpoints),
+		...(record?.rideAirSpeedCalibration !== undefined
+			? { rideAirSpeedCalibration: record.rideAirSpeedCalibration }
+			: {}),
+		...(record?.airSpeedCalibrationOverrides
+			? { airSpeedCalibrationOverrides: record.airSpeedCalibrationOverrides }
+			: {}),
 	};
 }
 
@@ -179,8 +199,45 @@ export function parseSettingsEnvelope(text: string): ParsedSettingsEnvelope {
 			outAndBackMarkerSettings: record(candidate.outAndBackMarkerSettings),
 			oneWayMarkerSettings: record(candidate.oneWayMarkerSettings),
 			checkpoints: sanitizeCheckpoints(candidate.checkpoints),
+			...calibrationFields(candidate),
 		},
 	};
+}
+
+/** A calibration percent from untrusted JSON: finite and inside the control's range. */
+function calibrationPercent(value: unknown): number | undefined {
+	return typeof value === "number" &&
+		Number.isFinite(value) &&
+		value >= AIR_SPEED_CALIBRATION_MIN_PERCENT &&
+		value <= AIR_SPEED_CALIBRATION_MAX_PERCENT
+		? value
+		: undefined;
+}
+
+/** The two calibration fields, salvaged: invalid values are dropped, not the file. */
+function calibrationFields(
+	candidate: Record<string, unknown>,
+): Pick<
+	SettingsEnvelope,
+	"rideAirSpeedCalibration" | "airSpeedCalibrationOverrides"
+> {
+	const out: Pick<
+		SettingsEnvelope,
+		"rideAirSpeedCalibration" | "airSpeedCalibrationOverrides"
+	> = {};
+	const ride = calibrationPercent(candidate.rideAirSpeedCalibration);
+	if (ride !== undefined) out.rideAirSpeedCalibration = ride;
+	const raw = candidate.airSpeedCalibrationOverrides;
+	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+		const overrides: Record<string, number> = {};
+		for (const [key, value] of Object.entries(raw)) {
+			const percent = calibrationPercent(value);
+			if (percent !== undefined) overrides[key] = percent;
+		}
+		if (Object.keys(overrides).length > 0)
+			out.airSpeedCalibrationOverrides = overrides;
+	}
+	return out;
 }
 
 /**
@@ -230,6 +287,12 @@ export function envelopeToStoredRecord(
 		oneWayMarkerSettings: envelope.oneWayMarkerSettings,
 		checkpoints: envelope.checkpoints,
 		section3: envelope.section3,
+		...(envelope.rideAirSpeedCalibration !== undefined
+			? { rideAirSpeedCalibration: envelope.rideAirSpeedCalibration }
+			: {}),
+		...(envelope.airSpeedCalibrationOverrides
+			? { airSpeedCalibrationOverrides: envelope.airSpeedCalibrationOverrides }
+			: {}),
 		lastUsed: now,
 		fileName: targetFileName,
 	};

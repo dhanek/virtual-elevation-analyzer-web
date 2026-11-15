@@ -136,6 +136,10 @@ export function buildSaveResultData(
 		params.ambient_temp_c !== null &&
 		params.ambient_temp_c !== undefined;
 
+	const recordCalibration =
+		appState.airSpeedCalibrationPercent !== 0 ||
+		appState.airSpeedCalibrationSource === "selection";
+
 	const data: SaveResultData = {
 		fileName: input.fileName,
 		// WHAT THE USER SELECTED, in all three modes (WR-02).
@@ -158,10 +162,12 @@ export function buildSaveResultData(
 		tireSensitivity: tempCorrectionActive
 			? (params.tire_sensitivity ?? "typical")
 			: undefined,
-		airSpeedCalibration:
-			appState.airSpeedCalibrationPercent !== 0
-				? appState.airSpeedCalibrationPercent
-				: undefined,
+		airSpeedCalibration: recordCalibration
+			? appState.airSpeedCalibrationPercent
+			: undefined,
+		airSpeedCalibrationSource: recordCalibration
+			? appState.airSpeedCalibrationSource
+			: undefined,
 		windSource: appState.currentWindSource,
 		parameters: params,
 		result: result,

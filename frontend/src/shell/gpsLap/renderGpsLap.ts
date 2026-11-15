@@ -19,6 +19,7 @@ import {
 	resolveDisplayCrr,
 } from "../../analysis/unsetParameterFallbacks";
 import type { AppState } from "../../state/AppState";
+import type { AnalysisModeId } from "../../modes/analysis/types";
 import type { ParameterStorage } from "../../utils/ParameterStorage";
 import type { ResultsStorage } from "../../utils/ResultsStorage";
 import type { AnalysisParameters } from "../../components/AnalysisParameters";
@@ -36,7 +37,9 @@ import { buildSegmentSupplementarySeries } from "../../analysis/SegmentSupplemen
 import { extractSegmentData } from "../../analysis/SegmentExtractor";
 import { resolveWindSeries } from "../../analysis/WindSourceResolver";
 import {
+	persistAirSpeedCalibration,
 	resolveMultiSegmentAnalysisParams,
+	setAirSpeedCalibrationScope,
 	saveCurrentMultiSegmentSettings,
 	buildAutoCalibrationSegmentsFromRanges,
 } from "../../analysis/MultiSegmentSettings";
@@ -81,10 +84,22 @@ import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
+import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 import { requestConvergenceRedraw } from "../analysis/convergenceView";
 import { requestRepeatsRedraw } from "../analysis/repeatsView";
+
+/**
+ * The mode a calibration override is stored under: the Section 3 mode the panel
+ * was drawn under. This renderer also draws Standard's Stacked view of FIT
+ * laps, which runs with Section 3 mode "None" and so reads "standard". Overlay
+ * lap numbers do not tell the two apart, because a GPS-lap checkbox narrow also
+ * sets them.
+ */
+function gpsLapCalibrationMode(): AnalysisModeId {
+	return getAnalysisModeHandler(getGpsAnalysisMode()).id;
+}
 
 /**
  * Select the GPS-detected laps and put the stacked panel on screen.
@@ -129,6 +144,7 @@ export async function showGpsLapVEAnalysis(
 	const resolvedParams = await resolveMultiSegmentAnalysisParams(
 		appState,
 		parameterStorage,
+		gpsLapCalibrationMode(),
 		analyzedLapNumbers,
 		params,
 		reuseCurrentSettings,
@@ -570,6 +586,20 @@ export function setupGpsLapSliderHandlers(
 		saveSettings: () => {
 			void saveCurrentMultiSegmentSettings(appState, parameterStorage);
 		},
+		persistCalibration: () => {
+			void persistAirSpeedCalibration(
+				appState,
+				parameterStorage,
+				gpsLapCalibrationMode(),
+			);
+		},
+		setCalibrationScope: (scope) =>
+			setAirSpeedCalibrationScope(
+				appState,
+				parameterStorage,
+				gpsLapCalibrationMode(),
+				scope,
+			),
 		// N-3: one sync-error window per lap, where Standard supplies its single
 		// trim window. The binder displays the NaN-skipping mean over them, so
 		// Standard's displayed number is unchanged and the GPS modes gain one.

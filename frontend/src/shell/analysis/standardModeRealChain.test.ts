@@ -920,6 +920,7 @@ describe("standard: asynchronous render ownership", () => {
 					if (laps[0] === 1) resolveA = resolve;
 					else resolveB = resolve;
 				}),
+			loadAirSpeedCalibration: async () => ({}),
 		} as unknown as ParameterStorage;
 
 		const renderA = renderStitched({ parameterStorage, analyzedLaps: [1] });
@@ -948,6 +949,7 @@ describe("standard: asynchronous render ownership", () => {
 				new Promise<null>((resolve) => {
 					resolveSettings = resolve;
 				}),
+			loadAirSpeedCalibration: async () => ({}),
 		} as unknown as ParameterStorage;
 
 		const render = renderStitched({ parameterStorage });
@@ -1442,6 +1444,7 @@ describe("standard: a stored trim is fitted to the selection it is loaded agains
 		appState.currentFileHash = "hash";
 		const parameterStorage = {
 			loadLapSettings: async () => settings,
+			loadAirSpeedCalibration: async () => ({}),
 		} as unknown as ParameterStorage;
 		await renderStitched({ parameterStorage });
 		await settle();
@@ -1491,7 +1494,7 @@ describe("standard: a stored trim is fitted to the selection it is loaded agains
 	});
 });
 
-describe("standard: a calibration drag reaches the settings saver", () => {
+describe("standard: the ride calibration and per-lap overrides", () => {
 	const dragCalibration = async (value: number): Promise<void> => {
 		const slider = document.getElementById(
 			"airSpeedCalibrationSlider",
@@ -1502,10 +1505,10 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 		await settle();
 	};
 
-	let records: Map<string, LapSettings>;
-	let loadLapSettings: ReturnType<typeof vi.fn>;
 	let parameterStorage: ParameterStorage;
 	let saver: ReturnType<typeof vi.fn>;
+	/** The mode every calibration read and override write was made with. */
+	let modesSeen: string[];
 
 	const renderLap = async (lap: number): Promise<void> => {
 		await renderStitched({
@@ -1517,18 +1520,44 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 	};
 
 	beforeEach(() => {
-		records = new Map();
-		loadLapSettings = vi.fn(async (_hash: string, laps: number[]) => {
-			return records.get(laps.join("-")) ?? null;
-		});
+		// In memory: this file runs on fake timers, which stall fake-indexeddb.
+		// The real store's semantics are covered against IndexedDB in
+		// `parameterStorageRideCalibration.test.ts`.
+		const lapSettings = new Map<string, LapSettings>();
+		const overrides = new Map<string, number>();
+		let ride: number | undefined;
+		modesSeen = [];
+		const key = (laps: number[]) => [...laps].sort((a, b) => a - b).join("-");
 		parameterStorage = {
-			loadLapSettings,
+			loadLapSettings: async (_hash: string, laps: number[]) =>
+				lapSettings.get(key(laps)) ?? null,
 			saveLapSettings: async (
 				_hash: string,
 				laps: number[],
 				settings: LapSettings,
 			) => {
-				records.set(laps.join("-"), settings);
+				lapSettings.set(key(laps), settings);
+			},
+			loadAirSpeedCalibration: async (
+				_hash: string,
+				mode: string,
+				laps: number[],
+			) => {
+				modesSeen.push(mode);
+				return { ride, override: overrides.get(`${mode}|${key(laps)}`) };
+			},
+			saveRideAirSpeedCalibration: async (_hash: string, percent: number) => {
+				ride = percent;
+			},
+			saveAirSpeedCalibrationOverride: async (
+				_hash: string,
+				mode: string,
+				laps: number[],
+				percent: number | null,
+			) => {
+				modesSeen.push(mode);
+				if (percent === null) overrides.delete(`${mode}|${key(laps)}`);
+				else overrides.set(`${mode}|${key(laps)}`, percent);
 			},
 		} as unknown as ParameterStorage;
 		saver = vi.fn(() => {
@@ -1536,32 +1565,17 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 		});
 		appState.currentFileHash = "hash";
 		appState.selectedFile = { name: "ride.fit" } as File;
+		appState.airSpeedCalibrationPercent = 0;
+		appState.airSpeedCalibrationSource = "ride";
+		appState.rideAirSpeedCalibrationPercent = 0;
 	});
 
-	it("gives a lap tuned to 0 its 0 back", async () => {
+	it("a later calibration reaches a lap saved earlier", async () => {
 		await renderLap(1);
 		await dragCalibration(5);
 
 		await renderLap(2);
 		expect(appState.airSpeedCalibrationPercent).toBe(5);
-		await dragCalibration(0);
-
-		await renderLap(1);
-		expect(appState.airSpeedCalibrationPercent).toBe(5);
-
-		loadLapSettings.mockClear();
-		await renderLap(2);
-		// Proves the read reached the saved-settings branch for this lap.
-		expect(loadLapSettings).toHaveBeenCalledWith("hash", [2]);
-		expect(appState.airSpeedCalibrationPercent).toBe(0);
-	});
-
-	it("a CdA drag on a lap stores the carried value", async () => {
-		await renderLap(1);
-		await dragCalibration(5);
-
-		await renderLap(2);
-		saver.mockClear();
 		const cda = document.getElementById("cdaSlider") as HTMLInputElement;
 		cda.value = "0.31";
 		cda.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1571,10 +1585,40 @@ describe("standard: a calibration drag reaches the settings saver", () => {
 		await renderLap(3);
 		await dragCalibration(9);
 
-		loadLapSettings.mockClear();
 		await renderLap(2);
-		// Proves the read reached the saved-settings branch for this lap.
-		expect(loadLapSettings).toHaveBeenCalledWith("hash", [2]);
+		expect(appState.airSpeedCalibrationPercent).toBe(9);
+		expect(appState.airSpeedCalibrationSource).toBe("ride");
+	});
+
+	it("a lap tuned on its own keeps it, 0 included", async () => {
+		await renderLap(1);
+		await dragCalibration(5);
+
+		await renderLap(2);
+		// The switch in the panel, not the function behind it: this also
+		// guards that Standard passes `setCalibrationScope` to the binder.
+		const scope = document.getElementById(
+			"airSpeedCalibrationScope",
+		) as HTMLInputElement;
+		scope.checked = true;
+		scope.dispatchEvent(new Event("change", { bubbles: true }));
+		await settle();
+		expect(
+			document.getElementById("airSpeedCalibrationSource")?.textContent,
+		).toBe("This selection only");
+		await dragCalibration(0);
+
+		await renderLap(3);
 		expect(appState.airSpeedCalibrationPercent).toBe(5);
+		await dragCalibration(9);
+
+		await renderLap(2);
+		expect(appState.airSpeedCalibrationPercent).toBe(0);
+		expect(appState.airSpeedCalibrationSource).toBe("selection");
+		await renderLap(1);
+		expect(appState.airSpeedCalibrationPercent).toBe(9);
+		// Standard reads and writes its overrides as Standard's.
+		expect(modesSeen.length).toBeGreaterThan(0);
+		expect(new Set(modesSeen)).toEqual(new Set(["standard"]));
 	});
 });

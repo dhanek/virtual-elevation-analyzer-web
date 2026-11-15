@@ -1,4 +1,5 @@
 import { bindCheckpointPlotClick } from "../checkpoints/checkpointOverlay";
+import type { CalibrationSource } from "../../analysis/RideCalibration";
 import { applyStandardCheckpoints } from "./standardCheckpoints";
 import { AppState, WindSource } from "../../state/AppState";
 import { log } from "../../utils/log";
@@ -447,6 +448,10 @@ export function setupVESliders(
 	positionLong: number[],
 	windSpeed: number[],
 	defaultAirSpeedOffset: number,
+	// Stores a calibration change as the ride value or this selection's
+	// override (`persistAirSpeedCalibration`). Optional only for test harnesses.
+	persistCalibration?: () => void,
+	setCalibrationScope?: (scope: CalibrationSource) => Promise<void>,
 ) {
 	if (!appState.currentParameters) {
 		log.error("setupVESliders: appState.currentParameters is null");
@@ -588,6 +593,8 @@ export function setupVESliders(
 		appState,
 		modeId: "standard",
 		saveSettings: saveCurrentLapSettings,
+		persistCalibration,
+		setCalibrationScope,
 		onTrimMapUpdate: (trimStart, trimEnd) => {
 			mapVisualization?.fitBoundsToTrimRegion(
 				trimStart,

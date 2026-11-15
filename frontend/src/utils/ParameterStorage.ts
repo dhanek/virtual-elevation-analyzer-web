@@ -1,5 +1,9 @@
 import { MAX_CHECKPOINTS } from "../analysis/Checkpoints";
 import {
+	calibrationOverrideKey,
+	normalizeRideCalibration,
+} from "../analysis/RideCalibration";
+import {
 	DEFAULT_WIND_HEIGHT_FACTOR,
 	LEGACY_WIND_HEIGHT_FACTOR,
 } from "../analysis/WindHeightTransfer";
@@ -7,6 +11,7 @@ import {
 	AnalysisParameters,
 	DEFAULT_PARAMETERS,
 } from "../components/AnalysisParameters";
+import type { AnalysisModeId } from "../modes/analysis/types";
 import { log } from "./log";
 
 export interface LapSettings {
@@ -14,7 +19,12 @@ export interface LapSettings {
 	trimEnd: number;
 	cda: number | null;
 	crr: number | null;
-	airSpeedCalibration?: number; // Air speed calibration percentage (-20 to +20)
+	/**
+	 * LEGACY, read only by `normalizeRideCalibration`. Every settings save used
+	 * to pin the then-current percent here, so it cannot tell a tune from a pin.
+	 * Never written any more.
+	 */
+	airSpeedCalibration?: number;
 }
 
 // GPS marker settings for lap detection (time-based)
@@ -74,6 +84,22 @@ export interface StoredParameters {
 	checkpoints?: number[];
 	/** Last Section-3 selection (mode + laps), so an analyze can replicate it. */
 	section3?: StoredSection3 | null;
+	/**
+	 * The ride's air speed calibration percent, which every selection follows
+	 * unless it has an override (`RideCalibration.ts`). Per FILE, shared by all
+	 * three modes. Absent = never calibrated, which resolves to 0.
+	 */
+	rideAirSpeedCalibration?: number;
+	/**
+	 * "This selection only": the percent an exact selection uses instead of the
+	 * ride value; 0 is a valid override. Keyed by mode and exact selection
+	 * (`calibrationOverrideKey`, e.g. `"gpsLap:1-2"`), so the same lap numbers in
+	 * another mode are a different selection; `lapSettings` itself stays shared
+	 * across modes.
+	 * Kept apart from `lapSettings` because `saveLapSettings` replaces a whole
+	 * entry on every trim or CdA save and would drop it.
+	 */
+	airSpeedCalibrationOverrides?: { [lapKey: string]: number };
 	lastUsed: number; // timestamp
 	fileName?: string; // optional, for debugging
 }
@@ -592,8 +618,18 @@ export class ParameterStorage {
 					existingData.lapSettings = {};
 				}
 
-				// Update lap settings
-				existingData.lapSettings[lapKey] = settings;
+				// Migrate BEFORE replacing the entry: the legacy calibration on the
+				// entry this save replaces still counts toward the file's ride value
+				// and may be an override (`normalizeRideCalibration`).
+				existingData = normalizeRideCalibration(existingData);
+
+				// Update lap settings. Calibration is no longer stored per entry
+				// (`RideCalibration.ts`), so a caller's stray legacy field is dropped.
+				const { airSpeedCalibration: _legacy, ...entry } = settings;
+				existingData.lapSettings = {
+					...existingData.lapSettings,
+					[lapKey]: entry,
+				};
 				existingData.lastUsed = Date.now();
 
 				const putRequest = objectStore.put(existingData);
@@ -646,6 +682,97 @@ export class ParameterStorage {
 			request.onerror = () => {
 				log.error("❌ Failed to load lap settings:", request.error);
 				reject(request.error);
+			};
+		});
+	}
+
+	/**
+	 * The file's ride calibration and this mode's exact selection's override,
+	 * both read through the per-file migration (`normalizeRideCalibration`).
+	 */
+	async loadAirSpeedCalibration(
+		fileHash: string,
+		mode: AnalysisModeId,
+		selectedLaps: number[],
+	): Promise<{ ride?: number; override?: number }> {
+		const record = await this.getStoredRecord(fileHash);
+		if (!record) return {};
+		const normalized = normalizeRideCalibration(record);
+		return {
+			ride: normalized.rideAirSpeedCalibration,
+			override:
+				normalized.airSpeedCalibrationOverrides?.[
+					calibrationOverrideKey(mode, this.getLapKey([...selectedLaps]))
+				],
+		};
+	}
+
+	/** Set the file's ride calibration (D1: every calibration change without "this selection only"). */
+	async saveRideAirSpeedCalibration(
+		fileHash: string,
+		percent: number,
+	): Promise<void> {
+		await this.updateRecord(fileHash, (record) => ({
+			...record,
+			rideAirSpeedCalibration: percent,
+		}));
+	}
+
+	/** Set (a number, 0 included) or remove (null) this mode's exact selection's override. */
+	async saveAirSpeedCalibrationOverride(
+		fileHash: string,
+		mode: AnalysisModeId,
+		selectedLaps: number[],
+		percent: number | null,
+	): Promise<void> {
+		const lapKey = calibrationOverrideKey(
+			mode,
+			this.getLapKey([...selectedLaps]),
+		);
+		await this.updateRecord(fileHash, (record) => {
+			const overrides = { ...(record.airSpeedCalibrationOverrides ?? {}) };
+			if (percent === null) delete overrides[lapKey];
+			else overrides[lapKey] = percent;
+			return { ...record, airSpeedCalibrationOverrides: overrides };
+		});
+	}
+
+	/**
+	 * Read-modify-write one file's record in a single transaction, through the
+	 * calibration migration, creating the default record if there is none.
+	 */
+	private updateRecord(
+		fileHash: string,
+		mutate: (record: StoredParameters) => StoredParameters,
+	): Promise<void> {
+		if (!this.db) {
+			log.warn("IndexedDB not initialized, cannot update record");
+			return Promise.resolve();
+		}
+		return new Promise((resolve, reject) => {
+			const transaction = this.db!.transaction([this.storeName], "readwrite");
+			const objectStore = transaction.objectStore(this.storeName);
+			const getRequest = objectStore.get(fileHash);
+			getRequest.onsuccess = () => {
+				const existing =
+					(getRequest.result as StoredParameters | undefined) ??
+					this.buildDefaultRecord(fileHash);
+				const next = mutate(
+					normalizeRideCalibration({
+						...existing,
+						lapSettings: existing.lapSettings ?? {},
+					}),
+				);
+				const putRequest = objectStore.put({ ...next, lastUsed: Date.now() });
+				putRequest.onsuccess = () => resolve();
+				putRequest.onerror = () => {
+					log.error("❌ Failed to update record:", putRequest.error);
+					reject(putRequest.error);
+				};
+			};
+			getRequest.onerror = () => {
+				log.error("❌ Failed to get existing data:", getRequest.error);
+				reject(getRequest.error);
 			};
 		});
 	}
