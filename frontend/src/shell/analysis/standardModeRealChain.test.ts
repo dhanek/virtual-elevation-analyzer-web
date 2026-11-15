@@ -1605,7 +1605,7 @@ describe("standard: the ride calibration and per-lap overrides", () => {
 		await settle();
 		expect(
 			document.getElementById("airSpeedCalibrationSource")?.textContent,
-		).toBe("This selection only");
+		).toBe("Own value");
 		await dragCalibration(0);
 
 		await renderLap(3);

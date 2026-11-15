@@ -570,7 +570,7 @@ reload a new selection's value depended on the order things were opened.
 - **Writes (D1).** The slider, the number box and Auto Adjust store the change as the ride value,
   or as this selection's override when "This selection only" is on (`persistAirSpeedCalibration`,
   wired through `bindModeControls`' `persistCalibration` in all three modes).
-- **UI (D4).** Under the slider: a tag ("Ride value" / "This selection only"), the switch, and
+- **UI (D4).** Under the slider: a tag ("Ride value" / "Own value"), the switch, and
   "Use ride value (+x %)", which removes the override and recomputes.
 - **Results (D6).** A stored result records `airSpeedCalibrationSource`; the CSV gains an
   `AirSpeedCalSource` column after `AirSpeedCal` (the CSV pin was re-baselined for it). A 0
@@ -592,8 +592,8 @@ lap 2 came back 0 (own), lap 1 +9. After a reload, lap 2 first: 0 (own), lap 3 +
 (ride). "Use ride value" on lap 2 gave +9 and the VE recomputed (RMSE 3.62 m → 2.70 m). GPS lap
 splitting on lap 6 opened at the ride value +9.0 and a drag there updated the ride. The stored
 settings were restored afterwards. **Not run in the app:** out-and-back, Auto Adjust under the
-switch, and a real pre-change record migrating (covered by the unit tests). The tag and the switch
-both read "This selection only" when the switch is on.
+switch, and a real pre-change record migrating (covered by the unit tests). The override tag first
+read "This selection only", the switch's own label beside it; it reads "Own value" since 2026-11-15.
 
 ### Air-speed sensor shadowing is masked — 2026-11-10
 
