@@ -23,6 +23,11 @@ import {
 } from "../outAndBack/renderOutAndBack";
 import { elevationSmoothingToggleMarkup } from "./elevationProfileCycle";
 import { resetModeUpdateRequests } from "./requestModeUpdate";
+import {
+	configureSection3Orchestration,
+	handleGpsLapSelectionChange,
+	restoreSection3Selection,
+} from "../section3/section3Orchestration";
 
 /** Let the stores' promise chains settle. */
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -95,6 +100,8 @@ function makeAppState(): AppState {
 		gpsDetectedLaps: [],
 		gpsSelectedLaps: [],
 		currentAnalyzedLaps: [1, 2],
+		// What `restoreSection3Selection` reads.
+		currentLaps: [],
 		currentFileHash: "hash",
 		selectedFile: { name: "ride.fit" },
 		airSpeedCalibrationPercent: 0,
@@ -141,6 +148,35 @@ function makeStorage() {
 
 let parameterStorage: ParameterStorage;
 
+type Section3Mode = Parameters<
+	typeof restoreSection3Selection
+>[0]["gpsAnalysisMode"];
+
+/**
+ * Set the REAL Section 3 mode, which the GPS-lap renderer reads for the
+ * override key. It is module state and persists across tests in this file, so
+ * every case sets its own. `appState` must be the object the binder gets: the
+ * lap-checkbox narrow writes to the configured one.
+ */
+function setSection3Mode(appState: AppState, gpsAnalysisMode: Section3Mode) {
+	configureSection3Orchestration({
+		appState,
+		parameterStorage: {
+			loadLapSettings: () => Promise.resolve(null),
+			saveLapSettings: () => Promise.resolve(),
+		} as never,
+		getMapVisualization: () => null as never,
+		setMapVisualization: () => {},
+		getParametersComponent: () => null,
+		updateAnalyzeButton: () => {},
+		setupAnalyzeButton: () => {},
+		showLoading: () => {},
+		hideLoading: () => {},
+		showError: () => {},
+	});
+	restoreSection3Selection({ gpsAnalysisMode, selectedLaps: [] });
+}
+
 const FLAGS = {
 	hasWindSpeed: true,
 	hasConstantWind: true,
@@ -155,6 +191,7 @@ const MODES = [
 	{
 		name: "GPS lap splitting",
 		mode: "gpsLap",
+		section3Mode: "GPS based lap splitting",
 		renderSidebar: (appState: AppState) =>
 			buildGpsLapVeAnalysisTemplate({
 				...FLAGS,
@@ -173,6 +210,7 @@ const MODES = [
 	{
 		name: "out-and-back",
 		mode: "outAndBack",
+		section3Mode: "GPS based out and back",
 		renderSidebar: (appState: AppState) =>
 			buildOutAndBackVeAnalysisTemplate({
 				...FLAGS,
@@ -198,7 +236,7 @@ const MODES = [
 
 describe.each(MODES)(
 	"$name: the calibration is stored on the ride or the selection",
-	({ mode, renderSidebar, bind }) => {
+	({ mode, section3Mode, renderSidebar, bind }) => {
 		let appState: AppState;
 		let state: ReturnType<typeof makeStorage>["state"];
 		const el = <T extends HTMLElement>(id: string) =>
@@ -216,6 +254,7 @@ describe.each(MODES)(
 			parameterStorage = made.storage;
 			state = made.state;
 			appState = makeAppState();
+			setSection3Mode(appState, section3Mode);
 			document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div>`;
 			document.getElementById("veAnalysisContent")!.innerHTML =
 				renderSidebar(appState);
@@ -278,6 +317,9 @@ describe("GPS-lap renderer drawing Standard's Stacked FIT laps", () => {
 		const made = makeStorage();
 		parameterStorage = made.storage;
 		const appState = makeAppState();
+		// Stacked Standard's state: Section 3 mode "None" plus overlay lap
+		// numbers. The overlay numbers alone do not make it Standard's.
+		setSection3Mode(appState, "None");
 		appState.currentOverlayLapNumbers = [1, 2];
 		document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div>`;
 		document.getElementById("veAnalysisContent")!.innerHTML =
@@ -293,5 +335,72 @@ describe("GPS-lap renderer drawing Standard's Stacked FIT laps", () => {
 
 		expect(made.state.overrides.get("standard|1-2")).toBe(0);
 		expect(made.state.overrides.has("gpsLap|1-2")).toBe(false);
+	});
+});
+
+describe("GPS-lap panel narrowed by a lap checkbox", () => {
+	function lap(lapNumber: number, startIdx: number, endIdx: number) {
+		return {
+			lapNumber,
+			startIdx,
+			endIdx,
+			startTime: startIdx,
+			endTime: endIdx,
+			duration: endIdx - startIdx,
+			distance: 1,
+			startDirection: 0,
+			endDirection: 0,
+			directionName: "N",
+			startLat: 0,
+			startLon: 0,
+		};
+	}
+
+	it("a GPS-lap panel narrowed by a lap checkbox keeps its overrides as GPS-lap's", async () => {
+		resetModeUpdateRequests();
+		const made = makeStorage();
+		parameterStorage = made.storage;
+		const appState = makeAppState();
+		setSection3Mode(appState, "GPS based lap splitting");
+		const laps = [lap(1, 0, 39), lap(2, 40, 79), lap(3, 80, N - 1)];
+		appState.gpsDetectedLaps = laps as never;
+		appState.gpsSelectedLaps = [1, 2, 3];
+		appState.currentAnalyzedLaps = [1, 2, 3];
+		appState.currentGpsLapIndexRanges = laps.map((l) => ({
+			startIdx: l.startIdx,
+			endIdx: l.endIdx,
+		}));
+		appState.currentVEResult = { r2: 0.9 } as never;
+		document.body.innerHTML = `<div id="veAnalysisSection"><div id="veAnalysisContent"></div></div><div id="results"></div>`;
+		document.getElementById("veAnalysisContent")!.innerHTML =
+			MODES[0].renderSidebar(appState);
+		MODES[0].bind(appState);
+
+		document.getElementById("results")!.innerHTML = [1, 2, 3]
+			.map(
+				(l) => `
+        <div class="lap-checkbox-item" data-gps-lap="${l}">
+            <input type="checkbox" class="gps-lap-checkbox"${l === 2 ? "" : " checked"}>
+        </div>`,
+			)
+			.join("");
+		handleGpsLapSelectionChange();
+		// The narrowed state that the overlay-numbers discriminator misread.
+		expect(appState.currentOverlayLapNumbers).toEqual([1, 3]);
+
+		const scope = document.getElementById(
+			"airSpeedCalibrationScope",
+		) as HTMLInputElement;
+		scope.checked = true;
+		scope.dispatchEvent(new Event("change", { bubbles: true }));
+		await flushPromises();
+		const keys = () => [...made.state.overrides.keys()];
+		expect(made.state.overrides.get("gpsLap|1-2-3")).toBe(0);
+		expect(keys().some((k) => k.startsWith("standard|"))).toBe(false);
+
+		document.getElementById("airSpeedCalibrationUseRide")!.click();
+		await flushPromises();
+		expect(made.state.overrides.has("gpsLap|1-2-3")).toBe(false);
+		expect(keys().some((k) => k.startsWith("standard|"))).toBe(false);
 	});
 });

@@ -84,18 +84,21 @@ import { autoConvergeLockControlsMarkup } from "../ve/autoConvergeLocks";
 import { crrTempControlsMarkup } from "../ve/crrTempControls";
 import { elevationDiffControlsMarkup } from "../ve/elevationDiffControls";
 import { getGpsAnalysisMode } from "../section3/section3Orchestration";
+import { getAnalysisModeHandler } from "../../modes/analysis/AnalysisModes";
 import { windHeightControlsMarkup } from "../ve/windHeightControls";
 import { resolveGpsLapNumber } from "../../modes/analysis/activeGpsLapRanges";
 import { requestConvergenceRedraw } from "../analysis/convergenceView";
 import { requestRepeatsRedraw } from "../analysis/repeatsView";
 
 /**
- * The mode a calibration override is stored under. This renderer also draws
- * Standard's Stacked view of FIT laps (`currentOverlayLapNumbers` set): those
- * are FIT lap numbers in Standard, not GPS-detected laps with the same numbers.
+ * The mode a calibration override is stored under: the Section 3 mode the panel
+ * was drawn under. This renderer also draws Standard's Stacked view of FIT
+ * laps, which runs with Section 3 mode "None" and so reads "standard". Overlay
+ * lap numbers do not tell the two apart, because a GPS-lap checkbox narrow also
+ * sets them.
  */
-function gpsLapCalibrationMode(appState: AppState): AnalysisModeId {
-	return appState.currentOverlayLapNumbers ? "standard" : "gpsLap";
+function gpsLapCalibrationMode(): AnalysisModeId {
+	return getAnalysisModeHandler(getGpsAnalysisMode()).id;
 }
 
 /**
@@ -141,7 +144,7 @@ export async function showGpsLapVEAnalysis(
 	const resolvedParams = await resolveMultiSegmentAnalysisParams(
 		appState,
 		parameterStorage,
-		gpsLapCalibrationMode(appState),
+		gpsLapCalibrationMode(),
 		analyzedLapNumbers,
 		params,
 		reuseCurrentSettings,
@@ -587,14 +590,14 @@ export function setupGpsLapSliderHandlers(
 			void persistAirSpeedCalibration(
 				appState,
 				parameterStorage,
-				gpsLapCalibrationMode(appState),
+				gpsLapCalibrationMode(),
 			);
 		},
 		setCalibrationScope: (scope) =>
 			setAirSpeedCalibrationScope(
 				appState,
 				parameterStorage,
-				gpsLapCalibrationMode(appState),
+				gpsLapCalibrationMode(),
 				scope,
 			),
 		// N-3: one sync-error window per lap, where Standard supplies its single
